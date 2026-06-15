@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Search, UserCog, X, XCircle, CheckCircle2 } from 'lucide-react';
 import api from '../../api/axios';
-import ReservationDetailsModal from '../../components/ReservationDetailsModal';
+import ReservationDetailsModal, { getReservationStatusUI } from '../../components/ReservationDetailsModal';
 
 export default function MembersPage() {
   const [users, setUsers] = useState([]);
@@ -213,6 +213,12 @@ export default function MembersPage() {
                     }
                     return acc;
                   }, {})).sort((a, b) => new Date(b.session.session_date) - new Date(a.session.session_date) || b.session.start_time.localeCompare(a.session.start_time)).map(r => {
+                    const rFormatted = {
+                      ...r,
+                      start_time: r.session?.start_time,
+                      session_date: r.session?.session_date
+                    };
+                    const statusUI = getReservationStatusUI(rFormatted);
                     const isCancelled = r.status === 'cancelled';
                     return (
                       <div 
@@ -235,9 +241,9 @@ export default function MembersPage() {
                           </div>
                         </div>
                         <div>
-                          {isCancelled ? 
-                            <span className="inline-flex items-center gap-1 text-gray-400 text-xs font-medium"><XCircle className="w-3.5 h-3.5"/> 已取消</span> : 
-                            <span className="inline-flex items-center gap-1 text-green-600 text-xs font-medium"><CheckCircle2 className="w-3.5 h-3.5"/> 預約成功</span>}
+                          <span className={`inline-flex items-center gap-1 text-xs font-medium ${statusUI.colorClass}`}>
+                            {statusUI.icon} {statusUI.text}
+                          </span>
                         </div>
                       </div>
                     )
