@@ -9,7 +9,12 @@ import Booking from './pages/Customer/Booking';
 
 // Admin Pages
 import AdminLogin from './pages/Admin/Login';
-import AdminDashboard from './pages/Admin/Dashboard';
+import AdminLayout from './components/AdminLayout';
+import SessionsPage from './pages/Admin/SessionsPage';
+import ReservationsPage from './pages/Admin/ReservationsPage';
+import MembersPage from './pages/Admin/MembersPage';
+import WeeklyPage from './pages/Admin/WeeklyPage';
+import SeatingPage from './pages/Admin/SeatingPage';
 
 function App() {
   const [userRole, setUserRole] = useState(null); // 'customer', 'temp_customer', 'admin', or null
@@ -47,15 +52,27 @@ function App() {
           element={userRole === 'customer' ? <Booking /> : <Navigate to="/" />} 
         />
 
-        {/* Admin Routes */}
+        {/* Admin Login */}
+        <Route 
+          path="/admin/login" 
+          element={userRole === 'admin' ? <Navigate to="/admin/sessions" /> : <AdminLogin setUserRole={setUserRole} />} 
+        />
+
+        {/* Admin Nested Routes */}
         <Route 
           path="/admin" 
-          element={userRole === 'admin' ? <Navigate to="/admin/dashboard" /> : <AdminLogin setUserRole={setUserRole} />} 
-        />
-        <Route 
-          path="/admin/dashboard" 
-          element={userRole === 'admin' ? <AdminDashboard /> : <Navigate to="/admin" />} 
-        />
+          element={userRole === 'admin' ? <AdminLayout /> : <Navigate to="/admin/login" />}
+        >
+          <Route index element={<Navigate to="sessions" replace />} />
+          <Route path="sessions" element={<SessionsPage />} />
+          <Route path="reservations" element={<ReservationsPage />} />
+          <Route path="members" element={<MembersPage />} />
+          <Route path="weekly" element={<WeeklyPage />} />
+          <Route path="seating" element={<SeatingPage />} />
+        </Route>
+
+        {/* Catch old dashboard link */}
+        <Route path="/admin/dashboard" element={<Navigate to="/admin/sessions" replace />} />
       </Routes>
     </BrowserRouter>
   );
