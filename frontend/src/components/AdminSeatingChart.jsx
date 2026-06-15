@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
 import { RefreshCw, Search } from 'lucide-react';
-import api from '../../api/axios';
+import api from '../api/axios';
 
 const SEATS = {
   A: ['A1-1', 'A1-2', 'A1-3', 'A1-4', 'A2-1', 'A2-2', 'A2-3', 'A2-4'],
