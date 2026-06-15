@@ -19,7 +19,8 @@ const groupReservations = (reservations) => {
         session_date: r.session.session_date,
         sessions: [],
         assigned_seats: r.assigned_seats || [],
-        is_seat_locked: r.is_seat_locked || false
+        is_seat_locked: r.is_seat_locked || false,
+        is_force_split: r.is_force_split || false
       };
     }
     groups[ref].sessions.push(r.session);
