@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Search, UserCog, X, XCircle, CheckCircle2 } from 'lucide-react';
 import api from '../../api/axios';
+import ReservationDetailsModal from '../../components/ReservationDetailsModal';
 
 export default function MembersPage() {
   const [users, setUsers] = useState([]);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
   const [selectedMember, setSelectedMember] = useState(null);
   const [memberReservations, setMemberReservations] = useState([]);
+  const [selectedReservation, setSelectedReservation] = useState(null);
   const [isMemberLoading, setIsMemberLoading] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -213,7 +215,11 @@ export default function MembersPage() {
                   }, {})).sort((a, b) => new Date(b.session.session_date) - new Date(a.session.session_date) || b.session.start_time.localeCompare(a.session.start_time)).map(r => {
                     const isCancelled = r.status === 'cancelled';
                     return (
-                      <div key={r.booking_ref} className={`p-4 rounded-xl border flex items-center justify-between ${isCancelled ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200'}`}>
+                      <div 
+                        key={r.booking_ref} 
+                        onClick={() => setSelectedReservation({ ...r, user: selectedMember })}
+                        className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer hover:shadow-md transition-shadow ${isCancelled ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200'}`}
+                      >
                         <div className="flex items-center gap-4">
                           <div className={`w-12 h-12 rounded-lg flex flex-col items-center justify-center ${isCancelled ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'}`}>
                             <span className="text-xs font-medium">{format(new Date(r.session.session_date), 'MM/dd')}</span>
@@ -242,6 +248,20 @@ export default function MembersPage() {
           </div>
         </div>
       )}
+
+      {/* Reservation Details Modal */}
+      <ReservationDetailsModal 
+        reservation={selectedReservation} 
+        onClose={() => setSelectedReservation(null)} 
+        onUpdate={(updates) => {
+          if (updates) {
+            setSelectedReservation(prev => ({ ...prev, ...updates }));
+          } else {
+            setSelectedReservation(null);
+          }
+          if (selectedMember) handleSelectMember(selectedMember);
+        }} 
+      />
 
       <style dangerouslySetInnerHTML={{__html: `
         .animate-in { animation: animateIn 0.4s ease-out forwards; }
