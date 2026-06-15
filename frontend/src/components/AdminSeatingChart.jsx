@@ -8,7 +8,7 @@ const SEATS = {
   B: ['B1-1', 'B1-2', 'B1-3', 'B1-4', 'B2-1', 'B2-2', 'B2-3', 'B2-4']
 };
 
-export default function AdminSeatingChart() {
+export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [sessions, setSessions] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
@@ -223,17 +223,40 @@ export default function AdminSeatingChart() {
             
             {/* Action Bar (shows when a seat is selected) */}
             {selectedSeat && (
-              <div className="bg-indigo-50 border border-indigo-200 text-indigo-700 px-6 py-4 rounded-xl flex items-center justify-between animate-fade-in">
+              <div className="bg-indigo-50 border border-indigo-200 text-indigo-700 px-6 py-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-fade-in">
                 <div className="flex items-center gap-3">
                   <span className="bg-indigo-600 text-white w-6 h-6 rounded-full flex items-center justify-center font-bold text-sm">1</span>
                   <span className="font-medium">已選取 <b>{selectedSeat.reservation.user?.name}</b> 的座位 <b>{selectedSeat.seat}</b></span>
                 </div>
+                
                 <div className="flex items-center gap-3">
+                  {onCheckIn && selectedSeat.reservation.attendance !== 'checked_in' && (
+                    <button 
+                      onClick={() => {
+                        onCheckIn(selectedSeat.reservation.booking_ref);
+                        setTimeout(() => fetchSeatingData(), 500);
+                      }}
+                      className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                    >
+                      完成報到
+                    </button>
+                  )}
+                  {onOpenDetails && (
+                    <button 
+                      onClick={() => onOpenDetails(selectedSeat.reservation.booking_ref)}
+                      className="bg-white text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-50 transition-colors shadow-sm"
+                    >
+                      訂單詳情
+                    </button>
+                  )}
+                  
+                  <div className="h-6 w-px bg-indigo-200 mx-1"></div>
+                  
                   <span className="bg-indigo-200 text-indigo-800 w-6 h-6 rounded-full flex items-center justify-center font-bold text-sm">2</span>
-                  <span className="font-medium animate-pulse">請點選一個空位來換桌...</span>
+                  <span className="font-medium animate-pulse">請點選空位換桌...</span>
                   <button 
                     onClick={() => setSelectedSeat(null)}
-                    className="ml-4 text-sm underline hover:text-indigo-800"
+                    className="ml-2 text-sm underline hover:text-indigo-800"
                   >
                     取消
                   </button>

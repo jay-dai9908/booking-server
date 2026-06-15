@@ -869,7 +869,13 @@ function AdminDashboard() {
 
           {/* Seating Chart */}
           {activeTab === 'seating' && (
-            <AdminSeatingChart />
+            <AdminSeatingChart 
+              onOpenDetails={(booking_ref) => {
+                const res = reservations.find(r => r.booking_ref === booking_ref);
+                if (res) setSelectedReservation(res);
+              }}
+              onCheckIn={(booking_ref) => handleUpdateAttendance(booking_ref, 'checked_in')}
+            />
           )}
 
         </main>
