@@ -11,6 +11,7 @@ const groupReservations = (reservations) => {
     if (!groups[ref]) {
       groups[ref] = {
         booking_ref: ref,
+        user_id: r.user_id,
         user: r.user,
         pax: r.pax,
         status: r.status,
@@ -35,6 +36,7 @@ const groupReservations = (reservations) => {
     
     return {
       booking_ref: group.booking_ref,
+      user_id: group.user_id,
       user: group.user,
       pax: group.pax,
       status: group.status,
