@@ -54,7 +54,7 @@ function AdminDashboard() {
   useEffect(() => {
     if (activeTab === 'sessions') {
       fetchSessions(listDate);
-    } else if (activeTab === 'reservations') {
+    } else if (activeTab === 'reservations' || activeTab === 'seating') {
       fetchReservations();
     } else if (activeTab === 'members') {
       fetchUsers();
