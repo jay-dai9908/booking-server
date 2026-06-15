@@ -195,6 +195,36 @@ export const cancelReservation = async (req, res) => {
   }
 };
 
+export const deleteReservationRecord = async (req, res) => {
+  const { id: booking_ref } = req.params;
+  
+  // This route is protected by requireAdmin middleware, so we know they are admin.
+  try {
+    const reservations = await prisma.reservation.findMany({
+      where: { booking_ref }
+    });
+
+    if (reservations.length === 0) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    if (reservations[0].status !== 'cancelled') {
+      return res.status(400).json({ error: 'Only cancelled reservations can be permanently deleted' });
+    }
+
+    // Hard delete all related rows
+    const deleted = await prisma.reservation.deleteMany({
+      where: { booking_ref }
+    });
+
+    res.json({ message: 'Reservation record deleted permanently', count: deleted.count });
+  } catch (error) {
+    console.error('Error deleting reservation record:', error);
+    res.status(500).json({ error: 'Failed to delete reservation record' });
+  }
+};
+
+
 export const adminCreateReservation = async (req, res) => {
   const { session_ids, pax, name, phone } = req.body;
   

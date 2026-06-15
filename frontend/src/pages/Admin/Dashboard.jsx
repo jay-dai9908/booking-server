@@ -321,6 +321,18 @@ function AdminDashboard() {
     }
   };
 
+  const handleDeleteReservationRecord = async (id) => {
+    if (window.confirm('確定要永久刪除此筆訂單紀錄嗎？此操作無法復原。')) {
+      try {
+        await api.delete(`/reservations/${id}/record`);
+        fetchReservations();
+        setSelectedReservation(null);
+      } catch (err) {
+        alert(err.response?.data?.error || '刪除失敗');
+      }
+    }
+  };
+
   const handleLogout = () => {
     api.post('/auth/logout').then(() => window.location.href = '/admin');
   };
@@ -1112,7 +1124,16 @@ function AdminDashboard() {
               <div className="pt-6 border-t border-gray-100">
                 <h3 className="text-sm font-medium text-gray-500 mb-3">訂單操作</h3>
                 {selectedReservation.status === 'cancelled' ? (
-                  <p className="text-gray-500 text-sm">此訂單已取消，無法進行其他操作。</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-gray-500 text-sm">此訂單已取消。</p>
+                    <button 
+                      onClick={() => handleDeleteReservationRecord(selectedReservation.booking_ref)}
+                      className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm border border-red-100"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      刪除紀錄
+                    </button>
+                  </div>
                 ) : (
                   <div className="flex flex-wrap gap-3">
                     <button 
