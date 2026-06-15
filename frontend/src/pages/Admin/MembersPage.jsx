@@ -25,7 +25,7 @@ export default function MembersPage() {
   }, [page, memberSearchQuery]);
 
   useEffect(() => {
-    if (users.length > 0) {
+    if (users && users.length > 0) {
       const userId = searchParams.get('userId');
       if (userId) {
         const user = users.find(u => u.id === parseInt(userId, 10));
@@ -40,9 +40,9 @@ export default function MembersPage() {
     setIsLoading(true);
     try {
       const res = await api.get(`/users?page=${page}&limit=20&search=${encodeURIComponent(memberSearchQuery)}`);
-      setUsers(res.data.data);
-      setTotalPages(res.data.totalPages);
-      setTotalRecords(res.data.total);
+      setUsers(res.data?.data || (Array.isArray(res.data) ? res.data : []));
+      setTotalPages(res.data?.totalPages || 1);
+      setTotalRecords(res.data?.total || (Array.isArray(res.data) ? res.data.length : 0));
     } catch (err) {
       console.error(err);
     } finally {

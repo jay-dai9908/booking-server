@@ -43,9 +43,9 @@ export default function ReservationsPage() {
     setIsLoading(true);
     try {
       const res = await api.get(`/reservations/admin?page=${page}&limit=20&search=${encodeURIComponent(searchQuery)}&month=${currentMonth}`);
-      setReservations(res.data.data);
-      setTotalPages(res.data.totalPages);
-      setTotalRecords(res.data.total);
+      setReservations(res.data?.data || (Array.isArray(res.data) ? res.data : []));
+      setTotalPages(res.data?.totalPages || 1);
+      setTotalRecords(res.data?.total || (Array.isArray(res.data) ? res.data.length : 0));
     } catch (err) {
       console.error(err);
     } finally {
@@ -200,7 +200,7 @@ export default function ReservationsPage() {
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="p-12 text-center text-gray-400">載入中...</div>
-          ) : reservations.length === 0 ? (
+          ) : !reservations || reservations.length === 0 ? (
             <div className="p-12 text-center text-gray-400 font-medium">此月份尚無預約紀錄或找不到符合的搜尋結果</div>
           ) : (
             <table className="w-full text-left whitespace-nowrap">
