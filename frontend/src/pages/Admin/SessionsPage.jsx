@@ -218,7 +218,7 @@ export default function SessionsPage() {
                             <td className="px-6 py-4 text-right">
                               <button 
                                 onClick={() => handleDeleteSession(s.id)}
-                                className="text-gray-400 hover:text-red-500 p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors"
                                 title="刪除時段"
                               >
                                 <Trash2 className="w-5 h-5" />
