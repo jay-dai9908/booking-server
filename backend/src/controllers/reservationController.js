@@ -162,7 +162,7 @@ export const getAdminReservations = async (req, res) => {
 
     let whereClause = {};
 
-    if (month) {
+    if (month && !search) {
       const startDate = new Date(`${month}-01T00:00:00.000Z`);
       const endDate = new Date(startDate);
       endDate.setMonth(endDate.getMonth() + 1);
