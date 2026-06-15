@@ -226,7 +226,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
       </div>
 
       {/* Main Seating Area */}
-      {selectedSessionId && (
+      {selectedSessionId ? (
         <div className="bg-white p-8 rounded-2xl shadow-sm border">
           <div className="max-w-4xl mx-auto flex flex-col gap-12">
             
@@ -342,6 +342,14 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
             </div>
 
           </div>
+        </div>
+      ) : (
+        <div className="bg-white p-16 rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400">
+          <svg className="w-16 h-16 mb-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <p className="text-lg font-medium">此日期尚未設定營業時段</p>
+          <p className="text-sm mt-1">請先前往「營業時段設定」新增時段，或切換至其他日期。</p>
         </div>
       )}
 
