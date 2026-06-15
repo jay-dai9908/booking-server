@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { X, CheckCircle2, XCircle, Trash2 } from 'lucide-react';
 import api from '../api/axios';
@@ -28,6 +29,7 @@ export const getReservationStatusUI = (r) => {
 };
 
 export default function ReservationDetailsModal({ reservation, onClose, onUpdate }) {
+  const navigate = useNavigate();
   if (!reservation) return null;
 
   const handleUpdateAttendance = async (attendance) => {
@@ -85,7 +87,20 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                 <p className="text-sm text-gray-800 font-mono">{reservation.booking_ref}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-1">顧客姓名</h3>
+                <div className="flex items-center gap-3 mb-1">
+                  <h3 className="text-sm font-medium text-gray-500">顧客姓名</h3>
+                  {reservation.user_id && (
+                    <button 
+                      onClick={() => {
+                        onClose();
+                        navigate(`/admin/members?userId=${reservation.user_id}`);
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md font-medium transition-colors"
+                    >
+                      會員資料
+                    </button>
+                  )}
+                </div>
                 <p className="text-lg font-bold text-gray-900">{reservation.user?.name || '未設定'}</p>
               </div>
               <div>
