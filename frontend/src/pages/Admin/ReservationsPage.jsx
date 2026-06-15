@@ -9,6 +9,12 @@ export default function ReservationsPage() {
   const [selectedReservation, setSelectedReservation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Pagination & Month filter
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [currentMonth, setCurrentMonth] = useState(format(new Date(), 'yyyy-MM'));
 
   // Manual Booking State
   const [showManualBooking, setShowManualBooking] = useState(false);
@@ -21,8 +27,11 @@ export default function ReservationsPage() {
   const [isManualLoading, setIsManualLoading] = useState(false);
 
   useEffect(() => {
-    fetchReservations();
-  }, []);
+    const delayDebounceFn = setTimeout(() => {
+      fetchReservations();
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [page, currentMonth, searchQuery]);
 
   useEffect(() => {
     if (showManualBooking) {
@@ -33,8 +42,10 @@ export default function ReservationsPage() {
   const fetchReservations = async () => {
     setIsLoading(true);
     try {
-      const res = await api.get('/reservations/admin');
-      setReservations(res.data);
+      const res = await api.get(`/reservations/admin?page=${page}&limit=20&search=${encodeURIComponent(searchQuery)}&month=${currentMonth}`);
+      setReservations(res.data.data);
+      setTotalPages(res.data.totalPages);
+      setTotalRecords(res.data.total);
     } catch (err) {
       console.error(err);
     } finally {
@@ -158,12 +169,24 @@ export default function ReservationsPage() {
             </div>
             <input
               type="text"
-              placeholder="搜尋姓名或電話..."
+              placeholder="搜尋訂單編號或姓名..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none text-sm transition-shadow w-full md:w-64"
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
+              className="pl-10 pr-4 py-2 border-none bg-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 w-full md:w-64 transition-shadow"
             />
           </div>
+          <input
+            type="month"
+            value={currentMonth}
+            onChange={(e) => {
+              setCurrentMonth(e.target.value);
+              setPage(1);
+            }}
+            className="px-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 bg-white"
+          />
           <button 
             onClick={() => setShowManualBooking(true)}
             className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-colors shadow-sm whitespace-nowrap"
@@ -176,7 +199,9 @@ export default function ReservationsPage() {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           {isLoading ? (
-            <div className="p-10 flex justify-center"><div className="w-8 h-8 border-4 border-gray-200 border-t-gray-800 rounded-full animate-spin" /></div>
+            <div className="p-12 text-center text-gray-400">載入中...</div>
+          ) : reservations.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 font-medium">此月份尚無預約紀錄或找不到符合的搜尋結果</div>
           ) : (
             <table className="w-full text-left whitespace-nowrap">
               <thead>
@@ -189,59 +214,75 @@ export default function ReservationsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {reservations.filter(r => {
-                  if (!searchQuery) return true;
-                  const q = searchQuery.toLowerCase();
-                  return r.user.name.toLowerCase().includes(q) || r.user.phone.toLowerCase().includes(q);
-                }).length === 0 ? (
-                  <tr><td colSpan="5" className="text-center py-16 text-gray-400">{searchQuery ? '找不到符合條件的預約' : '目前尚無預約紀錄'}</td></tr>
-                ) : (
-                  reservations.filter(r => {
-                    if (!searchQuery) return true;
-                    const q = searchQuery.toLowerCase();
-                    return r.user.name.toLowerCase().includes(q) || r.user.phone.toLowerCase().includes(q);
-                  }).map(r => {
-                    const isCancelled = r.status === 'cancelled';
-                    const statusUI = getReservationStatusUI(r);
-                    return (
-                      <tr key={r.booking_ref} 
-                          onClick={() => setSelectedReservation(r)}
-                          className={`hover:bg-gray-50 transition-colors cursor-pointer ${isCancelled ? 'bg-gray-50/50' : ''}`}>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col">
-                            <span className={`font-semibold ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
-                              {format(new Date(r.session_date), 'yyyy/MM/dd')}
-                            </span>
-                            <span className="text-sm text-gray-500">{r.start_time} - {r.end_time} ({r.session_count}小時)</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col">
-                            <span className={`font-medium ${isCancelled ? 'text-gray-400' : 'text-gray-800'}`}>{r.user.name}</span>
-                            <span className="text-sm text-gray-500">{r.user.phone}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <span className={`inline-flex justify-center items-center w-8 h-8 rounded-lg ${isCancelled ? 'bg-gray-100 text-gray-400' : 'bg-gray-100 text-gray-900 font-bold'}`}>
-                            {r.pax}
+                {reservations.map(r => {
+                  const isCancelled = r.status === 'cancelled';
+                  const statusUI = getReservationStatusUI(r);
+                  return (
+                    <tr key={r.booking_ref} 
+                        onClick={() => setSelectedReservation(r)}
+                        className={`hover:bg-gray-50 transition-colors cursor-pointer ${isCancelled ? 'bg-gray-50/50' : ''}`}>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className={`font-semibold ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                            {format(new Date(r.session_date), 'yyyy/MM/dd')}
                           </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                            {statusUI.icon} {statusUI.text}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-right text-sm text-gray-400">
-                          {format(new Date(r.created_at), 'MM/dd HH:mm')}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                          <span className="text-sm text-gray-500">{r.start_time} - {r.end_time} ({r.session_count}小時)</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className={`font-medium ${isCancelled ? 'text-gray-400' : 'text-gray-800'}`}>{r.user.name}</span>
+                          <span className="text-sm text-gray-500">{r.user.phone}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`inline-flex justify-center items-center w-8 h-8 rounded-lg ${isCancelled ? 'bg-gray-100 text-gray-400' : 'bg-gray-100 text-gray-900 font-bold'}`}>
+                          {r.pax}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                          {statusUI.icon} {statusUI.text}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right text-sm text-gray-400">
+                        {format(new Date(r.created_at), 'MM/dd HH:mm')}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
+        
+        {/* Pagination UI */}
+        {totalPages > 1 && (
+          <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-white">
+            <p className="text-sm text-gray-500">
+              共 {totalRecords} 筆資料
+            </p>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1 text-sm bg-gray-50 border rounded hover:bg-gray-100 disabled:opacity-50"
+              >
+                上一頁
+              </button>
+              <span className="text-sm font-medium text-gray-600">
+                {page} / {totalPages}
+              </span>
+              <button 
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="px-3 py-1 text-sm bg-gray-50 border rounded hover:bg-gray-100 disabled:opacity-50"
+              >
+                下一頁
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       </div>

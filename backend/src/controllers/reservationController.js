@@ -155,7 +155,37 @@ export const createReservation = async (req, res) => {
 
 export const getAdminReservations = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const month = req.query.month; // format: 'YYYY-MM'
+
+    let whereClause = {};
+
+    if (month) {
+      const startDate = new Date(`${month}-01T00:00:00.000Z`);
+      const endDate = new Date(startDate);
+      endDate.setMonth(endDate.getMonth() + 1);
+      
+      whereClause.session = {
+        session_date: {
+          gte: startDate,
+          lt: endDate
+        }
+      };
+    }
+
+    if (search) {
+      whereClause.OR = [
+        { booking_ref: { contains: search } },
+        { user: { name: { contains: search } } },
+        { user: { phone: { contains: search } } }
+      ];
+    }
+
+    // Fetch all reservations matching criteria (for the month)
     const reservations = await prisma.reservation.findMany({
+      where: whereClause,
       include: {
         session: true,
         user: {
@@ -167,11 +197,51 @@ export const getAdminReservations = async (req, res) => {
       }
     });
 
-    const grouped = groupReservations(reservations);
-    res.json(grouped);
+    // Group them
+    let grouped = groupReservations(reservations);
+    
+    // Sort grouped reservations by session_date descending, then start_time descending
+    grouped.sort((a, b) => {
+      if (a.session_date > b.session_date) return -1;
+      if (a.session_date < b.session_date) return 1;
+      return b.start_time.localeCompare(a.start_time);
+    });
+
+    const total = grouped.length;
+    const totalPages = Math.ceil(total / limit);
+    const paginatedData = grouped.slice((page - 1) * limit, page * limit);
+
+    res.json({
+      data: paginatedData,
+      total,
+      page,
+      totalPages
+    });
   } catch (error) {
     console.error('Error fetching reservations:', error);
     res.status(500).json({ error: 'Failed to fetch reservations' });
+  }
+};
+
+export const getAdminReservationDetails = async (req, res) => {
+  const { booking_ref } = req.params;
+  try {
+    const reservations = await prisma.reservation.findMany({
+      where: { booking_ref },
+      include: {
+        session: true,
+        user: { select: { name: true, phone: true } }
+      },
+      orderBy: { created_at: 'desc' }
+    });
+    if (reservations.length === 0) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+    const grouped = groupReservations(reservations);
+    res.json(grouped[0]);
+  } catch (error) {
+    console.error('Error fetching reservation details:', error);
+    res.status(500).json({ error: 'Failed to fetch reservation details' });
   }
 };
 

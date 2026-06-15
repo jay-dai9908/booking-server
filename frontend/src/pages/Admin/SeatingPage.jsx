@@ -6,28 +6,21 @@ import AdminSeatingChart from '../../components/AdminSeatingChart';
 import ReservationDetailsModal from '../../components/ReservationDetailsModal';
 
 export default function SeatingPage() {
-  const [reservations, setReservations] = useState([]);
   const [selectedReservation, setSelectedReservation] = useState(null);
 
-  useEffect(() => {
-    fetchReservations();
-  }, []);
-
-  const fetchReservations = async () => {
+  const fetchReservationDetails = async (booking_ref) => {
     try {
-      const res = await api.get('/reservations/admin');
-      setReservations(res.data);
+      const res = await api.get(`/reservations/admin/${booking_ref}/details`);
+      setSelectedReservation(res.data);
     } catch (err) {
       console.error(err);
+      alert('無法載入訂單詳細資訊');
     }
   };
 
   const handleUpdateAttendance = async (booking_ref, attendance) => {
     try {
       await api.patch(`/reservations/${booking_ref}/attendance`, { attendance });
-      setReservations(prev => prev.map(r => 
-        r.booking_ref === booking_ref ? { ...r, attendance } : r
-      ));
       if (selectedReservation && selectedReservation.booking_ref === booking_ref) {
         setSelectedReservation(prev => ({ ...prev, attendance }));
       }
@@ -40,7 +33,9 @@ export default function SeatingPage() {
   const handleCancelReservation = async (id) => {
     try {
       await api.delete(`/reservations/${id}`);
-      fetchReservations();
+      if (selectedReservation && selectedReservation.id === id) {
+        setSelectedReservation(null);
+      }
     } catch (err) {
       alert(err.response?.data?.error || '取消失敗');
     }
@@ -50,7 +45,6 @@ export default function SeatingPage() {
     if (window.confirm('確定要永久刪除此筆訂單紀錄嗎？此操作無法復原。')) {
       try {
         await api.delete(`/reservations/${id}/record`);
-        fetchReservations();
         setSelectedReservation(null);
       } catch (err) {
         alert(err.response?.data?.error || '刪除失敗');
@@ -66,8 +60,7 @@ export default function SeatingPage() {
       <div className="h-full relative">
         <AdminSeatingChart 
         onOpenDetails={(booking_ref) => {
-          const res = reservations.find(r => r.booking_ref === booking_ref);
-          if (res) setSelectedReservation(res);
+          fetchReservationDetails(booking_ref);
         }}
         onCheckIn={(booking_ref) => handleUpdateAttendance(booking_ref, 'checked_in')}
       />
@@ -84,7 +77,6 @@ export default function SeatingPage() {
           } else {
             setSelectedReservation(null);
           }
-          fetchReservations();
         }} 
       />
 

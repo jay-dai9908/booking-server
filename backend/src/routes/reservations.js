@@ -1,5 +1,5 @@
 import express from 'express';
-import { createReservation, getAdminReservations, getMyReservations, cancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, getSessionSeats } from '../controllers/reservationController.js';
+import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, getSessionSeats } from '../controllers/reservationController.js';
 import { verifyToken, requireAdmin } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
@@ -9,6 +9,7 @@ router.get('/my', verifyToken, getMyReservations);
 router.delete('/:id', verifyToken, cancelReservation);
 router.delete('/:id/record', verifyToken, requireAdmin, deleteReservationRecord);
 router.get('/admin', verifyToken, requireAdmin, getAdminReservations);
+router.get('/admin/:booking_ref/details', verifyToken, requireAdmin, getAdminReservationDetails);
 router.post('/admin', verifyToken, requireAdmin, adminCreateReservation);
 router.patch('/:id/attendance', verifyToken, requireAdmin, updateAttendance);
 router.put('/admin/move-seat', verifyToken, requireAdmin, moveSeat);
