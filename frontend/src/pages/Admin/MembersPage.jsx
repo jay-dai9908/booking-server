@@ -56,7 +56,8 @@ export default function MembersPage() {
   };
 
   return (
-    <div className="p-4 md:p-8 space-y-8 animate-fade-in">
+    <>
+      <div className="p-4 md:p-8 space-y-8 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">會員管理</h1>
@@ -126,6 +127,8 @@ export default function MembersPage() {
             </table>
           )}
         </div>
+      </div>
+
       </div>
 
       {/* Member Details Modal */}
@@ -244,6 +247,6 @@ export default function MembersPage() {
         .animate-in { animation: animateIn 0.4s ease-out forwards; }
         @keyframes animateIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       `}} />
-    </div>
+    </>
   );
 }

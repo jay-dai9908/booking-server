@@ -82,14 +82,17 @@ export default function SeatingPage() {
   };
 
   return (
-    <div className="h-full relative">
-      <AdminSeatingChart 
+    <>
+      <div className="h-full relative">
+        <AdminSeatingChart 
         onOpenDetails={(booking_ref) => {
           const res = reservations.find(r => r.booking_ref === booking_ref);
           if (res) setSelectedReservation(res);
         }}
         onCheckIn={(booking_ref) => handleUpdateAttendance(booking_ref, 'checked_in')}
       />
+
+      </div>
 
       {/* Reservation Details Modal */}
       {selectedReservation && (
@@ -224,6 +227,6 @@ export default function SeatingPage() {
         .animate-in { animation: animateIn 0.4s ease-out forwards; }
         @keyframes animateIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       `}} />
-    </div>
+    </>
   );
 }
