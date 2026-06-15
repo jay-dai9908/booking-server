@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { format, addDays } from 'date-fns';
-import { LayoutDashboard, CalendarRange, Users, LogOut, Plus, Trash2, Clock, CheckCircle2, XCircle, Menu, Search, UserCog, X, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, CalendarRange, Users, LogOut, Plus, Trash2, Clock, CheckCircle2, XCircle, Menu, Search, UserCog, X, CalendarDays, ChevronLeft, ChevronRight, Grid } from 'lucide-react';
 import api from '../../api/axios';
+import AdminSeatingChart from '../../components/AdminSeatingChart';
 
 function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState('sessions'); // 'sessions' | 'reservations' | 'members' | 'weekly'
+  const [activeTab, setActiveTab] = useState('sessions'); // 'sessions' | 'reservations' | 'members' | 'weekly' | 'seating'
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // Session Form State
@@ -854,6 +855,12 @@ function AdminDashboard() {
               </div>
             </>
           )}
+
+          {/* Seating Chart */}
+          {activeTab === 'seating' && (
+            <AdminSeatingChart />
+          )}
+
         </main>
       </div>
 

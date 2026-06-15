@@ -114,10 +114,10 @@ export const allocateSeats = (currentReservations, newReservation, forceSplit = 
   const updates = []; // 紀錄哪些訂單的座位被改變了
   let virtualAvailable = [...SEATS];
   
-  // 3.1 釘死 (Pin) 特定訂單：已報到/未到 或 pax >= 3 的大組客
+  // 3.1 釘死 (Pin) 特定訂單：已報到/未到 或 pax >= 3 的大組客 或 手動鎖定的座位
   const pinnedReservations = currentReservations.filter(r => 
     r.id !== newReservation.id && 
-    (r.attendance !== null || r.pax >= 3)
+    (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true)
   );
 
   pinnedReservations.forEach(r => {
@@ -127,11 +127,12 @@ export const allocateSeats = (currentReservations, newReservation, forceSplit = 
     });
   });
 
-  // 3.2 解鎖 (Unpin) 尚未報到的散客 (pax <= 2)
+  // 3.2 解鎖 (Unpin) 尚未報到的散客 (pax <= 2) 且 未被鎖定
   const unpinnedReservations = currentReservations.filter(r => 
     r.id !== newReservation.id && 
     r.attendance === null && 
-    r.pax <= 2
+    r.pax <= 2 &&
+    !r.is_seat_locked
   );
 
   // 準備虛擬分配佇列 (包含新訂單與被解鎖的訂單)

@@ -18,7 +18,8 @@ const groupReservations = (reservations) => {
         created_at: r.created_at,
         session_date: r.session.session_date,
         sessions: [],
-        assigned_seats: r.assigned_seats || []
+        assigned_seats: r.assigned_seats || [],
+        is_seat_locked: r.is_seat_locked || false
       };
     }
     groups[ref].sessions.push(r.session);
@@ -42,7 +43,8 @@ const groupReservations = (reservations) => {
       start_time,
       end_time,
       session_count: group.sessions.length,
-      assigned_seats: group.assigned_seats
+      assigned_seats: group.assigned_seats,
+      is_seat_locked: group.is_seat_locked
     };
   });
 };
@@ -257,6 +259,60 @@ export const deleteReservationRecord = async (req, res) => {
   }
 };
 
+export const moveSeat = async (req, res) => {
+  const { id } = req.body; // id of the reservation to update
+  const { assigned_seats } = req.body;
+
+  if (!id || !assigned_seats || !Array.isArray(assigned_seats)) {
+    return res.status(400).json({ error: 'Valid reservation id and assigned_seats array are required.' });
+  }
+
+  try {
+    const updated = await prisma.reservation.update({
+      where: { id: parseInt(id, 10) },
+      data: {
+        assigned_seats,
+        is_seat_locked: true // Lock the seat so it's not moved by the algorithm
+      }
+    });
+
+    res.json({ message: 'Seat moved successfully', reservation: updated });
+  } catch (error) {
+    console.error('Error moving seat:', error);
+    res.status(500).json({ error: 'Failed to move seat' });
+  }
+};
+
+export const getSessionSeats = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: parseInt(id, 10) }
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const reservations = await prisma.reservation.findMany({
+      where: { session_id: parseInt(id, 10), status: 'confirmed' },
+      include: {
+        user: {
+          select: { name: true, phone: true }
+        }
+      }
+    });
+
+    res.json({
+      session,
+      reservations
+    });
+  } catch (error) {
+    console.error('Error fetching session seats:', error);
+    res.status(500).json({ error: 'Failed to fetch session seats' });
+  }
+};
 
 export const adminCreateReservation = async (req, res) => {
   const { session_ids, pax, name, phone, forceSplit } = req.body;

@@ -8,6 +8,8 @@ function Booking() {
   const [selectedSessions, setSelectedSessions] = useState([]); // Array of selected sessions
   const [pax, setPax] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [showSplitModal, setShowSplitModal] = useState(false);
+  const [splitBookingData, setSplitBookingData] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
 
   // Generate calendar dates for the current month view
@@ -86,9 +88,37 @@ function Booking() {
         fetchSessions(selectedDate); // Refresh capacities
         setSelectedSessions([]);
       } catch (err) {
-        alert(err.response?.data?.error || '預約失敗，可能人數已滿或時段已被預約');
-        fetchSessions(selectedDate);
+        if (err.response?.status === 409 && err.response?.data?.error?.includes('拆散')) {
+          setSplitBookingData({
+            session_ids: sortedSessions.map(s => s.id),
+            pax: parseInt(pax)
+          });
+          setShowSplitModal(true);
+        } else {
+          alert(err.response?.data?.error || '預約失敗，可能人數已滿或時段已被預約');
+          fetchSessions(selectedDate);
+        }
       }
+    }
+  };
+
+  const confirmSplitBooking = async () => {
+    if (!splitBookingData) return;
+    try {
+      await api.post('/reservations', {
+        ...splitBookingData,
+        forceSplit: true
+      });
+      alert('預約成功！');
+      fetchSessions(selectedDate);
+      setSelectedSessions([]);
+      setShowSplitModal(false);
+      setSplitBookingData(null);
+    } catch (err) {
+      alert(err.response?.data?.error || '預約失敗');
+      setShowSplitModal(false);
+      setSplitBookingData(null);
+      fetchSessions(selectedDate);
     }
   };
 
@@ -235,16 +265,72 @@ function Booking() {
                   ))}
                 </select>
               </div>
-              <button 
-                onClick={handleBooking}
-                className="w-full sm:w-2/3 bg-gray-900 hover:bg-gray-800 text-white font-bold py-3 px-6 rounded-xl transition-colors shadow-lg shadow-gray-900/20"
-              >
-                確認送出預約
-              </button>
             </div>
           </section>
         )}
       </main>
+
+      {/* Booking Footer Action */}
+      {selectedSessions.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+          <div className="max-w-3xl mx-auto flex items-center justify-between">
+            <div className="text-sm">
+              <div className="font-bold text-gray-800">
+                已選擇 {selectedSessions.length} 個時段
+              </div>
+              <div className="text-gray-500">
+                人數: {pax} 人
+              </div>
+            </div>
+            <button
+              onClick={handleBooking}
+              className="bg-indigo-600 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-indigo-700 hover:-translate-y-0.5 transition-all"
+            >
+              送出預約
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Force Split Confirmation Modal */}
+      {showSplitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="bg-amber-100 p-6 flex flex-col items-center">
+              <div className="bg-amber-200 p-3 rounded-full mb-4">
+                <span className="text-3xl">⚠️</span>
+              </div>
+              <h3 className="text-xl font-bold text-amber-900 text-center">
+                連續座位不足
+              </h3>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-700 text-center mb-6">
+                您選擇的時段已無法安排連續的相鄰座位，<br/>
+                <span className="font-bold text-red-500">同行者將會被拆散入座。</span><br/><br/>
+                請問是否仍要確認預約？
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowSplitModal(false);
+                    setSplitBookingData(null);
+                  }}
+                  className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors"
+                >
+                  取消預約
+                </button>
+                <button
+                  onClick={confirmSplitBooking}
+                  className="flex-1 py-3 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold transition-colors shadow-lg shadow-amber-500/30"
+                >
+                  確認拆桌
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { height: 6px; }
