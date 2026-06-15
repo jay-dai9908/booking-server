@@ -1128,9 +1128,16 @@ function AdminDashboard() {
                       {(() => {
                         const statusUI = getReservationStatusUI(selectedReservation);
                         return (
-                          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                            {statusUI.icon} {statusUI.text}
-                          </span>
+                          <div className="flex items-center">
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                              {statusUI.icon} {statusUI.text}
+                            </span>
+                            {selectedReservation.is_force_split && (
+                              <span className="ml-2 inline-flex items-center px-2 py-1 bg-amber-50 text-amber-600 border border-amber-200 rounded-md text-xs font-bold tracking-wide">
+                                [顧客同意拆桌]
+                              </span>
+                            )}
+                          </div>
                         );
                       })()}
                     </div>

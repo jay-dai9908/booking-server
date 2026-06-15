@@ -104,7 +104,8 @@ export const createReservation = async (req, res) => {
           user_id: userId,
           pax: parseInt(pax, 10),
           status: 'confirmed',
-          assigned_seats: mySeats
+          assigned_seats: mySeats,
+          is_force_split: forceSplit === true
         });
 
         // Collect updates for existing reservations that got reshuffled
@@ -385,7 +386,8 @@ export const adminCreateReservation = async (req, res) => {
           user_id: targetUser.id,
           pax: parseInt(pax, 10),
           status: 'confirmed',
-          assigned_seats: mySeats
+          assigned_seats: mySeats,
+          is_force_split: forceSplit === true
         });
 
         allocResult.updates.forEach(update => {
