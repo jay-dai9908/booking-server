@@ -32,15 +32,16 @@ model Session {
 }
 
 model Reservation {
-  id           Int      @id @default(autoincrement())
-  booking_ref  String   @default(uuid())
-  session_id   Int
-  user_id      Int
-  pax          Int
-  status       String   @default("confirmed")
-  created_at   DateTime @default(now())
-  attendance   String?
+  id             Int      @id @default(autoincrement())
+  booking_ref    String   @default(uuid())
+  session_id     Int
+  user_id        Int
+  pax            Int
+  status         String   @default("confirmed")
+  created_at     DateTime @default(now())
+  attendance     String?
+  assigned_seats String[] // e.g. ["A1-1", "A1-2"]
   
-  session      Session  @relation(fields: [session_id], references: [id])
-  user         User     @relation(fields: [user_id], references: [id])
+  session        Session  @relation(fields: [session_id], references: [id])
+  user           User     @relation(fields: [user_id], references: [id])
 }

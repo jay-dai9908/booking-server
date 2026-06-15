@@ -1,6 +1,7 @@
 import prisma from '../prismaClient.js';
 import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
+import { allocateSeats } from '../utils/SeatAllocator.js';
 
 // Helper function to group reservations by booking_ref
 const groupReservations = (reservations) => {
@@ -17,6 +18,7 @@ const groupReservations = (reservations) => {
         created_at: r.created_at,
         session_date: r.session.session_date,
         sessions: [],
+        assigned_seats: r.assigned_seats || []
       };
     }
     groups[ref].sessions.push(r.session);
@@ -39,13 +41,14 @@ const groupReservations = (reservations) => {
       session_date: group.session_date,
       start_time,
       end_time,
-      session_count: group.sessions.length
+      session_count: group.sessions.length,
+      assigned_seats: group.assigned_seats
     };
   });
 };
 
 export const createReservation = async (req, res) => {
-  const { session_ids, pax } = req.body;
+  const { session_ids, pax, forceSplit } = req.body;
   const userId = req.user.id;
 
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !pax || pax <= 0) {
@@ -55,8 +58,8 @@ export const createReservation = async (req, res) => {
   try {
     const booking_ref = crypto.randomUUID();
 
-    const reservation = await prisma.$transaction(async (tx) => {
-      // 1. Get the sessions and lock the rows
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Get the sessions and lock the rows (Pessimistic Lock)
       const sessions = await tx.$queryRaw`
         SELECT id, max_capacity 
         FROM "Session" 
@@ -68,38 +71,65 @@ export const createReservation = async (req, res) => {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
       }
 
-      // 2. Check capacity for all selected sessions
-      for (const session of sessions) {
-        const booked = await tx.reservation.aggregate({
-          where: { session_id: session.id, status: 'confirmed' },
-          _sum: { pax: true }
-        });
-        
-        const currentlyBookedPax = booked._sum.pax || 0;
-        const remainingCapacity = session.max_capacity - currentlyBookedPax;
+      // We need to perform the seating algorithm for EACH selected session independently,
+      // because different sessions might have different reservations and empty seats.
+      const sessionUpdates = []; // Collect all updates to perform later
+      const newReservationsData = [];
 
-        if (remainingCapacity < pax) {
-          throw new Error('INSUFFICIENT_CAPACITY');
+      for (const session of sessions) {
+        // Fetch all confirmed reservations for this session to know current seating
+        const currentReservations = await tx.reservation.findMany({
+          where: { session_id: session.id, status: 'confirmed' }
+        });
+
+        // The new reservation we are trying to place
+        const newReservationMock = { id: 'NEW_RES', pax: parseInt(pax, 10), assigned_seats: null };
+
+        // Run the Smart Local Reshuffle algorithm
+        const allocResult = allocateSeats(currentReservations, newReservationMock, forceSplit);
+
+        if (!allocResult.success) {
+          if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
+          if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
+          throw new Error('ALLOCATION_FAILED');
         }
+
+        // Store the newly calculated seats for the new reservation
+        const mySeats = allocResult.updates.find(u => u.id === 'NEW_RES').assigned_seats;
+        newReservationsData.push({
+          booking_ref,
+          session_id: session.id,
+          user_id: userId,
+          pax: parseInt(pax, 10),
+          status: 'confirmed',
+          assigned_seats: mySeats
+        });
+
+        // Collect updates for existing reservations that got reshuffled
+        allocResult.updates.forEach(update => {
+          if (update.id !== 'NEW_RES') {
+            sessionUpdates.push({ id: update.id, assigned_seats: update.assigned_seats });
+          }
+        });
       }
 
-      // 3. Create reservations
-      const reservationsData = session_ids.map(s_id => ({
-        booking_ref,
-        session_id: s_id,
-        user_id: userId,
-        pax: parseInt(pax, 10),
-        status: 'confirmed'
-      }));
+      // 3. Apply Reshuffle Updates to existing reservations
+      for (const update of sessionUpdates) {
+        await tx.reservation.update({
+          where: { id: update.id },
+          data: { assigned_seats: update.assigned_seats }
+        });
+      }
 
+      // 4. Create the new reservations with their assigned seats
       const newReservations = await tx.reservation.createMany({
-        data: reservationsData
+        data: newReservationsData
       });
 
       return { booking_ref, count: newReservations.count };
     });
 
-    res.status(201).json({ message: 'Reservation successful', reservation });
+    res.status(201).json({ message: 'Reservation successful', reservation: result });
 
   } catch (error) {
     console.error('Reservation error:', error);
@@ -107,7 +137,10 @@ export const createReservation = async (req, res) => {
       return res.status(404).json({ error: 'One or more sessions not found.' });
     }
     if (error.message === 'INSUFFICIENT_CAPACITY') {
-      return res.status(409).json({ error: 'Not enough capacity remaining for one or more selected sessions.' });
+      return res.status(400).json({ error: 'Not enough capacity remaining for one or more selected sessions.' });
+    }
+    if (error.message === 'SPLIT_REQUIRED') {
+      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
     }
     res.status(500).json({ error: 'Failed to create reservation.' });
   }
@@ -226,7 +259,7 @@ export const deleteReservationRecord = async (req, res) => {
 
 
 export const adminCreateReservation = async (req, res) => {
-  const { session_ids, pax, name, phone } = req.body;
+  const { session_ids, pax, name, phone, forceSplit } = req.body;
   
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !pax || pax <= 0) {
     return res.status(400).json({ error: 'Valid session_ids array and pax are required.' });
@@ -239,7 +272,7 @@ export const adminCreateReservation = async (req, res) => {
   try {
     const booking_ref = crypto.randomUUID();
 
-    const reservation = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       // 0. Handle user finding / creation
       let targetUser = await tx.user.findFirst({
         where: { phone }
@@ -256,7 +289,7 @@ export const adminCreateReservation = async (req, res) => {
         });
       }
 
-      // 1. Get the sessions and lock the rows
+      // 1. Get the sessions and lock the rows (Pessimistic Lock)
       const sessions = await tx.$queryRaw`
         SELECT id, max_capacity 
         FROM "Session" 
@@ -268,38 +301,61 @@ export const adminCreateReservation = async (req, res) => {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
       }
 
-      // 2. Check capacity for all selected sessions
-      for (const session of sessions) {
-        const booked = await tx.reservation.aggregate({
-          where: { session_id: session.id, status: 'confirmed' },
-          _sum: { pax: true }
-        });
-        
-        const currentlyBookedPax = booked._sum.pax || 0;
-        const remainingCapacity = session.max_capacity - currentlyBookedPax;
+      const sessionUpdates = []; 
+      const newReservationsData = [];
 
-        if (remainingCapacity < pax) {
-          throw new Error('INSUFFICIENT_CAPACITY');
+      // 2. Perform the seating algorithm for EACH selected session independently
+      for (const session of sessions) {
+        const currentReservations = await tx.reservation.findMany({
+          where: { session_id: session.id, status: 'confirmed' }
+        });
+
+        const newReservationMock = { id: 'NEW_RES', pax: parseInt(pax, 10), assigned_seats: null };
+
+        // For admin, we might pass true to forceSplit directly if we don't want the prompt,
+        // but let's support it similarly to user side.
+        const allocResult = allocateSeats(currentReservations, newReservationMock, forceSplit || false);
+
+        if (!allocResult.success) {
+          if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
+          if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
+          throw new Error('ALLOCATION_FAILED');
         }
+
+        const mySeats = allocResult.updates.find(u => u.id === 'NEW_RES').assigned_seats;
+        newReservationsData.push({
+          booking_ref,
+          session_id: session.id,
+          user_id: targetUser.id,
+          pax: parseInt(pax, 10),
+          status: 'confirmed',
+          assigned_seats: mySeats
+        });
+
+        allocResult.updates.forEach(update => {
+          if (update.id !== 'NEW_RES') {
+            sessionUpdates.push({ id: update.id, assigned_seats: update.assigned_seats });
+          }
+        });
       }
 
-      // 3. Create reservations
-      const reservationsData = session_ids.map(s_id => ({
-        booking_ref,
-        session_id: s_id,
-        user_id: targetUser.id,
-        pax: parseInt(pax, 10),
-        status: 'confirmed'
-      }));
+      // 3. Apply Reshuffle Updates to existing reservations
+      for (const update of sessionUpdates) {
+        await tx.reservation.update({
+          where: { id: update.id },
+          data: { assigned_seats: update.assigned_seats }
+        });
+      }
 
+      // 4. Create the new reservations
       const newReservations = await tx.reservation.createMany({
-        data: reservationsData
+        data: newReservationsData
       });
 
       return { booking_ref, count: newReservations.count };
     });
 
-    res.status(201).json({ message: 'Manual reservation successful', reservation });
+    res.status(201).json({ message: 'Manual reservation successful', reservation: result });
 
   } catch (error) {
     console.error('Manual Reservation error:', error);
@@ -307,7 +363,10 @@ export const adminCreateReservation = async (req, res) => {
       return res.status(404).json({ error: 'One or more sessions not found.' });
     }
     if (error.message === 'INSUFFICIENT_CAPACITY') {
-      return res.status(409).json({ error: 'Not enough capacity remaining for one or more selected sessions.' });
+      return res.status(400).json({ error: 'Not enough capacity remaining for one or more selected sessions.' });
+    }
+    if (error.message === 'SPLIT_REQUIRED') {
+      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
     }
     res.status(500).json({ error: 'Failed to create manual reservation.' });
   }
