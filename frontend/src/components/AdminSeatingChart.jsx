@@ -53,8 +53,10 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
     try {
       const res = await api.get(`/sessions?date=${selectedDate}`);
       setSessions(res.data);
-      if (res.data.length > 0 && !selectedSessionId) {
+      if (res.data.length > 0) {
         setSelectedSessionId(res.data[0].id);
+      } else {
+        setSelectedSessionId(null);
       }
     } catch (err) {
       console.error(err);
