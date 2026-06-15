@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int           @id @default(autoincrement())
+  line_user_id String        @unique
+  name         String?
+  phone        String?
+  created_at   DateTime      @default(now())
+  is_blacklisted Boolean   @default(false)
+  notes          String?
+  
+  reservations Reservation[]
+}
+
+model Session {
+  id           Int           @id @default(autoincrement())
+  session_date DateTime      @db.Date
+  start_time   String        // 例如: "10:00"
+  end_time     String        // 例如: "11:00"
+  max_capacity Int
+  
+  reservations Reservation[]
+
+  @@unique([session_date, start_time])
+}
+
+model Reservation {
+  id           Int      @id @default(autoincrement())
+  booking_ref  String   @default(uuid())
+  session_id   Int
+  user_id      Int
+  pax          Int
+  status       String   @default("confirmed")
+  created_at   DateTime @default(now())
+  attendance   String?
+  
+  session      Session  @relation(fields: [session_id], references: [id])
+  user         User     @relation(fields: [user_id], references: [id])
+}
