@@ -379,9 +379,33 @@ export const getSessionSeats = async (req, res) => {
       }
     });
 
+    // Find the end_time of the entire booking for each reservation
+    const bookingRefs = [...new Set(reservations.map(r => r.booking_ref))];
+    const allRelatedReservations = await prisma.reservation.findMany({
+      where: {
+        booking_ref: { in: bookingRefs },
+        status: 'confirmed'
+      },
+      include: {
+        session: true
+      }
+    });
+
+    const endTimeMap = {};
+    allRelatedReservations.forEach(r => {
+      if (!endTimeMap[r.booking_ref] || r.session.end_time > endTimeMap[r.booking_ref]) {
+        endTimeMap[r.booking_ref] = r.session.end_time;
+      }
+    });
+
+    const reservationsWithEndTime = reservations.map(r => ({
+      ...r,
+      booking_end_time: endTimeMap[r.booking_ref] || session.end_time
+    }));
+
     res.json({
       session,
-      reservations
+      reservations: reservationsWithEndTime
     });
   } catch (error) {
     console.error('Error fetching session seats:', error);

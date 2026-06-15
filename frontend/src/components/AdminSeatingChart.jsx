@@ -170,8 +170,15 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
         <div className="text-center">
           <div className="text-xs font-semibold mb-1 opacity-50">{seatId}</div>
           {isOccupied ? (
-            <div className="text-sm font-bold truncate px-1 max-w-[80px]">
-              {occupant.user?.name}
+            <div className="flex flex-col items-center">
+              <div className="text-sm font-bold truncate px-1 max-w-[80px]">
+                {occupant.user?.name}
+              </div>
+              {occupant.booking_end_time && (
+                <div className="text-[10px] text-indigo-500/80 -mt-0.5 font-medium">
+                  ~{occupant.booking_end_time}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-sm font-medium">空位</div>
