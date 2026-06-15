@@ -299,7 +299,7 @@ function AdminDashboard() {
   };
 
   const handleClearDay = async () => {
-    if (window.confirm(`確定要清除 ${listDate} 的所有時段嗎？（已有預約的時段將自動保留）`)) {
+    if (window.confirm(`確定要清除 ${listDate} 的所有時段嗎？（已有「有效預約」的時段將自動保留，已取消的空時段將一併清除）`)) {
       try {
         const res = await api.delete(`/sessions/date/${listDate}`);
         alert(`清除成功！已刪除 ${res.data.deletedCount} 個空時段，保留 ${res.data.keptCount} 個已預約時段。`);
