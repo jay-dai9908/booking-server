@@ -153,7 +153,26 @@ function Booking() {
         {/* Time Selector */}
         <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-gray-800">2. 選擇時段 (可複選)</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-bold text-gray-800">2. 選擇時段 (可複選)</h2>
+              {sessions.length > 0 && (
+                <button
+                  onClick={() => {
+                    const availableSessions = sessions.filter(s => s.remaining_capacity > 0);
+                    if (selectedSessions.length === availableSessions.length && availableSessions.length > 0) {
+                      setSelectedSessions([]);
+                    } else {
+                      setSelectedSessions(availableSessions);
+                    }
+                  }}
+                  className="text-xs px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded hover:bg-emerald-100 transition-colors font-medium"
+                >
+                  {selectedSessions.length === sessions.filter(s => s.remaining_capacity > 0).length && sessions.filter(s => s.remaining_capacity > 0).length > 0
+                    ? '取消全選'
+                    : '不限時 (全選)'}
+                </button>
+              )}
+            </div>
             {selectedSessions.length > 0 && (
               <span className="text-sm bg-gray-100 text-gray-800 px-3 py-1 rounded-full font-medium">
                 已選 {selectedSessions.length} 小時
