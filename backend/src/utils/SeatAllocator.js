@@ -163,11 +163,36 @@ export const allocateSeats = (currentReservations, newReservation, forceSplit = 
     return { success: false, error: 'SPLIT_REQUIRED' }; // 回傳 409，需前端確認
   }
 
-  // 強制拆桌：直接從剩下的位子抓取
-  // 注意：我們捨棄剛才失敗的虛擬重排，直接在最原始的 availableSeats 中強抓
-  const forcedSeats = availableSeats.slice(0, newReservation.pax);
+  // 強制拆桌：使用智能分塊演算法 (Chunking) 節省後續手動排位時間
+  let remainingPax = newReservation.pax;
+  let tempAvailable = [...availableSeats];
+  const forcedAssigned = [];
+
+  while (remainingPax > 0) {
+    let chunk = remainingPax >= 4 ? 4 : remainingPax;
+    let seats = null;
+
+    // 嘗試尋找連續座位，若失敗則降級 chunk size
+    while (chunk > 0) {
+      seats = findConsecutiveSeats(tempAvailable, chunk);
+      if (seats) break;
+      chunk--;
+    }
+
+    if (!seats) {
+      // 若極端情況無法找到任何組合，則直接抓取剩下的空位
+      const fallbackSeat = tempAvailable.shift();
+      forcedAssigned.push(fallbackSeat);
+      remainingPax -= 1;
+    } else {
+      forcedAssigned.push(...seats);
+      tempAvailable = tempAvailable.filter(s => !seats.includes(s));
+      remainingPax -= seats.length;
+    }
+  }
+
   return {
     success: true,
-    updates: [{ id: newReservation.id, assigned_seats: forcedSeats }]
+    updates: [{ id: newReservation.id, assigned_seats: forcedAssigned }]
   };
 };
