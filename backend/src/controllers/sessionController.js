@@ -171,20 +171,19 @@ export const deleteSessionsByDate = async (req, res) => {
       return res.status(400).json({ error: 'All sessions on this date have confirmed reservations and cannot be deleted.' });
     }
 
-    // Delete them
-    const deleteResult = await prisma.session.deleteMany({
-      where: {
-        id: { in: sessionsToDelete.map(s => s.id) }
-      }
-    });
-
-    // Also delete cancelled reservations associated with these sessions to clean up
-    await prisma.reservation.deleteMany({
-      where: {
-        session_id: { in: sessionsToDelete.map(s => s.id) },
-        status: 'cancelled'
-      }
-    });
+    // Use a transaction to safely delete child records (reservations) before parent records (sessions)
+    const [_, deleteResult] = await prisma.$transaction([
+      prisma.reservation.deleteMany({
+        where: {
+          session_id: { in: sessionsToDelete.map(s => s.id) }
+        }
+      }),
+      prisma.session.deleteMany({
+        where: {
+          id: { in: sessionsToDelete.map(s => s.id) }
+        }
+      })
+    ]);
 
     res.json({ 
       message: 'Sessions cleared successfully', 
