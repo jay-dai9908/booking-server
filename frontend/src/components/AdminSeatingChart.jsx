@@ -230,16 +230,28 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
                 </div>
                 
                 <div className="flex items-center gap-3">
-                  {onCheckIn && selectedSeat.reservation.attendance !== 'checked_in' && (
-                    <button 
-                      onClick={() => {
-                        onCheckIn(selectedSeat.reservation.booking_ref);
-                        setTimeout(() => fetchSeatingData(), 500);
-                      }}
-                      className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
-                    >
-                      完成報到
-                    </button>
+                  {onCheckIn && (
+                    selectedSeat.reservation.attendance === 'checked_in' ? (
+                      <button 
+                        disabled
+                        className="bg-green-100 text-green-700 border border-green-200 px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm flex items-center gap-1.5"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        已報到
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => {
+                          onCheckIn(selectedSeat.reservation.booking_ref);
+                          setTimeout(() => fetchSeatingData(), 500);
+                        }}
+                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                      >
+                        完成報到
+                      </button>
+                    )
                   )}
                   {onOpenDetails && (
                     <button 
