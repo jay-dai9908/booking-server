@@ -116,13 +116,12 @@ async function main() {
         const virtAvailable = getIntersectionAvailableSeats(virtualBlocks, reqBlock.session_ids);
         let seats = findConsecutiveSeats(virtAvailable, reqBlock.pax);
         
-        // If consecutive fails, we MUST split because this is just a DB repair script, we can't fail.
         if (!seats) {
            console.log(`    ! Forced split required for ${reqBlock.booking_ref} pax ${reqBlock.pax}`);
            seats = [];
            let remaining = reqBlock.pax;
            let tempAvail = [...virtAvailable];
-           while(remaining > 0) {
+           while(remaining > 0 && tempAvail.length > 0) {
               let chunk = remaining > 4 ? 4 : remaining;
               let chunkSeats = null;
               while(chunk > 0) {
@@ -131,12 +130,28 @@ async function main() {
                  chunk--;
               }
               if (!chunkSeats) {
-                 chunkSeats = [tempAvail.shift()];
+                 const s = tempAvail.shift();
+                 if (s) chunkSeats = [s];
+                 else break;
               }
               seats.push(...chunkSeats);
               tempAvail = tempAvail.filter(s => !chunkSeats.includes(s));
               remaining -= chunkSeats.length;
            }
+        }
+
+        if (seats.length < reqBlock.pax) {
+           console.log(`    ! FAILED to allocate enough continuous seats for ${reqBlock.booking_ref}. Retaining original inconsistent seats.`);
+           // Fallback: Just put their original inconsistent seats back into virtualBlocks so they occupy space
+           for (const os of reqBlock.original_sessions) {
+             virtualBlocks.push({
+               ...reqBlock,
+               session_ids: [os.session_id],
+               assigned_seats: os.assigned_seats
+             });
+           }
+           // Do not add to updates, so DB retains original
+           continue;
         }
 
         virtualBlocks.push({ ...reqBlock, assigned_seats: seats });
