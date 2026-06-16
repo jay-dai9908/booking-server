@@ -84,7 +84,7 @@ async function main() {
         }
         const block = blocksMap.get(r.booking_ref);
         if (!block.session_ids.includes(r.session_id)) block.session_ids.push(r.session_id);
-        if (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true) block.is_pinned = true;
+        if (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true || block.session_ids.length > 1) block.is_pinned = true;
         block.original_sessions.push({ session_id: r.session_id, assigned_seats: r.assigned_seats || [] });
       }
 
@@ -130,9 +130,8 @@ async function main() {
                  chunk--;
               }
               if (!chunkSeats) {
-                 const s = tempAvail.shift();
-                 if (s) chunkSeats = [s];
-                 else break;
+                 const s = tempAvail.shift() || `WAIT-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+                 chunkSeats = [s];
               }
               seats.push(...chunkSeats);
               tempAvail = tempAvail.filter(s => !chunkSeats.includes(s));
