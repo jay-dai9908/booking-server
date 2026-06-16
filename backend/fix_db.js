@@ -91,11 +91,19 @@ async function main() {
       for (const block of blocksMap.values()) {
         let inconsistent = false;
         const baseSeats = block.assigned_seats;
+        
+        // 1. Check if seats are consistent across all sessions
         for (const os of block.original_sessions) {
           if (baseSeats.length !== os.assigned_seats.length || !baseSeats.every(s => os.assigned_seats.includes(s))) {
             inconsistent = true; break;
           }
         }
+        
+        // 2. CRITICAL: Check if the block has fewer seats than pax (partial seats bug)
+        if (baseSeats.length < block.pax) {
+          inconsistent = true;
+        }
+
         if (inconsistent) block.is_pinned = false;
       }
 
