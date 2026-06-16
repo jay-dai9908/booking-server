@@ -85,6 +85,18 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
     return null;
   };
 
+  const getWaitSeats = () => {
+    const seats = new Set();
+    seatingData.forEach(r => {
+      r.assigned_seats?.forEach(s => {
+        if (s.startsWith('WAIT-')) {
+          seats.add(s);
+        }
+      });
+    });
+    return Array.from(seats);
+  };
+
   const handleSeatClick = (seatId) => {
     const occupant = getOccupant(seatId);
 
@@ -340,6 +352,19 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
                 </div>
               </div>
             </div>
+
+            {/* Virtual Waiting Area (Overbooked) */}
+            {getWaitSeats().length > 0 && (
+              <div className="mt-4 pt-8 border-t-2 border-dashed border-red-200">
+                <div className="text-lg font-bold text-red-600 mb-4 flex items-center gap-2">
+                  <div className="w-2 h-6 bg-red-500 rounded-full animate-pulse"></div>
+                  ⚠️ 虛擬等候區 (座位不足，需手動安排)
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 bg-red-50/50 p-6 rounded-2xl border border-red-100">
+                  {getWaitSeats().map(renderSeat)}
+                </div>
+              </div>
+            )}
 
           </div>
         </div>
