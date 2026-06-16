@@ -99,8 +99,8 @@ const groupReservations = (reservations) => {
       block.session_ids.push(r.session_id);
     }
     
-    // 如果該訂單在任何一個 session 中被釘死 (已報到/大於等於3人/手動鎖定)，整個 block 就必須釘死
-    if (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true) {
+    // 如果該訂單在任何一個 session 中被釘死 (已報到/大於等於3人/手動鎖定)，或是跨越多個時段 (Super Anchor)，整個 block 就必須釘死
+    if (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true || block.session_ids.length > 1) {
       block.is_pinned = true;
     }
     
@@ -254,7 +254,7 @@ export const allocateSeats = (currentReservations, newReservationBlock, forceSpl
     }
 
     if (!seats) {
-      const fallbackSeat = tempAvailable.shift();
+      const fallbackSeat = tempAvailable.shift() || `WAIT-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       forcedAssigned.push(fallbackSeat);
       remainingPax -= 1;
     } else {
