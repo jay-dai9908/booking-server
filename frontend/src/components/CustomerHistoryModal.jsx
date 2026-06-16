@@ -51,6 +51,7 @@ export default function CustomerHistoryModal({ onClose }) {
                   const rFormatted = {
                     ...r,
                     start_time: r.start_time || r.session?.start_time,
+                    end_time: r.end_time || r.session?.end_time,
                     session_date: r.session_date || r.session?.session_date
                   };
                   const statusUI = getReservationStatusUI(rFormatted);
@@ -65,8 +66,8 @@ export default function CustomerHistoryModal({ onClose }) {
                           <span className="font-bold text-gray-900">
                             {format(new Date(rFormatted.session_date), 'yyyy/MM/dd')}
                           </span>
-                          <span className="text-sm font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">
-                            {rFormatted.start_time}
+                          <span className="text-sm font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md tracking-wider">
+                            {rFormatted.start_time} - {rFormatted.end_time}
                           </span>
                         </div>
                         <p className="text-sm text-gray-500">
