@@ -90,11 +90,13 @@ async function main() {
 
       for (const block of blocksMap.values()) {
         let inconsistent = false;
-        const baseSeats = block.assigned_seats;
+        // 0. CRITICAL: Filter out any null/undefined ghost seats!
+        const baseSeats = (block.assigned_seats || []).filter(s => s !== null && s !== undefined);
         
         // 1. Check if seats are consistent across all sessions
         for (const os of block.original_sessions) {
-          if (baseSeats.length !== os.assigned_seats.length || !baseSeats.every(s => os.assigned_seats.includes(s))) {
+          const osSeats = (os.assigned_seats || []).filter(s => s !== null && s !== undefined);
+          if (baseSeats.length !== osSeats.length || !baseSeats.every(s => osSeats.includes(s))) {
             inconsistent = true; break;
           }
         }
