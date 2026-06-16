@@ -172,7 +172,7 @@ export const getAdminReservations = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
-    const search = req.query.search || '';
+    const search = (req.query.search || '').trim();
     const month = req.query.month; // format: 'YYYY-MM'
 
     let whereClause = {};
