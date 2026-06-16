@@ -152,45 +152,51 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           </div>
 
           {/* Actions */}
-          {!readOnly && (
+          {(!readOnly || reservation.status !== 'cancelled') && (
             <div className="pt-6 border-t border-gray-100">
               <h3 className="text-sm font-medium text-gray-500 mb-3">訂單操作</h3>
               {reservation.status === 'cancelled' ? (
                 <div className="flex items-center justify-between">
                   <p className="text-gray-500 text-sm">此訂單已取消。</p>
-                  <button 
-                    onClick={handleDeleteRecord}
-                    className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm border border-red-100"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    刪除紀錄
-                  </button>
+                  {!readOnly && (
+                    <button 
+                      onClick={handleDeleteRecord}
+                      className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm border border-red-100"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      刪除紀錄
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-3">
-                  <button 
-                    onClick={() => handleUpdateAttendance('checked_in')}
-                    disabled={reservation.attendance === 'checked_in'}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    完成報到
-                  </button>
-                  <button 
-                    onClick={() => handleUpdateAttendance('no_show')}
-                    disabled={reservation.attendance === 'no_show'}
-                    className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-300 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
-                  >
-                    <XCircle className="w-4 h-4" />
-                    標記未到
-                  </button>
-                  <button 
-                    onClick={() => handleUpdateAttendance(null)}
-                    disabled={!reservation.attendance}
-                    className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 disabled:bg-gray-50 disabled:text-gray-400 text-gray-700 rounded-xl font-medium transition-colors"
-                  >
-                    清除報到標記
-                  </button>
+                  {!readOnly && (
+                    <>
+                      <button 
+                        onClick={() => handleUpdateAttendance('checked_in')}
+                        disabled={reservation.attendance === 'checked_in'}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        完成報到
+                      </button>
+                      <button 
+                        onClick={() => handleUpdateAttendance('no_show')}
+                        disabled={reservation.attendance === 'no_show'}
+                        className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-300 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        標記未到
+                      </button>
+                      <button 
+                        onClick={() => handleUpdateAttendance(null)}
+                        disabled={!reservation.attendance}
+                        className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 disabled:bg-gray-50 disabled:text-gray-400 text-gray-700 rounded-xl font-medium transition-colors"
+                      >
+                        清除報到標記
+                      </button>
+                    </>
+                  )}
                   
                   <div className="flex-1"></div>
                   
