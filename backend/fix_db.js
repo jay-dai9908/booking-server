@@ -121,7 +121,7 @@ async function main() {
            seats = [];
            let remaining = reqBlock.pax;
            let tempAvail = [...virtAvailable];
-           while(remaining > 0 && tempAvail.length > 0) {
+           while(remaining > 0) {
               let chunk = remaining > 4 ? 4 : remaining;
               let chunkSeats = null;
               while(chunk > 0) {
