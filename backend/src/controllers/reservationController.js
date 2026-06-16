@@ -350,7 +350,7 @@ export const deleteReservationRecord = async (req, res) => {
 };
 
 export const moveSeat = async (req, res) => {
-  const { id } = req.body; // id of the reservation to update
+  const { id } = req.body; // id of the specific session's reservation that was clicked
   const { assigned_seats } = req.body;
 
   if (!id || !assigned_seats || !Array.isArray(assigned_seats)) {
@@ -358,15 +358,49 @@ export const moveSeat = async (req, res) => {
   }
 
   try {
-    const updated = await prisma.reservation.update({
-      where: { id: parseInt(id, 10) },
+    const targetRes = await prisma.reservation.findUnique({ where: { id: parseInt(id, 10) } });
+    if (!targetRes) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Find all reservations for this booking_ref
+    const group = await prisma.reservation.findMany({ 
+      where: { booking_ref: targetRes.booking_ref }
+    });
+    const sessionIds = group.map(r => r.session_id);
+
+    // Check for collisions in ANY of the involved sessions
+    const conflicts = await prisma.reservation.findMany({
+      where: {
+        session_id: { in: sessionIds },
+        booking_ref: { not: targetRes.booking_ref },
+        status: 'confirmed'
+      }
+    });
+
+    const isConflict = conflicts.some(c => 
+      c.assigned_seats && c.assigned_seats.some(seat => assigned_seats.includes(seat))
+    );
+
+    if (isConflict) {
+      return res.status(400).json({ 
+        error: '目標座位在該顧客的其他預約時段中已被佔用。請確保新座位在該筆訂單的所有時段中皆為空位。' 
+      });
+    }
+
+    // Update ALL reservations for this booking_ref
+    const updated = await prisma.reservation.updateMany({
+      where: { booking_ref: targetRes.booking_ref },
       data: {
         assigned_seats,
         is_seat_locked: true // Lock the seat so it's not moved by the algorithm
       }
     });
 
-    res.json({ message: 'Seat moved successfully', reservation: updated });
+    // Return the updated single reservation for frontend compatibility
+    const singleUpdated = await prisma.reservation.findUnique({ where: { id: parseInt(id, 10) } });
+
+    res.json({ message: 'Seat moved successfully', reservation: singleUpdated });
   } catch (error) {
     console.error('Error moving seat:', error);
     res.status(500).json({ error: 'Failed to move seat' });

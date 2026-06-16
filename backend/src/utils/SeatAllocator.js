@@ -88,13 +88,24 @@ const groupReservations = (reservations) => {
         pax: r.pax,
         session_ids: [],
         assigned_seats: r.assigned_seats || [],
-        is_pinned: (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true)
+        is_pinned: false,
+        original_sessions: []
       });
     }
+    const block = blocksMap.get(r.booking_ref);
+    
     // 確保不會重複加入同一個 session_id
-    if (!blocksMap.get(r.booking_ref).session_ids.includes(r.session_id)) {
-      blocksMap.get(r.booking_ref).session_ids.push(r.session_id);
+    if (!block.session_ids.includes(r.session_id)) {
+      block.session_ids.push(r.session_id);
     }
+    
+    // 如果該訂單在任何一個 session 中被釘死 (已報到/大於等於3人/手動鎖定)，整個 block 就必須釘死
+    if (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true) {
+      block.is_pinned = true;
+    }
+    
+    // 紀錄每個 session 原本的座位，用來比對是否真正發生改變或是本身資料有跨時段不一致的狀況
+    block.original_sessions.push({ session_id: r.session_id, assigned_seats: r.assigned_seats || [] });
   }
   return Array.from(blocksMap.values());
 };
@@ -172,10 +183,25 @@ export const allocateSeats = (currentReservations, newReservationBlock, forceSpl
       });
       
       const originalBlock = blocks.find(b => b.booking_ref === reqBlock.booking_ref);
-      const originalSeats = originalBlock ? originalBlock.assigned_seats : [];
       
-      // Zero-Diff Filter：只有座位真正改變時才加入 updates 回傳
-      const seatsChanged = seats.length !== originalSeats.length || !seats.every(s => originalSeats.includes(s));
+      let seatsChanged = false;
+      if (!originalBlock) {
+        seatsChanged = true;
+      } else {
+        // 只要任何一個原始 session 的座位與新分配的不同，或是原本就跨時段不一致，就視為改變
+        for (const sid of reqBlock.session_ids) {
+          const origSession = originalBlock.original_sessions.find(os => os.session_id === sid);
+          if (!origSession) {
+            seatsChanged = true;
+            break;
+          }
+          const origSeats = origSession.assigned_seats;
+          if (seats.length !== origSeats.length || !seats.every(s => origSeats.includes(s))) {
+            seatsChanged = true;
+            break;
+          }
+        }
+      }
       
       if (seatsChanged) {
         updates.push({ booking_ref: reqBlock.booking_ref, assigned_seats: seats });
