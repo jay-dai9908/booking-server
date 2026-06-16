@@ -65,70 +65,85 @@ export const createReservation = async (req, res) => {
     const booking_ref = crypto.randomUUID();
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Get the sessions and lock the rows (Pessimistic Lock)
-      const sessions = await tx.$queryRaw`
-        SELECT id, max_capacity 
+      // 1. Get the requested sessions
+      const requestedSessions = await tx.$queryRaw`
+        SELECT id, max_capacity, session_date
         FROM "Session" 
         WHERE id IN (${Prisma.join(session_ids)}) 
         FOR UPDATE
       `;
-      
-      if (sessions.length !== session_ids.length) {
+
+      if (requestedSessions.length !== session_ids.length) {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
       }
 
-      // We need to perform the seating algorithm for EACH selected session independently,
-      // because different sessions might have different reservations and empty seats.
-      const sessionUpdates = []; // Collect all updates to perform later
+      const sessionDate = requestedSessions[0].session_date;
+
+      // Lock ALL sessions for the same date to prevent race conditions across the day
+      const allSessionsOfDay = await tx.$queryRaw`
+        SELECT id
+        FROM "Session"
+        WHERE session_date = ${sessionDate}
+        FOR UPDATE
+      `;
+      const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
+
+      // Fetch all confirmed reservations for the day
+      const currentReservations = await tx.reservation.findMany({
+        where: { session_id: { in: allSessionIdsOfDay }, status: 'confirmed' }
+      });
+
+      // Prepare the new reservation block
+      const newReservationBlock = { 
+        booking_ref: 'NEW_RES', 
+        pax: parseInt(pax, 10), 
+        session_ids: session_ids 
+      };
+
+      // Run Continuous Block Allocation algorithm
+      const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true);
+
+      if (!allocResult.success) {
+        if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
+        if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
+        throw new Error('ALLOCATION_FAILED');
+      }
+
+      // Apply Reshuffle Updates to existing reservations
+      const sessionUpdates = []; 
       const newReservationsData = [];
+      
+      const mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
 
-      for (const session of sessions) {
-        // Fetch all confirmed reservations for this session to know current seating
-        const currentReservations = await tx.reservation.findMany({
-          where: { session_id: session.id, status: 'confirmed' }
-        });
-
-        // The new reservation we are trying to place
-        const newReservationMock = { id: 'NEW_RES', pax: parseInt(pax, 10), assigned_seats: null };
-
-        // Run the Smart Local Reshuffle algorithm
-        const allocResult = allocateSeats(currentReservations, newReservationMock, forceSplit);
-
-        if (!allocResult.success) {
-          if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
-          if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
-          throw new Error('ALLOCATION_FAILED');
-        }
-
-        // Store the newly calculated seats for the new reservation
-        const mySeats = allocResult.updates.find(u => u.id === 'NEW_RES').assigned_seats;
+      for (const sessionId of session_ids) {
         newReservationsData.push({
           booking_ref,
-          session_id: session.id,
+          session_id: sessionId,
           user_id: userId,
           pax: parseInt(pax, 10),
           status: 'confirmed',
           assigned_seats: mySeats,
           is_force_split: forceSplit === true
         });
-
-        // Collect updates for existing reservations that got reshuffled
-        allocResult.updates.forEach(update => {
-          if (update.id !== 'NEW_RES') {
-            sessionUpdates.push({ id: update.id, assigned_seats: update.assigned_seats });
-          }
-        });
       }
 
-      // 3. Apply Reshuffle Updates to existing reservations
-      for (const update of sessionUpdates) {
-        await tx.reservation.update({
-          where: { id: update.id },
-          data: { assigned_seats: update.assigned_seats }
-        });
+      for (const update of allocResult.updates) {
+        if (update.booking_ref !== 'NEW_RES') {
+          // Update all session records for this reshuffled booking_ref
+          sessionUpdates.push(
+            tx.reservation.updateMany({
+              where: { booking_ref: update.booking_ref },
+              data: { assigned_seats: update.assigned_seats }
+            })
+          );
+        }
       }
 
-      // 4. Create the new reservations with their assigned seats
+      if (sessionUpdates.length > 0) {
+        await Promise.all(sessionUpdates);
+      }
+
+      // Create the new reservations with their assigned seats
       const newReservations = await tx.reservation.createMany({
         data: newReservationsData
       });
@@ -444,66 +459,85 @@ export const adminCreateReservation = async (req, res) => {
         });
       }
 
-      // 1. Get the sessions and lock the rows (Pessimistic Lock)
-      const sessions = await tx.$queryRaw`
-        SELECT id, max_capacity 
+      // 1. Get the requested sessions
+      const requestedSessions = await tx.$queryRaw`
+        SELECT id, max_capacity, session_date
         FROM "Session" 
         WHERE id IN (${Prisma.join(session_ids)}) 
         FOR UPDATE
       `;
-      
-      if (sessions.length !== session_ids.length) {
+
+      if (requestedSessions.length !== session_ids.length) {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
       }
 
+      const sessionDate = requestedSessions[0].session_date;
+
+      // Lock ALL sessions for the same date to prevent race conditions across the day
+      const allSessionsOfDay = await tx.$queryRaw`
+        SELECT id
+        FROM "Session"
+        WHERE session_date = ${sessionDate}
+        FOR UPDATE
+      `;
+      const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
+
+      // Fetch all confirmed reservations for the day
+      const currentReservations = await tx.reservation.findMany({
+        where: { session_id: { in: allSessionIdsOfDay }, status: 'confirmed' }
+      });
+
+      // Prepare the new reservation block
+      const newReservationBlock = { 
+        booking_ref: 'NEW_RES', 
+        pax: parseInt(pax, 10), 
+        session_ids: session_ids 
+      };
+
+      // Run Continuous Block Allocation algorithm
+      const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true || forceSplit === 'true');
+
+      if (!allocResult.success) {
+        if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
+        if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
+        throw new Error('ALLOCATION_FAILED');
+      }
+
+      // Apply Reshuffle Updates to existing reservations
       const sessionUpdates = []; 
       const newReservationsData = [];
+      
+      const mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
 
-      // 2. Perform the seating algorithm for EACH selected session independently
-      for (const session of sessions) {
-        const currentReservations = await tx.reservation.findMany({
-          where: { session_id: session.id, status: 'confirmed' }
-        });
-
-        const newReservationMock = { id: 'NEW_RES', pax: parseInt(pax, 10), assigned_seats: null };
-
-        // For admin, we might pass true to forceSplit directly if we don't want the prompt,
-        // but let's support it similarly to user side.
-        const allocResult = allocateSeats(currentReservations, newReservationMock, forceSplit || false);
-
-        if (!allocResult.success) {
-          if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
-          if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
-          throw new Error('ALLOCATION_FAILED');
-        }
-
-        const mySeats = allocResult.updates.find(u => u.id === 'NEW_RES').assigned_seats;
+      for (const sessionId of session_ids) {
         newReservationsData.push({
           booking_ref,
-          session_id: session.id,
+          session_id: sessionId,
           user_id: targetUser.id,
           pax: parseInt(pax, 10),
           status: 'confirmed',
           assigned_seats: mySeats,
-          is_force_split: forceSplit === true
-        });
-
-        allocResult.updates.forEach(update => {
-          if (update.id !== 'NEW_RES') {
-            sessionUpdates.push({ id: update.id, assigned_seats: update.assigned_seats });
-          }
+          is_force_split: forceSplit === true || forceSplit === 'true'
         });
       }
 
-      // 3. Apply Reshuffle Updates to existing reservations
-      for (const update of sessionUpdates) {
-        await tx.reservation.update({
-          where: { id: update.id },
-          data: { assigned_seats: update.assigned_seats }
-        });
+      for (const update of allocResult.updates) {
+        if (update.booking_ref !== 'NEW_RES') {
+          // Update all session records for this reshuffled booking_ref
+          sessionUpdates.push(
+            tx.reservation.updateMany({
+              where: { booking_ref: update.booking_ref },
+              data: { assigned_seats: update.assigned_seats }
+            })
+          );
+        }
       }
 
-      // 4. Create the new reservations
+      if (sessionUpdates.length > 0) {
+        await Promise.all(sessionUpdates);
+      }
+
+      // Create the new reservations with their assigned seats
       const newReservations = await tx.reservation.createMany({
         data: newReservationsData
       });

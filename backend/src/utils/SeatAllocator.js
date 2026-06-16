@@ -78,76 +78,108 @@ const findConsecutiveSeats = (availableSeats, pax) => {
   return null;
 };
 
+// Helper: Group reservations by booking_ref
+const groupReservations = (reservations) => {
+  const blocksMap = new Map();
+  for (const r of reservations) {
+    if (!blocksMap.has(r.booking_ref)) {
+      blocksMap.set(r.booking_ref, {
+        booking_ref: r.booking_ref,
+        pax: r.pax,
+        session_ids: [],
+        assigned_seats: r.assigned_seats || [],
+        is_pinned: (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true)
+      });
+    }
+    // 確保不會重複加入同一個 session_id
+    if (!blocksMap.get(r.booking_ref).session_ids.includes(r.session_id)) {
+      blocksMap.get(r.booking_ref).session_ids.push(r.session_id);
+    }
+  }
+  return Array.from(blocksMap.values());
+};
+
+// Helper: 針對目標時段尋找可用的座位交集
+const getIntersectionAvailableSeats = (blocks, targetSessionIds, excludeRef = null) => {
+  const occupiedSeats = new Set();
+  
+  for (const block of blocks) {
+    if (excludeRef && block.booking_ref === excludeRef) continue;
+    
+    // 檢查這個 block 是否與目標時段有交集
+    const intersects = block.session_ids.some(sid => targetSessionIds.includes(sid));
+    if (intersects && block.assigned_seats) {
+      block.assigned_seats.forEach(seat => occupiedSeats.add(seat));
+    }
+  }
+
+  return SEATS.filter(s => !occupiedSeats.has(s));
+};
+
 /**
- * 核心演算法：排位與散客智能挪位 (Local Reshuffle)
- * @param {Array} currentReservations - 該時段目前所有的訂單 (包含新進訂單)
- * @param {Object} newReservation - 本次預約的訂單 (尚未有 assigned_seats)
+ * 核心演算法：多時段一致性排位與智能挪位 (Continuous Block Allocation & Local Reshuffle)
+ * @param {Array} currentReservations - 該日期所有的訂單 (尚未包含新進訂單)
+ * @param {Object} newReservationBlock - 本次預約的訂單區塊 { booking_ref: 'NEW_RES', pax, session_ids: [...] }
  * @param {boolean} forceSplit - 是否允許強行拆桌
  * @returns {Object} { success: boolean, updates: Array, error: string } 
  */
-export const allocateSeats = (currentReservations, newReservation, forceSplit = false) => {
-  // 1. 計算所有已被佔用的座位 (不含本次新訂單)
-  const occupiedSeats = new Set();
-  currentReservations.forEach(r => {
-    if (r.id !== newReservation.id && r.assigned_seats) {
-      r.assigned_seats.forEach(seat => occupiedSeats.add(seat));
-    }
-  });
-
-  const availableSeats = SEATS.filter(s => !occupiedSeats.has(s));
+export const allocateSeats = (currentReservations, newReservationBlock, forceSplit = false) => {
+  const blocks = groupReservations(currentReservations);
+  
+  // 1. 計算新訂單全時段可用空位交集
+  const initialAvailable = getIntersectionAvailableSeats(blocks, newReservationBlock.session_ids);
 
   // 階段一：嘗試常規劃位 (FCFS)
-  let assigned = findConsecutiveSeats(availableSeats, newReservation.pax);
+  let assigned = findConsecutiveSeats(initialAvailable, newReservationBlock.pax);
   if (assigned) {
     return {
       success: true,
-      updates: [{ id: newReservation.id, assigned_seats: assigned }]
+      updates: [{ booking_ref: newReservationBlock.booking_ref, assigned_seats: assigned }]
     };
   }
 
-  // 階段二：觸發檢查 (Trigger Check)
-  if (availableSeats.length < newReservation.pax) {
+  // 檢查絕對容量防呆：如果可用空位數量連硬拆桌都不夠，直接擋下
+  if (initialAvailable.length < newReservationBlock.pax) {
     return { success: false, error: 'INSUFFICIENT_SEATS' };
   }
 
-  // 階段三：散客智能挪位 (Virtual Reshuffle)
-  const updates = []; // 紀錄哪些訂單的座位被改變了
-  let virtualAvailable = [...SEATS];
+  // 階段二：散客智能挪位 (Virtual Reshuffle)
+  const updates = [];
   
-  // 3.1 釘死 (Pin) 特定訂單：已報到/未到 或 pax >= 3 的大組客 或 手動鎖定的座位
-  const pinnedReservations = currentReservations.filter(r => 
-    r.id !== newReservation.id && 
-    (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true)
-  );
-
-  pinnedReservations.forEach(r => {
-    r.assigned_seats.forEach(s => {
-      const index = virtualAvailable.indexOf(s);
-      if (index > -1) virtualAvailable.splice(index, 1); // 標記為已使用
-    });
+  const unpinnedBlocks = blocks.filter(b => !b.is_pinned);
+  const pinnedBlocks = blocks.filter(b => b.is_pinned);
+  
+  const queueToAllocate = [newReservationBlock, ...unpinnedBlocks];
+  
+  // 動態貪婪洗牌：依照 人數(降冪) -> 時段長度(降冪) 排序
+  queueToAllocate.sort((a, b) => {
+    if (b.pax !== a.pax) return b.pax - a.pax;
+    return b.session_ids.length - a.session_ids.length;
   });
 
-  // 3.2 解鎖 (Unpin) 尚未報到的散客 (pax <= 2) 且 未被鎖定
-  const unpinnedReservations = currentReservations.filter(r => 
-    r.id !== newReservation.id && 
-    r.attendance === null && 
-    r.pax <= 2 &&
-    !r.is_seat_locked
-  );
-
-  // 準備虛擬分配佇列 (包含新訂單與被解鎖的訂單)
-  const queueToAllocate = [newReservation, ...unpinnedReservations];
-  
-  // 依照人數降冪排序 (Best Fit Decreasing)
-  queueToAllocate.sort((a, b) => b.pax - a.pax);
-
+  const virtualBlocks = [...pinnedBlocks]; 
   let reshuffleSuccess = true;
-  for (const r of queueToAllocate) {
-    const seats = findConsecutiveSeats(virtualAvailable, r.pax);
+
+  for (const reqBlock of queueToAllocate) {
+    // 在目前的虛擬排位表中尋找可用空位交集
+    const virtAvailable = getIntersectionAvailableSeats(virtualBlocks, reqBlock.session_ids);
+    const seats = findConsecutiveSeats(virtAvailable, reqBlock.pax);
+    
     if (seats) {
-      // 成功分配，從 virtualAvailable 中移除
-      virtualAvailable = virtualAvailable.filter(s => !seats.includes(s));
-      updates.push({ id: r.id, assigned_seats: seats });
+      virtualBlocks.push({
+        ...reqBlock,
+        assigned_seats: seats
+      });
+      
+      const originalBlock = blocks.find(b => b.booking_ref === reqBlock.booking_ref);
+      const originalSeats = originalBlock ? originalBlock.assigned_seats : [];
+      
+      // Zero-Diff Filter：只有座位真正改變時才加入 updates 回傳
+      const seatsChanged = seats.length !== originalSeats.length || !seats.every(s => originalSeats.includes(s));
+      
+      if (seatsChanged) {
+        updates.push({ booking_ref: reqBlock.booking_ref, assigned_seats: seats });
+      }
     } else {
       reshuffleSuccess = false;
       break;
@@ -158,21 +190,20 @@ export const allocateSeats = (currentReservations, newReservation, forceSplit = 
     return { success: true, updates };
   }
 
-  // 階段四：兩段式強行拆桌防呆
+  // 階段三：兩段式強行拆桌防呆
   if (!forceSplit) {
-    return { success: false, error: 'SPLIT_REQUIRED' }; // 回傳 409，需前端確認
+    return { success: false, error: 'SPLIT_REQUIRED' };
   }
 
-  // 強制拆桌：使用智能分塊演算法 (Chunking) 節省後續手動排位時間
-  let remainingPax = newReservation.pax;
-  let tempAvailable = [...availableSeats];
+  // 強制拆桌：回到最初的 availableSeats 進行拆桌
+  let remainingPax = newReservationBlock.pax;
+  let tempAvailable = [...initialAvailable];
   const forcedAssigned = [];
 
   while (remainingPax > 0) {
     let chunk = remainingPax >= 4 ? 4 : remainingPax;
     let seats = null;
 
-    // 嘗試尋找連續座位，若失敗則降級 chunk size
     while (chunk > 0) {
       seats = findConsecutiveSeats(tempAvailable, chunk);
       if (seats) break;
@@ -180,7 +211,6 @@ export const allocateSeats = (currentReservations, newReservation, forceSplit = 
     }
 
     if (!seats) {
-      // 若極端情況無法找到任何組合，則直接抓取剩下的空位
       const fallbackSeat = tempAvailable.shift();
       forcedAssigned.push(fallbackSeat);
       remainingPax -= 1;
@@ -193,6 +223,6 @@ export const allocateSeats = (currentReservations, newReservation, forceSplit = 
 
   return {
     success: true,
-    updates: [{ id: newReservation.id, assigned_seats: forcedAssigned }]
+    updates: [{ booking_ref: newReservationBlock.booking_ref, assigned_seats: forcedAssigned }]
   };
 };
