@@ -106,6 +106,11 @@ async function main() {
           inconsistent = true;
         }
 
+        // 3. CRITICAL: If the block is sitting in the WAIT area, it MUST be unpinned so it has a chance to get a real seat!
+        if (baseSeats.some(s => typeof s === 'string' && s.startsWith('WAIT-'))) {
+          inconsistent = true;
+        }
+
         if (inconsistent) block.is_pinned = false;
       }
 
