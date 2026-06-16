@@ -109,7 +109,29 @@ async function main() {
         if (inconsistent) block.is_pinned = false;
       }
 
+      // 3. SUPER CRITICAL: Double Booking Detection
+      // Check if any pinned blocks collide with each other in any session
       const blocks = Array.from(blocksMap.values());
+      const sessionSeatMap = new Map(); // "session_id_seatId" -> booking_ref
+      for (const block of blocks) {
+        if (!block.is_pinned) continue;
+        const validSeats = (block.assigned_seats || []).filter(s => s !== null && s !== undefined);
+        for (const sid of block.session_ids) {
+          for (const seat of validSeats) {
+            const key = `${sid}_${seat}`;
+            if (sessionSeatMap.has(key)) {
+              // COLLISION DETECTED! Unpin BOTH blocks!
+              const otherRef = sessionSeatMap.get(key);
+              const otherBlock = blocks.find(b => b.booking_ref === otherRef);
+              if (otherBlock) otherBlock.is_pinned = false;
+              block.is_pinned = false;
+            } else {
+              sessionSeatMap.set(key, block.booking_ref);
+            }
+          }
+        }
+      }
+
       const updates = [];
       const unpinnedBlocks = blocks.filter(b => !b.is_pinned);
       const pinnedBlocks = blocks.filter(b => b.is_pinned);
