@@ -68,6 +68,21 @@ function Home({ userRole }) {
     window.location.href = lineLoginUrl;
   };
 
+  const isHandlingCallback = new URLSearchParams(location.search).has('code');
+  const showLoading = isHandlingCallback || isProcessing.current;
+
+  if (showLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#06C755] mx-auto mb-4"></div>
+          <h2 className="text-xl font-bold text-gray-800 mb-2">正在處理登入資訊...</h2>
+          <p className="text-gray-500 text-sm">請稍候，即將為您跳轉</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
       <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center">
