@@ -71,7 +71,7 @@ export default function CustomerHistoryModal({ onClose }) {
                           </span>
                         </div>
                         <p className="text-sm text-gray-500">
-                          {rFormatted.pax} 人 · 預約編號 {rFormatted.booking_ref}
+                          {rFormatted.pax} 人
                         </p>
                       </div>
                       <div className="flex items-center justify-between md:justify-end gap-4 w-full md:w-auto">
