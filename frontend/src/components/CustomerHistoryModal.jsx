@@ -2,25 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import api from '../api/axios';
 import { format } from 'date-fns';
-import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
+import CustomerReservationDetailsModal, { getReservationStatusUI } from './CustomerReservationDetailsModal';
 
 export default function CustomerHistoryModal({ onClose }) {
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedReservation, setSelectedReservation] = useState(null);
 
+  const fetchReservations = async () => {
+    try {
+      const res = await api.get('/reservations/my');
+      setReservations(Object.values(res.data));
+    } catch (err) {
+      console.error('Failed to fetch reservations', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchReservations = async () => {
-      try {
-        const res = await api.get('/reservations/my');
-        // The API returns an object with booking_ref as keys. We need an array.
-        setReservations(Object.values(res.data));
-      } catch (err) {
-        console.error('Failed to fetch reservations', err);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchReservations();
   }, []);
 
@@ -91,10 +91,10 @@ export default function CustomerHistoryModal({ onClose }) {
       </div>
 
       {selectedReservation && (
-        <ReservationDetailsModal 
+        <CustomerReservationDetailsModal 
           reservation={selectedReservation} 
           onClose={() => setSelectedReservation(null)} 
-          readOnly={true}
+          onUpdate={fetchReservations}
         />
       )}
     </>
