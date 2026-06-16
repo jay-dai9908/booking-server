@@ -107,6 +107,23 @@ const groupReservations = (reservations) => {
     // 紀錄每個 session 原本的座位，用來比對是否真正發生改變或是本身資料有跨時段不一致的狀況
     block.original_sessions.push({ session_id: r.session_id, assigned_seats: r.assigned_seats || [] });
   }
+
+  // 安全檢查：如果這個 block 在不同時段的座位不一致，代表它是舊系統留下的髒資料 (或是被手動錯誤修改)
+  // 這種情況下，我們必須強制將它「解鎖 (Unpin)」，讓演算法重新為它尋找一組全程一致的座位！
+  for (const block of blocksMap.values()) {
+    let inconsistent = false;
+    const baseSeats = block.assigned_seats;
+    for (const os of block.original_sessions) {
+      if (baseSeats.length !== os.assigned_seats.length || !baseSeats.every(s => os.assigned_seats.includes(s))) {
+        inconsistent = true;
+        break;
+      }
+    }
+    if (inconsistent) {
+      block.is_pinned = false; // 強制拔除釘死狀態，丟入洗牌佇列
+    }
+  }
+
   return Array.from(blocksMap.values());
 };
 
