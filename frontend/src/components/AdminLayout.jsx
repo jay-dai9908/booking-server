@@ -11,7 +11,7 @@ export default function AdminLayout() {
   const handleLogout = async () => {
     try {
       await api.post('/auth/logout');
-      navigate('/admin');
+      window.location.href = '/admin/login';
     } catch (err) {
       console.error(err);
     }
