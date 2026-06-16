@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths, isBefore, startOfDay } from 'date-fns';
 import api from '../../api/axios';
+import CustomerHistoryModal from '../../components/CustomerHistoryModal';
 
 function Booking() {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -10,6 +11,7 @@ function Booking() {
   const [loading, setLoading] = useState(false);
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [splitBookingData, setSplitBookingData] = useState(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
 
   // Generate calendar dates for the current month view
@@ -128,12 +130,20 @@ function Booking() {
       <header className="bg-white shadow-sm px-4 py-4 mb-6">
         <div className="max-w-3xl mx-auto flex justify-between items-center">
           <h1 className="text-xl font-bold text-gray-800">藝術家的貓 拼豆時段預約系統</h1>
-          <button 
-            onClick={() => { api.post('/auth/logout').then(() => window.location.href = '/') }}
-            className="text-sm text-gray-500 hover:text-gray-800"
-          >
-            登出
-          </button>
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setShowHistoryModal(true)}
+              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              預約紀錄
+            </button>
+            <button 
+              onClick={() => { api.post('/auth/logout').then(() => window.location.href = '/') }}
+              className="text-sm text-gray-500 hover:text-gray-800"
+            >
+              登出
+            </button>
+          </div>
         </div>
       </header>
 
@@ -292,7 +302,7 @@ function Booking() {
         </div>
       )}
 
-      {/* Force Split Confirmation Modal */}
+      {/* Split/Waitlist Confirmation Modal */}
       {showSplitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
@@ -330,6 +340,11 @@ function Booking() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Customer History Modal */}
+      {showHistoryModal && (
+        <CustomerHistoryModal onClose={() => setShowHistoryModal(false)} />
       )}
 
       <style dangerouslySetInnerHTML={{__html: `
