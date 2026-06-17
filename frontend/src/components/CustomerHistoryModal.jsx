@@ -72,9 +72,16 @@ export default function CustomerHistoryModal({ onClose }) {
                               : `${rFormatted.start_time} - ${rFormatted.end_time}`}
                           </span>
                         </div>
-                        <p className="text-sm text-gray-500">
-                          {rFormatted.pax} 人
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-gray-500">
+                            {rFormatted.pax} 人
+                          </p>
+                          {rFormatted.is_unlimited && (
+                            <span className="inline-flex items-center gap-1 text-xs font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
+                              ✨ 不限時
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center justify-between md:justify-end gap-4 w-full md:w-auto">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>

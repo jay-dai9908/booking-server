@@ -132,7 +132,14 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">人數</h3>
-                <p className="text-lg font-bold text-gray-900">{reservation.pax} 人</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-lg font-bold text-gray-900">{reservation.pax} 人</p>
+                  {reservation.is_unlimited && (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
+                      ✨ 不限時
+                    </span>
+                  )}
+                </div>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">當前狀態</h3>

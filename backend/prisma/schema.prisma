@@ -43,6 +43,7 @@ model Reservation {
   assigned_seats String[] // e.g. ["A1-1", "A1-2"]
   is_seat_locked Boolean  @default(false)
   is_force_split Boolean  @default(false)
+  is_unlimited   Boolean  @default(false)
   
   session        Session  @relation(fields: [session_id], references: [id])
   user           User     @relation(fields: [user_id], references: [id])

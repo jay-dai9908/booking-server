@@ -21,7 +21,8 @@ const groupReservations = (reservations) => {
         sessions: [],
         assigned_seats: r.assigned_seats || [],
         is_seat_locked: r.is_seat_locked || false,
-        is_force_split: r.is_force_split || false
+        is_force_split: r.is_force_split || false,
+        is_unlimited: r.is_unlimited || false
       };
     }
     groups[ref].sessions.push(r.session);
@@ -143,7 +144,8 @@ export const createReservation = async (req, res) => {
           pax: parseInt(pax, 10),
           status: 'confirmed',
           assigned_seats: mySeats,
-          is_force_split: forceSplit === true
+          is_force_split: forceSplit === true,
+          is_unlimited: req.body.isUnlimited === true
         });
       }
 

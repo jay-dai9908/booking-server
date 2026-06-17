@@ -80,11 +80,24 @@ function Booking() {
     const sortedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
     const timeRangeStr = `${sortedSessions[0].start_time} - ${sortedSessions[sortedSessions.length - 1].end_time}`;
     
+    const availableSessions = sessions.filter(s => s.remaining_capacity > 0);
+    const isUnlimited = selectedSessions.length === availableSessions.length && availableSessions.length > 0;
+    
+    if (isUnlimited) {
+      const hasFullSessions = sessions.some(s => s.remaining_capacity === 0);
+      if (hasFullSessions) {
+        if (!window.confirm('當天部分時段已滿，是否確定預約？')) {
+          return;
+        }
+      }
+    }
+    
     if (window.confirm(`確定要預約 ${format(selectedDate, 'yyyy-MM-dd')} \n時段：${timeRangeStr} \n人數：${pax} 人嗎？`)) {
       try {
         await api.post('/reservations', {
           session_ids: sortedSessions.map(s => s.id),
-          pax: parseInt(pax)
+          pax: parseInt(pax),
+          isUnlimited
         });
         alert('預約成功！');
         fetchSessions(selectedDate); // Refresh capacities
@@ -93,7 +106,8 @@ function Booking() {
         if (err.response?.status === 409 && err.response?.data?.error?.includes('拆散')) {
           setSplitBookingData({
             session_ids: sortedSessions.map(s => s.id),
-            pax: parseInt(pax)
+            pax: parseInt(pax),
+            isUnlimited
           });
           setShowSplitModal(true);
         } else {
