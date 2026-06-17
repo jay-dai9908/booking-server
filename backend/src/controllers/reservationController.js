@@ -69,7 +69,8 @@ const groupReservations = (reservations) => {
       session_count: group.sessions.length,
       assigned_seats: group.assigned_seats,
       is_seat_locked: group.is_seat_locked,
-      is_force_split: group.is_force_split
+      is_force_split: group.is_force_split,
+      is_unlimited: group.is_unlimited
     };
   });
 };
