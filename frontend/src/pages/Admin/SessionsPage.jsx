@@ -13,10 +13,35 @@ export default function SessionsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [allowUnlimited, setAllowUnlimited] = useState(true);
 
   useEffect(() => {
     fetchSessions(listDate);
+    fetchDailySetting(listDate);
   }, [listDate]);
+
+  const fetchDailySetting = async (date) => {
+    try {
+      const res = await api.get(`/daily-settings?date=${date}`);
+      setAllowUnlimited(res.data.allow_unlimited);
+    } catch (err) {
+      console.error('Error fetching daily setting:', err);
+    }
+  };
+
+  const handleToggleUnlimited = async () => {
+    const newValue = !allowUnlimited;
+    // Optimistic update
+    setAllowUnlimited(newValue);
+    try {
+      await api.put('/daily-settings', { date: listDate, allow_unlimited: newValue });
+    } catch (err) {
+      console.error('Error updating daily setting:', err);
+      // Revert on failure
+      setAllowUnlimited(!newValue);
+      alert('更新設定失敗');
+    }
+  };
 
   const fetchSessions = async (date = listDate) => {
     setIsLoading(true);
@@ -170,14 +195,25 @@ export default function SessionsPage() {
 
         {/* Session List */}
         <div className="xl:col-span-2 space-y-4">
-          <div className="flex items-center justify-between bg-white p-4 rounded-2xl shadow-sm border border-gray-200">
+          <div className="flex flex-col md:flex-row md:items-center justify-between bg-white p-4 rounded-2xl shadow-sm border border-gray-200 gap-4">
             <h2 className="font-bold text-gray-900">時段列表</h2>
-            <input
-              type="date"
-              value={listDate}
-              onChange={(e) => setListDate(e.target.value)}
-              className="px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none text-sm font-medium text-gray-700"
-            />
+            <div className="flex items-center gap-4">
+              <label className="flex items-center cursor-pointer">
+                <div className="relative">
+                  <input type="checkbox" className="sr-only" checked={allowUnlimited} onChange={handleToggleUnlimited} disabled={isLoading} />
+                  <div className={`block w-10 h-6 rounded-full transition-colors ${allowUnlimited ? 'bg-purple-500' : 'bg-gray-300'}`}></div>
+                  <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${allowUnlimited ? 'transform translate-x-4' : ''}`}></div>
+                </div>
+                <div className="ml-3 text-sm font-medium text-gray-700">開放不限時預約</div>
+              </label>
+              <div className="h-6 w-px bg-gray-200 hidden md:block"></div>
+              <input
+                type="date"
+                value={listDate}
+                onChange={(e) => setListDate(e.target.value)}
+                className="px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none text-sm font-medium text-gray-700"
+              />
+            </div>
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">

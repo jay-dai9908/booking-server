@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.js';
 import sessionRoutes from './routes/sessions.js';
 import reservationRoutes from './routes/reservations.js';
 import userRoutes from './routes/users.js';
+import dailySettingsRoutes from './routes/dailySettings.js';
 import { startCronJobs } from './cronJobs.js';
 
 dotenv.config();
@@ -32,6 +33,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/daily-settings', dailySettingsRoutes);
 
 // Basic error handler
 app.use((err, req, res, next) => {

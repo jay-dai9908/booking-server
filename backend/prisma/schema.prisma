@@ -48,3 +48,9 @@ model Reservation {
   session        Session  @relation(fields: [session_id], references: [id])
   user           User     @relation(fields: [user_id], references: [id])
 }
+
+model DailySetting {
+  id              Int      @id @default(autoincrement())
+  date            DateTime @unique @db.Date
+  allow_unlimited Boolean  @default(true)
+}

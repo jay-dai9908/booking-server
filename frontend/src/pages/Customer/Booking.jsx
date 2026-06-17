@@ -27,10 +27,23 @@ function Booking() {
     day = addDays(day, 1);
   }
 
+  const [allowUnlimited, setAllowUnlimited] = useState(true);
+
   useEffect(() => {
     fetchSessions(selectedDate);
+    fetchDailySetting(selectedDate);
     setSelectedSessions([]);
   }, [selectedDate]);
+
+  const fetchDailySetting = async (date) => {
+    try {
+      const formattedDate = format(date, 'yyyy-MM-dd');
+      const res = await api.get(`/daily-settings?date=${formattedDate}`);
+      setAllowUnlimited(res.data.allow_unlimited);
+    } catch (err) {
+      console.error('Error fetching daily setting:', err);
+    }
+  };
 
   const fetchSessions = async (date) => {
     setLoading(true);
@@ -209,7 +222,7 @@ function Booking() {
           <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-bold text-gray-800">2. 選擇時段 (可複選)</h2>
-              {sessions.length > 0 && (
+              {sessions.length > 0 && allowUnlimited && (
                 <button
                   onClick={() => {
                     const availableSessions = sessions.filter(s => s.remaining_capacity > 0);
