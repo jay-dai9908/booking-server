@@ -62,12 +62,14 @@ export default function CustomerHistoryModal({ onClose }) {
                       className="group flex flex-col md:flex-row md:items-center justify-between p-4 rounded-xl border border-gray-100 hover:border-indigo-200 hover:shadow-md bg-white transition-all cursor-pointer gap-4"
                     >
                       <div>
-                        <div className="flex items-center gap-3 mb-1">
+                        <div className="flex flex-wrap items-center gap-3 mb-1">
                           <span className="font-bold text-gray-900">
                             {format(new Date(rFormatted.session_date), 'yyyy/MM/dd')}
                           </span>
                           <span className="text-sm font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md tracking-wider">
-                            {rFormatted.start_time} - {rFormatted.end_time}
+                            {rFormatted.time_blocks 
+                              ? rFormatted.time_blocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ')
+                              : `${rFormatted.start_time} - ${rFormatted.end_time}`}
                           </span>
                         </div>
                         <p className="text-sm text-gray-500">

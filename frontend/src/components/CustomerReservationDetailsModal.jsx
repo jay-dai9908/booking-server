@@ -71,13 +71,18 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">預約時間</h3>
-                <p className="text-lg font-bold text-gray-900">
+                <div className="text-lg font-bold text-gray-900">
                   {format(new Date(reservation.session_date || reservation.session?.session_date), 'yyyy/MM/dd')}
-                  <br />
-                  <span className="text-gray-500 text-sm font-normal">
-                    {reservation.start_time || reservation.session?.start_time} - {reservation.end_time || reservation.session?.end_time}
-                  </span>
-                </p>
+                  <div className="text-gray-500 text-sm font-normal mt-1 space-y-1">
+                    {reservation.time_blocks ? (
+                      reservation.time_blocks.map((b, i) => (
+                        <div key={i}>{b.start_time} - {b.end_time}</div>
+                      ))
+                    ) : (
+                      <div>{reservation.start_time || reservation.session?.start_time} - {reservation.end_time || reservation.session?.end_time}</div>
+                    )}
+                  </div>
+                </div>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">人數</h3>

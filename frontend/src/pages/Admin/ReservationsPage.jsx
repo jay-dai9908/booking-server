@@ -226,7 +226,12 @@ export default function ReservationsPage() {
                           <span className={`font-semibold ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
                             {format(new Date(r.session_date), 'yyyy/MM/dd')}
                           </span>
-                          <span className="text-sm text-gray-500">{r.start_time} - {r.end_time} ({r.session_count}小時)</span>
+                          <span className="text-sm text-gray-500">
+                            {r.time_blocks 
+                              ? r.time_blocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ')
+                              : `${r.start_time} - ${r.end_time}`} 
+                            ({r.session_count}小時)
+                          </span>
                         </div>
                       </td>
                       <td className="px-6 py-4">

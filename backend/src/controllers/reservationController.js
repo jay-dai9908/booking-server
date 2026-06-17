@@ -34,6 +34,25 @@ const groupReservations = (reservations) => {
     const start_time = group.sessions[0].start_time;
     const end_time = group.sessions[group.sessions.length - 1].end_time;
     
+    const time_blocks = [];
+    let current_block = null;
+    
+    for (const session of group.sessions) {
+      if (!current_block) {
+        current_block = { start_time: session.start_time, end_time: session.end_time };
+      } else {
+        if (session.start_time === current_block.end_time) {
+          // contiguous
+          current_block.end_time = session.end_time;
+        } else {
+          // gap
+          time_blocks.push(current_block);
+          current_block = { start_time: session.start_time, end_time: session.end_time };
+        }
+      }
+    }
+    if (current_block) time_blocks.push(current_block);
+    
     return {
       booking_ref: group.booking_ref,
       user_id: group.user_id,
@@ -45,6 +64,7 @@ const groupReservations = (reservations) => {
       session_date: group.session_date,
       start_time,
       end_time,
+      time_blocks,
       session_count: group.sessions.length,
       assigned_seats: group.assigned_seats,
       is_seat_locked: group.is_seat_locked,
