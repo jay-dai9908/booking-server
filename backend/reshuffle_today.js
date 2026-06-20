@@ -1,5 +1,5 @@
 import prisma from './src/prismaClient.js';
-import { allocateSeats } from './src/utils/seatAllocator.js';
+import { allocateSeats } from './src/utils/SeatAllocator.js';
 
 // We will temporarily redefine groupReservations to force everyone to be unpinned
 function forceGroupReservations(reservations) {
