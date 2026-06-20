@@ -733,18 +733,6 @@ export const adminCreateReservation = async (req, res) => {
         });
       }
 
-      for (const update of allocResult.updates) {
-        if (update.booking_ref !== 'NEW_RES') {
-          // Update all session records for this reshuffled booking_ref
-          sessionUpdates.push(
-            tx.reservation.updateMany({
-              where: { booking_ref: update.booking_ref },
-              data: { assigned_seats: update.assigned_seats }
-            })
-          );
-        }
-      }
-
       if (sessionUpdates.length > 0) {
         await Promise.all(sessionUpdates);
       }
