@@ -457,7 +457,19 @@ const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRefs) => {
     } else {
       // Very edge case: completely full, couldn't reshuffle. Put them in wait area
       const sessionUpdates = [];
-      let waitCounter = 1;
+      
+      let maxWait = 0;
+      for (const res of currentReservations) {
+        if (res.assigned_seats) {
+          for (const seat of res.assigned_seats) {
+            if (seat.startsWith('WAIT-')) {
+              const num = parseInt(seat.replace('WAIT-', ''), 10);
+              if (!isNaN(num) && num > maxWait) maxWait = num;
+            }
+          }
+        }
+      }
+      let waitCounter = maxWait + 1;
       for (const ref of collidingRefs) {
         const r = currentReservations.find(res => res.booking_ref === ref);
         const waitSeats = [];
@@ -763,6 +775,161 @@ export const adminCreateReservation = async (req, res) => {
       return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
     }
     res.status(500).json({ error: 'Failed to create manual reservation.' });
+  }
+};
+
+export const extendReservation = async (req, res) => {
+  const { booking_ref } = req.params;
+  const { session_ids, extendMode, forceSplit } = req.body;
+  
+  if (!Array.isArray(session_ids) || session_ids.length === 0) {
+    return res.status(400).json({ error: 'Valid session_ids array is required.' });
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // Find the existing reservation details
+      const existingReservations = await tx.reservation.findMany({
+        where: { booking_ref, status: 'confirmed' },
+        orderBy: { session_id: 'desc' }
+      });
+
+      if (existingReservations.length === 0) {
+        throw new Error('RESERVATION_NOT_FOUND');
+      }
+
+      const baseReservation = existingReservations[0];
+      const { user_id, pax, assigned_seats, is_walk_in } = baseReservation;
+
+      // Ensure sessions exist
+      const sessions = await tx.session.findMany({
+        where: { id: { in: session_ids } },
+        include: { reservations: { where: { status: 'confirmed' }, select: { pax: true, assigned_seats: true } } }
+      });
+
+      if (sessions.length !== session_ids.length) {
+        throw new Error('SOME_SESSIONS_NOT_FOUND');
+      }
+
+      let mySeats = [];
+      const sessionUpdates = [];
+
+      // Fetch current reservations for all affected sessions for allocator
+      const allCurrentReservations = await tx.reservation.findMany({
+        where: { session_id: { in: session_ids }, status: 'confirmed' }
+      });
+
+      if (extendMode === 'force_wait') {
+        let maxWait = 0;
+        for (const r of allCurrentReservations) {
+          if (r.assigned_seats) {
+            for (const seat of r.assigned_seats) {
+              if (seat.startsWith('WAIT-')) {
+                const num = parseInt(seat.replace('WAIT-', ''), 10);
+                if (!isNaN(num) && num > maxWait) maxWait = num;
+              }
+            }
+          }
+        }
+        let waitCounter = maxWait + 1;
+        for (let i = 0; i < pax; i++) {
+          mySeats.push(`WAIT-${waitCounter++}`);
+        }
+      } else {
+        // Capacity check for non-wait modes
+        for (const session of sessions) {
+          const bookedPax = session.reservations.reduce((sum, res) => {
+            if (res.assigned_seats && res.assigned_seats.length > 0 && res.assigned_seats[0].startsWith('WAIT')) {
+              return sum;
+            }
+            return sum + res.pax;
+          }, 0);
+          if (session.max_capacity - bookedPax < pax) {
+            throw new Error('INSUFFICIENT_CAPACITY');
+          }
+        }
+
+        if (extendMode === 'keep_seat') {
+          mySeats = assigned_seats || [];
+        } else if (extendMode === 'system_allocate') {
+          const newBlock = { booking_ref: 'NEW_RES', pax, session_ids };
+          const allocResult = allocateSeats(allCurrentReservations, newBlock, forceSplit === true || forceSplit === 'true');
+          
+          if (!allocResult.success) {
+            if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
+            if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
+            throw new Error('ALLOCATION_FAILED');
+          }
+
+          mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
+
+          for (const update of allocResult.updates) {
+            if (update.booking_ref !== 'NEW_RES') {
+              sessionUpdates.push(
+                tx.reservation.updateMany({
+                  where: { booking_ref: update.booking_ref },
+                  data: { assigned_seats: update.assigned_seats }
+                })
+              );
+            }
+          }
+        }
+      }
+
+      const newReservationsData = [];
+      for (const sessionId of session_ids) {
+        newReservationsData.push({
+          booking_ref,
+          session_id: sessionId,
+          user_id,
+          pax,
+          status: 'confirmed',
+          assigned_seats: mySeats,
+          is_force_split: forceSplit === true || forceSplit === 'true',
+          is_walk_in
+        });
+      }
+
+      if (sessionUpdates.length > 0) {
+        await Promise.all(sessionUpdates);
+      }
+
+      // Create the new extended reservations
+      const newReservations = await tx.reservation.createMany({
+        data: newReservationsData
+      });
+
+      // If keep_seat, we must trigger reshuffle NOW to push colliding reservations
+      if (extendMode === 'keep_seat') {
+        // We do this outside the createMany but inside the tx, but handleCollisionsAndReshuffle uses its own queries/txs.
+        // Wait, handleCollisionsAndReshuffle uses `prisma` directly! We cannot run it inside `tx` if it uses `prisma`.
+        // So we just return success, and we'll run reshuffle AFTER the tx commits!
+      }
+
+      return { count: newReservations.count };
+    });
+
+    if (extendMode === 'keep_seat') {
+      await handleCollisionsAndReshuffle(session_ids, [booking_ref]);
+    }
+
+    res.status(201).json({ message: 'Reservation extended successfully', result });
+
+  } catch (error) {
+    console.error('Extend Reservation error:', error);
+    if (error.message === 'RESERVATION_NOT_FOUND') {
+      return res.status(404).json({ error: 'Original reservation not found.' });
+    }
+    if (error.message === 'SOME_SESSIONS_NOT_FOUND') {
+      return res.status(404).json({ error: 'One or more sessions not found.' });
+    }
+    if (error.message === 'INSUFFICIENT_CAPACITY') {
+      return res.status(400).json({ error: 'Not enough capacity remaining for one or more selected sessions.' });
+    }
+    if (error.message === 'SPLIT_REQUIRED') {
+      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
+    }
+    res.status(500).json({ error: 'Failed to extend reservation.' });
   }
 };
 

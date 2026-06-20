@@ -24,7 +24,7 @@ export const getSessions = async (req, res) => {
       include: {
         reservations: {
           where: { status: 'confirmed' },
-          select: { pax: true },
+          select: { pax: true, assigned_seats: true },
         },
       },
       orderBy: [
@@ -35,7 +35,13 @@ export const getSessions = async (req, res) => {
 
     // Calculate remaining capacity
     const formattedSessions = sessions.map(session => {
-      const bookedPax = session.reservations.reduce((sum, res) => sum + res.pax, 0);
+      const bookedPax = session.reservations.reduce((sum, res) => {
+        // Exclude reservations that are entirely in WAIT area
+        if (res.assigned_seats && res.assigned_seats.length > 0 && res.assigned_seats[0].startsWith('WAIT')) {
+          return sum;
+        }
+        return sum + res.pax;
+      }, 0);
       return {
         id: session.id,
         session_date: session.session_date,

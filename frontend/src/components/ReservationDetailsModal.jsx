@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { X, CheckCircle2, XCircle, Trash2 } from 'lucide-react';
 import api from '../api/axios';
+import ExtendTimeModal from './ExtendTimeModal';
 
 export const getReservationStatusUI = (r) => {
   if (r.status === 'cancelled') {
@@ -30,6 +31,8 @@ export const getReservationStatusUI = (r) => {
 
 export default function ReservationDetailsModal({ reservation, onClose, onUpdate, readOnly = false }) {
   const navigate = useNavigate();
+  const [showExtendModal, setShowExtendModal] = React.useState(false);
+
   if (!reservation) return null;
 
   const handleUpdateAttendance = async (attendance) => {
@@ -111,7 +114,17 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
             
             <div className="space-y-4">
               <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-1">預約時間</h3>
+                <div className="flex items-center gap-3 mb-1">
+                  <h3 className="text-sm font-medium text-gray-500">預約時間</h3>
+                  {!readOnly && reservation.status === 'confirmed' && (
+                    <button 
+                      onClick={() => setShowExtendModal(true)}
+                      className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-md hover:bg-indigo-100 transition-colors font-medium flex items-center gap-1"
+                    >
+                      <span className="text-[10px]">➕</span> 現場加時
+                    </button>
+                  )}
+                </div>
                 <div className="text-lg font-bold text-gray-900">
                   {format(new Date(reservation.session_date || reservation.session?.session_date), 'yyyy/MM/dd')}
                   <div className="text-gray-500 text-sm font-normal mt-1 space-y-1">
@@ -241,6 +254,15 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           )}
         </div>
       </div>
+      
+      <ExtendTimeModal 
+        isOpen={showExtendModal}
+        onClose={() => setShowExtendModal(false)}
+        reservation={reservation}
+        onSuccess={() => {
+          if (onUpdate) onUpdate();
+        }}
+      />
     </div>
   );
 }
