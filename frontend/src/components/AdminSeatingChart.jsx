@@ -147,20 +147,36 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
       let res;
 
       if (targetOccupant) {
-        // Swap with another occupied seat
-        const sourceNewSeats = selectedSeat.reservation.assigned_seats.map(s => 
-          s === selectedSeat.seat ? targetSwapSeat : s
-        );
-        const targetNewSeats = targetOccupant.assigned_seats.map(s => 
-          s === targetSwapSeat ? selectedSeat.seat : s
-        );
+        if (targetOccupant.booking_ref === selectedSeat.reservation.booking_ref) {
+          // Swap within the SAME group
+          let newSeats = [...selectedSeat.reservation.assigned_seats];
+          const idx1 = newSeats.indexOf(selectedSeat.seat);
+          const idx2 = newSeats.indexOf(targetSwapSeat);
+          if (idx1 !== -1 && idx2 !== -1) {
+            const temp = newSeats[idx1];
+            newSeats[idx1] = newSeats[idx2];
+            newSeats[idx2] = temp;
+          }
+          res = await api.put('/reservations/admin/move-seat', {
+            id: selectedSeat.reservation.id,
+            assigned_seats: newSeats
+          });
+        } else {
+          // Swap with another occupied seat (DIFFERENT group)
+          const sourceNewSeats = selectedSeat.reservation.assigned_seats.map(s => 
+            s === selectedSeat.seat ? targetSwapSeat : s
+          );
+          const targetNewSeats = targetOccupant.assigned_seats.map(s => 
+            s === targetSwapSeat ? selectedSeat.seat : s
+          );
 
-        res = await api.put('/reservations/admin/swap-seats', {
-          source_booking_ref: selectedSeat.reservation.booking_ref,
-          source_assigned_seats: sourceNewSeats,
-          target_booking_ref: targetOccupant.booking_ref,
-          target_assigned_seats: targetNewSeats
-        });
+          res = await api.put('/reservations/admin/swap-seats', {
+            source_booking_ref: selectedSeat.reservation.booking_ref,
+            source_assigned_seats: sourceNewSeats,
+            target_booking_ref: targetOccupant.booking_ref,
+            target_assigned_seats: targetNewSeats
+          });
+        }
       } else {
         // Move to empty seat
         const newSeats = selectedSeat.reservation.assigned_seats.map(s => 
