@@ -611,7 +611,7 @@ export const getSessionSeats = async (req, res) => {
 };
 
 export const adminCreateReservation = async (req, res) => {
-  const { session_ids, pax, name, phone, forceSplit } = req.body;
+  const { session_ids, pax, name, phone, forceSplit, isForceWait } = req.body;
   
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !pax || pax <= 0) {
     return res.status(400).json({ error: 'Valid session_ids array and pax are required.' });
@@ -676,20 +676,50 @@ export const adminCreateReservation = async (req, res) => {
         session_ids: session_ids 
       };
 
-      // Run Continuous Block Allocation algorithm
-      const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true || forceSplit === 'true');
+      // Run Allocation algorithm or Force Wait
+      let mySeats = [];
+      const sessionUpdates = [];
 
-      if (!allocResult.success) {
-        if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
-        if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
-        throw new Error('ALLOCATION_FAILED');
+      if (isForceWait === true || isForceWait === 'true') {
+        let waitCounter = 1;
+        const requestedSessionIdsSet = new Set(session_ids);
+        for (const r of currentReservations) {
+          if (requestedSessionIdsSet.has(r.session_id) && r.assigned_seats) {
+            for (const s of r.assigned_seats) {
+              if (s.startsWith('WAIT-')) {
+                const num = parseInt(s.split('-')[1]);
+                if (num >= waitCounter) waitCounter = num + 1;
+              }
+            }
+          }
+        }
+        for (let i = 0; i < parseInt(pax, 10); i++) {
+          mySeats.push(`WAIT-${waitCounter++}`);
+        }
+      } else {
+        const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true || forceSplit === 'true');
+
+        if (!allocResult.success) {
+          if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
+          if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
+          throw new Error('ALLOCATION_FAILED');
+        }
+
+        mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
+
+        for (const update of allocResult.updates) {
+          if (update.booking_ref !== 'NEW_RES') {
+            sessionUpdates.push(
+              tx.reservation.updateMany({
+                where: { booking_ref: update.booking_ref },
+                data: { assigned_seats: update.assigned_seats }
+              })
+            );
+          }
+        }
       }
 
-      // Apply Reshuffle Updates to existing reservations
-      const sessionUpdates = []; 
       const newReservationsData = [];
-      
-      const mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
 
       for (const sessionId of session_ids) {
         newReservationsData.push({

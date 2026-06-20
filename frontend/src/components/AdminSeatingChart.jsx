@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { RefreshCw, Search } from 'lucide-react';
 import api from '../api/axios';
 import DailyReservationsList from './DailyReservationsList';
+import ForceAddModal from './ForceAddModal';
 
 const SEATS = {
   A: ['A1-1', 'A1-2', 'A1-3', 'A1-4', 'A2-1', 'A2-2', 'A2-3', 'A2-4'],
@@ -20,6 +21,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
   const [selectedSeat, setSelectedSeat] = useState(null); // { seat: 'A1-1', reservation: {...} }
   const [hoveredReservationId, setHoveredReservationId] = useState(null);
   const [showSwapModal, setShowSwapModal] = useState(false);
+  const [showForceAddModal, setShowForceAddModal] = useState(false);
   const [targetSwapSeat, setTargetSwapSeat] = useState(null); // string e.g., 'B1-1'
   
   const pollingRef = useRef(null);
@@ -420,9 +422,17 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
 
             {/* Virtual Waiting Area (Overbooked / Extra) */}
             <div className="mt-4 pt-8 border-t-2 border-dashed border-gray-200">
-              <div className="text-lg font-bold text-gray-600 mb-4 flex items-center gap-2">
-                <div className="w-2 h-6 bg-gray-400 rounded-full"></div>
-                ➕ 虛擬等候 / 外加區 (可手動拖曳至此暫放)
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-lg font-bold text-gray-600 flex items-center gap-2">
+                  <div className="w-2 h-6 bg-gray-400 rounded-full"></div>
+                  ➕ 虛擬等候 / 外加區 <span className="text-sm font-normal text-gray-400">(可手動拖曳至此暫放)</span>
+                </div>
+                <button 
+                  onClick={() => setShowForceAddModal(true)}
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center gap-2"
+                >
+                  <span>➕ 現場加人</span>
+                </button>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 bg-gray-50 p-6 rounded-2xl border border-gray-100">
                 {getWaitSeats().map(renderSeat)}
