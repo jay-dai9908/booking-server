@@ -210,6 +210,9 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
     const isSelected = selectedSeat?.seat === seatId;
     const isHoveredGroup = hoveredReservationId && occupant?.id === hoveredReservationId;
     
+    const currentSession = sessions.find(s => s.id === selectedSessionId);
+    const isLastHour = isOccupied && currentSession && occupant.booking_end_time === currentSession.end_time;
+    
     let baseClass = "h-16 flex items-center justify-center rounded-xl cursor-pointer transition-all duration-200 border-2 ";
     
     if (isOccupied) {
@@ -255,7 +258,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
                 {occupant.user?.name}
               </div>
               {occupant.booking_end_time && (
-                <div className="text-[10px] opacity-80 -mt-0.5 font-medium">
+                <div className={`text-[10px] -mt-0.5 font-bold ${isLastHour ? 'text-red-500' : 'opacity-80'}`}>
                   ~{occupant.booking_end_time}
                 </div>
               )}
