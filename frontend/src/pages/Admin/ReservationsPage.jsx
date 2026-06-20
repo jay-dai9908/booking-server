@@ -256,6 +256,12 @@ export default function ReservationsPage() {
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
                           {statusUI.icon} {statusUI.text}
                         </span>
+                        {r.status === 'cancelled' && r.cancelled_at && (
+                          <div className="mt-1 text-[11px] text-gray-500 flex flex-col gap-0.5">
+                            <span>{format(new Date(r.cancelled_at), 'MM/dd HH:mm')}</span>
+                            <span>({r.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})</span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-right text-sm text-gray-400">
                         {format(new Date(r.created_at), 'MM/dd HH:mm')}

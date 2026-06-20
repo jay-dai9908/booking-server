@@ -334,7 +334,11 @@ export const cancelReservation = async (req, res) => {
     // Cancel all related rows
     const updated = await prisma.reservation.updateMany({
       where: { booking_ref },
-      data: { status: 'cancelled' }
+      data: { 
+        status: 'cancelled',
+        cancelled_at: new Date(),
+        cancelled_by: isAdmin ? 'admin' : 'customer'
+      }
     });
 
     res.json({ message: 'Reservation cancelled successfully', count: updated.count });

@@ -109,6 +109,12 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
                   {statusUI.icon} {statusUI.text}
                 </span>
+                {reservation.status === 'cancelled' && reservation.cancelled_at && (
+                  <span className="ml-3 text-sm text-gray-500">
+                    取消於 {format(new Date(reservation.cancelled_at), 'MM/dd HH:mm')} 
+                    ({reservation.cancelled_by === 'admin' ? '由店家取消' : '自行取消'})
+                  </span>
+                )}
                 {reservation.is_force_split && (
                   <span className="ml-2 inline-flex items-center px-2 py-1 bg-amber-50 text-amber-600 border border-amber-200 rounded-md text-xs font-bold tracking-wide">
                     同意拆桌
