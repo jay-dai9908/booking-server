@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
 import { RefreshCw, Search } from 'lucide-react';
 import api from '../api/axios';
+import DailyReservationsList from './DailyReservationsList';
 
 const SEATS = {
   A: ['A1-1', 'A1-2', 'A1-3', 'A1-4', 'A2-1', 'A2-2', 'A2-3', 'A2-4'],
@@ -298,7 +299,8 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
 
       {/* Main Seating Area */}
       {selectedSessionId ? (
-        <div className="bg-white p-8 rounded-2xl shadow-sm border">
+        <div className="space-y-8">
+          <div className="bg-white p-8 rounded-2xl shadow-sm border">
           <div className="max-w-4xl mx-auto flex flex-col gap-12">
             
             {/* Action Bar (shows when a seat is selected) */}
@@ -428,6 +430,11 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
             </div>
 
           </div>
+        </div>
+        
+        {/* Daily Reservations List Section */}
+        <DailyReservationsList date={selectedDate} onOpenDetails={onOpenDetails} />
+        
         </div>
       ) : (
         <div className="bg-white p-16 rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400">

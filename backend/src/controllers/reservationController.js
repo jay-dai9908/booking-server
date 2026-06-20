@@ -201,10 +201,23 @@ export const getAdminReservations = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const search = (req.query.search || '').trim();
     const month = req.query.month; // format: 'YYYY-MM'
+    const date = req.query.date;   // format: 'YYYY-MM-DD'
+    const sort = req.query.sort;   // format: 'start_time_asc'
 
     let whereClause = {};
 
-    if (month && !search) {
+    if (date && !search) {
+      const startDate = new Date(`${date}T00:00:00.000Z`);
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 1);
+      
+      whereClause.session = {
+        session_date: {
+          gte: startDate,
+          lt: endDate
+        }
+      };
+    } else if (month && !search) {
       const startDate = new Date(`${month}-01T00:00:00.000Z`);
       const endDate = new Date(startDate);
       endDate.setMonth(endDate.getMonth() + 1);
@@ -243,9 +256,14 @@ export const getAdminReservations = async (req, res) => {
     let grouped = groupReservations(reservations);
     
     // Sort grouped reservations by session_date descending, then start_time descending
+    // Unless sort=start_time_asc is provided, then sort by start_time ascending
     grouped.sort((a, b) => {
       if (a.session_date > b.session_date) return -1;
       if (a.session_date < b.session_date) return 1;
+      
+      if (sort === 'start_time_asc') {
+        return a.start_time.localeCompare(b.start_time);
+      }
       return b.start_time.localeCompare(a.start_time);
     });
 
