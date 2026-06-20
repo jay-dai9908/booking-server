@@ -431,6 +431,38 @@ export const moveSeat = async (req, res) => {
   }
 };
 
+export const swapSeats = async (req, res) => {
+  const { source_booking_ref, source_assigned_seats, target_booking_ref, target_assigned_seats } = req.body;
+
+  if (!source_booking_ref || !target_booking_ref || !Array.isArray(source_assigned_seats) || !Array.isArray(target_assigned_seats)) {
+    return res.status(400).json({ error: 'Invalid parameters for swapping seats' });
+  }
+
+  try {
+    await prisma.$transaction([
+      prisma.reservation.updateMany({
+        where: { booking_ref: source_booking_ref },
+        data: {
+          assigned_seats: source_assigned_seats,
+          is_seat_locked: true
+        }
+      }),
+      prisma.reservation.updateMany({
+        where: { booking_ref: target_booking_ref },
+        data: {
+          assigned_seats: target_assigned_seats,
+          is_seat_locked: true
+        }
+      })
+    ]);
+
+    res.json({ message: 'Seats swapped successfully' });
+  } catch (error) {
+    console.error('Error swapping seats:', error);
+    res.status(500).json({ error: 'Failed to swap seats' });
+  }
+};
+
 export const getSessionSeats = async (req, res) => {
   const { id } = req.params;
 

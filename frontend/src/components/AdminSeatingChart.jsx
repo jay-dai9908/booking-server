@@ -101,24 +101,37 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
     const occupant = getOccupant(seatId);
 
     if (selectedSeat) {
-      // If we already selected a source seat
-      if (occupant) {
-        // Clicked another occupied seat -> change selection or deselect
-        if (selectedSeat.seat === seatId) {
-          setSelectedSeat(null); // Deselect
-        } else {
-          setSelectedSeat({ seat: seatId, reservation: occupant });
-        }
+      if (selectedSeat.seat === seatId) {
+        setSelectedSeat(null); // Deselect
       } else {
-        // Clicked an empty seat -> propose swap
         setTargetSwapSeat(seatId);
         setShowSwapModal(true);
       }
     } else {
-      // No source seat selected yet
       if (occupant) {
         setSelectedSeat({ seat: seatId, reservation: occupant });
       }
+    }
+  };
+
+  const handleDragStart = (e, seatId, occupant) => {
+    if (occupant) {
+      setSelectedSeat({ seat: seatId, reservation: occupant });
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', seatId);
+    }
+  };
+
+  const handleDragOver = (e, seatId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e, seatId) => {
+    e.preventDefault();
+    if (selectedSeat && selectedSeat.seat !== seatId) {
+      setTargetSwapSeat(seatId);
+      setShowSwapModal(true);
     }
   };
 
@@ -126,17 +139,35 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
     if (!selectedSeat || !targetSwapSeat) return;
 
     try {
-      // Calculate new assigned_seats array for this reservation
-      const newSeats = selectedSeat.reservation.assigned_seats.map(s => 
-        s === selectedSeat.seat ? targetSwapSeat : s
-      );
+      const targetOccupant = getOccupant(targetSwapSeat);
 
-      await api.put('/reservations/admin/move-seat', {
-        id: selectedSeat.reservation.id,
-        assigned_seats: newSeats
-      });
+      if (targetOccupant) {
+        // Swap with another occupied seat
+        const sourceNewSeats = selectedSeat.reservation.assigned_seats.map(s => 
+          s === selectedSeat.seat ? targetSwapSeat : s
+        );
+        const targetNewSeats = targetOccupant.assigned_seats.map(s => 
+          s === targetSwapSeat ? selectedSeat.seat : s
+        );
 
-      // Reset selection and refresh data
+        await api.put('/reservations/admin/swap-seats', {
+          source_booking_ref: selectedSeat.reservation.booking_ref,
+          source_assigned_seats: sourceNewSeats,
+          target_booking_ref: targetOccupant.booking_ref,
+          target_assigned_seats: targetNewSeats
+        });
+      } else {
+        // Move to empty seat
+        const newSeats = selectedSeat.reservation.assigned_seats.map(s => 
+          s === selectedSeat.seat ? targetSwapSeat : s
+        );
+
+        await api.put('/reservations/admin/move-seat', {
+          id: selectedSeat.reservation.id,
+          assigned_seats: newSeats
+        });
+      }
+
       setSelectedSeat(null);
       setTargetSwapSeat(null);
       setShowSwapModal(false);
@@ -150,19 +181,25 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
   const renderSeat = (seatId) => {
     const occupant = getOccupant(seatId);
     const isOccupied = !!occupant;
+    const isCheckedIn = isOccupied && occupant.attendance === 'checked_in';
     const isSelected = selectedSeat?.seat === seatId;
     const isHoveredGroup = hoveredReservationId && occupant?.id === hoveredReservationId;
     
     let baseClass = "h-16 flex items-center justify-center rounded-xl cursor-pointer transition-all duration-200 border-2 ";
     
     if (isOccupied) {
-      baseClass += "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm ";
+      if (isCheckedIn) {
+        baseClass += "bg-emerald-50 border-emerald-300 text-emerald-800 shadow-sm ";
+      } else {
+        baseClass += "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm ";
+      }
+
       if (isSelected) {
         baseClass += "ring-4 ring-indigo-500 border-indigo-500 shadow-md transform -translate-y-1 ";
       } else if (isHoveredGroup) {
         baseClass += "ring-4 ring-yellow-400 border-yellow-400 ";
       } else {
-        baseClass += "hover:bg-indigo-100 ";
+        baseClass += isCheckedIn ? "hover:bg-emerald-100 " : "hover:bg-indigo-100 ";
       }
     } else {
       baseClass += "bg-gray-50 border-dashed border-gray-300 text-gray-400 ";
@@ -180,22 +217,26 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
         onClick={() => handleSeatClick(seatId)}
         onMouseEnter={() => isOccupied && setHoveredReservationId(occupant.id)}
         onMouseLeave={() => setHoveredReservationId(null)}
+        draggable={isOccupied}
+        onDragStart={(e) => handleDragStart(e, seatId, occupant)}
+        onDragOver={(e) => handleDragOver(e, seatId)}
+        onDrop={(e) => handleDrop(e, seatId)}
       >
         <div className="text-center">
-          <div className="text-xs font-semibold mb-1 opacity-50">{seatId}</div>
+          <div className="text-xs font-semibold mb-1 opacity-50 pointer-events-none">{seatId}</div>
           {isOccupied ? (
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center pointer-events-none">
               <div className="text-sm font-bold truncate px-1 max-w-[80px]">
                 {occupant.user?.name}
               </div>
               {occupant.booking_end_time && (
-                <div className="text-[10px] text-indigo-500/80 -mt-0.5 font-medium">
+                <div className="text-[10px] opacity-80 -mt-0.5 font-medium">
                   ~{occupant.booking_end_time}
                 </div>
               )}
             </div>
           ) : (
-            <div className="text-sm font-medium">空位</div>
+            <div className="text-sm font-medium pointer-events-none">空位</div>
           )}
         </div>
       </div>
@@ -266,7 +307,11 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
                       <button 
                         onClick={() => {
                           onCheckIn(selectedSeat.reservation.booking_ref);
-                          setTimeout(() => fetchSeatingData(), 500);
+                          setSelectedSeat(prev => ({
+                            ...prev,
+                            reservation: { ...prev.reservation, attendance: 'checked_in' }
+                          }));
+                          setTimeout(() => fetchSeatingData(false), 500);
                         }}
                         className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
                       >
@@ -383,11 +428,12 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
             <div className="p-6 border-b border-gray-100">
-              <h3 className="text-xl font-bold text-gray-800">確認換位</h3>
+              <h3 className="text-xl font-bold text-gray-800">{getOccupant(targetSwapSeat) ? '確認互換座位' : '確認換位'}</h3>
             </div>
             <div className="p-6">
               <p className="text-gray-600 mb-4 text-center">
                 確定要將 <strong className="text-indigo-600">{selectedSeat?.reservation?.user?.name}</strong> 的座位
+                {getOccupant(targetSwapSeat) && <span> 與 <strong className="text-emerald-600">{getOccupant(targetSwapSeat).user?.name}</strong> 互換</span>}
               </p>
               <div className="flex items-center justify-center gap-4 text-lg font-bold">
                 <span className="bg-gray-100 px-4 py-2 rounded-lg text-gray-500 line-through">{selectedSeat?.seat}</span>
