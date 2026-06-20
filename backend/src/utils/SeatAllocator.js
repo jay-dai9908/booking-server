@@ -151,24 +151,26 @@ const getIntersectionAvailableSeats = (blocks, targetSessionIds, excludeRef = nu
  * @param {boolean} forceSplit - 是否允許強行拆桌
  * @returns {Object} { success: boolean, updates: Array, error: string } 
  */
-export const allocateSeats = (currentReservations, newReservationBlock, forceSplit = false) => {
+export const allocateSeats = (currentReservations, newReservationBlock = null, forceSplit = false) => {
   const blocks = groupReservations(currentReservations);
   
-  // 1. 計算新訂單全時段可用空位交集
-  const initialAvailable = getIntersectionAvailableSeats(blocks, newReservationBlock.session_ids);
+  if (newReservationBlock) {
+    // 1. 計算新訂單全時段可用空位交集
+    const initialAvailable = getIntersectionAvailableSeats(blocks, newReservationBlock.session_ids);
 
-  // 階段一：嘗試常規劃位 (FCFS)
-  let assigned = findConsecutiveSeats(initialAvailable, newReservationBlock.pax);
-  if (assigned) {
-    return {
-      success: true,
-      updates: [{ booking_ref: newReservationBlock.booking_ref, assigned_seats: assigned }]
-    };
-  }
+    // 階段一：嘗試常規劃位 (FCFS)
+    let assigned = findConsecutiveSeats(initialAvailable, newReservationBlock.pax);
+    if (assigned) {
+      return {
+        success: true,
+        updates: [{ booking_ref: newReservationBlock.booking_ref, assigned_seats: assigned }]
+      };
+    }
 
-  // 檢查絕對容量防呆：如果可用空位數量連硬拆桌都不夠，直接擋下
-  if (initialAvailable.length < newReservationBlock.pax) {
-    return { success: false, error: 'INSUFFICIENT_SEATS' };
+    // 檢查絕對容量防呆：如果可用空位數量連硬拆桌都不夠，直接擋下
+    if (initialAvailable.length < newReservationBlock.pax) {
+      return { success: false, error: 'INSUFFICIENT_SEATS' };
+    }
   }
 
   // 階段二：散客智能挪位 (Virtual Reshuffle)
@@ -177,7 +179,7 @@ export const allocateSeats = (currentReservations, newReservationBlock, forceSpl
   const unpinnedBlocks = blocks.filter(b => !b.is_pinned);
   const pinnedBlocks = blocks.filter(b => b.is_pinned);
   
-  const queueToAllocate = [newReservationBlock, ...unpinnedBlocks];
+  const queueToAllocate = newReservationBlock ? [newReservationBlock, ...unpinnedBlocks] : [...unpinnedBlocks];
   
   // 動態貪婪洗牌：依照 人數(降冪) -> 時段長度(降冪) 排序
   queueToAllocate.sort((a, b) => {

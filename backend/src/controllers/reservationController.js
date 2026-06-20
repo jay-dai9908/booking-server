@@ -373,9 +373,81 @@ export const deleteReservationRecord = async (req, res) => {
   }
 };
 
+const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRefs) => {
+  // Find all confirmed reservations in the affected sessions
+  const currentReservations = await prisma.reservation.findMany({
+    where: { session_id: { in: sessionIds }, status: 'confirmed' }
+  });
+
+  // Collect newly assigned seats for the updated refs
+  const updatedSeatsMap = new Map();
+  for (const r of currentReservations) {
+    if (updatedBookingRefs.includes(r.booking_ref)) {
+      if (!updatedSeatsMap.has(r.session_id)) updatedSeatsMap.set(r.session_id, new Set());
+      r.assigned_seats?.forEach(s => updatedSeatsMap.get(r.session_id).add(s));
+    }
+  }
+
+  // Find colliding reservations
+  const collidingRefs = new Set();
+  for (const r of currentReservations) {
+    if (updatedBookingRefs.includes(r.booking_ref)) continue;
+    
+    const updatedSeatsForSession = updatedSeatsMap.get(r.session_id);
+    if (updatedSeatsForSession && r.assigned_seats) {
+      if (r.assigned_seats.some(seat => updatedSeatsForSession.has(seat))) {
+        collidingRefs.add(r.booking_ref);
+      }
+    }
+  }
+
+  let displacedCount = collidingRefs.size;
+
+  if (displacedCount > 0) {
+    // Unpin colliding reservations in memory
+    for (const r of currentReservations) {
+      if (collidingRefs.has(r.booking_ref)) {
+        r.is_seat_locked = false;
+        r.assigned_seats = []; // Strip to force reshuffle
+      }
+    }
+
+    // Run allocation algorithm (pure reshuffle)
+    const allocResult = allocateSeats(currentReservations, null, true);
+
+    if (allocResult.updates && allocResult.updates.length > 0) {
+      const sessionUpdates = [];
+      for (const update of allocResult.updates) {
+        sessionUpdates.push(
+          prisma.reservation.updateMany({
+            where: { booking_ref: update.booking_ref },
+            data: { assigned_seats: update.assigned_seats }
+          })
+        );
+      }
+      if (sessionUpdates.length > 0) {
+        await prisma.$transaction(sessionUpdates);
+      }
+    } else {
+      // Very edge case: completely full, couldn't reshuffle. Put them in wait area
+      const sessionUpdates = [];
+      for (const ref of collidingRefs) {
+        sessionUpdates.push(
+          prisma.reservation.updateMany({
+            where: { booking_ref: ref },
+            data: { assigned_seats: ['WAIT-1'] }
+          })
+        );
+      }
+      await prisma.$transaction(sessionUpdates);
+    }
+  }
+
+  return displacedCount;
+};
+
 export const moveSeat = async (req, res) => {
-  const { id } = req.body; // id of the specific session's reservation that was clicked
-  const { assigned_seats } = req.body;
+  const { id, assigned_seats } = req.body;
 
   if (!id || !assigned_seats || !Array.isArray(assigned_seats)) {
     return res.status(400).json({ error: 'Valid reservation id and assigned_seats array are required.' });
@@ -387,44 +459,29 @@ export const moveSeat = async (req, res) => {
       return res.status(404).json({ error: 'Reservation not found' });
     }
 
-    // Find all reservations for this booking_ref
     const group = await prisma.reservation.findMany({ 
       where: { booking_ref: targetRes.booking_ref }
     });
     const sessionIds = group.map(r => r.session_id);
 
-    // Check for collisions in ANY of the involved sessions
-    const conflicts = await prisma.reservation.findMany({
-      where: {
-        session_id: { in: sessionIds },
-        booking_ref: { not: targetRes.booking_ref },
-        status: 'confirmed'
-      }
-    });
-
-    const isConflict = conflicts.some(c => 
-      c.assigned_seats && c.assigned_seats.some(seat => assigned_seats.includes(seat))
-    );
-
-    if (isConflict) {
-      return res.status(400).json({ 
-        error: '目標座位在該顧客的其他預約時段中已被佔用。請確保新座位在該筆訂單的所有時段中皆為空位。' 
-      });
-    }
-
-    // Update ALL reservations for this booking_ref
-    const updated = await prisma.reservation.updateMany({
+    // Force update the target reservation
+    await prisma.reservation.updateMany({
       where: { booking_ref: targetRes.booking_ref },
       data: {
         assigned_seats,
-        is_seat_locked: true // Lock the seat so it's not moved by the algorithm
+        is_seat_locked: true
       }
     });
 
-    // Return the updated single reservation for frontend compatibility
+    const displacedCount = await handleCollisionsAndReshuffle(sessionIds, [targetRes.booking_ref]);
+
     const singleUpdated = await prisma.reservation.findUnique({ where: { id: parseInt(id, 10) } });
 
-    res.json({ message: 'Seat moved successfully', reservation: singleUpdated });
+    res.json({ 
+      message: 'Seat moved successfully', 
+      reservation: singleUpdated,
+      displacedCount
+    });
   } catch (error) {
     console.error('Error moving seat:', error);
     res.status(500).json({ error: 'Failed to move seat' });
@@ -439,24 +496,26 @@ export const swapSeats = async (req, res) => {
   }
 
   try {
+    const sourceGroup = await prisma.reservation.findMany({ where: { booking_ref: source_booking_ref } });
+    const targetGroup = await prisma.reservation.findMany({ where: { booking_ref: target_booking_ref } });
+    
+    const sessionIdsSet = new Set([...sourceGroup.map(r => r.session_id), ...targetGroup.map(r => r.session_id)]);
+    const sessionIds = Array.from(sessionIdsSet);
+
     await prisma.$transaction([
       prisma.reservation.updateMany({
         where: { booking_ref: source_booking_ref },
-        data: {
-          assigned_seats: source_assigned_seats,
-          is_seat_locked: true
-        }
+        data: { assigned_seats: source_assigned_seats, is_seat_locked: true }
       }),
       prisma.reservation.updateMany({
         where: { booking_ref: target_booking_ref },
-        data: {
-          assigned_seats: target_assigned_seats,
-          is_seat_locked: true
-        }
+        data: { assigned_seats: target_assigned_seats, is_seat_locked: true }
       })
     ]);
 
-    res.json({ message: 'Seats swapped successfully' });
+    const displacedCount = await handleCollisionsAndReshuffle(sessionIds, [source_booking_ref, target_booking_ref]);
+
+    res.json({ message: 'Seats swapped successfully', displacedCount });
   } catch (error) {
     console.error('Error swapping seats:', error);
     res.status(500).json({ error: 'Failed to swap seats' });

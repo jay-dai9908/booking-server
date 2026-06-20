@@ -140,6 +140,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
 
     try {
       const targetOccupant = getOccupant(targetSwapSeat);
+      let res;
 
       if (targetOccupant) {
         // Swap with another occupied seat
@@ -150,7 +151,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
           s === targetSwapSeat ? selectedSeat.seat : s
         );
 
-        await api.put('/reservations/admin/swap-seats', {
+        res = await api.put('/reservations/admin/swap-seats', {
           source_booking_ref: selectedSeat.reservation.booking_ref,
           source_assigned_seats: sourceNewSeats,
           target_booking_ref: targetOccupant.booking_ref,
@@ -162,10 +163,14 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
           s === selectedSeat.seat ? targetSwapSeat : s
         );
 
-        await api.put('/reservations/admin/move-seat', {
+        res = await api.put('/reservations/admin/move-seat', {
           id: selectedSeat.reservation.id,
           assigned_seats: newSeats
         });
+      }
+
+      if (res && res.data && res.data.displacedCount > 0) {
+        alert(`換位成功！系統已自動為 ${res.data.displacedCount} 組產生跨時段衝突的客人重新安排座位。`);
       }
 
       setSelectedSeat(null);
