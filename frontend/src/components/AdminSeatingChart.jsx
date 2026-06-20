@@ -103,18 +103,8 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
 
   const handleSeatClick = (seatId) => {
     const occupant = getOccupant(seatId);
-
-    if (selectedSeat) {
-      if (selectedSeat.seat === seatId) {
-        setSelectedSeat(null); // Deselect
-      } else {
-        setTargetSwapSeat(seatId);
-        setShowSwapModal(true);
-      }
-    } else {
-      if (occupant) {
-        setSelectedSeat({ seat: seatId, reservation: occupant });
-      }
+    if (occupant && onOpenDetails) {
+      onOpenDetails(occupant.booking_ref);
     }
   };
 
