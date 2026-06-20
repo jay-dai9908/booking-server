@@ -86,7 +86,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
   };
 
   const getWaitSeats = () => {
-    const seats = new Set();
+    const seats = new Set(['WAIT-1', 'WAIT-2', 'WAIT-3', 'WAIT-4', 'WAIT-5', 'WAIT-6', 'WAIT-7', 'WAIT-8']);
     seatingData.forEach(r => {
       r.assigned_seats?.forEach(s => {
         if (s.startsWith('WAIT-')) {
@@ -94,7 +94,11 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
         }
       });
     });
-    return Array.from(seats);
+    return Array.from(seats).sort((a, b) => {
+      const numA = parseInt(a.split('-')[1]) || 0;
+      const numB = parseInt(b.split('-')[1]) || 0;
+      return numA - numB;
+    });
   };
 
   const handleSeatClick = (seatId) => {
@@ -403,18 +407,16 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
               </div>
             </div>
 
-            {/* Virtual Waiting Area (Overbooked) */}
-            {getWaitSeats().length > 0 && (
-              <div className="mt-4 pt-8 border-t-2 border-dashed border-red-200">
-                <div className="text-lg font-bold text-red-600 mb-4 flex items-center gap-2">
-                  <div className="w-2 h-6 bg-red-500 rounded-full animate-pulse"></div>
-                  ⚠️ 虛擬等候區 (座位不足，需手動安排)
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 bg-red-50/50 p-6 rounded-2xl border border-red-100">
-                  {getWaitSeats().map(renderSeat)}
-                </div>
+            {/* Virtual Waiting Area (Overbooked / Extra) */}
+            <div className="mt-4 pt-8 border-t-2 border-dashed border-gray-200">
+              <div className="text-lg font-bold text-gray-600 mb-4 flex items-center gap-2">
+                <div className="w-2 h-6 bg-gray-400 rounded-full"></div>
+                ➕ 虛擬等候 / 外加區 (可手動拖曳至此暫放)
               </div>
-            )}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 bg-gray-50 p-6 rounded-2xl border border-gray-100">
+                {getWaitSeats().map(renderSeat)}
+              </div>
+            </div>
 
           </div>
         </div>
