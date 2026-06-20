@@ -139,13 +139,16 @@ export default function ReservationsPage() {
         name: manualName,
         phone: manualPhone,
         session_ids: sortedSessions.map(s => s.id),
-        pax: manualPax
+        pax: manualPax,
+        forceSplit: manualForceSplit,
+        isWalkIn: true
       });
       alert('手動預約建立成功！');
       setShowManualBooking(false);
       setManualName('');
       setManualPhone('');
       setManualSelectedSessions([]);
+      setManualForceSplit(true);
       fetchReservations();
     } catch (err) {
       alert(err.response?.data?.error || '手動預約失敗');
@@ -335,6 +338,22 @@ export default function ReservationsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">預約日期</label>
                 <input type="date" required value={manualDate} onChange={e => setManualDate(e.target.value)}
                   className="w-full md:w-1/2 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 outline-none" />
+              </div>
+
+              {/* Force Split */}
+              <div className="mb-6">
+                <label className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors w-full md:w-1/2">
+                  <input
+                    type="checkbox"
+                    checked={manualForceSplit}
+                    onChange={(e) => setManualForceSplit(e.target.checked)}
+                    className="w-5 h-5 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-gray-800">同意拆桌 <span className="ml-1 text-xs text-gray-600 bg-gray-200 px-1.5 py-0.5 rounded">預設推薦</span></span>
+                    <span className="text-xs text-gray-500 mt-0.5">系統空間不足時，優先拆散以騰出大桌</span>
+                  </div>
+                </label>
               </div>
 
               <div className="mb-6">

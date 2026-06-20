@@ -44,6 +44,7 @@ model Reservation {
   is_seat_locked Boolean  @default(false)
   is_force_split Boolean  @default(false)
   is_unlimited   Boolean  @default(false)
+  is_walk_in     Boolean  @default(false)
   cancelled_at   DateTime?
   cancelled_by   String?
   

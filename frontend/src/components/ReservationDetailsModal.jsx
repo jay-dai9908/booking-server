@@ -139,6 +139,11 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                       ✨ 不限時
                     </span>
                   )}
+                  {reservation.is_walk_in && (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-md">
+                      🚶 現場預約
+                    </span>
+                  )}
                 </div>
               </div>
               <div>

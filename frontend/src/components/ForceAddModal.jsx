@@ -6,7 +6,8 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
-    pax: 1
+    pax: 1,
+    forceSplit: true
   });
   const [selectedSessions, setSelectedSessions] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,12 +60,14 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
         pax: formData.pax,
         name: formData.name,
         phone: formData.phone,
-        isForceWait: true
+        isForceWait: true,
+        forceSplit: formData.forceSplit,
+        isWalkIn: true
       });
       
       onSuccess(); // triggers refetch
       onClose();
-      setFormData({ name: '', phone: '', pax: 1 });
+      setFormData({ name: '', phone: '', pax: 1, forceSplit: true });
     } catch (err) {
       setError(err.response?.data?.error || '建立失敗，請稍後再試');
     } finally {
@@ -152,6 +155,22 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
                   className="w-full pl-11 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
                 />
               </div>
+            </div>
+
+            {/* Force Split */}
+            <div>
+              <label className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={formData.forceSplit}
+                  onChange={(e) => setFormData({...formData, forceSplit: e.target.checked})}
+                  className="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-gray-800">同意拆桌 <span className="ml-1 text-xs text-indigo-600 bg-indigo-100 px-1.5 py-0.5 rounded">預設推薦</span></span>
+                  <span className="text-xs text-gray-500 mt-0.5">當移入實體座位但空間不足時，優先將此組客人拆散以騰出完整大桌</span>
+                </div>
+              </label>
             </div>
 
             {/* Multi-Session Selection */}

@@ -611,7 +611,7 @@ export const getSessionSeats = async (req, res) => {
 };
 
 export const adminCreateReservation = async (req, res) => {
-  const { session_ids, pax, name, phone, forceSplit, isForceWait } = req.body;
+  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn } = req.body;
   
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !pax || pax <= 0) {
     return res.status(400).json({ error: 'Valid session_ids array and pax are required.' });
@@ -732,7 +732,8 @@ export const adminCreateReservation = async (req, res) => {
           pax: parseInt(pax, 10),
           status: 'confirmed',
           assigned_seats: mySeats,
-          is_force_split: forceSplit === true || forceSplit === 'true'
+          is_force_split: forceSplit === true || forceSplit === 'true',
+          is_walk_in: isWalkIn === true || isWalkIn === 'true'
         });
       }
 

@@ -248,6 +248,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
           {isOccupied ? (
             <div className="flex flex-col items-center pointer-events-none">
               <div className="text-sm font-bold truncate px-1 max-w-[80px]">
+                {occupant.is_walk_in && <span className="text-orange-500 mr-0.5">🚶</span>}
                 {occupant.user?.name}
               </div>
               {occupant.booking_end_time && (
