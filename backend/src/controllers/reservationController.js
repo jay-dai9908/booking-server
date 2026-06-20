@@ -22,7 +22,9 @@ const groupReservations = (reservations) => {
         assigned_seats: r.assigned_seats || [],
         is_seat_locked: r.is_seat_locked || false,
         is_force_split: r.is_force_split || false,
-        is_unlimited: r.is_unlimited || false
+        is_unlimited: r.is_unlimited || false,
+        cancelled_at: r.cancelled_at || null,
+        cancelled_by: r.cancelled_by || null
       };
     }
     groups[ref].sessions.push(r.session);
@@ -70,7 +72,9 @@ const groupReservations = (reservations) => {
       assigned_seats: group.assigned_seats,
       is_seat_locked: group.is_seat_locked,
       is_force_split: group.is_force_split,
-      is_unlimited: group.is_unlimited
+      is_unlimited: group.is_unlimited,
+      cancelled_at: group.cancelled_at,
+      cancelled_by: group.cancelled_by
     };
   });
 };
