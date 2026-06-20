@@ -168,10 +168,6 @@ export const allocateSeats = (currentReservations, newReservationBlock = null, f
       };
     }
 
-    // 檢查絕對容量防呆：如果可用空位數量連硬拆桌都不夠，直接擋下
-    if (initialAvailable.length < newReservationBlock.pax) {
-      return { success: false, error: 'INSUFFICIENT_SEATS' };
-    }
   }
 
   // 階段二：散客智能挪位 (Virtual Reshuffle)
