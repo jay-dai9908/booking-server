@@ -255,16 +255,12 @@ export const getAdminReservations = async (req, res) => {
     // Group them
     let grouped = groupReservations(reservations);
     
-    // Sort grouped reservations by session_date descending, then start_time descending
-    // Unless sort=start_time_asc is provided, then sort by start_time ascending
+    // Sort grouped reservations by session_date ascending, then start_time ascending
     grouped.sort((a, b) => {
-      if (a.session_date > b.session_date) return -1;
-      if (a.session_date < b.session_date) return 1;
+      if (a.session_date > b.session_date) return 1;
+      if (a.session_date < b.session_date) return -1;
       
-      if (sort === 'start_time_asc') {
-        return a.start_time.localeCompare(b.start_time);
-      }
-      return b.start_time.localeCompare(a.start_time);
+      return a.start_time.localeCompare(b.start_time);
     });
 
     const total = grouped.length;
