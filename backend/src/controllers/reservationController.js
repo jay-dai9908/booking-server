@@ -431,11 +431,18 @@ const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRefs) => {
     } else {
       // Very edge case: completely full, couldn't reshuffle. Put them in wait area
       const sessionUpdates = [];
+      let waitCounter = 1;
       for (const ref of collidingRefs) {
+        const r = currentReservations.find(res => res.booking_ref === ref);
+        const waitSeats = [];
+        const paxCount = r ? r.pax : 1;
+        for (let i = 0; i < paxCount; i++) {
+          waitSeats.push(`WAIT-${waitCounter++}`);
+        }
         sessionUpdates.push(
           prisma.reservation.updateMany({
             where: { booking_ref: ref },
-            data: { assigned_seats: ['WAIT-1'] }
+            data: { assigned_seats: waitSeats }
           })
         );
       }
