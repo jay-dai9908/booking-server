@@ -121,6 +121,7 @@ async function reshuffle() {
 
   const virtualBlocks = [];
   const updates = [];
+  let waitCounter = 1;
 
   for (const reqBlock of unpinnedBlocks) {
     const virtAvailable = getIntersectionAvailableSeats(virtualBlocks, reqBlock.session_ids);
@@ -137,9 +138,13 @@ async function reshuffle() {
       });
     } else {
       console.log('Failed to fit:', reqBlock.booking_ref);
+      const waitSeats = [];
+      for (let i = 0; i < (reqBlock.pax || 1); i++) {
+        waitSeats.push(`WAIT-${waitCounter++}`);
+      }
       updates.push({
         booking_ref: reqBlock.booking_ref,
-        assigned_seats: ['WAIT-1']
+        assigned_seats: waitSeats
       });
     }
   }
