@@ -494,6 +494,13 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
           </div>
         </div>
       )}
+
+      <ForceAddModal 
+        isOpen={showForceAddModal} 
+        onClose={() => setShowForceAddModal(false)} 
+        selectedSessionId={selectedSessionId} 
+        onSuccess={() => fetchSeatingData()} 
+      />
     </div>
   );
 }
