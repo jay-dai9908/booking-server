@@ -153,10 +153,11 @@ const getIntersectionAvailableSeats = (blocks, targetSessionIds, excludeRef = nu
  */
 export const allocateSeats = (currentReservations, newReservationBlock = null, forceSplit = false) => {
   const blocks = groupReservations(currentReservations);
+  let initialAvailable = [];
   
   if (newReservationBlock) {
     // 1. 計算新訂單全時段可用空位交集
-    const initialAvailable = getIntersectionAvailableSeats(blocks, newReservationBlock.session_ids);
+    initialAvailable = getIntersectionAvailableSeats(blocks, newReservationBlock.session_ids);
 
     // 階段一：嘗試常規劃位 (FCFS)
     let assigned = findConsecutiveSeats(initialAvailable, newReservationBlock.pax);
