@@ -58,7 +58,7 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, onSu
 
         <form onSubmit={handleSubmit} className="p-6 md:p-8">
           <p className="text-sm text-gray-500 mb-6 bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-700">
-            此功能會完全略過容量檢查，將顧客直接加入目前的「虛擬等候 / 外加區」。
+            將顧客直接加入目前的「虛擬等候 / 外加區」。
           </p>
 
           {error && (
