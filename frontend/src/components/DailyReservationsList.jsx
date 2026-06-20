@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
+import { Search } from 'lucide-react';
 import api from '../api/axios';
 import { getReservationStatusUI } from './ReservationDetailsModal';
 
@@ -9,22 +10,26 @@ export default function DailyReservationsList({ date, onOpenDetails }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Reset page to 1 when date changes
+  // Reset page to 1 when date or search changes
   useEffect(() => {
     setPage(1);
-  }, [date]);
+  }, [date, searchQuery]);
 
   useEffect(() => {
-    if (date) {
-      fetchReservations();
-    }
-  }, [date, page]);
+    const delayDebounceFn = setTimeout(() => {
+      if (date) {
+        fetchReservations();
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [date, page, searchQuery]);
 
   const fetchReservations = async () => {
     setIsLoading(true);
     try {
-      const res = await api.get(`/reservations/admin?page=${page}&limit=20&date=${date}&sort=start_time_asc`);
+      const res = await api.get(`/reservations/admin?page=${page}&limit=20&date=${date}&sort=start_time_asc&search=${encodeURIComponent(searchQuery)}`);
       setReservations(res.data?.data || (Array.isArray(res.data) ? res.data : []));
       setTotalPages(res.data?.totalPages || 1);
       setTotalRecords(res.data?.total || (Array.isArray(res.data) ? res.data.length : 0));
@@ -37,11 +42,26 @@ export default function DailyReservationsList({ date, onOpenDetails }) {
 
   return (
     <div className="mt-8 pt-8 border-t-2 border-gray-200">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-gray-800">當日所有訂單列表</h2>
-        <span className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-          {format(new Date(date), 'yyyy/MM/dd')}
-        </span>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+        <h2 className="text-xl font-bold text-gray-800 whitespace-nowrap">當日所有訂單列表</h2>
+        
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="relative flex-1 sm:w-64">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search className="h-4 w-4 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              placeholder="搜尋姓名或電話..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-gray-200 bg-white rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 w-full transition-shadow"
+            />
+          </div>
+          <span className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-2 rounded-xl whitespace-nowrap">
+            {format(new Date(date), 'yyyy/MM/dd')}
+          </span>
+        </div>
       </div>
       
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
