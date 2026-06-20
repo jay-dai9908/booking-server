@@ -33,8 +33,8 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.phone || formData.pax < 1) {
-      setError('請填寫所有必要資訊，且人數必須大於 0');
+    if (!formData.name || formData.pax < 1) {
+      setError('請填寫顧客姓名，且人數必須大於 0');
       return;
     }
     if (selectedSessions.length === 0) {
@@ -119,14 +119,13 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
 
               {/* Phone */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">聯絡電話</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">聯絡電話 <span className="text-gray-400 font-normal">(選填)</span></label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
                     <Phone className="w-5 h-5" />
                   </div>
                   <input
                     type="tel"
-                    required
                     placeholder="例如：0912345678"
                     value={formData.phone}
                     onChange={(e) => setFormData({...formData, phone: e.target.value})}

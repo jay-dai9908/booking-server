@@ -617,8 +617,8 @@ export const adminCreateReservation = async (req, res) => {
     return res.status(400).json({ error: 'Valid session_ids array and pax are required.' });
   }
 
-  if (!name || !phone) {
-    return res.status(400).json({ error: 'Name and phone are required for manual booking.' });
+  if (!name) {
+    return res.status(400).json({ error: 'Name is required for manual booking.' });
   }
 
   try {
@@ -626,9 +626,12 @@ export const adminCreateReservation = async (req, res) => {
 
     const result = await prisma.$transaction(async (tx) => {
       // 0. Handle user finding / creation
-      let targetUser = await tx.user.findFirst({
-        where: { phone }
-      });
+      let targetUser = null;
+      if (phone) {
+        targetUser = await tx.user.findFirst({
+          where: { phone }
+        });
+      }
 
       if (!targetUser) {
         // Create manual user
@@ -636,7 +639,7 @@ export const adminCreateReservation = async (req, res) => {
           data: {
             line_user_id: `manual_${crypto.randomUUID()}`,
             name,
-            phone
+            phone: phone || null
           }
         });
       }
