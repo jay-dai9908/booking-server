@@ -7,6 +7,7 @@ import ReservationDetailsModal from '../../components/ReservationDetailsModal';
 
 export default function SeatingPage() {
   const [selectedReservation, setSelectedReservation] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const fetchReservationDetails = async (booking_ref) => {
     try {
@@ -59,12 +60,12 @@ export default function SeatingPage() {
     <>
       <div className="h-full relative">
         <AdminSeatingChart 
-        onOpenDetails={(booking_ref) => {
-          fetchReservationDetails(booking_ref);
-        }}
-        onCheckIn={(booking_ref) => handleUpdateAttendance(booking_ref, 'checked_in')}
-      />
-
+          key={refreshKey}
+          onOpenDetails={(booking_ref) => {
+            fetchReservationDetails(booking_ref);
+          }}
+          onCheckIn={(booking_ref) => handleUpdateAttendance(booking_ref, 'checked_in')}
+        />
       </div>
 
       {/* Reservation Details Modal */}
@@ -77,6 +78,7 @@ export default function SeatingPage() {
           } else {
             setSelectedReservation(null);
           }
+          setRefreshKey(prev => prev + 1);
         }} 
       />
 
