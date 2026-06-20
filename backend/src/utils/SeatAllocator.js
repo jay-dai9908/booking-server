@@ -242,6 +242,9 @@ export const allocateSeats = (currentReservations, newReservationBlock = null, f
   }
 
   // 強制拆桌：回到最初的 availableSeats 進行拆桌
+  if (!newReservationBlock) {
+    return { success: false, error: 'NO_NEW_RESERVATION_BLOCK' };
+  }
   let remainingPax = newReservationBlock.pax;
   let tempAvailable = [...initialAvailable];
   const forcedAssigned = [];

@@ -413,7 +413,7 @@ const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRefs) => {
     }
 
     // Run allocation algorithm (pure reshuffle)
-    const allocResult = allocateSeats(currentReservations, null, true);
+    const allocResult = allocateSeats(currentReservations, null, false);
 
     if (allocResult.updates && allocResult.updates.length > 0) {
       const sessionUpdates = [];
