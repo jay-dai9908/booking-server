@@ -235,6 +235,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
       <div 
         key={seatId} 
         className={baseClass}
+        style={{ touchAction: isOccupied ? 'none' : 'auto' }}
         onClick={() => handleSeatClick(seatId)}
         onMouseEnter={() => isOccupied && setHoveredReservationId(occupant.id)}
         onMouseLeave={() => setHoveredReservationId(null)}
