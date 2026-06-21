@@ -245,6 +245,19 @@ export const allocateSeats = (currentReservations, newReservationBlock = null, f
   let tempAvailable = [...initialAvailable];
   const forcedAssigned = [];
 
+  let maxWait = 0;
+  for (const b of blocks) {
+    if (b.assigned_seats) {
+      for (const s of b.assigned_seats) {
+        if (s.startsWith('WAIT-')) {
+          const num = parseInt(s.replace('WAIT-', ''), 10);
+          if (!isNaN(num) && num > maxWait) maxWait = num;
+        }
+      }
+    }
+  }
+  let waitCounter = maxWait + 1;
+
   while (remainingPax > 0) {
     let chunk = remainingPax >= 4 ? 4 : remainingPax;
     let seats = null;
@@ -256,7 +269,7 @@ export const allocateSeats = (currentReservations, newReservationBlock = null, f
     }
 
     if (!seats) {
-      const fallbackSeat = tempAvailable.shift() || `WAIT-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const fallbackSeat = tempAvailable.shift() || `WAIT-${waitCounter++}`;
       forcedAssigned.push(fallbackSeat);
       remainingPax -= 1;
     } else {

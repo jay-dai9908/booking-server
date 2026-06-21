@@ -584,6 +584,72 @@ export const getSessionSeats = async (req, res) => {
       }
     });
 
+    // --- Self-Healing Mechanism ---
+    const SEAT_REGEX = /^[AB][12]-[1-4]$/;
+    const WAIT_REGEX = /^WAIT-\d+$/;
+    const occupiedSeats = new Set();
+    let maxWait = 0;
+
+    for (const r of reservations) {
+      if (r.assigned_seats && Array.isArray(r.assigned_seats)) {
+        for (const s of r.assigned_seats) {
+          if (WAIT_REGEX.test(s)) {
+            const num = parseInt(s.split('-')[1], 10);
+            if (num > maxWait) maxWait = num;
+          }
+        }
+      }
+    }
+
+    let waitCounter = maxWait + 1;
+    const healUpdates = [];
+
+    for (let i = 0; i < reservations.length; i++) {
+      const r = reservations[i];
+      let isMissing = false;
+
+      if (!r.assigned_seats || !Array.isArray(r.assigned_seats) || r.assigned_seats.length === 0) {
+        isMissing = true;
+      } else {
+        for (const s of r.assigned_seats) {
+          if (!SEAT_REGEX.test(s) && !WAIT_REGEX.test(s)) {
+            isMissing = true;
+            break;
+          }
+          if (occupiedSeats.has(s)) {
+            isMissing = true; // Overlap detected! One of them must be pushed to wait.
+            break;
+          }
+        }
+      }
+
+      if (isMissing) {
+        const waitSeats = [];
+        const paxCount = r.pax || 1;
+        for (let j = 0; j < paxCount; j++) {
+          waitSeats.push(`WAIT-${waitCounter++}`);
+        }
+        r.assigned_seats = waitSeats; // Update memory for current response
+        healUpdates.push(
+          prisma.reservation.updateMany({
+            where: { booking_ref: r.booking_ref },
+            data: { assigned_seats: waitSeats }
+          })
+        );
+      } else {
+        // Valid and no overlap, mark seats as occupied
+        for (const s of r.assigned_seats) {
+          occupiedSeats.add(s);
+        }
+      }
+    }
+
+    if (healUpdates.length > 0) {
+      await prisma.$transaction(healUpdates);
+      console.log(`Self-healed ${healUpdates.length} missing/overlapping reservations in session ${id}`);
+    }
+    // --- End Self-Healing ---
+
     // Find the end_time of the entire booking for each reservation
     const bookingRefs = [...new Set(reservations.map(r => r.booking_ref))];
     const allRelatedReservations = await prisma.reservation.findMany({
