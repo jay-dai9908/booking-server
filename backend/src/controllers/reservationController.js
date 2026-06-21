@@ -395,7 +395,7 @@ export const deleteReservationRecord = async (req, res) => {
   }
 };
 
-const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRefs) => {
+export const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRefs) => {
   // Find all confirmed reservations in the affected sessions
   const currentReservations = await prisma.reservation.findMany({
     where: { session_id: { in: sessionIds }, status: 'confirmed' }

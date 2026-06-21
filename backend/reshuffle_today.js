@@ -100,8 +100,11 @@ const getIntersectionAvailableSeats = (blocks, targetSessionIds) => {
 };
 
 async function reshuffle() {
-  const start = new Date('2026-06-20T00:00:00Z');
-  const end = new Date('2026-06-21T00:00:00Z');
+  const targetDateStr = process.argv[2] || new Date().toISOString().split('T')[0];
+  const start = new Date(`${targetDateStr}T00:00:00Z`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  console.log(`Reshuffling seats for date: ${targetDateStr}`);
 
   const sessions = await prisma.session.findMany({
     where: { session_date: { gte: start, lt: end } }
