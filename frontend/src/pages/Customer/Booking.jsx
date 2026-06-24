@@ -12,6 +12,8 @@ function Booking() {
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [splitBookingData, setSplitBookingData] = useState(null);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [isUnlimited, setIsUnlimited] = useState(false);
+  const [showUnlimitedWarningModal, setShowUnlimitedWarningModal] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
 
   // Generate calendar dates for the current month view
@@ -33,6 +35,7 @@ function Booking() {
     fetchSessions(selectedDate);
     fetchDailySetting(selectedDate);
     setSelectedSessions([]);
+    setIsUnlimited(false);
   }, [selectedDate]);
 
   const fetchDailySetting = async (date) => {
@@ -86,24 +89,26 @@ function Booking() {
     }
   }, [selectedSessions, maxAvailablePax, pax]);
 
+  const handleUnlimitedClick = () => {
+    if (isUnlimited) {
+      setIsUnlimited(false);
+      return;
+    }
+
+    const hasFullSessions = sessions.some(s => s.remaining_capacity === 0);
+    if (hasFullSessions) {
+      setShowUnlimitedWarningModal(true);
+    } else {
+      setIsUnlimited(true);
+    }
+  };
+
   const handleBooking = async () => {
     if (selectedSessions.length === 0) return;
     
     // Sort selected sessions by start time to display nicely
     const sortedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
     const timeRangeStr = `${sortedSessions[0].start_time} - ${sortedSessions[sortedSessions.length - 1].end_time}`;
-    
-    const availableSessions = sessions.filter(s => s.remaining_capacity > 0);
-    const isUnlimited = selectedSessions.length === availableSessions.length && availableSessions.length > 0;
-    
-    if (isUnlimited) {
-      const hasFullSessions = sessions.some(s => s.remaining_capacity === 0);
-      if (hasFullSessions) {
-        if (!window.confirm('當天部分時段已滿，是否確定預約？')) {
-          return;
-        }
-      }
-    }
     
     if (window.confirm(`確定要預約 ${format(selectedDate, 'yyyy-MM-dd')} \n時段：${timeRangeStr} \n人數：${pax} 人嗎？`)) {
       try {
@@ -220,24 +225,24 @@ function Booking() {
         {/* Time Selector */}
         <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <h2 className="text-lg font-bold text-gray-800">2. 選擇時段 (可複選)</h2>
               {sessions.length > 0 && allowUnlimited && (
-                <button
-                  onClick={() => {
-                    const availableSessions = sessions.filter(s => s.remaining_capacity > 0);
-                    if (selectedSessions.length === availableSessions.length && availableSessions.length > 0) {
-                      setSelectedSessions([]);
-                    } else {
-                      setSelectedSessions(availableSessions);
-                    }
-                  }}
-                  className="text-xs px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded hover:bg-emerald-100 transition-colors font-medium"
-                >
-                  {selectedSessions.length === sessions.filter(s => s.remaining_capacity > 0).length && sessions.filter(s => s.remaining_capacity > 0).length > 0
-                    ? '取消全選'
-                    : '不限時 (全選)'}
-                </button>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <button
+                    onClick={handleUnlimitedClick}
+                    className={`text-xs px-3 py-1.5 border rounded transition-colors font-bold flex items-center gap-1 ${
+                      isUnlimited 
+                        ? 'bg-emerald-500 text-white border-emerald-600 shadow-sm' 
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                  >
+                    {isUnlimited ? '✓ 已開啟不限時' : '開啟不限時'}
+                  </button>
+                  <span className="text-xs text-emerald-600 font-medium">
+                    (請根據實際預計來店時間進行勾選時段)
+                  </span>
+                </div>
               )}
             </div>
             {selectedSessions.length > 0 && (
@@ -372,6 +377,46 @@ function Booking() {
       {/* Customer History Modal */}
       {showHistoryModal && (
         <CustomerHistoryModal onClose={() => setShowHistoryModal(false)} />
+      )}
+
+      {/* Unlimited Warning Modal */}
+      {showUnlimitedWarningModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="bg-amber-100 p-6 flex flex-col items-center">
+              <div className="bg-amber-200 p-3 rounded-full mb-4">
+                <span className="text-3xl">⚠️</span>
+              </div>
+              <h3 className="text-xl font-bold text-amber-900 text-center">
+                不限時預約提醒
+              </h3>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-700 text-center mb-6 leading-relaxed">
+                目前部分時段人數已滿，不限時預約僅提供系統上所顯示剩餘可預約的時段。<br/><br/>
+                <span className="font-bold text-red-500">預約已滿的時段店內無多餘位置，請勿在店內逗留</span><br/><br/>
+                請問是否同意並確定開啟？
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowUnlimitedWarningModal(false)}
+                  className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors"
+                >
+                  我不同意
+                </button>
+                <button
+                  onClick={() => {
+                    setIsUnlimited(true);
+                    setShowUnlimitedWarningModal(false);
+                  }}
+                  className="flex-1 py-3 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold transition-colors shadow-lg shadow-amber-500/30"
+                >
+                  同意開啟
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       <style dangerouslySetInnerHTML={{__html: `
