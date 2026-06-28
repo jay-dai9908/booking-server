@@ -211,6 +211,7 @@ export default function AccountingPage() {
       ) : (
         <>
           {activeTab === 'dashboard' && summary && (
+            <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-green-500">
                 <div className="flex items-center justify-between mb-4">
