@@ -1119,7 +1119,11 @@ export const updatePaymentStatus = async (req, res) => {
 
         const updated = await tx.reservation.updateMany({
           where: { booking_ref },
-          data: { is_paid, ...(totalAmount !== undefined && { total_amount: totalAmount }) }
+          data: { 
+            is_paid, 
+            paid_at: new Date(),
+            ...(totalAmount !== undefined && { total_amount: totalAmount }) 
+          }
         });
 
         if (updated.count === 0) {
@@ -1130,7 +1134,10 @@ export const updatePaymentStatus = async (req, res) => {
     } else {
       const updated = await prisma.reservation.updateMany({
         where: { booking_ref },
-        data: { is_paid }
+        data: { 
+          is_paid,
+          paid_at: null
+        }
       });
       
       if (updated.count === 0) {
