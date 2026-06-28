@@ -264,12 +264,16 @@ export default function AccountingPage() {
                         dy={10}
                       />
                       <YAxis 
-                        domain={['auto', 'auto']}
+                        width={85}
+                        domain={[
+                          dataMin => Math.max(0, Math.floor((dataMin - 500) / 100) * 100), 
+                          dataMax => Math.ceil((dataMax + 500) / 100) * 100
+                        ]}
                         axisLine={false} 
                         tickLine={false} 
                         tick={{ fill: '#6b7280', fontSize: 12 }}
                         tickFormatter={(value) => `NT$ ${value}`}
-                        dx={-10}
+                        dx={-5}
                       />
                       <Tooltip 
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
