@@ -2,10 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { BarChart3, FileText, AlertTriangle, Download, Calendar, DollarSign, Users, ShoppingCart } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, startOfDay, endOfDay } from 'date-fns';
 import api from '../../api/axios';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import ReservationDetailsModal from '../../components/ReservationDetailsModal';
 
 export default function AccountingPage() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [dateMode, setDateMode] = useState('today');
+  const [baseDate, setBaseDate] = useState(new Date());
   const [startDate, setStartDate] = useState(format(startOfDay(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfDay(new Date()), 'yyyy-MM-dd'));
 
@@ -71,24 +74,43 @@ export default function AccountingPage() {
     document.body.removeChild(link);
   };
 
-  const setDateRange = (range) => {
-    const today = new Date();
-    switch (range) {
+  const handleDateShortcut = (mode, referenceDate = new Date()) => {
+    setDateMode(mode);
+    setBaseDate(referenceDate);
+    switch (mode) {
       case 'today':
-        setStartDate(format(startOfDay(today), 'yyyy-MM-dd'));
-        setEndDate(format(endOfDay(today), 'yyyy-MM-dd'));
+        setStartDate(format(startOfDay(referenceDate), 'yyyy-MM-dd'));
+        setEndDate(format(endOfDay(referenceDate), 'yyyy-MM-dd'));
         break;
       case 'week':
-        setStartDate(format(startOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd'));
-        setEndDate(format(endOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd'));
+        setStartDate(format(startOfWeek(referenceDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'));
+        setEndDate(format(endOfWeek(referenceDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'));
         break;
       case 'month':
-        setStartDate(format(startOfMonth(today), 'yyyy-MM-dd'));
-        setEndDate(format(endOfMonth(today), 'yyyy-MM-dd'));
+        setStartDate(format(startOfMonth(referenceDate), 'yyyy-MM-dd'));
+        setEndDate(format(endOfMonth(referenceDate), 'yyyy-MM-dd'));
         break;
       default:
         break;
     }
+  };
+
+  const handlePrevPeriod = () => {
+    let newDate = new Date(baseDate);
+    if (dateMode === 'today') newDate = subDays(newDate, 1);
+    else if (dateMode === 'week') newDate = subDays(newDate, 7);
+    else if (dateMode === 'month') newDate = new Date(newDate.getFullYear(), newDate.getMonth() - 1, 1);
+    else return;
+    handleDateShortcut(dateMode, newDate);
+  };
+
+  const handleNextPeriod = () => {
+    let newDate = new Date(baseDate);
+    if (dateMode === 'today') newDate = new Date(newDate.getTime() + 86400000);
+    else if (dateMode === 'week') newDate = new Date(newDate.getTime() + 7 * 86400000);
+    else if (dateMode === 'month') newDate = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 1);
+    else return;
+    handleDateShortcut(dateMode, newDate);
   };
 
   return (
@@ -136,24 +158,36 @@ export default function AccountingPage() {
             <Calendar className="w-5 h-5 text-gray-400" />
             <span className="text-sm font-bold text-gray-700">期間設定</span>
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => setDateRange('today')} className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">今日</button>
-            <button onClick={() => setDateRange('week')} className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">本週</button>
-            <button onClick={() => setDateRange('month')} className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">本月</button>
+          <div className="flex items-center gap-1">
+            <button onClick={handlePrevPeriod} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            </button>
+            <div className="flex gap-1">
+              <button onClick={() => handleDateShortcut('today')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'today' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>今日</button>
+              <button onClick={() => handleDateShortcut('week')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'week' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>本週</button>
+              <button onClick={() => handleDateShortcut('month')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'month' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>本月</button>
+            </div>
+            <button onClick={handleNextPeriod} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+              </svg>
+            </button>
           </div>
           <div className="h-6 w-px bg-gray-200 hidden md:block"></div>
           <div className="flex items-center gap-2">
             <input 
               type="date" 
               value={startDate} 
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => { setStartDate(e.target.value); setDateMode('custom'); }}
               className="text-sm border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
             />
             <span className="text-gray-400 text-sm">至</span>
             <input 
               type="date" 
               value={endDate} 
-              onChange={(e) => setEndDate(e.target.value)}
+              onChange={(e) => { setEndDate(e.target.value); setDateMode('custom'); }}
               className="text-sm border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
@@ -210,6 +244,56 @@ export default function AccountingPage() {
                 <div className="text-3xl font-black text-gray-900">NT$ {summary.avgPrice.toLocaleString()}</div>
               </div>
             </div>
+
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mt-6">
+              <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-indigo-600" />
+                營收趨勢圖
+              </h3>
+              <div className="h-[300px] w-full">
+                {summary.dailyData && summary.dailyData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={summary.dailyData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                      <XAxis 
+                        dataKey="date" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fill: '#6b7280', fontSize: 12 }} 
+                        dy={10}
+                      />
+                      <YAxis 
+                        domain={['auto', 'auto']}
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fill: '#6b7280', fontSize: 12 }}
+                        tickFormatter={(value) => `NT$ ${value}`}
+                        dx={-10}
+                      />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        formatter={(value) => [`NT$ ${value.toLocaleString()}`, '營收']}
+                        labelStyle={{ color: '#4b5563', fontWeight: 'bold', marginBottom: '4px' }}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="revenue" 
+                        stroke="#4f46e5" 
+                        strokeWidth={3}
+                        dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                        activeDot={{ r: 6, strokeWidth: 0, fill: '#4f46e5' }}
+                        animationDuration={1000}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-gray-400">
+                    這段期間尚未有營收資料
+                  </div>
+                )}
+              </div>
+            </div>
+            </>
           )}
 
           {activeTab === 'ledger' && (

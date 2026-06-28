@@ -40,22 +40,35 @@ export const getAccountingSummary = async (req, res) => {
       }
     });
 
+    const dailyDataMap = {};
+
     uniqueReservations.forEach(r => {
       if (r.is_paid) {
         totalRevenue += (r.total_amount || 0);
         paidCount++;
         totalPax += r.pax;
+        
+        // Group by local date string (e.g. "06/28")
+        const dateStr = r.session.session_date.toISOString().split('T')[0].substring(5).replace('-', '/'); // "MM/DD"
+        if (!dailyDataMap[dateStr]) dailyDataMap[dateStr] = 0;
+        dailyDataMap[dateStr] += (r.total_amount || 0);
       } else {
         unpaidCount++;
       }
     });
+
+    const dailyData = Object.keys(dailyDataMap).map(date => ({
+      date,
+      revenue: dailyDataMap[date]
+    })).sort((a, b) => a.date.localeCompare(b.date));
 
     res.json({
       totalRevenue,
       paidCount,
       unpaidCount,
       totalPax,
-      avgPrice: totalPax > 0 ? Math.round(totalRevenue / totalPax) : 0
+      avgPrice: totalPax > 0 ? Math.round(totalRevenue / totalPax) : 0,
+      dailyData
     });
   } catch (error) {
     console.error('Error fetching accounting summary:', error);
