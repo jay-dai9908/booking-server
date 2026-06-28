@@ -47,6 +47,7 @@ model Reservation {
   is_walk_in     Boolean  @default(false)
   is_paid        Boolean  @default(false)
   total_amount   Int?
+  is_amount_manual Boolean @default(false)
   paid_at        DateTime?
   cancelled_at   DateTime?
   cancelled_by   String?

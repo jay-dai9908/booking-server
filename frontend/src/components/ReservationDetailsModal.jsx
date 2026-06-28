@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { X, CheckCircle2, XCircle, Trash2 } from 'lucide-react';
+import { X, CheckCircle2, XCircle, Trash2, Pencil, Check } from 'lucide-react';
 import api from '../api/axios';
 import ExtendTimeModal from './ExtendTimeModal';
 
@@ -32,6 +32,8 @@ export const getReservationStatusUI = (r) => {
 export default function ReservationDetailsModal({ reservation, onClose, onUpdate, readOnly = false }) {
   const navigate = useNavigate();
   const [showExtendModal, setShowExtendModal] = React.useState(false);
+  const [isEditingAmount, setIsEditingAmount] = React.useState(false);
+  const [editAmountValue, setEditAmountValue] = React.useState('');
 
   if (!reservation) return null;
 
@@ -52,6 +54,23 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
     } catch (err) {
       console.error(err);
       alert('更新付費狀態失敗');
+    }
+  };
+
+  const handleSaveAmount = async () => {
+    if (!editAmountValue || isNaN(parseInt(editAmountValue))) {
+      alert('請輸入有效的金額');
+      return;
+    }
+    try {
+      await api.patch(`/reservations/admin/${reservation.booking_ref}/amount`, { 
+        total_amount: parseInt(editAmountValue) 
+      });
+      setIsEditingAmount(false);
+      if (onUpdate) onUpdate({ total_amount: parseInt(editAmountValue), is_amount_manual: true });
+    } catch (err) {
+      console.error(err);
+      alert('更新結帳金額失敗');
     }
   };
 
@@ -173,28 +192,55 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                 <div>
                   <h3 className="text-sm font-medium text-gray-500 mb-1">結帳金額</h3>
                   <div className="flex items-center gap-2">
-                    <p className="text-lg font-bold text-gray-900">NT$ {reservation.total_amount}</p>
-                    {reservation.is_paid ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded-md border border-yellow-200">
-                        💰 已結清
-                      </span>
+                    {isEditingAmount ? (
+                      <div className="flex items-center gap-1">
+                        <span className="text-lg font-bold text-gray-900">NT$</span>
+                        <input 
+                          type="number" 
+                          className="w-24 px-2 py-1 border border-gray-300 rounded text-lg font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          value={editAmountValue}
+                          onChange={(e) => setEditAmountValue(e.target.value)}
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveAmount();
+                            if (e.key === 'Escape') setIsEditingAmount(false);
+                          }}
+                        />
+                        <button onClick={handleSaveAmount} className="p-1 text-green-600 hover:bg-green-50 rounded">
+                          <Check className="w-5 h-5" />
+                        </button>
+                        <button onClick={() => setIsEditingAmount(false)} className="p-1 text-gray-400 hover:bg-gray-100 rounded">
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200">
-                        ⏳ 未付款
-                      </span>
+                      <>
+                        <p className="text-lg font-bold text-gray-900">NT$ {reservation.total_amount}</p>
+                        {!readOnly && (
+                          <button 
+                            onClick={() => {
+                              setEditAmountValue(reservation.total_amount.toString());
+                              setIsEditingAmount(true);
+                            }}
+                            className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                            title="編輯結帳金額"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                      </>
                     )}
-                    
-                    {!readOnly && (
-                      <button
-                        onClick={() => handleUpdatePayment(!reservation.is_paid)}
-                        className={`ml-2 text-xs px-3 py-1 rounded-md font-bold transition-colors border shadow-sm ${
-                          reservation.is_paid 
-                            ? 'text-gray-500 hover:bg-gray-100 border-gray-200' 
-                            : 'text-yellow-700 bg-yellow-50 hover:bg-yellow-100 border-yellow-300'
-                        }`}
-                      >
-                        {reservation.is_paid ? '退回未付款' : '👉 一鍵標記已付款'}
-                      </button>
+
+                    {!isEditingAmount && (
+                      reservation.is_paid ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded-md border border-yellow-200">
+                          💰 已結清
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200">
+                          ⏳ 未付款
+                        </span>
+                      )
                     )}
                   </div>
                 </div>

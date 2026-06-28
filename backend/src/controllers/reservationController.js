@@ -350,6 +350,28 @@ export const getAdminReservationDetails = async (req, res) => {
     if (reservations.length === 0) {
       return res.status(404).json({ error: 'Reservation not found' });
     }
+    
+    let firstRes = reservations[0];
+    
+    // Auto-recalculate if unpaid and not manually overridden
+    if (!firstRes.is_paid && !firstRes.is_amount_manual) {
+      await prisma.$transaction(async (tx) => {
+        const sessionDate = firstRes.session.session_date;
+        const pax = firstRes.pax;
+        const is_unlimited = firstRes.is_unlimited;
+        const totalAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
+        
+        if (totalAmount !== firstRes.total_amount) {
+          await tx.reservation.updateMany({
+            where: { booking_ref },
+            data: { total_amount: totalAmount }
+          });
+          // Update local objects for returning
+          reservations.forEach(r => r.total_amount = totalAmount);
+        }
+      });
+    }
+
     const grouped = groupReservations(reservations);
     res.json(grouped[0]);
   } catch (error) {
@@ -1152,5 +1174,33 @@ export const updatePaymentStatus = async (req, res) => {
       return res.status(404).json({ error: 'Reservation not found' });
     }
     res.status(500).json({ error: 'Failed to update payment status' });
+  }
+};
+
+export const updateAmount = async (req, res) => {
+  const { booking_ref } = req.params;
+  const { total_amount } = req.body;
+
+  if (total_amount === undefined || isNaN(parseInt(total_amount))) {
+    return res.status(400).json({ error: 'Valid total_amount is required' });
+  }
+
+  try {
+    const updated = await prisma.reservation.updateMany({
+      where: { booking_ref },
+      data: { 
+        total_amount: parseInt(total_amount),
+        is_amount_manual: true
+      }
+    });
+
+    if (updated.count === 0) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    res.json({ message: 'Amount updated successfully', total_amount: parseInt(total_amount) });
+  } catch (error) {
+    console.error('Error updating amount:', error);
+    res.status(500).json({ error: 'Failed to update amount' });
   }
 };
