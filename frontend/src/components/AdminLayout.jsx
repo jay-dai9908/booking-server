@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CalendarRange, Menu, X, LogOut, UserCog, CalendarDays, Grid } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarRange, Menu, X, LogOut, UserCog, CalendarDays, Grid, Banknote } from 'lucide-react';
 import api from '../api/axios';
 
 export default function AdminLayout() {
@@ -23,6 +23,7 @@ export default function AdminLayout() {
     { to: '/admin/members', icon: <UserCog className="w-5 h-5" />, label: '會員管理' },
     { to: '/admin/weekly', icon: <CalendarDays className="w-5 h-5" />, label: '周營業狀況' },
     { to: '/admin/seating', icon: <Grid className="w-5 h-5" />, label: '帶位圖管理' },
+    { to: '/admin/accounting', icon: <Banknote className="w-5 h-5" />, label: '帳務管理' },
   ];
 
   const SidebarContent = () => (
