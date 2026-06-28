@@ -249,7 +249,7 @@ export const getAdminReservations = async (req, res) => {
 
     let whereClause = {};
 
-    if (date && !search) {
+    if (date) {
       const startDate = new Date(`${date}T00:00:00.000Z`);
       const endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + 1);
@@ -260,7 +260,7 @@ export const getAdminReservations = async (req, res) => {
           lt: endDate
         }
       };
-    } else if (month && !search) {
+    } else if (month) {
       const startDate = new Date(`${month}-01T00:00:00.000Z`);
       const endDate = new Date(startDate);
       endDate.setMonth(endDate.getMonth() + 1);
@@ -274,6 +274,8 @@ export const getAdminReservations = async (req, res) => {
     }
 
     if (search) {
+      // If we already have a whereClause.session, we need to combine them with AND
+      // The easiest way is to just assign the OR array directly to whereClause.OR
       whereClause.OR = [
         { booking_ref: { contains: search } },
         { user: { name: { contains: search } } },
