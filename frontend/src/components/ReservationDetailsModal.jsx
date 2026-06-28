@@ -63,11 +63,22 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
       return;
     }
     try {
+      const amount = parseInt(editAmountValue);
       await api.patch(`/reservations/admin/${reservation.booking_ref}/amount`, { 
-        total_amount: parseInt(editAmountValue) 
+        total_amount: amount 
       });
+      
+      // Auto-mark as paid when manually editing amount
+      await api.patch(`/reservations/admin/${reservation.booking_ref}/payment`, { is_paid: true });
+      
       setIsEditingAmount(false);
-      if (onUpdate) onUpdate({ total_amount: parseInt(editAmountValue), is_amount_manual: true });
+      if (onUpdate) {
+        onUpdate({ 
+          total_amount: amount, 
+          is_amount_manual: true,
+          is_paid: true 
+        });
+      }
     } catch (err) {
       console.error(err);
       alert('更新結帳金額失敗');
