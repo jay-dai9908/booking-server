@@ -118,7 +118,7 @@ export const getUnpaidFollowUp = async (req, res) => {
     const unpaid = await prisma.reservation.findMany({
       where: {
         is_paid: false,
-        attendance: 'present',
+        attendance: 'checked_in',
         session: {
           session_date: {
             lte: end
