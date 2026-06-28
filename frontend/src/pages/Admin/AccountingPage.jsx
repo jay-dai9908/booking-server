@@ -158,25 +158,18 @@ export default function AccountingPage() {
             <Calendar className="w-5 h-5 text-gray-400" />
             <span className="text-sm font-bold text-gray-700">期間設定</span>
           </div>
-          <div className="flex items-center gap-1">
-            <button onClick={handlePrevPeriod} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-              </svg>
-            </button>
-            <div className="flex gap-1">
-              <button onClick={() => handleDateShortcut('today')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'today' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>今日</button>
-              <button onClick={() => handleDateShortcut('week')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'week' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>本週</button>
-              <button onClick={() => handleDateShortcut('month')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'month' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>本月</button>
-            </div>
-            <button onClick={handleNextPeriod} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-              </svg>
-            </button>
+          <div className="flex gap-2">
+            <button onClick={() => handleDateShortcut('today')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'today' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>今日</button>
+            <button onClick={() => handleDateShortcut('week')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'week' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>本週</button>
+            <button onClick={() => handleDateShortcut('month')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'month' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>本月</button>
           </div>
           <div className="h-6 w-px bg-gray-200 hidden md:block"></div>
           <div className="flex items-center gap-2">
+            <button onClick={handlePrevPeriod} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M15.293 4.293a1 1 0 010 1.414L10.414 10l4.879 4.293a1 1 0 11-1.414 1.414l-5-5a1 1 0 010-1.414l5-5a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            </button>
             <input 
               type="date" 
               value={startDate} 
@@ -190,6 +183,11 @@ export default function AccountingPage() {
               onChange={(e) => { setEndDate(e.target.value); setDateMode('custom'); }}
               className="text-sm border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
             />
+            <button onClick={handleNextPeriod} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.707 15.707a1 1 0 010-1.414L9.586 10 4.707 5.707a1 1 0 011.414-1.414l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0z" clipRule="evenodd" />
+              </svg>
+            </button>
           </div>
           {activeTab === 'ledger' && (
             <button 
