@@ -268,7 +268,7 @@ export default function AccountingPage() {
                   <AlertTriangle className="w-5 h-5" />
                   待收帳款 (已入座未結帳)
                 </h2>
-                <p className="text-red-600 text-sm mt-1">此列表顯示「已經報到入座 (包含過去與今日)」，但「尚未標記為已付款」的訂單，方便您進行帳務追蹤與防呆。</p>
+                <p className="text-red-600 text-sm mt-1">此列表顯示「已經報到入座 (2026-06-28 起至今日)」，但「尚未標記為已付款」的訂單，方便您進行帳務追蹤與防呆。</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left whitespace-nowrap">

@@ -112,8 +112,11 @@ export const getUnpaidFollowUp = async (req, res) => {
   try {
     // Unpaid orders where the session date is up to today
     // Helpful to find people who haven't paid.
+    // Filter from 2026-06-28 onwards since this feature was added then
     const end = new Date();
     end.setHours(23, 59, 59, 999);
+    
+    const start = new Date('2026-06-28T00:00:00Z');
 
     const unpaid = await prisma.reservation.findMany({
       where: {
@@ -121,6 +124,7 @@ export const getUnpaidFollowUp = async (req, res) => {
         attendance: 'checked_in',
         session: {
           session_date: {
+            gte: start,
             lte: end
           }
         }
