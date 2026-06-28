@@ -9,8 +9,13 @@ import userRoutes from './routes/users.js';
 import dailySettingsRoutes from './routes/dailySettings.js';
 import accountingRoutes from './routes/accounting.js';
 import { startCronJobs } from './cronJobs.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
