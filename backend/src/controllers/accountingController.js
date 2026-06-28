@@ -1,12 +1,14 @@
 import prisma from '../prismaClient.js';
-import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 
 export const getAccountingSummary = async (req, res) => {
   const { start_date, end_date } = req.query;
 
   try {
-    const startDate = start_date ? new Date(start_date) : startOfDay(new Date());
-    const endDate = end_date ? new Date(end_date) : endOfDay(new Date());
+    const start = start_date ? new Date(start_date) : new Date();
+    if (!start_date) start.setHours(0, 0, 0, 0);
+
+    const end = end_date ? new Date(end_date) : new Date();
+    if (!end_date) end.setHours(23, 59, 59, 999);
 
     // We only care about reservations where the SESSION falls in this date range.
     // And for revenue, only those that are PAID.
@@ -14,8 +16,8 @@ export const getAccountingSummary = async (req, res) => {
       where: {
         session: {
           session_date: {
-            gte: startDate,
-            lte: endDate
+            gte: start,
+            lte: end
           }
         }
       },
@@ -56,16 +58,19 @@ export const getLedger = async (req, res) => {
   const { start_date, end_date } = req.query;
 
   try {
-    const startDate = start_date ? new Date(start_date) : startOfDay(new Date());
-    const endDate = end_date ? new Date(end_date) : endOfDay(new Date());
+    const start = start_date ? new Date(start_date) : new Date();
+    if (!start_date) start.setHours(0, 0, 0, 0);
+
+    const end = end_date ? new Date(end_date) : new Date();
+    if (!end_date) end.setHours(23, 59, 59, 999);
 
     const ledgers = await prisma.reservation.findMany({
       where: {
         is_paid: true,
         session: {
           session_date: {
-            gte: startDate,
-            lte: endDate
+            gte: start,
+            lte: end
           }
         }
       },
@@ -89,14 +94,15 @@ export const getUnpaidFollowUp = async (req, res) => {
   try {
     // Unpaid orders where the session date is up to today
     // Helpful to find people who haven't paid.
-    const endDate = endOfDay(new Date());
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
 
     const unpaid = await prisma.reservation.findMany({
       where: {
         is_paid: false,
         session: {
           session_date: {
-            lte: endDate
+            lte: end
           }
         }
       },
