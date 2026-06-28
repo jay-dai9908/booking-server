@@ -64,6 +64,8 @@ model DailySetting {
 
 model GlobalSetting {
   id              Int      @id @default(1)
-  hourly_price    Int      @default(100)
-  unlimited_price Int      @default(300)
+  weekday_hourly_price    Int      @default(100)
+  weekday_unlimited_price Int      @default(550)
+  weekend_hourly_price    Int      @default(150)
+  weekend_unlimited_price Int      @default(800)
 }

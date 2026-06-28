@@ -99,13 +99,16 @@ const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlim
       where: { id: 1 }
     });
     
-    // Safety fallback in case GlobalSetting isn't initialized
+    // Determine if sessionDate is weekend (0 = Sunday, 6 = Saturday)
+    const dayOfWeek = new Date(sessionDate).getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
     if (!globalSetting) {
-      hourly_price = hourly_price ?? 100;
-      unlimited_price = unlimited_price ?? 300;
+      hourly_price = hourly_price ?? (isWeekend ? 150 : 100);
+      unlimited_price = unlimited_price ?? (isWeekend ? 800 : 550);
     } else {
-      hourly_price = hourly_price ?? globalSetting.hourly_price;
-      unlimited_price = unlimited_price ?? globalSetting.unlimited_price;
+      hourly_price = hourly_price ?? (isWeekend ? globalSetting.weekend_hourly_price : globalSetting.weekday_hourly_price);
+      unlimited_price = unlimited_price ?? (isWeekend ? globalSetting.weekend_unlimited_price : globalSetting.weekday_unlimited_price);
     }
   }
 

@@ -16,8 +16,10 @@ export default function SessionsPage() {
   const [allowUnlimited, setAllowUnlimited] = useState(true);
 
   // Pricing States
-  const [globalHourly, setGlobalHourly] = useState('');
-  const [globalUnlimited, setGlobalUnlimited] = useState('');
+  const [globalWeekdayHourly, setGlobalWeekdayHourly] = useState('');
+  const [globalWeekdayUnlimited, setGlobalWeekdayUnlimited] = useState('');
+  const [globalWeekendHourly, setGlobalWeekendHourly] = useState('');
+  const [globalWeekendUnlimited, setGlobalWeekendUnlimited] = useState('');
   
   const [dailyHourly, setDailyHourly] = useState('');
   const [dailyUnlimited, setDailyUnlimited] = useState('');
@@ -40,8 +42,10 @@ export default function SessionsPage() {
   const fetchGlobalSetting = async () => {
     try {
       const res = await api.get('/daily-settings/global');
-      setGlobalHourly(res.data.hourly_price || '');
-      setGlobalUnlimited(res.data.unlimited_price || '');
+      setGlobalWeekdayHourly(res.data.weekday_hourly_price || '');
+      setGlobalWeekdayUnlimited(res.data.weekday_unlimited_price || '');
+      setGlobalWeekendHourly(res.data.weekend_hourly_price || '');
+      setGlobalWeekendUnlimited(res.data.weekend_unlimited_price || '');
     } catch (err) {
       console.error('Error fetching global setting:', err);
     }
@@ -74,8 +78,10 @@ export default function SessionsPage() {
     e.preventDefault();
     try {
       await api.put('/daily-settings/global', { 
-        hourly_price: globalHourly || null, 
-        unlimited_price: globalUnlimited || null 
+        weekday_hourly_price: globalWeekdayHourly || null, 
+        weekday_unlimited_price: globalWeekdayUnlimited || null,
+        weekend_hourly_price: globalWeekendHourly || null,
+        weekend_unlimited_price: globalWeekendUnlimited || null
       });
       alert('全店預設價格更新成功！');
     } catch (err) {
@@ -352,13 +358,25 @@ export default function SessionsPage() {
             預設全店價格
           </h2>
           <form onSubmit={handleUpdateGlobalPrice} className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">每小時價格 (預設: 100)</label>
-              <input type="number" value={globalHourly} onChange={e => setGlobalHourly(e.target.value)} placeholder="100" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">平日/時</label>
+                <input type="number" value={globalWeekdayHourly} onChange={e => setGlobalWeekdayHourly(e.target.value)} placeholder="100" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">平日/上限</label>
+                <input type="number" value={globalWeekdayUnlimited} onChange={e => setGlobalWeekdayUnlimited(e.target.value)} placeholder="550" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">不限時價格 (預設: 300)</label>
-              <input type="number" value={globalUnlimited} onChange={e => setGlobalUnlimited(e.target.value)} placeholder="300" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">假日/時</label>
+                <input type="number" value={globalWeekendHourly} onChange={e => setGlobalWeekendHourly(e.target.value)} placeholder="150" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">假日/上限</label>
+                <input type="number" value={globalWeekendUnlimited} onChange={e => setGlobalWeekendUnlimited(e.target.value)} placeholder="800" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+              </div>
             </div>
             <button type="submit" className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-xl transition-all shadow-sm">儲存全店預設</button>
           </form>

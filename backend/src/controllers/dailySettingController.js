@@ -110,7 +110,12 @@ export const getGlobalSetting = async (req, res) => {
     let setting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
     if (!setting) {
       setting = await prisma.globalSetting.create({
-        data: { hourly_price: 100, unlimited_price: 300 }
+        data: { 
+          weekday_hourly_price: 100, 
+          weekday_unlimited_price: 550,
+          weekend_hourly_price: 150,
+          weekend_unlimited_price: 800
+        }
       });
     }
     res.json(setting);
@@ -121,20 +126,24 @@ export const getGlobalSetting = async (req, res) => {
 };
 
 export const updateGlobalSetting = async (req, res) => {
-  const { hourly_price, unlimited_price } = req.body;
+  const { weekday_hourly_price, weekday_unlimited_price, weekend_hourly_price, weekend_unlimited_price } = req.body;
 
   try {
     const dataToUpdate = {};
-    if (hourly_price !== undefined) dataToUpdate.hourly_price = parseInt(hourly_price);
-    if (unlimited_price !== undefined) dataToUpdate.unlimited_price = parseInt(unlimited_price);
+    if (weekday_hourly_price !== undefined) dataToUpdate.weekday_hourly_price = parseInt(weekday_hourly_price);
+    if (weekday_unlimited_price !== undefined) dataToUpdate.weekday_unlimited_price = parseInt(weekday_unlimited_price);
+    if (weekend_hourly_price !== undefined) dataToUpdate.weekend_hourly_price = parseInt(weekend_hourly_price);
+    if (weekend_unlimited_price !== undefined) dataToUpdate.weekend_unlimited_price = parseInt(weekend_unlimited_price);
 
     const setting = await prisma.globalSetting.upsert({
       where: { id: 1 },
       update: dataToUpdate,
       create: {
         id: 1,
-        hourly_price: dataToUpdate.hourly_price ?? 100,
-        unlimited_price: dataToUpdate.unlimited_price ?? 300
+        weekday_hourly_price: dataToUpdate.weekday_hourly_price ?? 100,
+        weekday_unlimited_price: dataToUpdate.weekday_unlimited_price ?? 550,
+        weekend_hourly_price: dataToUpdate.weekend_hourly_price ?? 150,
+        weekend_unlimited_price: dataToUpdate.weekend_unlimited_price ?? 800
       }
     });
 
