@@ -1099,32 +1099,21 @@ export const updatePaymentStatus = async (req, res) => {
     let totalAmount = undefined;
 
     if (is_paid) {
-      // Recalculate amount
-      await prisma.$transaction(async (tx) => {
-        const reservations = await tx.reservation.findMany({
-          where: { booking_ref },
-          include: { session: true }
-        });
-        
-        if (reservations.length > 0) {
-          const firstRes = reservations[0];
-          const sessionDate = firstRes.session.session_date;
-          const pax = firstRes.pax;
-          const is_unlimited = firstRes.is_unlimited;
-          
-          totalAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
-        }
-
-        const updated = await tx.reservation.updateMany({
-          where: { booking_ref },
-          data: { is_paid, ...(totalAmount !== undefined && { total_amount: totalAmount }) }
-        });
-
-        if (updated.count === 0) {
-          throw new Error('NOT_FOUND');
-        }
+      const updated = await prisma.reservation.updateMany({
+        where: { booking_ref },
+        data: { is_paid }
       });
-      res.json({ message: 'Payment status updated successfully', total_amount: totalAmount });
+
+      if (updated.count === 0) {
+        return res.status(404).json({ error: 'Reservation not found' });
+      }
+      
+      // Fetch the reservation to return the locked total_amount
+      const firstRes = await prisma.reservation.findFirst({
+        where: { booking_ref }
+      });
+
+      res.json({ message: 'Payment status updated successfully', total_amount: firstRes.total_amount });
     } else {
       const updated = await prisma.reservation.updateMany({
         where: { booking_ref },
