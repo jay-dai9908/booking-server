@@ -10,6 +10,7 @@ export default function DailyReservationsList({ date, onOpenDetails }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [totalRevenue, setTotalRevenue] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Reset page to 1 when date or search changes
@@ -33,6 +34,7 @@ export default function DailyReservationsList({ date, onOpenDetails }) {
       setReservations(res.data?.data || (Array.isArray(res.data) ? res.data : []));
       setTotalPages(res.data?.totalPages || 1);
       setTotalRecords(res.data?.total || (Array.isArray(res.data) ? res.data.length : 0));
+      setTotalRevenue(res.data?.total_daily_revenue || 0);
     } catch (err) {
       console.error(err);
     } finally {
@@ -43,7 +45,15 @@ export default function DailyReservationsList({ date, onOpenDetails }) {
   return (
     <div className="mt-8 pt-8 border-t-2 border-gray-200">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
-        <h2 className="text-xl font-bold text-gray-800 whitespace-nowrap">當日所有訂單列表</h2>
+        <div className="flex items-center gap-4">
+          <h2 className="text-xl font-bold text-gray-800 whitespace-nowrap">當日所有訂單列表</h2>
+          {totalRevenue > 0 && !searchQuery && (
+            <div className="bg-green-50 text-green-700 px-3 py-1 rounded-lg border border-green-200 font-medium text-sm flex items-center gap-1.5">
+              <span>本日目前實收：</span>
+              <span className="font-bold">NT$ {totalRevenue.toLocaleString()}</span>
+            </div>
+          )}
+        </div>
         
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">

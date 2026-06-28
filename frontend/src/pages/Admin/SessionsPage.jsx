@@ -15,15 +15,44 @@ export default function SessionsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [allowUnlimited, setAllowUnlimited] = useState(true);
 
+  // Pricing States
+  const [globalHourly, setGlobalHourly] = useState('');
+  const [globalUnlimited, setGlobalUnlimited] = useState('');
+  
+  const [dailyHourly, setDailyHourly] = useState('');
+  const [dailyUnlimited, setDailyUnlimited] = useState('');
+
+  const [batchStartDate, setBatchStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [batchEndDate, setBatchEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [batchHourly, setBatchHourly] = useState('');
+  const [batchUnlimited, setBatchUnlimited] = useState('');
+  const [isBatching, setIsBatching] = useState(false);
+
+  useEffect(() => {
+    fetchGlobalSetting();
+  }, []);
+
   useEffect(() => {
     fetchSessions(listDate);
     fetchDailySetting(listDate);
   }, [listDate]);
 
+  const fetchGlobalSetting = async () => {
+    try {
+      const res = await api.get('/daily-settings/global');
+      setGlobalHourly(res.data.hourly_price || '');
+      setGlobalUnlimited(res.data.unlimited_price || '');
+    } catch (err) {
+      console.error('Error fetching global setting:', err);
+    }
+  };
+
   const fetchDailySetting = async (date) => {
     try {
       const res = await api.get(`/daily-settings?date=${date}`);
       setAllowUnlimited(res.data.allow_unlimited);
+      setDailyHourly(res.data.hourly_price || '');
+      setDailyUnlimited(res.data.unlimited_price || '');
     } catch (err) {
       console.error('Error fetching daily setting:', err);
     }
@@ -31,15 +60,59 @@ export default function SessionsPage() {
 
   const handleToggleUnlimited = async () => {
     const newValue = !allowUnlimited;
-    // Optimistic update
     setAllowUnlimited(newValue);
     try {
       await api.put('/daily-settings', { date: listDate, allow_unlimited: newValue });
     } catch (err) {
       console.error('Error updating daily setting:', err);
-      // Revert on failure
       setAllowUnlimited(!newValue);
       alert('更新設定失敗');
+    }
+  };
+
+  const handleUpdateGlobalPrice = async (e) => {
+    e.preventDefault();
+    try {
+      await api.put('/daily-settings/global', { 
+        hourly_price: globalHourly || null, 
+        unlimited_price: globalUnlimited || null 
+      });
+      alert('全店預設價格更新成功！');
+    } catch (err) {
+      alert('更新失敗');
+    }
+  };
+
+  const handleUpdateDailyPrice = async (e) => {
+    e.preventDefault();
+    try {
+      await api.put('/daily-settings', { 
+        date: listDate,
+        hourly_price: dailyHourly || null,
+        unlimited_price: dailyUnlimited || null
+      });
+      alert('單日覆蓋價格更新成功！');
+    } catch (err) {
+      alert('更新失敗');
+    }
+  };
+
+  const handleBatchUpdatePrices = async (e) => {
+    e.preventDefault();
+    setIsBatching(true);
+    try {
+      await api.post('/daily-settings/batch', {
+        start_date: batchStartDate,
+        end_date: batchEndDate,
+        hourly_price: batchHourly || null,
+        unlimited_price: batchUnlimited || null
+      });
+      alert('批次修改成功！');
+      fetchDailySetting(listDate);
+    } catch (err) {
+      alert('批次修改失敗');
+    } finally {
+      setIsBatching(false);
     }
   };
 
@@ -269,6 +342,76 @@ export default function SessionsPage() {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mt-8">
+        {/* Global Prices */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+            預設全店價格
+          </h2>
+          <form onSubmit={handleUpdateGlobalPrice} className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">每小時價格 (預設: 100)</label>
+              <input type="number" value={globalHourly} onChange={e => setGlobalHourly(e.target.value)} placeholder="100" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">不限時價格 (預設: 300)</label>
+              <input type="number" value={globalUnlimited} onChange={e => setGlobalUnlimited(e.target.value)} placeholder="300" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+            </div>
+            <button type="submit" className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-xl transition-all shadow-sm">儲存全店預設</button>
+          </form>
+        </div>
+
+        {/* Daily Prices Overrides */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+            {format(new Date(listDate), 'yyyy-MM-dd')} 單日覆蓋設定
+          </h2>
+          <form onSubmit={handleUpdateDailyPrice} className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">每小時價格 (留空使用預設)</label>
+              <input type="number" value={dailyHourly} onChange={e => setDailyHourly(e.target.value)} placeholder="留空使用預設" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">不限時價格 (留空使用預設)</label>
+              <input type="number" value={dailyUnlimited} onChange={e => setDailyUnlimited(e.target.value)} placeholder="留空使用預設" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+            </div>
+            <button type="submit" className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-xl transition-all shadow-sm">儲存單日覆蓋</button>
+          </form>
+        </div>
+
+        {/* Batch Prices Overrides */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+            批次修改價格覆蓋
+          </h2>
+          <form onSubmit={handleBatchUpdatePrices} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">開始日期</label>
+                <input type="date" required value={batchStartDate} onChange={e => {setBatchStartDate(e.target.value); if(e.target.value > batchEndDate) setBatchEndDate(e.target.value);}} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">結束日期</label>
+                <input type="date" required min={batchStartDate} value={batchEndDate} onChange={e => setBatchEndDate(e.target.value)} className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">每小時價格</label>
+                <input type="number" value={batchHourly} onChange={e => setBatchHourly(e.target.value)} placeholder="留空清除覆蓋" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">不限時價格</label>
+                <input type="number" value={batchUnlimited} onChange={e => setBatchUnlimited(e.target.value)} placeholder="留空清除覆蓋" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+              </div>
+            </div>
+            <button type="submit" disabled={isBatching} className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50">
+              {isBatching ? <div className="w-5 h-5 mx-auto border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '批次儲存覆蓋'}
+            </button>
+          </form>
         </div>
       </div>
     </div>

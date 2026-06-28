@@ -169,6 +169,36 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                   )}
                 </div>
               </div>
+              {reservation.total_amount != null && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">結帳金額</h3>
+                  <div className="flex items-center gap-2">
+                    <p className="text-lg font-bold text-gray-900">NT$ {reservation.total_amount}</p>
+                    {reservation.is_paid ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded-md border border-yellow-200">
+                        💰 已結清
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200">
+                        ⏳ 未付款
+                      </span>
+                    )}
+                    
+                    {!readOnly && (
+                      <button
+                        onClick={() => handleUpdatePayment(!reservation.is_paid)}
+                        className={`ml-2 text-xs px-3 py-1 rounded-md font-bold transition-colors border shadow-sm ${
+                          reservation.is_paid 
+                            ? 'text-gray-500 hover:bg-gray-100 border-gray-200' 
+                            : 'text-yellow-700 bg-yellow-50 hover:bg-yellow-100 border-yellow-300'
+                        }`}
+                      >
+                        {reservation.is_paid ? '退回未付款' : '👉 一鍵標記已付款'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">當前狀態</h3>
                 <div className="mt-1">

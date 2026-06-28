@@ -46,6 +46,7 @@ model Reservation {
   is_unlimited   Boolean  @default(false)
   is_walk_in     Boolean  @default(false)
   is_paid        Boolean  @default(false)
+  total_amount   Int?
   cancelled_at   DateTime?
   cancelled_by   String?
   
@@ -57,4 +58,12 @@ model DailySetting {
   id              Int      @id @default(autoincrement())
   date            DateTime @unique @db.Date
   allow_unlimited Boolean  @default(true)
+  hourly_price    Int?
+  unlimited_price Int?
+}
+
+model GlobalSetting {
+  id              Int      @id @default(1)
+  hourly_price    Int      @default(100)
+  unlimited_price Int      @default(300)
 }

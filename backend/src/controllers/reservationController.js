@@ -23,6 +23,8 @@ const groupReservations = (reservations) => {
         is_seat_locked: r.is_seat_locked || false,
         is_force_split: r.is_force_split || false,
         is_unlimited: r.is_unlimited || false,
+        is_paid: r.is_paid || false,
+        total_amount: r.total_amount || null,
         cancelled_at: r.cancelled_at || null,
         cancelled_by: r.cancelled_by || null
       };
@@ -73,10 +75,44 @@ const groupReservations = (reservations) => {
       is_seat_locked: group.is_seat_locked,
       is_force_split: group.is_force_split,
       is_unlimited: group.is_unlimited,
+      is_paid: group.is_paid,
+      total_amount: group.total_amount,
       cancelled_at: group.cancelled_at,
       cancelled_by: group.cancelled_by
     };
   });
+};
+
+// Helper function to calculate total amount based on pricing rules
+const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlimited) => {
+  // Try to find DailySetting override
+  const dailySetting = await tx.dailySetting.findUnique({
+    where: { date: sessionDate }
+  });
+
+  let hourly_price = dailySetting?.hourly_price;
+  let unlimited_price = dailySetting?.unlimited_price;
+
+  // If daily setting doesn't have prices, fallback to GlobalSetting
+  if (hourly_price == null || unlimited_price == null) {
+    const globalSetting = await tx.globalSetting.findUnique({
+      where: { id: 1 }
+    });
+    
+    // Safety fallback in case GlobalSetting isn't initialized
+    if (!globalSetting) {
+      hourly_price = hourly_price ?? 100;
+      unlimited_price = unlimited_price ?? 300;
+    } else {
+      hourly_price = hourly_price ?? globalSetting.hourly_price;
+      unlimited_price = unlimited_price ?? globalSetting.unlimited_price;
+    }
+  }
+
+  const calculatedHourlyTotal = pax * hourly_price * sessionCount;
+  const calculatedUnlimitedTotal = pax * unlimited_price;
+
+  return Math.min(calculatedHourlyTotal, calculatedUnlimitedTotal);
 };
 
 export const createReservation = async (req, res) => {
@@ -141,6 +177,9 @@ export const createReservation = async (req, res) => {
       
       const mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
 
+      const is_unlimited = req.body.isUnlimited === true;
+      const totalAmount = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
+
       for (const sessionId of session_ids) {
         newReservationsData.push({
           booking_ref,
@@ -150,7 +189,8 @@ export const createReservation = async (req, res) => {
           status: 'confirmed',
           assigned_seats: mySeats,
           is_force_split: forceSplit === true,
-          is_unlimited: req.body.isUnlimited === true
+          is_unlimited: is_unlimited,
+          total_amount: totalAmount
         });
       }
 
@@ -263,6 +303,17 @@ export const getAdminReservations = async (req, res) => {
       return a.start_time.localeCompare(b.start_time);
     });
 
+    // Calculate total daily revenue if it's a specific date query
+    let total_daily_revenue = 0;
+    if (date && !search) {
+      total_daily_revenue = grouped.reduce((sum, r) => {
+        if (r.status === 'confirmed' && r.is_paid && r.total_amount) {
+          return sum + r.total_amount;
+        }
+        return sum;
+      }, 0);
+    }
+
     const total = grouped.length;
     const totalPages = Math.ceil(total / limit);
     const paginatedData = grouped.slice((page - 1) * limit, page * limit);
@@ -271,7 +322,8 @@ export const getAdminReservations = async (req, res) => {
       data: paginatedData,
       total,
       page,
-      totalPages
+      totalPages,
+      total_daily_revenue
     });
   } catch (error) {
     console.error('Error fetching reservations:', error);
@@ -797,6 +849,8 @@ export const adminCreateReservation = async (req, res) => {
       }
 
       const newReservationsData = [];
+      const is_unlimited = req.body.isUnlimited === true || req.body.isUnlimited === 'true';
+      const totalAmount = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -807,7 +861,9 @@ export const adminCreateReservation = async (req, res) => {
           status: 'confirmed',
           assigned_seats: mySeats,
           is_force_split: forceSplit === true || forceSplit === 'true',
-          is_walk_in: isWalkIn === true || isWalkIn === 'true'
+          is_walk_in: isWalkIn === true || isWalkIn === 'true',
+          is_unlimited: is_unlimited,
+          total_amount: totalAmount
         });
       }
 
@@ -938,6 +994,16 @@ export const extendReservation = async (req, res) => {
         }
       }
 
+      const is_unlimited = baseReservation.is_unlimited;
+      const sessionDate = sessions[0].session_date;
+      const totalAmount = await calculateTotalAmount(tx, sessionDate, pax, existingReservations.length + session_ids.length, is_unlimited);
+
+      // Update total_amount for existing reservations
+      await tx.reservation.updateMany({
+        where: { booking_ref },
+        data: { total_amount: totalAmount }
+      });
+
       const newReservationsData = [];
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -948,7 +1014,9 @@ export const extendReservation = async (req, res) => {
           status: 'confirmed',
           assigned_seats: mySeats,
           is_force_split: forceSplit === true || forceSplit === 'true',
-          is_walk_in
+          is_walk_in,
+          is_unlimited,
+          total_amount: totalAmount
         });
       }
 
@@ -1025,18 +1093,52 @@ export const updatePaymentStatus = async (req, res) => {
   }
 
   try {
-    const updated = await prisma.reservation.updateMany({
-      where: { booking_ref },
-      data: { is_paid }
-    });
+    let totalAmount = undefined;
 
-    if (updated.count === 0) {
-      return res.status(404).json({ error: 'Reservation not found' });
+    if (is_paid) {
+      // Recalculate amount
+      await prisma.$transaction(async (tx) => {
+        const reservations = await tx.reservation.findMany({
+          where: { booking_ref },
+          include: { session: true }
+        });
+        
+        if (reservations.length > 0) {
+          const firstRes = reservations[0];
+          const sessionDate = firstRes.session.session_date;
+          const pax = firstRes.pax;
+          const is_unlimited = firstRes.is_unlimited;
+          
+          totalAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
+        }
+
+        const updated = await tx.reservation.updateMany({
+          where: { booking_ref },
+          data: { is_paid, ...(totalAmount !== undefined && { total_amount: totalAmount }) }
+        });
+
+        if (updated.count === 0) {
+          throw new Error('NOT_FOUND');
+        }
+      });
+      res.json({ message: 'Payment status updated successfully', total_amount: totalAmount });
+    } else {
+      const updated = await prisma.reservation.updateMany({
+        where: { booking_ref },
+        data: { is_paid }
+      });
+      
+      if (updated.count === 0) {
+        return res.status(404).json({ error: 'Reservation not found' });
+      }
+      
+      res.json({ message: 'Payment status updated successfully', count: updated.count });
     }
-
-    res.json({ message: 'Payment status updated successfully', count: updated.count });
   } catch (error) {
     console.error('Error updating payment status:', error);
+    if (error.message === 'NOT_FOUND') {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
     res.status(500).json({ error: 'Failed to update payment status' });
   }
 };
