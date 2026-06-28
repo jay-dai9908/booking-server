@@ -57,7 +57,23 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
       const res = await api.get(`/sessions?date=${selectedDate}`);
       setSessions(res.data);
       if (res.data.length > 0) {
-        setSelectedSessionId(res.data[0].id);
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        
+        if (selectedDate === todayStr) {
+          const currentTimeStr = format(new Date(), 'HH:mm');
+          // Find a session where current time is within [start_time, end_time)
+          const currentSession = res.data.find(s => 
+            s.start_time <= currentTimeStr && s.end_time > currentTimeStr
+          );
+          
+          if (currentSession) {
+            setSelectedSessionId(currentSession.id);
+          } else {
+            setSelectedSessionId(res.data[0].id);
+          }
+        } else {
+          setSelectedSessionId(res.data[0].id);
+        }
       } else {
         setSelectedSessionId(null);
       }
