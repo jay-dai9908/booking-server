@@ -266,9 +266,9 @@ export default function AccountingPage() {
               <div className="p-6 bg-red-50 border-b border-red-100">
                 <h2 className="text-red-800 font-bold flex items-center gap-2">
                   <AlertTriangle className="w-5 h-5" />
-                  歷史未付款訂單
+                  待收帳款 (已入座未結帳)
                 </h2>
-                <p className="text-red-600 text-sm mt-1">此列表顯示「預約日期為今日之前 (含今日)」，且「尚未標記為已付款」的訂單，方便您進行帳務追蹤與防呆。</p>
+                <p className="text-red-600 text-sm mt-1">此列表顯示「已經報到入座 (包含過去與今日)」，但「尚未標記為已付款」的訂單，方便您進行帳務追蹤與防呆。</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left whitespace-nowrap">
