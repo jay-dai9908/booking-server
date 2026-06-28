@@ -1132,11 +1132,16 @@ export const updatePaymentStatus = async (req, res) => {
         
         if (reservations.length > 0) {
           const firstRes = reservations[0];
-          const sessionDate = firstRes.session.session_date;
-          const pax = firstRes.pax;
-          const is_unlimited = firstRes.is_unlimited;
           
-          totalAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
+          if (!firstRes.is_amount_manual) {
+            const sessionDate = firstRes.session.session_date;
+            const pax = firstRes.pax;
+            const is_unlimited = firstRes.is_unlimited;
+            
+            totalAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
+          } else {
+            totalAmount = firstRes.total_amount;
+          }
         }
 
         const updated = await tx.reservation.updateMany({
