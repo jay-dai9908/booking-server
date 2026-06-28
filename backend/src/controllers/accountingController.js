@@ -31,7 +31,16 @@ export const getAccountingSummary = async (req, res) => {
     let unpaidCount = 0;
     let totalPax = 0;
 
+    const seenRefs = new Set();
+    const uniqueReservations = [];
     reservations.forEach(r => {
+      if (!seenRefs.has(r.booking_ref)) {
+        seenRefs.add(r.booking_ref);
+        uniqueReservations.push(r);
+      }
+    });
+
+    uniqueReservations.forEach(r => {
       if (r.is_paid) {
         totalRevenue += (r.total_amount || 0);
         paidCount++;
@@ -83,7 +92,16 @@ export const getLedger = async (req, res) => {
       }
     });
 
-    res.json(ledgers);
+    const seenRefs = new Set();
+    const uniqueLedgers = [];
+    ledgers.forEach(r => {
+      if (!seenRefs.has(r.booking_ref)) {
+        seenRefs.add(r.booking_ref);
+        uniqueLedgers.push(r);
+      }
+    });
+
+    res.json(uniqueLedgers);
   } catch (error) {
     console.error('Error fetching ledger:', error);
     res.status(500).json({ error: 'Failed to fetch ledger' });
@@ -117,7 +135,16 @@ export const getUnpaidFollowUp = async (req, res) => {
       }
     });
 
-    res.json(unpaid);
+    const seenRefs = new Set();
+    const uniqueUnpaid = [];
+    unpaid.forEach(r => {
+      if (!seenRefs.has(r.booking_ref)) {
+        seenRefs.add(r.booking_ref);
+        uniqueUnpaid.push(r);
+      }
+    });
+
+    res.json(uniqueUnpaid);
   } catch (error) {
     console.error('Error fetching unpaid follow up:', error);
     res.status(500).json({ error: 'Failed to fetch unpaid follow up' });
