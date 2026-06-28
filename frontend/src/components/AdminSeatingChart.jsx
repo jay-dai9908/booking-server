@@ -251,6 +251,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
               <div className="text-sm font-bold truncate px-1 max-w-[80px]">
                 {occupant.is_walk_in && <span className="text-orange-500 mr-0.5">🚶</span>}
                 {occupant.user?.name}
+                {occupant.is_paid && <span className="ml-0.5" title="已付費">💰</span>}
               </div>
               {occupant.booking_end_time && (
                 <div className={`text-[10px] -mt-0.5 font-bold ${isLastHour ? 'text-red-500' : 'opacity-80'}`}>

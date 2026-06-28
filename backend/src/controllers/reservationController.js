@@ -1015,3 +1015,28 @@ export const updateAttendance = async (req, res) => {
     res.status(500).json({ error: 'Failed to update attendance' });
   }
 };
+
+export const updatePaymentStatus = async (req, res) => {
+  const { booking_ref } = req.params;
+  const { is_paid } = req.body;
+
+  if (typeof is_paid !== 'boolean') {
+    return res.status(400).json({ error: 'Invalid payment status' });
+  }
+
+  try {
+    const updated = await prisma.reservation.updateMany({
+      where: { booking_ref },
+      data: { is_paid }
+    });
+
+    if (updated.count === 0) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    res.json({ message: 'Payment status updated successfully', count: updated.count });
+  } catch (error) {
+    console.error('Error updating payment status:', error);
+    res.status(500).json({ error: 'Failed to update payment status' });
+  }
+};

@@ -45,6 +45,16 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
     }
   };
 
+  const handleUpdatePayment = async (is_paid) => {
+    try {
+      await api.patch(`/reservations/admin/${reservation.booking_ref}/payment`, { is_paid });
+      if (onUpdate) onUpdate({ is_paid });
+    } catch (err) {
+      console.error(err);
+      alert('更新付費狀態失敗');
+    }
+  };
+
   const handleCancelReservation = async () => {
     if (window.confirm('確定要取消此預約嗎？此操作無法復原。')) {
       try {
@@ -236,6 +246,17 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                         className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 disabled:bg-gray-50 disabled:text-gray-400 text-gray-700 rounded-xl font-medium transition-colors"
                       >
                         清除報到標記
+                      </button>
+                      <button 
+                        onClick={() => handleUpdatePayment(!reservation.is_paid)}
+                        className={`px-4 py-2 border rounded-xl font-medium transition-colors flex items-center gap-2 ${
+                          reservation.is_paid 
+                            ? 'bg-yellow-100 border-yellow-300 text-yellow-800 hover:bg-yellow-200' 
+                            : 'bg-white border-yellow-300 text-yellow-600 hover:bg-yellow-50'
+                        }`}
+                      >
+                        <span>💰</span>
+                        {reservation.is_paid ? '取消付費標記' : '標記為已付費'}
                       </button>
                     </>
                   )}
