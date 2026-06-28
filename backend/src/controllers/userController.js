@@ -49,6 +49,32 @@ export const getUsers = async (req, res) => {
   }
 };
 
+export const getUserById = async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: parseInt(req.params.id) },
+      select: {
+        id: true,
+        line_user_id: true,
+        name: true,
+        phone: true,
+        created_at: true,
+        is_blacklisted: true,
+        notes: true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Failed to fetch user' });
+  }
+};
+
 export const getUserReservations = async (req, res) => {
   const { id } = req.params;
   try {

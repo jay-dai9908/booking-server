@@ -25,13 +25,21 @@ export default function MembersPage() {
   }, [page, memberSearchQuery]);
 
   useEffect(() => {
-    if (users && users.length > 0) {
-      const userId = searchParams.get('userId');
-      if (userId) {
-        const user = users.find(u => u.id === parseInt(userId, 10));
-        if (user) {
-          setSelectedMember(user);
-        }
+    const userId = searchParams.get('userId');
+    if (userId) {
+      const parsedId = parseInt(userId, 10);
+      const user = users.find(u => u.id === parsedId);
+      if (user) {
+        setSelectedMember(user);
+      } else {
+        // Fetch the specific user if not in the current list
+        api.get(`/users/${parsedId}`)
+          .then(res => {
+            setSelectedMember(res.data);
+          })
+          .catch(err => {
+            console.error('Failed to fetch specific user:', err);
+          });
       }
     }
   }, [users, searchParams]);
