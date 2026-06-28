@@ -15,7 +15,7 @@ import ReservationsPage from './pages/Admin/ReservationsPage';
 import MembersPage from './pages/Admin/MembersPage';
 import WeeklyPage from './pages/Admin/WeeklyPage';
 import SeatingPage from './pages/Admin/SeatingPage';
-import WeeklyReportPage from './pages/Admin/WeeklyReportPage';
+
 import AccountingPage from './pages/Admin/AccountingPage';
 
 function App() {
@@ -71,7 +71,7 @@ function App() {
           <Route path="members" element={<MembersPage />} />
           <Route path="weekly" element={<WeeklyPage />} />
           <Route path="seating" element={<SeatingPage />} />
-          <Route path="weekly-report" element={<WeeklyReportPage />} />
+
           <Route path="accounting" element={<AccountingPage />} />
         </Route>
 
