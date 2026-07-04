@@ -44,7 +44,7 @@ export const getSessions = async (req, res) => {
         start_time: session.start_time,
         end_time: session.end_time,
         max_capacity: session.max_capacity,
-        remaining_capacity: session.max_capacity - bookedPax
+        remaining_capacity: Math.max(0, session.max_capacity - bookedPax)
       };
     });
 
