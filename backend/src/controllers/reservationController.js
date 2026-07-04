@@ -165,6 +165,17 @@ export const createReservation = async (req, res) => {
         session_ids: session_ids 
       };
 
+      // Strict capacity check before allocation
+      for (const reqSession of requestedSessions) {
+        const bookedPax = currentReservations
+          .filter(r => r.session_id === reqSession.id)
+          .reduce((sum, r) => sum + r.pax, 0);
+        
+        if (reqSession.max_capacity - bookedPax < parseInt(pax, 10)) {
+          throw new Error('INSUFFICIENT_CAPACITY');
+        }
+      }
+
       // Run Continuous Block Allocation algorithm
       const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true);
 
@@ -984,9 +995,6 @@ export const extendReservation = async (req, res) => {
         // Capacity check for non-wait modes
         for (const session of sessions) {
           const bookedPax = session.reservations.reduce((sum, res) => {
-            if (res.assigned_seats && res.assigned_seats.length > 0 && res.assigned_seats[0].startsWith('WAIT')) {
-              return sum;
-            }
             return sum + res.pax;
           }, 0);
           if (session.max_capacity - bookedPax < pax) {
