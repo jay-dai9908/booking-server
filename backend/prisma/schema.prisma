@@ -70,6 +70,7 @@ model GlobalSetting {
   weekday_unlimited_price Int      @default(550)
   weekend_hourly_price    Int      @default(150)
   weekend_unlimited_price Int      @default(800)
+  is_lockdown_mode        Boolean  @default(false)
 }
 
 model BannedIP {

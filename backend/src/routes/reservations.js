@@ -12,7 +12,7 @@ router.get('/my', queryLimiter, verifyToken, getMyReservations);
 router.delete('/:id', verifyToken, cancelReservation);
 router.delete('/:id/record', verifyToken, requireAdmin, deleteReservationRecord);
 router.get('/admin', verifyToken, requireAdmin, getAdminReservations);
-router.get('/admin/:booking_ref/details', verifyToken, requireAdmin, getAdminReservationDetails);
+router.get('/admin/:booking_ref/details', queryLimiter, verifyToken, requireAdmin, getAdminReservationDetails);
 router.post('/admin', verifyToken, requireAdmin, adminCreateReservation);
 router.post('/admin/:booking_ref/extend', verifyToken, requireAdmin, extendReservation);
 router.patch('/admin/:booking_ref/payment', verifyToken, requireAdmin, updatePaymentStatus);

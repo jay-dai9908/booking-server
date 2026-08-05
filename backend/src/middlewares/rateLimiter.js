@@ -70,6 +70,17 @@ export const rateLimiter = ({ windowMs, max, reason }) => {
         });
         bannedIPCache.add(ip);
         console.warn(`[SECURITY] Banned IP ${ip}. Reason: ${reason}`);
+
+        // Check for lockdown trigger
+        if (bannedIPCache.size >= 3) {
+          await prisma.globalSetting.upsert({
+            where: { id: 1 },
+            update: { is_lockdown_mode: true },
+            create: { id: 1, is_lockdown_mode: true }
+          });
+          console.error('[SECURITY] SYSTEM LOCKDOWN INITIATED DUE TO MULTIPLE BANNED IPs');
+        }
+
       } catch (err) {
         console.error('Failed to ban IP', err);
       }
