@@ -5,7 +5,7 @@ import { rateLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
-const queryLimiter = rateLimiter({ windowMs: 3 * 60 * 1000, max: 10, reason: 'Too many reservation queries' });
+const queryLimiter = rateLimiter({ windowMs: 3 * 60 * 1000, max: 15, reason: 'Too many reservation queries' });
 
 router.post('/', verifyToken, createReservation);
 router.get('/my', queryLimiter, verifyToken, getMyReservations);
