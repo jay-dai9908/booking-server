@@ -71,3 +71,10 @@ model GlobalSetting {
   weekend_hourly_price    Int      @default(150)
   weekend_unlimited_price Int      @default(800)
 }
+
+model BannedIP {
+  id         Int      @id @default(autoincrement())
+  ip         String   @unique
+  reason     String?
+  banned_at  DateTime @default(now())
+}

@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import sessionRoutes from './routes/sessions.js';
 import reservationRoutes from './routes/reservations.js';
+import { checkBannedIP } from './middlewares/rateLimiter.js';
 import userRoutes from './routes/users.js';
 import dailySettingsRoutes from './routes/dailySettings.js';
 import accountingRoutes from './routes/accounting.js';
@@ -21,9 +22,13 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Start background cron jobs
+// Start background cron jobs
 startCronJobs();
 
+app.set('trust proxy', 1);
+
 // Middleware
+app.use(checkBannedIP);
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true, // Allow cookies to be sent
