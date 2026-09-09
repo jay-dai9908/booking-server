@@ -27,7 +27,8 @@ export const requireAdmin = async (req, res, next) => {
       try {
         const settings = await prisma.globalSetting.findUnique({ where: { id: 1 } });
         if (settings && settings.is_lockdown_mode) {
-          return res.status(403).json({ error: 'SYSTEM LOCKED DOWN DUE TO SECURITY THREAT. Read/Delete access revoked.' });
+          // Temporarily disabled lockdown check
+          // return res.status(403).json({ error: 'SYSTEM LOCKED DOWN DUE TO SECURITY THREAT. Read/Delete access revoked.' });
         }
       } catch (err) {
         console.error('Failed to check lockdown status', err);

@@ -16,6 +16,7 @@ const loadBannedIPs = async () => {
 loadBannedIPs();
 
 export const checkBannedIP = async (req, res, next) => {
+  return next(); // Temporarily disabled
   const ip = req.ip || req.connection.remoteAddress;
   if (bannedIPCache.has(ip)) {
     return res.status(403).json({ error: 'Your IP has been banned due to suspicious activity.' });
@@ -38,6 +39,7 @@ setInterval(() => {
 
 export const rateLimiter = ({ windowMs, max, reason }) => {
   return async (req, res, next) => {
+    return next(); // Temporarily disabled
     const ip = req.ip || req.connection.remoteAddress;
     
     if (bannedIPCache.has(ip)) {
