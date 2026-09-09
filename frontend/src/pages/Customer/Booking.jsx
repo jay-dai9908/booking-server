@@ -161,7 +161,7 @@ function Booking() {
       {/* Header */}
       <header className="bg-white shadow-sm px-4 py-4 mb-6">
         <div className="max-w-3xl mx-auto flex justify-between items-center">
-          <h1 className="text-xl font-bold text-gray-800">藝術家的貓 拼豆時段預約系統</h1>
+          <h1 className="text-xl font-bold text-gray-800">拾光製所 拼豆時段預約系統</h1>
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setShowHistoryModal(true)}

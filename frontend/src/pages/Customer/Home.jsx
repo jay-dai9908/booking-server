@@ -86,7 +86,7 @@ function Home({ userRole }) {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
       <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center">
-        <h1 className="text-3xl font-bold text-gray-800 mb-6">藝術家的貓 拼豆時段預約系統</h1>
+        <h1 className="text-3xl font-bold text-gray-800 mb-6">拾光製所 拼豆時段預約系統</h1>
         <p className="text-gray-600 mb-8">請登入您的 LINE 帳號以進行預約</p>
         
         <button 
