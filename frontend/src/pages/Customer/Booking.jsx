@@ -270,31 +270,37 @@ function Booking() {
 
         {/* Time Selector */}
         <section className="bg-wood-card p-6 rounded-2xl shadow-warm">
-          <div className="flex justify-between items-center mb-6">
-            <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex flex-col gap-4 mb-6">
+            <div className="flex justify-between items-center">
               <h2 className="text-lg font-bold">2. 選擇時段 (可複選)</h2>
-              {sessions.length > 0 && allowUnlimited && (
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                  <button
-                    onClick={handleUnlimitedClick}
-                    className={`text-xs px-4 py-2 rounded-lg transition-all font-bold flex items-center gap-1 ${
-                      isUnlimited 
-                        ? 'bg-wood-primary text-white shadow-md' 
-                        : 'bg-wood-sage text-wood-sageText hover:brightness-95'
-                    }`}
-                  >
-                    {isUnlimited ? '✓ 已開啟不限時' : '開啟不限時'}
-                  </button>
-                  <span className="text-xs text-wood-sageText font-medium">
-                    (請根據實際預計來店時間進行勾選時段)
-                  </span>
-                </div>
+              {selectedSessions.length > 0 && (
+                <span className="text-sm bg-wood-bg text-wood-primary px-3 py-1.5 rounded-full font-bold">
+                  已選 {selectedSessions.length} 小時
+                </span>
               )}
             </div>
-            {selectedSessions.length > 0 && (
-              <span className="text-sm bg-wood-bg text-wood-primary px-3 py-1 rounded-full font-bold">
-                已選 {selectedSessions.length} 小時
-              </span>
+            {sessions.length > 0 && allowUnlimited && (
+              <div className="flex flex-col gap-2">
+                <div 
+                  onClick={handleUnlimitedClick}
+                  className="flex flex-row items-center justify-between sm:justify-start sm:gap-6 bg-[#F9F7F3] rounded-2xl px-4 py-3 cursor-pointer select-none transition-all duration-300 hover:bg-[#F3EFE9]"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-[18px] leading-none text-[#4A3F35]">✨</span>
+                    <span className="text-[15px] font-bold text-[#4A3F35]">
+                      開啟不限時
+                    </span>
+                  </div>
+                  
+                  {/* Toggle Switch */}
+                  <div className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-300 shrink-0 ${isUnlimited ? 'bg-[#8B5B43]' : 'bg-[#D5CFC9]'}`}>
+                    <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full shadow-sm transition-transform duration-300 ${isUnlimited ? 'translate-x-[20px]' : 'translate-x-0'}`}></div>
+                  </div>
+                </div>
+                <span className="text-xs text-wood-textMuted font-medium px-2">
+                  * 請根據實際預計來店時間進行勾選
+                </span>
+              </div>
             )}
           </div>
           
