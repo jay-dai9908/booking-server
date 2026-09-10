@@ -208,16 +208,16 @@ function Booking() {
             <img src="/logo.png" alt="拾光製所 Logo" className="w-8 h-8 object-cover rounded-full" />
             <h1 className="text-xl font-bold tracking-wide">拾光製所 拼豆時段預約系統</h1>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button 
               onClick={() => setShowHistoryModal(true)}
-              className="text-sm font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-4 py-1.5 rounded-full transition-all duration-200 ease-in-out"
+              className="whitespace-nowrap text-sm font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-4 py-1.5 rounded-full transition-all duration-200 ease-in-out"
             >
               預約紀錄
             </button>
             <button 
               onClick={() => { api.post('/auth/logout').then(() => window.location.href = '/') }}
-              className="text-sm font-medium text-[#8C8279] bg-transparent hover:bg-[#F4EFE6] hover:text-[#4A3F35] px-3 py-1.5 rounded-full transition-all duration-200 ease-in-out"
+              className="whitespace-nowrap text-sm font-medium text-[#8C8279] bg-transparent hover:bg-[#F4EFE6] hover:text-[#4A3F35] px-3 py-1.5 rounded-full transition-all duration-200 ease-in-out"
             >
               登出
             </button>
@@ -250,19 +250,20 @@ function Booking() {
               const isPast = isBefore(startOfDay(date), startOfDay(new Date()));
               
               return (
-                <button
-                  key={i}
-                  disabled={isPast}
-                  onClick={() => setSelectedDate(date)}
-                  className={`aspect-square rounded-full text-sm font-medium transition-all duration-200 flex items-center justify-center ${
-                    !isCurrentMonth ? 'text-wood-border bg-transparent' : 
-                    isPast ? 'text-wood-border cursor-not-allowed' :
-                    isSelected ? 'bg-wood-primary text-white shadow-md transform scale-105' :
-                    'text-wood-textMain hover:bg-[#F0EBE1] hover:text-wood-primary'
-                  }`}
-                >
-                  {format(date, 'd')}
-                </button>
+                <div key={i} className="flex justify-center items-center aspect-square">
+                  <button
+                    disabled={isPast}
+                    onClick={() => setSelectedDate(date)}
+                    className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full text-sm font-medium transition-all duration-200 flex items-center justify-center ${
+                      !isCurrentMonth ? 'text-wood-border bg-transparent' : 
+                      isPast ? 'text-wood-border cursor-not-allowed' :
+                      isSelected ? 'bg-wood-primary text-white shadow-md transform scale-105' :
+                      'text-wood-textMain hover:bg-[#F0EBE1] hover:text-wood-primary'
+                    }`}
+                  >
+                    {format(date, 'd')}
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -319,7 +320,7 @@ function Booking() {
                     key={session.id}
                     disabled={isFull}
                     onClick={() => toggleSession(session)}
-                    className={`py-3 px-2 rounded-xl border flex flex-col items-center transition-all duration-200 ${
+                    className={`h-full py-3 px-2 rounded-xl border flex flex-col justify-center items-center transition-all duration-200 focus:outline-none focus:border-wood-primary ${
                       isFull 
                         ? 'bg-wood-bg/50 border-wood-border text-wood-border cursor-not-allowed opacity-70' 
                         : isSelected
@@ -349,23 +350,23 @@ function Booking() {
                 <label className="block text-sm text-wood-textMuted mb-3">
                   預約人數 <span className="opacity-70">(最多 {maxAvailablePax} 人)</span>
                 </label>
-                <div className="flex items-center justify-between bg-wood-bg/60 border border-wood-border rounded-xl p-2 w-full max-w-[200px]">
+                <div className="flex items-center justify-between bg-[#F9F7F3] border border-[#D5CFC9] rounded-xl p-2 w-full max-w-[200px]">
                   <button
                     onClick={() => setPax(Math.max(1, pax - 1))}
                     disabled={pax <= 1}
-                    className="w-10 h-10 flex items-center justify-center rounded-lg border border-wood-primary text-wood-primary transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-[#D5CFC9] text-[#8B5B43] bg-white transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 12H4"></path></svg>
+                    <svg className="w-5 h-5 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 12H4"></path></svg>
                   </button>
-                  <div className="w-16 text-center text-lg font-bold text-wood-textMain">
+                  <div className="w-16 text-center text-[17px] font-bold text-[#3E332B] flex items-center justify-center">
                     {pax} 人
                   </div>
                   <button
                     onClick={() => setPax(Math.min(maxAvailablePax, pax + 1))}
                     disabled={pax >= maxAvailablePax}
-                    className="w-10 h-10 flex items-center justify-center rounded-lg border border-wood-primary text-wood-primary transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-[#D5CFC9] text-[#8B5B43] bg-white transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                    <svg className="w-5 h-5 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4"></path></svg>
                   </button>
                 </div>
               </div>

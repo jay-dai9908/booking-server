@@ -112,7 +112,7 @@ function Preview() {
                 return (
                   <div
                     key={session.id}
-                    className={`py-3 px-2 rounded-xl border flex flex-col items-center transition-all duration-200 ${
+                    className={`h-full py-3 px-2 rounded-xl border flex flex-col justify-center items-center transition-all duration-200 focus:outline-none focus:border-wood-primary ${
                       isFull 
                         ? 'bg-wood-bg/50 border-wood-border text-wood-border opacity-70' 
                         : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
