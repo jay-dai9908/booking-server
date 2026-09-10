@@ -111,14 +111,14 @@ function Preview() {
                 return (
                   <div
                     key={session.id}
-                    className={`p-4 rounded-xl border flex flex-col items-center transition-all duration-200 ${
+                    className={`py-3 px-2 rounded-xl border flex flex-col items-center transition-all duration-200 ${
                       isFull 
                         ? 'bg-wood-bg/50 border-wood-border text-wood-border opacity-70' 
                         : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
                     }`}
                   >
-                    <span className="font-bold mb-1 text-lg">
-                      {session.start_time}
+                    <span className="font-bold mb-1 text-[15px] sm:text-base whitespace-nowrap">
+                      {session.start_time}~{session.end_time}
                     </span>
                     <span className={`text-xs font-medium ${isFull ? 'text-red-400/70' : 'text-wood-sageText'}`}>
                       {isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人`}

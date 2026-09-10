@@ -267,7 +267,7 @@ function Booking() {
                     key={session.id}
                     disabled={isFull}
                     onClick={() => toggleSession(session)}
-                    className={`p-4 rounded-xl border flex flex-col items-center transition-all duration-200 ${
+                    className={`py-3 px-2 rounded-xl border flex flex-col items-center transition-all duration-200 ${
                       isFull 
                         ? 'bg-wood-bg/50 border-wood-border text-wood-border cursor-not-allowed opacity-70' 
                         : isSelected
@@ -275,8 +275,8 @@ function Booking() {
                           : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
                     }`}
                   >
-                    <span className={`font-bold mb-1 text-lg ${isSelected ? 'text-white' : ''}`}>
-                      {session.start_time}
+                    <span className={`font-bold mb-1 text-[15px] sm:text-base whitespace-nowrap ${isSelected ? 'text-white' : ''}`}>
+                      {session.start_time}~{session.end_time}
                     </span>
                     <span className={`text-xs font-medium ${isFull ? 'text-red-400/70' : isSelected ? 'text-white/90' : 'text-wood-sageText'}`}>
                       {isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人`}
