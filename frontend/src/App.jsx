@@ -6,6 +6,7 @@ import api from './api/axios';
 import Home from './pages/Customer/Home';
 import Register from './pages/Customer/Register';
 import Booking from './pages/Customer/Booking';
+import Preview from './pages/Customer/Preview';
 
 // Admin Pages
 import AdminLogin from './pages/Admin/Login';
@@ -45,6 +46,7 @@ function App() {
       <Routes>
         {/* Customer Routes */}
         <Route path="/" element={<Home userRole={userRole} />} />
+        <Route path="/preview" element={<Preview />} />
         <Route 
           path="/register" 
           element={userRole === 'temp_customer' ? <Register setUserRole={setUserRole} /> : <Navigate to="/" />} 
