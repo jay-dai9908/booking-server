@@ -294,18 +294,28 @@ function Booking() {
             <h2 className="text-lg font-bold mb-4">3. 確認預約人數</h2>
             <div className="flex flex-col sm:flex-row gap-4 items-end">
               <div className="w-full sm:w-1/3">
-                <label className="block text-sm text-wood-textMuted mb-2">
+                <label className="block text-sm text-wood-textMuted mb-3">
                   預約人數 <span className="opacity-70">(最多 {maxAvailablePax} 人)</span>
                 </label>
-                <select 
-                  value={pax}
-                  onChange={(e) => setPax(parseInt(e.target.value))}
-                  className="w-full px-4 py-3 border border-wood-border rounded-xl focus:ring-2 focus:ring-wood-primary/50 outline-none bg-wood-bg/50 text-wood-textMain font-medium transition-colors"
-                >
-                  {Array.from({ length: maxAvailablePax }).map((_, i) => (
-                    <option key={i + 1} value={i + 1}>{i + 1} 人</option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between bg-wood-bg/60 border border-wood-border rounded-xl p-2 w-full max-w-[200px]">
+                  <button
+                    onClick={() => setPax(Math.max(1, pax - 1))}
+                    disabled={pax <= 1}
+                    className="w-10 h-10 flex items-center justify-center rounded-lg border border-wood-primary text-wood-primary transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 12H4"></path></svg>
+                  </button>
+                  <div className="w-16 text-center text-lg font-bold text-wood-textMain">
+                    {pax} 人
+                  </div>
+                  <button
+                    onClick={() => setPax(Math.min(maxAvailablePax, pax + 1))}
+                    disabled={pax >= maxAvailablePax}
+                    className="w-10 h-10 flex items-center justify-center rounded-lg border border-wood-primary text-wood-primary transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                  </button>
+                </div>
               </div>
             </div>
           </section>
