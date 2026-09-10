@@ -47,7 +47,6 @@ function App() {
         {/* Customer Routes */}
         <Route path="/" element={<Home userRole={userRole} />} />
         <Route path="/preview" element={<Preview />} />
-        <Route path="/preview-register" element={<Register setUserRole={() => {}} />} />
         <Route 
           path="/register" 
           element={userRole === 'temp_customer' ? <Register setUserRole={setUserRole} /> : <Navigate to="/" />} 
