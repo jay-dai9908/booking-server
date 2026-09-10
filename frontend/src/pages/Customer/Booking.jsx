@@ -208,16 +208,16 @@ function Booking() {
             <img src="/logo.png" alt="拾光製所 Logo" className="w-8 h-8 object-cover rounded-full" />
             <h1 className="text-xl font-bold tracking-wide">拾光製所 拼豆時段預約系統</h1>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button 
               onClick={() => setShowHistoryModal(true)}
-              className="text-sm text-wood-primary hover:text-wood-primaryHover font-medium transition-colors hover:underline underline-offset-4"
+              className="text-sm font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-4 py-1.5 rounded-full transition-all duration-200 ease-in-out"
             >
               預約紀錄
             </button>
             <button 
               onClick={() => { api.post('/auth/logout').then(() => window.location.href = '/') }}
-              className="text-sm text-wood-textMuted hover:text-wood-textMain transition-colors"
+              className="text-sm font-medium text-[#8C8279] bg-transparent hover:bg-[#F4EFE6] hover:text-[#4A3F35] px-3 py-1.5 rounded-full transition-all duration-200 ease-in-out"
             >
               登出
             </button>
