@@ -62,18 +62,61 @@ function Booking() {
     }
   };
 
+  const applyUnlimitedMacro = (startSession, currentSelected) => {
+    if (!startSession) return currentSelected;
+    
+    const startIndex = sessions.findIndex(s => s.id === startSession.id);
+    if (startIndex === -1) return currentSelected;
+
+    let newSelected = [...currentSelected];
+    if (!newSelected.find(s => s.id === startSession.id)) {
+      newSelected.push(startSession);
+    }
+
+    let count = 1;
+    let currentIndex = startIndex + 1;
+    
+    while (count < 6 && currentIndex < sessions.length) {
+      const nextSession = sessions[currentIndex];
+      if (nextSession.remaining_capacity > 0) {
+        if (!newSelected.find(s => s.id === nextSession.id)) {
+          newSelected.push(nextSession);
+        }
+        count++;
+        currentIndex++;
+      } else {
+        // Stop if we hit a full session to maintain contiguity
+        break;
+      }
+    }
+    return newSelected;
+  };
+
+  const enableUnlimitedMode = () => {
+    setIsUnlimited(true);
+    setSelectedSessions(prev => {
+      if (prev.length > 0) {
+        const sortedSelected = [...prev].sort((a, b) => a.start_time.localeCompare(b.start_time));
+        return applyUnlimitedMacro(sortedSelected[0], []);
+      }
+      return prev;
+    });
+  };
+
   const toggleSession = (session) => {
     if (session.remaining_capacity === 0) return;
     
     setSelectedSessions(prev => {
       const isSelected = prev.find(s => s.id === session.id);
-      let newSelected;
+      
       if (isSelected) {
-        newSelected = prev.filter(s => s.id !== session.id);
+        return prev.filter(s => s.id !== session.id);
       } else {
-        newSelected = [...prev, session];
+        if (isUnlimited && prev.length === 0) {
+          return applyUnlimitedMacro(session, []);
+        }
+        return [...prev, session];
       }
-      return newSelected;
     });
   };
 
@@ -99,7 +142,7 @@ function Booking() {
     if (hasFullSessions) {
       setShowUnlimitedWarningModal(true);
     } else {
-      setIsUnlimited(true);
+      enableUnlimitedMode();
     }
   };
 
@@ -416,7 +459,7 @@ function Booking() {
                 </button>
                 <button
                   onClick={() => {
-                    setIsUnlimited(true);
+                    enableUnlimitedMode();
                     setShowUnlimitedWarningModal(false);
                   }}
                   className="flex-1 py-3 px-4 bg-wood-primary hover:bg-wood-primaryHover text-white rounded-xl font-bold transition-colors shadow-warm"
