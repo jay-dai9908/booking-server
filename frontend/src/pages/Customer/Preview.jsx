@@ -46,7 +46,7 @@ function Preview() {
       {/* Header */}
       <header className="sticky top-0 z-40 bg-wood-bg/80 backdrop-blur-md border-b border-wood-border px-4 py-4 mb-6">
         <div className="max-w-3xl mx-auto flex justify-center items-center gap-3">
-          <img src="/logo.png" alt="拾光製所 Logo" className="w-8 h-8 object-contain" />
+          <img src="/logo.png" alt="拾光製所 Logo" className="w-8 h-8 object-cover rounded-full" />
           <h1 className="text-xl font-bold tracking-wide">拾光製所 預約時段預覽</h1>
         </div>
       </header>
