@@ -73,30 +73,35 @@ function Home({ userRole }) {
 
   if (showLoading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
-        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#06C755] mx-auto mb-4"></div>
-          <h2 className="text-xl font-bold text-gray-800 mb-2">正在處理登入資訊...</h2>
-          <p className="text-gray-500 text-sm">請稍候，即將為您跳轉</p>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-wood-bg px-4 transition-colors duration-300">
+        <div className="bg-wood-card p-10 sm:p-12 rounded-[24px] shadow-warm max-w-md w-full text-center py-16">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#06C755] mx-auto mb-6"></div>
+          <h2 className="text-xl font-bold text-wood-textMain mb-2">正在處理登入資訊...</h2>
+          <p className="text-wood-textMuted text-sm font-medium">請稍候，即將為您跳轉</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
-      <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center">
-        <h1 className="text-3xl font-bold text-gray-800 mb-6">拾光製所 拼豆時段預約系統</h1>
-        <p className="text-gray-600 mb-8">請登入您的 LINE 帳號以進行預約</p>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-wood-bg px-4 transition-colors duration-300">
+      <div className="bg-wood-card p-10 sm:p-12 rounded-[24px] shadow-warm max-w-md w-full text-center relative overflow-hidden">
+        {/* Logo and Titles */}
+        <div className="mb-10">
+          <img src="/logo.png" alt="拾光製所 Logo" className="w-16 h-16 object-cover rounded-full mx-auto mb-6 shadow-sm ring-4 ring-wood-bg" />
+          <h1 className="text-2xl sm:text-3xl font-bold text-wood-textMain mb-4">拾光製所<br/>拼豆時段預約系統</h1>
+          <p className="text-wood-textMuted font-medium">請登入您的 LINE 帳號以進行預約</p>
+        </div>
         
+        {/* LINE Button */}
         <button 
           onClick={initiateLineLogin}
-          className="w-full flex items-center justify-center gap-2 bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 px-4 rounded-xl transition-colors duration-200"
+          className="w-full flex items-center justify-center gap-3 bg-[#06C755] hover:bg-[#05b34c] hover:shadow-[0_8px_20px_rgba(6,199,85,0.25)] text-white font-bold py-4 px-6 rounded-full transition-all duration-300 transform hover:-translate-y-1"
         >
           <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
              <path d="M23.928 10.38c0-4.323-4.288-7.85-9.56-7.85-5.275 0-9.562 3.527-9.562 7.85 0 3.864 3.398 7.155 8.1 7.766.316.04.757.124.863.432.096.277.062.705.03 1.002-.032.316-.202 1.258-.246 1.48-.052.264-.246.43-.166.496.082.066.623-.332.964-.53 1.205-.705 4.502-2.82 6.136-4.505 1.57-1.63 2.44-3.415 2.44-5.14z"/>
           </svg>
-          使用 LINE 登入
+          <span className="text-lg tracking-wide">使用 LINE 登入</span>
         </button>
       </div>
     </div>
