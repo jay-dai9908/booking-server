@@ -62,29 +62,29 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="bg-[#F9F7F3] rounded-[24px] shadow-[0_20px_40px_rgba(139,91,67,0.1)] w-full max-w-lg overflow-hidden relative z-10 animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+      <div className="bg-white rounded-[24px] shadow-[0_20px_40px_rgba(139,91,67,0.1)] w-full max-w-lg overflow-hidden relative z-10 animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
         <div className="px-6 py-5 border-b border-[#EBE5DF] flex items-center justify-between">
-          <h2 className="text-xl font-bold text-[#3E332B]">
+          <h2 className="text-xl font-bold text-[#2C241E]">
             預約詳細資訊
           </h2>
-          <button onClick={onClose} className="p-2 text-[#8C8279] hover:text-[#3E332B] rounded-full hover:bg-[#EBE5DF] transition-colors">
+          <button onClick={onClose} className="p-2 text-[#8C8279] hover:text-[#2C241E] rounded-full hover:bg-[#F9F7F3] transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
         
-        <div className="p-6 overflow-y-auto flex-1 text-[#4A3F35]">
-          <div className="space-y-6 mb-8">
-            <div>
-              <h3 className="text-sm font-medium text-[#8C8279] mb-1">預約編號</h3>
-              <p className="text-sm font-mono text-[#3E332B]">{truncateUUID(reservation.booking_ref)}</p>
+        <div className="p-6 overflow-y-auto flex-1">
+          <div className="bg-[#F9F7F3] rounded-[16px] p-5 sm:p-6 space-y-5">
+            <div className="border-b border-dashed border-[#E5DFD7] pb-5">
+              <h3 className="text-sm font-medium text-[#7A7067] mb-1.5">預約編號</h3>
+              <p className="text-sm font-mono font-medium text-[#2C241E]">{truncateUUID(reservation.booking_ref)}</p>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="border-b border-dashed border-[#E5DFD7] pb-5 grid grid-cols-2 gap-4">
               <div>
-                <h3 className="text-sm font-medium text-[#8C8279] mb-1 flex items-center gap-1.5"><Calendar className="w-4 h-4" /> 預約時間</h3>
-                <div className="text-lg font-bold text-[#3E332B]">
+                <h3 className="text-sm font-medium text-[#7A7067] mb-1.5 flex items-center gap-1.5"><Calendar className="w-4 h-4" /> 預約時間</h3>
+                <div className="text-[17px] font-bold text-[#2C241E]">
                   {format(new Date(reservation.session_date || reservation.session?.session_date), 'yyyy/MM/dd')}
-                  <div className="text-[#8C8279] text-sm font-normal mt-1 space-y-1">
+                  <div className="text-[#7A7067] text-sm font-medium mt-1 space-y-1">
                     {reservation.time_blocks ? (
                       reservation.time_blocks.map((b, i) => (
                         <div key={i}>{b.start_time} - {b.end_time}</div>
@@ -96,9 +96,9 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                 </div>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-[#8C8279] mb-1 flex items-center gap-1.5"><Users className="w-4 h-4" /> 人數</h3>
+                <h3 className="text-sm font-medium text-[#7A7067] mb-1.5 flex items-center gap-1.5"><Users className="w-4 h-4" /> 人數</h3>
                 <div className="flex items-center gap-2">
-                  <p className="text-lg font-bold text-[#3E332B]">{reservation.pax} 人</p>
+                  <p className="text-[17px] font-bold text-[#2C241E]">{reservation.pax} 人</p>
                   {reservation.is_unlimited && (
                     <span className="inline-flex items-center gap-1 text-xs font-bold text-[#A67C52] bg-[#F4EFE6] px-2 py-0.5 rounded-full border border-[#D5CFC9]">
                       ✨ 不限時
@@ -108,15 +108,17 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
               </div>
             </div>
 
-            <div>
-              <h3 className="text-sm font-medium text-[#8C8279] mb-1 flex items-center gap-1.5"><Phone className="w-4 h-4" /> 聯絡人資訊</h3>
-              <p className="text-md font-bold text-[#3E332B]">{reservation.user?.name || '未提供'}</p>
-              <p className="text-md text-[#4A3F35]">{reservation.user?.phone || '未提供'}</p>
+            <div className="border-b border-dashed border-[#E5DFD7] pb-5">
+              <h3 className="text-sm font-medium text-[#7A7067] mb-1.5 flex items-center gap-1.5"><Phone className="w-4 h-4" /> 聯絡人資訊</h3>
+              <div className="flex items-center gap-3">
+                <p className="text-base font-bold text-[#2C241E]">{reservation.user?.name || '未提供'}</p>
+                <p className="text-base font-medium text-[#7A7067]">{reservation.user?.phone || '未提供'}</p>
+              </div>
             </div>
 
             <div>
-              <h3 className="text-sm font-medium text-[#8C8279] mb-1">當前狀態</h3>
-              <div className="mt-1 flex items-center flex-wrap gap-2">
+              <h3 className="text-sm font-medium text-[#7A7067] mb-2">當前狀態</h3>
+              <div className="flex items-center flex-wrap gap-2">
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full font-medium text-sm ${statusUI.bgClass} ${statusUI.colorClass}`}>
                   {statusUI.icon} {statusUI.text}
                 </span>
@@ -137,14 +139,14 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
 
           {/* Actions */}
           {reservation.status !== 'cancelled' && (
-            <div className="pt-6 border-t border-[#EBE5DF] flex justify-end">
+            <div className="mt-6 flex justify-end">
               <button 
                 onClick={handleCancelReservation}
                 disabled={isPast}
                 className={`px-6 py-2.5 rounded-full font-medium transition-colors ${
                   isPast 
-                    ? 'bg-[#EBE5DF] text-[#A8A19A] cursor-not-allowed border border-transparent' 
-                    : 'border border-[#8B5B43] text-[#8B5B43] hover:bg-[#F4EFE6] bg-transparent'
+                    ? 'bg-[#F0EBE6] text-[#A8A19A] cursor-not-allowed border border-transparent' 
+                    : 'border border-[#8B5B43] text-[#8B5B43] hover:bg-[#F9F7F3] bg-transparent'
                 }`}
               >
                 {isPast ? '已過期無法取消' : '取消此預約'}
