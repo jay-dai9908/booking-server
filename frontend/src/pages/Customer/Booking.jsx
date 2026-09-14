@@ -14,6 +14,8 @@ function Booking() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [isUnlimited, setIsUnlimited] = useState(false);
   const [showUnlimitedWarningModal, setShowUnlimitedWarningModal] = useState(false);
+  const [confirmModalData, setConfirmModalData] = useState(null);
+  const [alertModalData, setAlertModalData] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
 
   // Generate calendar dates for the current month view
@@ -56,7 +58,7 @@ function Booking() {
       setSessions(res.data);
     } catch (err) {
       console.error(err);
-      alert('無法取得時段資料');
+      setAlertModalData({ type: 'error', title: '錯誤', message: '無法取得時段資料' });
     } finally {
       setLoading(false);
     }
@@ -146,35 +148,45 @@ function Booking() {
     }
   };
 
-  const handleBooking = async () => {
+  const handleBooking = () => {
     if (selectedSessions.length === 0) return;
     
     // Sort selected sessions by start time to display nicely
     const sortedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
     const timeRangeStr = `${sortedSessions[0].start_time} - ${sortedSessions[sortedSessions.length - 1].end_time}`;
     
-    if (window.confirm(`確定要預約 ${format(selectedDate, 'yyyy-MM-dd')} \n時段：${timeRangeStr} \n人數：${pax} 人嗎？`)) {
-      try {
-        await api.post('/reservations', {
-          session_ids: sortedSessions.map(s => s.id),
-          pax: parseInt(pax),
-          isUnlimited
+    setConfirmModalData({
+      date: format(selectedDate, 'yyyy-MM-dd'),
+      timeRange: timeRangeStr,
+      pax: pax,
+      sortedSessions,
+      isUnlimited
+    });
+  };
+
+  const executeBooking = async () => {
+    const data = confirmModalData;
+    setConfirmModalData(null);
+    try {
+      await api.post('/reservations', {
+        session_ids: data.sortedSessions.map(s => s.id),
+        pax: parseInt(data.pax),
+        isUnlimited: data.isUnlimited
+      });
+      setAlertModalData({ type: 'success', title: '預約成功！', message: '期待在拾光製所為您服務。' });
+      fetchSessions(selectedDate); // Refresh capacities
+      setSelectedSessions([]);
+    } catch (err) {
+      if (err.response?.status === 409 && err.response?.data?.error?.includes('拆散')) {
+        setSplitBookingData({
+          session_ids: data.sortedSessions.map(s => s.id),
+          pax: parseInt(data.pax),
+          isUnlimited: data.isUnlimited
         });
-        alert('預約成功！');
-        fetchSessions(selectedDate); // Refresh capacities
-        setSelectedSessions([]);
-      } catch (err) {
-        if (err.response?.status === 409 && err.response?.data?.error?.includes('拆散')) {
-          setSplitBookingData({
-            session_ids: sortedSessions.map(s => s.id),
-            pax: parseInt(pax),
-            isUnlimited
-          });
-          setShowSplitModal(true);
-        } else {
-          alert(err.response?.data?.error || '預約失敗，可能人數已滿或時段已被預約');
-          fetchSessions(selectedDate);
-        }
+        setShowSplitModal(true);
+      } else {
+        setAlertModalData({ type: 'error', title: '預約失敗', message: err.response?.data?.error || '可能人數已滿或時段已被預約' });
+        fetchSessions(selectedDate);
       }
     }
   };
@@ -186,13 +198,13 @@ function Booking() {
         ...splitBookingData,
         forceSplit: true
       });
-      alert('預約成功！');
+      setAlertModalData({ type: 'success', title: '預約成功！', message: '期待在拾光製所為您服務。' });
       fetchSessions(selectedDate);
       setSelectedSessions([]);
       setShowSplitModal(false);
       setSplitBookingData(null);
     } catch (err) {
-      alert(err.response?.data?.error || '預約失敗');
+      setAlertModalData({ type: 'error', title: '預約失敗', message: err.response?.data?.error || '預約失敗' });
       setShowSplitModal(false);
       setSplitBookingData(null);
       fetchSessions(selectedDate);
@@ -482,12 +494,93 @@ function Booking() {
         </div>
       )}
 
+      {/* Confirm Booking Modal */}
+      {confirmModalData && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[4px]" onClick={() => setConfirmModalData(null)} />
+          <div className="bg-white rounded-[24px] shadow-[0_16px_32px_rgba(139,91,67,0.12)] w-full max-w-sm overflow-hidden relative z-10 animate-zoom-in">
+            <div className="p-6">
+              <h2 className="text-[18px] font-semibold text-[#3E332B] text-center mb-5">確認預約資訊</h2>
+              <div className="bg-[#F9F7F3] rounded-[12px] p-4 space-y-3 mb-6 text-[15px]">
+                <div className="flex items-center text-[#3E332B]">
+                  <span className="w-16 font-medium text-[#8C8279]">📅 日期</span>
+                  <span className="font-bold">{confirmModalData.date}</span>
+                </div>
+                <div className="flex items-center text-[#3E332B]">
+                  <span className="w-16 font-medium text-[#8C8279]">🕒 時段</span>
+                  <span className="font-bold">{confirmModalData.timeRange}</span>
+                </div>
+                <div className="flex items-center text-[#3E332B]">
+                  <span className="w-16 font-medium text-[#8C8279]">👥 人數</span>
+                  <span className="font-bold">{confirmModalData.pax} 人</span>
+                </div>
+              </div>
+              
+              <div className="flex items-center justify-center gap-3">
+                <button 
+                  onClick={() => setConfirmModalData(null)}
+                  className="flex-1 py-3 bg-transparent text-[#8C8279] font-medium hover:bg-[#F9F7F3] rounded-[12px] transition-colors"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={executeBooking}
+                  className="flex-1 py-3 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-[12px] shadow-sm transition-colors"
+                >
+                  確定預約
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success/Error Alert Modal */}
+      {alertModalData && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[4px]" onClick={() => {
+            const isSuccess = alertModalData.type === 'success';
+            setAlertModalData(null);
+            if (isSuccess) setShowHistoryModal(true);
+          }} />
+          <div className="bg-white rounded-[24px] shadow-[0_16px_32px_rgba(139,91,67,0.12)] w-full max-w-sm overflow-hidden relative z-10 animate-zoom-in text-center p-8">
+            <div className={`mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-4 ${alertModalData.type === 'success' ? 'bg-[#A5B69C]/20 text-[#A5B69C]' : 'bg-[#FDF3F1] text-[#B35D4F]'}`}>
+              {alertModalData.type === 'success' ? (
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
+            </div>
+            <h2 className="text-[20px] font-bold text-[#3E332B] mb-2">{alertModalData.title}</h2>
+            {alertModalData.message && (
+              <p className="text-[#8C8279] text-[15px] mb-6 font-medium">{alertModalData.message}</p>
+            )}
+            <button 
+              onClick={() => {
+                const isSuccess = alertModalData.type === 'success';
+                setAlertModalData(null);
+                if (isSuccess) setShowHistoryModal(true);
+              }}
+              className="w-full py-3 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-[12px] shadow-sm transition-colors"
+            >
+              {alertModalData.type === 'success' ? '查看預約紀錄' : '好的'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #e5e7eb; border-radius: 20px; }
         .animate-fade-in-up { animation: fadeInUp 0.3s ease-out forwards; }
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-zoom-in { animation: zoomIn 0.2s ease-out forwards; }
+        @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
       `}} />
     </div>
   );
