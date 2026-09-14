@@ -64,6 +64,15 @@ function Booking() {
     }
   };
 
+  const isSessionPast = (session) => {
+    if (!isSameDay(selectedDate, new Date())) return false;
+    const now = new Date();
+    const [hours, minutes] = session.start_time.split(':').map(Number);
+    const sessionTime = new Date();
+    sessionTime.setHours(hours, minutes, 0, 0);
+    return now >= sessionTime;
+  };
+
   const applyUnlimitedMacro = (startSession, currentSelected) => {
     if (!startSession) return currentSelected;
     
@@ -80,14 +89,14 @@ function Booking() {
     
     while (count < 6 && currentIndex < sessions.length) {
       const nextSession = sessions[currentIndex];
-      if (nextSession.remaining_capacity > 0) {
+      if (nextSession.remaining_capacity > 0 && !isSessionPast(nextSession)) {
         if (!newSelected.find(s => s.id === nextSession.id)) {
           newSelected.push(nextSession);
         }
         count++;
         currentIndex++;
       } else {
-        // Stop if we hit a full session to maintain contiguity
+        // Stop if we hit a full or past session to maintain contiguity
         break;
       }
     }
@@ -106,7 +115,7 @@ function Booking() {
   };
 
   const toggleSession = (session) => {
-    if (session.remaining_capacity === 0) return;
+    if (session.remaining_capacity === 0 || isSessionPast(session)) return;
     
     setSelectedSessions(prev => {
       const isSelected = prev.find(s => s.id === session.id);
@@ -324,27 +333,31 @@ function Booking() {
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {sessions.map(session => {
+                const isPast = isSessionPast(session);
                 const isFull = session.remaining_capacity === 0;
+                const isDisabled = isPast || isFull;
                 const isSelected = !!selectedSessions.find(s => s.id === session.id);
                 
                 return (
                   <button
                     key={session.id}
-                    disabled={isFull}
+                    disabled={isDisabled}
                     onClick={() => toggleSession(session)}
                     className={`h-full py-3 px-2 rounded-xl border flex flex-col justify-center items-center transition-all duration-200 focus:outline-none focus:border-wood-primary ${
-                      isFull 
-                        ? 'bg-wood-bg/50 border-wood-border text-wood-border cursor-not-allowed opacity-70' 
-                        : isSelected
-                          ? 'border-wood-primary bg-wood-primary text-white shadow-md transform scale-105'
-                          : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
+                      isPast
+                        ? 'bg-[#F0EBE6] border-transparent text-[#A8A19A] cursor-not-allowed opacity-70'
+                        : isFull 
+                          ? 'bg-wood-bg/50 border-wood-border text-wood-border cursor-not-allowed opacity-70' 
+                          : isSelected
+                            ? 'border-wood-primary bg-wood-primary text-white shadow-md transform scale-105'
+                            : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
                     }`}
                   >
                     <span className={`font-bold mb-1 text-[15px] sm:text-base whitespace-nowrap ${isSelected ? 'text-white' : ''}`}>
                       {session.start_time}~{session.end_time}
                     </span>
-                    <span className={`text-xs font-medium ${isFull ? 'text-red-400/70' : isSelected ? 'text-white/90' : 'text-wood-sageText'}`}>
-                      {isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人`}
+                    <span className={`text-xs font-medium ${isPast ? 'text-[#A8A19A]' : isFull ? 'text-red-400/70' : isSelected ? 'text-white/90' : 'text-wood-sageText'}`}>
+                      {isPast ? '已逾時' : isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人`}
                     </span>
                   </button>
                 )
