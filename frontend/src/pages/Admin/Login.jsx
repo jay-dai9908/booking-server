@@ -26,13 +26,13 @@ function AdminLogin({ setUserRole }) {
       {/* Minimalist Card */}
       <div className="bg-white p-8 rounded-[24px] shadow-[0_12px_32px_rgba(139,91,67,0.08)] max-w-sm w-full transition-all duration-300">
         <div className="flex justify-center mb-6">
-          <div className="bg-[#F9F7F3] p-4 rounded-full">
-            <ShieldCheck className="w-8 h-8 text-[#8B5B43]" />
+          <div className="bg-[#F9F7F3] p-2 rounded-full w-20 h-20 overflow-hidden flex items-center justify-center">
+            <img src="/路徑/你的品牌logo.png" alt="品牌 Logo" className="w-full h-full object-contain" />
           </div>
         </div>
         
-        <h2 className="text-2xl font-bold text-[#3E332B] mb-2 text-center">系統管理中心</h2>
-        <p className="text-[#8C8279] mb-8 text-center text-sm">請輸入專屬管理員密碼</p>
+        <h2 className="text-2xl font-bold text-[#3E332B] mb-2 text-center">拾光製所 系統管理中心</h2>
+        <p className="text-[#8C8279] mb-8 text-center text-sm">請輸入員工密碼</p>
         
         {error && (
           <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-6 text-sm flex items-center justify-center">
