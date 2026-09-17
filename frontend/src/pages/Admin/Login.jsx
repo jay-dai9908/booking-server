@@ -33,7 +33,7 @@ function AdminLogin({ setUserRole }) {
         <p className="text-[#8C8279] mb-8 text-center text-sm">請輸入員工密碼</p>
         
         {error && (
-          <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-6 text-sm flex items-center justify-center">
+          <div className="bg-[#FDF3F1] border border-[#F2D6D3] text-[#B24F45] p-3 rounded-xl mb-6 text-sm flex items-center justify-center font-medium">
             {error}
           </div>
         )}

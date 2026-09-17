@@ -135,7 +135,7 @@ export const adminLogin = async (req, res) => {
     res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 });
     res.json({ message: 'Admin login successful' });
   } else {
-    res.status(401).json({ error: 'Invalid admin credentials' });
+    res.status(401).json({ error: '密碼錯誤，請重新輸入' });
   }
 };
 
