@@ -22,17 +22,17 @@ function AdminLogin({ setUserRole }) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-[#F7F4F0] p-4">
       {/* Minimalist Card */}
-      <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full transition-all duration-300 hover:shadow-2xl">
+      <div className="bg-white p-8 rounded-[24px] shadow-[0_12px_32px_rgba(139,91,67,0.08)] max-w-sm w-full transition-all duration-300">
         <div className="flex justify-center mb-6">
-          <div className="bg-gray-100 p-4 rounded-full">
-            <ShieldCheck className="w-8 h-8 text-gray-800" />
+          <div className="bg-[#F9F7F3] p-4 rounded-full">
+            <ShieldCheck className="w-8 h-8 text-[#8B5B43]" />
           </div>
         </div>
         
-        <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">系統管理中心</h2>
-        <p className="text-gray-500 mb-8 text-center text-sm">請輸入專屬管理員密碼</p>
+        <h2 className="text-2xl font-bold text-[#3E332B] mb-2 text-center">系統管理中心</h2>
+        <p className="text-[#8C8279] mb-8 text-center text-sm">請輸入專屬管理員密碼</p>
         
         {error && (
           <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-6 text-sm flex items-center justify-center">
@@ -43,21 +43,21 @@ function AdminLogin({ setUserRole }) {
         <form onSubmit={handleLogin} className="space-y-5">
           <div className="relative group">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Lock className="h-5 w-5 text-gray-400 group-focus-within:text-gray-800 transition-colors" />
+              <Lock className="h-5 w-5 text-[#A8A19A] group-focus-within:text-[#8B5B43] transition-colors" />
             </div>
             <input 
               type="password" 
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-gray-900 focus:border-transparent outline-none transition-all"
+              className="w-full pl-11 pr-4 py-3 bg-white border border-[#D5CFC9] rounded-xl text-[#3E332B] placeholder-[#A8A19A] focus:border-[#8B5B43] focus:ring-1 focus:ring-[#8B5B43] outline-none transition-all"
               placeholder="請輸入密碼"
             />
           </div>
           <button 
             type="submit"
             disabled={isLoading}
-            className="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white font-bold py-3 px-4 rounded-xl transition-colors duration-200 disabled:opacity-70"
+            className="w-full flex items-center justify-center gap-2 bg-[#8B5B43] hover:bg-[#A67C52] text-white font-bold py-3 px-4 rounded-xl transition-colors duration-200 disabled:opacity-70"
           >
             {isLoading ? '驗證中...' : '安全登入'}
             {!isLoading && <ArrowRight className="w-5 h-5" />}
