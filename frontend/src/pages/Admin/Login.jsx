@@ -27,7 +27,7 @@ function AdminLogin({ setUserRole }) {
       <div className="bg-white p-8 rounded-[24px] shadow-[0_12px_32px_rgba(139,91,67,0.08)] max-w-sm w-full transition-all duration-300">
         <div className="flex justify-center mb-6">
           <div className="bg-[#F9F7F3] p-2 rounded-full w-20 h-20 overflow-hidden flex items-center justify-center">
-            <img src="/路徑/你的品牌logo.png" alt="品牌 Logo" className="w-full h-full object-contain" />
+            <img src="/logo.png" alt="拾光製所 Logo" className="w-full h-full object-contain" />
           </div>
         </div>
         
