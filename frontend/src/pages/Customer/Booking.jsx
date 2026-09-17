@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths, isBefore, startOfDay } from 'date-fns';
 import api from '../../api/axios';
-import CustomerHistoryModal from '../../components/CustomerHistoryModal';
+import { useNavigate } from 'react-router-dom';
 
 function Booking() {
+  const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [sessions, setSessions] = useState([]);
   const [selectedSessions, setSelectedSessions] = useState([]); // Array of selected sessions
@@ -11,7 +12,6 @@ function Booking() {
   const [loading, setLoading] = useState(false);
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [splitBookingData, setSplitBookingData] = useState(null);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [isUnlimited, setIsUnlimited] = useState(false);
   const [showUnlimitedWarningModal, setShowUnlimitedWarningModal] = useState(false);
   const [confirmModalData, setConfirmModalData] = useState(null);
@@ -231,7 +231,7 @@ function Booking() {
           </div>
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button 
-              onClick={() => setShowHistoryModal(true)}
+              onClick={() => navigate('/history')}
               className="whitespace-nowrap text-sm font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-4 py-1.5 rounded-full transition-all duration-200 ease-in-out"
             >
               預約紀錄
@@ -462,11 +462,6 @@ function Booking() {
         </div>
       )}
 
-      {/* Customer History Modal */}
-      {showHistoryModal && (
-        <CustomerHistoryModal onClose={() => setShowHistoryModal(false)} />
-      )}
-
       {/* Unlimited Warning Modal */}
       {showUnlimitedWarningModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-wood-textMain/40 backdrop-blur-sm animate-fade-in">
@@ -554,7 +549,7 @@ function Booking() {
           <div className="absolute inset-0 bg-black/40 backdrop-blur-[4px]" onClick={() => {
             const isSuccess = alertModalData.type === 'success';
             setAlertModalData(null);
-            if (isSuccess) setShowHistoryModal(true);
+            if (isSuccess) navigate('/history');
           }} />
           <div className="bg-white rounded-[24px] shadow-[0_16px_32px_rgba(139,91,67,0.12)] w-full max-w-sm overflow-hidden relative z-10 animate-zoom-in text-center p-8">
             <div className={`mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-4 ${alertModalData.type === 'success' ? 'bg-[#A5B69C]/20 text-[#A5B69C]' : 'bg-[#FDF3F1] text-[#B35D4F]'}`}>
@@ -576,7 +571,7 @@ function Booking() {
               onClick={() => {
                 const isSuccess = alertModalData.type === 'success';
                 setAlertModalData(null);
-                if (isSuccess) setShowHistoryModal(true);
+                if (isSuccess) navigate('/history');
               }}
               className="w-full py-3 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-[12px] shadow-sm transition-colors"
             >

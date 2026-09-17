@@ -7,6 +7,7 @@ import Home from './pages/Customer/Home';
 import Register from './pages/Customer/Register';
 import Booking from './pages/Customer/Booking';
 import Preview from './pages/Customer/Preview';
+import HistoryPage from './pages/Customer/HistoryPage';
 
 // Admin Pages
 import AdminLogin from './pages/Admin/Login';
@@ -54,6 +55,10 @@ function App() {
         <Route 
           path="/booking" 
           element={userRole === 'customer' ? <Booking /> : <Navigate to="/" />} 
+        />
+        <Route 
+          path="/history" 
+          element={userRole === 'customer' ? <HistoryPage /> : <Navigate to="/" />} 
         />
 
         {/* Admin Login */}
