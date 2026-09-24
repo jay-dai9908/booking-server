@@ -175,6 +175,19 @@ export default function SessionsPage() {
     }
   };
 
+  const handleDeleteAllForDate = async () => {
+    if (sessions.length === 0) return;
+    if (window.confirm(`確定要刪除 ${listDate} 的「所有未被預約」的時段嗎？\n(已有預約的時段會自動保留)`)) {
+      try {
+        const res = await api.delete(`/sessions/date/${listDate}`);
+        alert(`成功刪除 ${res.data.deletedCount} 個時段。${res.data.keptCount > 0 ? `\n(保留了 ${res.data.keptCount} 個已被預約的時段)` : ''}`);
+        fetchSessions(listDate);
+      } catch (err) {
+        alert(err.response?.data?.error || '刪除失敗');
+      }
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 space-y-8 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -292,6 +305,14 @@ export default function SessionsPage() {
                 onChange={(e) => setListDate(e.target.value)}
                 className="px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none text-sm font-medium text-gray-700"
               />
+              <button
+                onClick={handleDeleteAllForDate}
+                disabled={sessions.length === 0}
+                className={`p-2 rounded-xl border transition-colors flex items-center justify-center ${sessions.length === 0 ? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' : 'bg-white border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300'}`}
+                title="刪除當日所有未被預約時段"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
             </div>
           </div>
 
