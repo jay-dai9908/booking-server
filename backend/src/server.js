@@ -9,6 +9,7 @@ import { checkBannedIP } from './middlewares/rateLimiter.js';
 import userRoutes from './routes/users.js';
 import dailySettingsRoutes from './routes/dailySettings.js';
 import accountingRoutes from './routes/accounting.js';
+import staffRoutes from './routes/staff.js';
 import { startCronJobs } from './cronJobs.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -46,6 +47,8 @@ app.use('/api/reservations', reservationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/daily-settings', dailySettingsRoutes);
 app.use('/api/accounting', accountingRoutes);
+app.use('/api/staff', staffRoutes);
+
 
 // Basic error handler
 app.use((err, req, res, next) => {

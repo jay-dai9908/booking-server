@@ -23,19 +23,44 @@ export const verifyToken = (req, res, next) => {
 
 export const requireAdmin = async (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
-    if (req.method === 'GET' || req.method === 'DELETE') {
-      try {
-        const settings = await prisma.globalSetting.findUnique({ where: { id: 1 } });
-        if (settings && settings.is_lockdown_mode) {
-          // Temporarily disabled lockdown check
-          // return res.status(403).json({ error: 'SYSTEM LOCKED DOWN DUE TO SECURITY THREAT. Read/Delete access revoked.' });
-        }
-      } catch (err) {
-        console.error('Failed to check lockdown status', err);
-      }
-    }
     next();
   } else {
     return res.status(403).json({ error: 'Forbidden. Admin access required.' });
   }
 };
+
+export const requireSuperAdmin = async (req, res, next) => {
+  if (req.user && req.user.role === 'admin' && req.user.isSuperAdmin) {
+    next();
+  } else {
+    return res.status(403).json({ error: 'Forbidden. Super admin access required.' });
+  }
+};
+
+export const requirePermission = (permission) => {
+  return (req, res, next) => {
+    if (req.user && req.user.role === 'admin') {
+      if (req.user.isSuperAdmin || (Array.isArray(req.user.permissions) && req.user.permissions.includes(permission))) {
+        return next();
+      }
+      return res.status(403).json({ error: '無此功能存取權限' });
+    }
+    return res.status(403).json({ error: 'Forbidden. Admin access required.' });
+  };
+};
+
+export const requireAnyPermission = (permissions) => {
+  return (req, res, next) => {
+    if (req.user && req.user.role === 'admin') {
+      if (req.user.isSuperAdmin) return next();
+      if (Array.isArray(req.user.permissions)) {
+        const hasAny = permissions.some(p => req.user.permissions.includes(p));
+        if (hasAny) return next();
+      }
+      return res.status(403).json({ error: '無此功能存取權限' });
+    }
+    return res.status(403).json({ error: 'Forbidden. Admin access required.' });
+  };
+};
+
+

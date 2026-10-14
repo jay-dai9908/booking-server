@@ -1,15 +1,16 @@
 import express from 'express';
 import { getDailySetting, updateDailySetting, batchUpdateDailySettings, getGlobalSetting, updateGlobalSetting } from '../controllers/dailySettingController.js';
-import { verifyToken, requireAdmin } from '../middlewares/authMiddleware.js';
+import { verifyToken, requirePermission } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
 router.get('/global', getGlobalSetting);
-router.put('/global', verifyToken, requireAdmin, updateGlobalSetting);
+router.put('/global', verifyToken, requirePermission('sessions'), updateGlobalSetting);
 
-router.post('/batch', verifyToken, requireAdmin, batchUpdateDailySettings);
+router.post('/batch', verifyToken, requirePermission('sessions'), batchUpdateDailySettings);
 
 router.get('/', getDailySetting);
-router.put('/', verifyToken, requireAdmin, updateDailySetting);
+router.put('/', verifyToken, requirePermission('sessions'), updateDailySetting);
 
 export default router;
+

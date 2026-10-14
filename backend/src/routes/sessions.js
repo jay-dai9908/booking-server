@@ -1,12 +1,13 @@
 import express from 'express';
 import { getSessions, createBulkSessions, deleteSession, deleteSessionsByDate } from '../controllers/sessionController.js';
-import { verifyToken, requireAdmin } from '../middlewares/authMiddleware.js';
+import { verifyToken, requirePermission } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
 router.get('/', getSessions);
-router.post('/', verifyToken, requireAdmin, createBulkSessions);
-router.delete('/date/:date', verifyToken, requireAdmin, deleteSessionsByDate);
-router.delete('/:id', verifyToken, requireAdmin, deleteSession);
+router.post('/', verifyToken, requirePermission('sessions'), createBulkSessions);
+router.delete('/date/:date', verifyToken, requirePermission('sessions'), deleteSessionsByDate);
+router.delete('/:id', verifyToken, requirePermission('sessions'), deleteSession);
 
 export default router;
+

@@ -1,12 +1,41 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, CalendarRange, Menu, X, LogOut, UserCog, CalendarDays, Grid, Banknote } from 'lucide-react';
+import { 
+  Users, 
+  CalendarRange, 
+  Menu, 
+  X, 
+  LogOut, 
+  UserCog, 
+  CalendarDays, 
+  Grid, 
+  Banknote,
+  ShieldCheck,
+  User
+} from 'lucide-react';
 import api from '../api/axios';
 
 export default function AdminLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [adminInfo, setAdminInfo] = useState(null);
+  const [isLoadingInfo, setIsLoadingInfo] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    fetchAdminInfo();
+  }, []);
+
+  const fetchAdminInfo = async () => {
+    try {
+      const res = await api.get('/auth/me');
+      setAdminInfo(res.data);
+    } catch (err) {
+      console.error('Failed to get admin info:', err);
+    } finally {
+      setIsLoadingInfo(false);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -17,36 +46,88 @@ export default function AdminLayout() {
     }
   };
 
-  const navLinks = [
-    { to: '/admin/sessions', icon: <CalendarRange className="w-5 h-5" />, label: '營業時段設定' },
-    { to: '/admin/reservations', icon: <Users className="w-5 h-5" />, label: '預約訂單總覽' },
-    { to: '/admin/members', icon: <UserCog className="w-5 h-5" />, label: '會員管理' },
-    { to: '/admin/weekly', icon: <CalendarDays className="w-5 h-5" />, label: '周營業狀況' },
-    { to: '/admin/seating', icon: <Grid className="w-5 h-5" />, label: '帶位圖管理' },
-    { to: '/admin/accounting', icon: <Banknote className="w-5 h-5" />, label: '帳務管理' },
+  const allNavLinks = [
+    { to: '/admin/sessions', perm: 'sessions', icon: <CalendarRange className="w-5 h-5" />, label: '營業時段設定' },
+    { to: '/admin/reservations', perm: 'reservations', icon: <Users className="w-5 h-5" />, label: '預約訂單總覽' },
+    { to: '/admin/members', perm: 'members', icon: <UserCog className="w-5 h-5" />, label: '會員管理' },
+    { to: '/admin/weekly', perm: 'weekly', icon: <CalendarDays className="w-5 h-5" />, label: '周營業狀況' },
+    { to: '/admin/seating', perm: 'seating', icon: <Grid className="w-5 h-5" />, label: '帶位圖管理' },
+    { to: '/admin/accounting', perm: 'accounting', icon: <Banknote className="w-5 h-5" />, label: '帳務管理' },
+    { to: '/admin/staff', perm: 'staff', superAdminOnly: true, icon: <ShieldCheck className="w-5 h-5" />, label: '人員權限管理' },
   ];
+
+  // Filter allowed navigation links
+  const allowedLinks = allNavLinks.filter(link => {
+    if (!adminInfo) return false;
+    if (adminInfo.isSuperAdmin) return true;
+    if (link.superAdminOnly) return false;
+    return Array.isArray(adminInfo.permissions) && adminInfo.permissions.includes(link.perm);
+  });
+
+  // Guard: if current path is forbidden or root /admin, redirect to first allowed route
+  useEffect(() => {
+    if (!isLoadingInfo && adminInfo && allowedLinks.length > 0) {
+      const currentPath = location.pathname;
+      const isAllowed = allowedLinks.some(link => link.to === currentPath);
+      if (!isAllowed) {
+        navigate(allowedLinks[0].to, { replace: true });
+      }
+    }
+  }, [isLoadingInfo, adminInfo, location.pathname, allowedLinks]);
 
   const SidebarContent = () => (
     <>
-      <div className="p-6">
+      {/* Brand & User Header */}
+      <div className="p-6 border-b border-gray-100">
         <div className="flex items-center gap-3">
-          <div className="bg-gray-100 p-2 rounded-xl">
-            <LayoutDashboard className="w-6 h-6 text-gray-800" />
+          <div className="w-10 h-10 rounded-xl bg-[#FAF7F2] border border-[#E8DEC8] flex items-center justify-center shrink-0">
+            <img src="/logo.png" alt="Logo" className="w-6 h-6 object-contain" />
           </div>
-          <span className="text-xl font-bold text-gray-900 tracking-tight">後台管理</span>
+          <div className="min-w-0">
+            <span className="text-lg font-bold text-[#3E332B] tracking-tight block truncate">
+              拾光製所
+            </span>
+            <span className="text-xs text-gray-400 block">系統管理中心</span>
+          </div>
         </div>
+
+        {/* Current Staff Badge */}
+        {adminInfo && (
+          <div className="mt-4 p-3 bg-amber-50/40 border border-[#E8DEC8]/60 rounded-xl flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-[#8B5B43] text-white flex items-center justify-center font-bold text-xs shrink-0">
+                {adminInfo.name?.charAt(0) || <User className="w-3.5 h-3.5" />}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-gray-800 truncate">
+                  {adminInfo.name || '管理員'}
+                </div>
+                <div className="text-[10px] text-gray-500 truncate">
+                  {adminInfo.isSuperAdmin ? '最高管理員' : '工作人員'}
+                </div>
+              </div>
+            </div>
+            {adminInfo.isSuperAdmin && (
+              <span className="text-[10px] bg-[#8B5B43]/10 text-[#8B5B43] px-1.5 py-0.5 rounded font-semibold shrink-0">
+                全權限
+              </span>
+            )}
+          </div>
+        )}
       </div>
-      <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
-        {navLinks.map((link) => (
+
+      {/* Navigation List */}
+      <nav className="flex-1 px-4 py-3 space-y-1.5 overflow-y-auto">
+        {allowedLinks.map((link) => (
           <NavLink
             key={link.to}
             to={link.to}
             onClick={() => setIsSidebarOpen(false)}
             className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
+              `w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 text-sm ${
                 isActive
-                  ? 'bg-gray-100 text-gray-900 font-semibold'
-                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                  ? 'bg-[#FAF7F2] text-[#8B5B43] font-bold border border-[#E8DEC8] shadow-sm'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
               }`
             }
           >
@@ -55,12 +136,14 @@ export default function AdminLayout() {
           </NavLink>
         ))}
       </nav>
+
+      {/* Footer / Logout */}
       <div className="p-4 border-t border-gray-100">
         <button 
           onClick={handleLogout} 
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 text-gray-500 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-all"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
         >
-          <LogOut className="w-5 h-5" />
+          <LogOut className="w-4 h-4" />
           登出系統
         </button>
       </div>
@@ -68,7 +151,7 @@ export default function AdminLayout() {
   );
 
   return (
-    <div className="h-screen overflow-hidden bg-gray-50 flex font-sans selection:bg-gray-200">
+    <div className="h-screen overflow-hidden bg-gray-50 flex font-sans selection:bg-[#8B5B43]/20">
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
@@ -85,10 +168,19 @@ export default function AdminLayout() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Mobile Header */}
-        <header className="md:hidden bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between z-30 shrink-0">
-          <div className="flex items-center gap-2">
-            <LayoutDashboard className="w-5 h-5 text-gray-800" />
-            <span className="font-bold text-gray-900">管理後台</span>
+        <header className="md:hidden bg-white border-b border-gray-200 px-4 py-3.5 flex items-center justify-between z-30 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#FAF7F2] border border-[#E8DEC8] flex items-center justify-center shrink-0">
+              <img src="/logo.png" alt="Logo" className="w-5 h-5 object-contain" />
+            </div>
+            <div>
+              <span className="font-bold text-gray-900 text-sm">拾光製所 後台</span>
+              {adminInfo && (
+                <span className="text-[11px] text-gray-500 block">
+                  {adminInfo.name} ({adminInfo.isSuperAdmin ? '最高管理員' : '工作人員'})
+                </span>
+              )}
+            </div>
           </div>
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -100,7 +192,7 @@ export default function AdminLayout() {
 
         {/* Dynamic Page Content */}
         <div className="flex-1 overflow-y-auto">
-          <Outlet />
+          <Outlet context={{ adminInfo }} />
         </div>
       </div>
     </div>

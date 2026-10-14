@@ -19,6 +19,7 @@ import WeeklyPage from './pages/Admin/WeeklyPage';
 import SeatingPage from './pages/Admin/SeatingPage';
 
 import AccountingPage from './pages/Admin/AccountingPage';
+import StaffPage from './pages/Admin/StaffPage';
 
 function App() {
   const [userRole, setUserRole] = useState(null); // 'customer', 'temp_customer', 'admin', or null
@@ -80,6 +81,7 @@ function App() {
           <Route path="seating" element={<SeatingPage />} />
 
           <Route path="accounting" element={<AccountingPage />} />
+          <Route path="staff" element={<StaffPage />} />
         </Route>
 
         {/* Catch old dashboard link */}

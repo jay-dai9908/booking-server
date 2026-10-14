@@ -128,14 +128,65 @@ export const register = async (req, res) => {
 
 export const adminLogin = async (req, res) => {
   const { password } = req.body;
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'gathering.light2609';
 
   if (password === adminPassword) {
-    const token = generateToken({ role: 'admin' });
-    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 });
-    res.json({ message: 'Admin login successful' });
-  } else {
-    res.status(401).json({ error: '密碼錯誤，請重新輸入' });
+    const token = generateToken({
+      role: 'admin',
+      isSuperAdmin: true,
+      name: '最高管理員',
+      permissions: ['all']
+    });
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+    return res.json({
+      message: 'Admin login successful',
+      admin: { name: '最高管理員', isSuperAdmin: true, permissions: ['all'] }
+    });
+  }
+
+  try {
+    const staff = await prisma.adminUser.findUnique({
+      where: { password }
+    });
+
+    if (staff) {
+      if (!staff.is_active) {
+        return res.status(403).json({ error: '此人員帳號已被停用，請聯繫店長' });
+      }
+
+      const isSuperAdmin = staff.role === 'super_admin';
+      const token = generateToken({
+        id: staff.id,
+        role: 'admin',
+        isSuperAdmin,
+        name: staff.name,
+        permissions: isSuperAdmin ? ['all'] : staff.permissions
+      });
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+      return res.json({
+        message: 'Staff login successful',
+        admin: {
+          name: staff.name,
+          isSuperAdmin,
+          permissions: isSuperAdmin ? ['all'] : staff.permissions
+        }
+      });
+    }
+
+    return res.status(401).json({ error: '密碼錯誤，請重新輸入' });
+  } catch (error) {
+    console.error('Staff login error:', error);
+    return res.status(500).json({ error: '登入驗證時伺服器發生錯誤' });
   }
 };
 
@@ -147,7 +198,12 @@ export const logout = (req, res) => {
 export const me = async (req, res) => {
   try {
     if (req.user.role === 'admin') {
-      return res.json({ role: 'admin' });
+      return res.json({
+        role: 'admin',
+        isSuperAdmin: !!req.user.isSuperAdmin,
+        name: req.user.name || '管理員',
+        permissions: req.user.permissions || []
+      });
     }
     
     if (req.user.isTemp) {
