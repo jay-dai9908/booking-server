@@ -1,4 +1,5 @@
 import prisma from '../prismaClient.js';
+import { calculateTotalAmount } from './reservationController.js';
 
 export const getAccountingSummary = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -10,10 +11,10 @@ export const getAccountingSummary = async (req, res) => {
     const end = end_date ? new Date(end_date) : new Date();
     if (!end_date) end.setHours(23, 59, 59, 999);
 
-    // We only care about reservations where the SESSION falls in this date range.
-    // And for revenue, only those that are PAID.
+    // Fetch confirmed (non-cancelled) reservations in this date range
     const reservations = await prisma.reservation.findMany({
       where: {
+        status: { not: 'cancelled' },
         session: {
           session_date: {
             gte: start,
@@ -22,59 +23,124 @@ export const getAccountingSummary = async (req, res) => {
         }
       },
       include: {
-        session: true
+        session: true,
+        user: {
+          select: { id: true, name: true, phone: true }
+        }
+      },
+      orderBy: {
+        session: {
+          start_time: 'asc'
+        }
       }
     });
 
+    const groups = {};
+    for (const r of reservations) {
+      const ref = r.booking_ref;
+      if (!groups[ref]) {
+        groups[ref] = {
+          booking_ref: ref,
+          user: r.user,
+          pax: r.pax,
+          status: r.status,
+          attendance: r.attendance,
+          session_date: r.session.session_date,
+          sessions: [],
+          is_unlimited: r.is_unlimited || false,
+          is_paid: r.is_paid || false,
+          total_amount: r.total_amount,
+          paid_at: r.paid_at
+        };
+      }
+      groups[ref].sessions.push(r.session);
+    }
+
+    const uniqueReservations = Object.values(groups);
+
+    let expectedRevenue = 0;
     let totalRevenue = 0;
     let paidCount = 0;
     let unpaidCount = 0;
-    let totalPax = 0;
-
-    const seenRefs = new Set();
-    const uniqueReservations = [];
-    reservations.forEach(r => {
-      if (!seenRefs.has(r.booking_ref)) {
-        seenRefs.add(r.booking_ref);
-        uniqueReservations.push(r);
-      }
-    });
+    let paidPax = 0;
+    let totalExpectedPax = 0;
 
     const dailyDataMap = {};
 
-    uniqueReservations.forEach(r => {
-      if (r.is_paid) {
-        totalRevenue += (r.total_amount || 0);
+    for (const group of uniqueReservations) {
+      let amount = group.total_amount;
+      if (amount == null) {
+        amount = await calculateTotalAmount(
+          prisma,
+          group.session_date,
+          group.pax,
+          group.sessions.length,
+          group.is_unlimited
+        );
+      }
+      group.calculated_amount = amount;
+
+      expectedRevenue += amount;
+      totalExpectedPax += group.pax;
+
+      const dateStr = group.session_date.toISOString().split('T')[0].substring(5).replace('-', '/'); // "MM/DD"
+      if (!dailyDataMap[dateStr]) {
+        dailyDataMap[dateStr] = {
+          date: dateStr,
+          revenue: 0,
+          expected: 0
+        };
+      }
+      dailyDataMap[dateStr].expected += amount;
+
+      if (group.is_paid) {
+        totalRevenue += amount;
         paidCount++;
-        totalPax += r.pax;
-        
-        // Group by local date string (e.g. "06/28")
-        const dateStr = r.session.session_date.toISOString().split('T')[0].substring(5).replace('-', '/'); // "MM/DD"
-        if (!dailyDataMap[dateStr]) dailyDataMap[dateStr] = 0;
-        dailyDataMap[dateStr] += (r.total_amount || 0);
+        paidPax += group.pax;
+        dailyDataMap[dateStr].revenue += amount;
       } else {
         unpaidCount++;
       }
+    }
+
+    const dailyData = Object.values(dailyDataMap).sort((a, b) => a.date.localeCompare(b.date));
+
+    const bookingsBreakdown = uniqueReservations.map(g => {
+      g.sessions.sort((a, b) => a.start_time.localeCompare(b.start_time));
+      return {
+        booking_ref: g.booking_ref,
+        name: g.user?.name || '未知顧客',
+        phone: g.user?.phone || '',
+        session_date: g.session_date,
+        start_time: g.sessions[0]?.start_time,
+        end_time: g.sessions[g.sessions.length - 1]?.end_time,
+        pax: g.pax,
+        is_paid: g.is_paid,
+        is_unlimited: g.is_unlimited,
+        attendance: g.attendance,
+        amount: g.calculated_amount
+      };
     });
 
-    const dailyData = Object.keys(dailyDataMap).map(date => ({
-      date,
-      revenue: dailyDataMap[date]
-    })).sort((a, b) => a.date.localeCompare(b.date));
-
     res.json({
+      expectedRevenue,
       totalRevenue,
+      pendingRevenue: Math.max(0, expectedRevenue - totalRevenue),
+      totalOrders: uniqueReservations.length,
       paidCount,
       unpaidCount,
-      totalPax,
-      avgPrice: totalPax > 0 ? Math.round(totalRevenue / totalPax) : 0,
-      dailyData
+      totalExpectedPax,
+      paidPax,
+      avgPrice: totalExpectedPax > 0 ? Math.round(expectedRevenue / totalExpectedPax) : 0,
+      dailyData,
+      bookingsBreakdown
     });
   } catch (error) {
     console.error('Error fetching accounting summary:', error);
     res.status(500).json({ error: 'Failed to fetch accounting summary' });
   }
 };
+
 
 export const getLedger = async (req, res) => {
   const { start_date, end_date } = req.query;

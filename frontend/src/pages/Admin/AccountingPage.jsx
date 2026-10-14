@@ -209,46 +209,85 @@ export default function AccountingPage() {
       ) : (
         <>
           {activeTab === 'dashboard' && summary && (
+
             <>
+            {/* Summary Stat Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-green-500">
+              {/* Expected Revenue */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-[#8B5B43]">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium text-sm">總實收金額</h3>
-                  <div className="p-2 bg-green-50 rounded-lg text-green-600"><DollarSign className="w-5 h-5"/></div>
+                  <h3 className="text-gray-500 font-medium text-sm">預期總收益</h3>
+                  <div className="p-2 bg-amber-50 rounded-lg text-[#8B5B43]"><DollarSign className="w-5 h-5"/></div>
                 </div>
-                <div className="text-3xl font-black text-gray-900">NT$ {summary.totalRevenue.toLocaleString()}</div>
+                <div className="text-3xl font-black text-gray-900">
+                  NT$ {(summary.expectedRevenue || 0).toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-400 mt-2 font-medium">
+                  共 {summary.totalOrders || 0} 筆確認預約 ({summary.totalExpectedPax || 0} 人)
+                </div>
               </div>
 
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-indigo-500">
+              {/* Actual Paid Revenue */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-emerald-500">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium text-sm">已付款訂單</h3>
-                  <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600"><ShoppingCart className="w-5 h-5"/></div>
+                  <h3 className="text-gray-500 font-medium text-sm">總實收金額 (已結帳)</h3>
+                  <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600"><DollarSign className="w-5 h-5"/></div>
                 </div>
-                <div className="text-3xl font-black text-gray-900">{summary.paidCount} <span className="text-sm font-normal text-gray-400">筆</span></div>
+                <div className="text-3xl font-black text-emerald-600">
+                  NT$ {(summary.totalRevenue || 0).toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-400 mt-2 font-medium">
+                  {summary.paidCount || 0} 筆已完成付款 ({summary.paidPax || 0} 人)
+                </div>
               </div>
 
+              {/* Pending / Unpaid Revenue */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-blue-500">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium text-sm">總來客數 (已付)</h3>
-                  <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Users className="w-5 h-5"/></div>
+                  <h3 className="text-gray-500 font-medium text-sm">待結帳金額</h3>
+                  <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><ShoppingCart className="w-5 h-5"/></div>
                 </div>
-                <div className="text-3xl font-black text-gray-900">{summary.totalPax} <span className="text-sm font-normal text-gray-400">人</span></div>
+                <div className="text-3xl font-black text-gray-900">
+                  NT$ {(summary.pendingRevenue || 0).toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-400 mt-2 font-medium">
+                  {summary.unpaidCount || 0} 筆預約尚未付款
+                </div>
               </div>
 
+              {/* Avg Price */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-purple-500">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium text-sm">平均客單價</h3>
+                  <h3 className="text-gray-500 font-medium text-sm">預估平均客單價</h3>
                   <div className="p-2 bg-purple-50 rounded-lg text-purple-600"><BarChart3 className="w-5 h-5"/></div>
                 </div>
-                <div className="text-3xl font-black text-gray-900">NT$ {summary.avgPrice.toLocaleString()}</div>
+                <div className="text-3xl font-black text-gray-900">
+                  NT$ {(summary.avgPrice || 0).toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-400 mt-2 font-medium">
+                  依預期總收益與人數推算
+                </div>
               </div>
             </div>
 
+            {/* Revenue Trend Chart */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mt-6">
-              <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-indigo-600" />
-                營收趨勢圖
-              </h3>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
+                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-indigo-600" />
+                  營收與預期收益趨勢
+                </h3>
+                <div className="flex items-center gap-4 text-xs font-semibold">
+                  <span className="flex items-center gap-1.5 text-[#8B5B43]">
+                    <span className="w-3 h-1 bg-[#8B5B43] rounded-full inline-block"></span>
+                    預期收益
+                  </span>
+                  <span className="flex items-center gap-1.5 text-emerald-600">
+                    <span className="w-3 h-1 bg-emerald-500 rounded-full inline-block"></span>
+                    實收金額
+                  </span>
+                </div>
+              </div>
               <div className="h-[300px] w-full">
                 {summary.dailyData && summary.dailyData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
@@ -269,31 +308,149 @@ export default function AccountingPage() {
                         ]}
                         axisLine={false} 
                         tickLine={false} 
-                        tick={{ fill: '#6b7280', fontSize: 12 }}
+                        tick={{ fill: '#6b7280', fontSize: 12 }} 
                         tickFormatter={(value) => `NT$ ${value}`}
                         dx={-5}
                       />
                       <Tooltip 
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        formatter={(value) => [`NT$ ${value.toLocaleString()}`, '營收']}
+                        formatter={(value, name) => [`NT$ ${value.toLocaleString()}`, name === 'expected' ? '預期收益' : '實收金額']}
                         labelStyle={{ color: '#4b5563', fontWeight: 'bold', marginBottom: '4px' }}
                       />
                       <Line 
                         type="monotone" 
+                        name="expected"
+                        dataKey="expected" 
+                        stroke="#8B5B43" 
+                        strokeWidth={2}
+                        strokeDasharray="4 4"
+                        dot={{ r: 3, strokeWidth: 2, fill: '#8B5B43' }}
+                        activeDot={{ r: 5, strokeWidth: 0, fill: '#8B5B43' }}
+                        animationDuration={1000}
+                      />
+                      <Line 
+                        type="monotone" 
+                        name="revenue"
                         dataKey="revenue" 
-                        stroke="#4f46e5" 
+                        stroke="#10b981" 
                         strokeWidth={3}
                         dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
-                        activeDot={{ r: 6, strokeWidth: 0, fill: '#4f46e5' }}
+                        activeDot={{ r: 6, strokeWidth: 0, fill: '#10b981' }}
                         animationDuration={1000}
                       />
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
                   <div className="h-full flex items-center justify-center text-gray-400">
-                    這段期間尚未有營收資料
+                    這段期間尚未有營收或預約資料
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Daily / Period Bookings Expected Breakdown */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 mt-6 overflow-hidden">
+              <div className="px-6 py-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50/50">
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                    <Calendar className="w-5 h-5 text-[#8B5B43]" />
+                    {startDate === endDate ? `${startDate} 當日預約預期收益明細` : `${startDate} 至 ${endDate} 期間預約預期收益明細`}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    點擊任一訂單可開啟詳細資訊查看或進行結帳操作。
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-amber-50 text-[#8B5B43] border border-[#E8DEC8] px-2.5 py-1 rounded-lg font-bold">
+                    預期總計：NT$ {(summary.expectedRevenue || 0).toLocaleString()}
+                  </span>
+                  <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-lg font-bold">
+                    實收：NT$ {(summary.totalRevenue || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left whitespace-nowrap">
+                  <thead>
+                    <tr className="bg-gray-50/70 text-gray-500 text-xs font-semibold uppercase tracking-wider border-b border-gray-200">
+                      <th className="px-6 py-3.5">預約時段</th>
+                      <th className="px-6 py-3.5">顧客姓名 / 電話</th>
+                      <th className="px-6 py-3.5 text-center">人數</th>
+                      <th className="px-6 py-3.5">預估 / 實收金額</th>
+                      <th className="px-6 py-3.5">結帳狀態</th>
+                      <th className="px-6 py-3.5 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 text-sm">
+                    {!summary.bookingsBreakdown || summary.bookingsBreakdown.length === 0 ? (
+                      <tr>
+                        <td colSpan="6" className="px-6 py-12 text-center text-gray-400">
+                          此日期區間內尚無任何預約訂單
+                        </td>
+                      </tr>
+                    ) : (
+                      summary.bookingsBreakdown.map((item) => (
+                        <tr 
+                          key={item.booking_ref} 
+                          onClick={() => setSelectedReservationRef(item.booking_ref)}
+                          className="hover:bg-amber-50/20 cursor-pointer transition-colors"
+                        >
+                          <td className="px-6 py-4">
+                            <div className="font-semibold text-gray-800">
+                              {item.start_time} - {item.end_time}
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              {format(new Date(item.session_date), 'yyyy/MM/dd')}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="font-medium text-gray-900">{item.name}</div>
+                            <div className="text-xs text-gray-500">{item.phone}</div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <div className="inline-flex items-center gap-1">
+                              <span className="font-bold text-gray-800">{item.pax} 人</span>
+                              {item.is_unlimited && (
+                                <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-bold">
+                                  不限時
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="font-bold text-gray-900 text-base">
+                              NT$ {(item.amount || 0).toLocaleString()}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            {item.is_paid ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                已結帳
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                待結帳
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedReservationRef(item.booking_ref);
+                              }}
+                              className="text-xs font-semibold text-[#8B5B43] hover:text-[#724833] bg-[#FAF7F2] hover:bg-amber-100/50 border border-[#E8DEC8] px-3 py-1.5 rounded-lg transition-colors"
+                            >
+                              查看詳情 / 結帳
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
             </>

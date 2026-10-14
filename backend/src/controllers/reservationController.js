@@ -84,8 +84,9 @@ const groupReservations = (reservations) => {
 };
 
 // Helper function to calculate total amount based on pricing rules
-const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlimited) => {
+export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlimited) => {
   // Try to find DailySetting override
+
   const dailySetting = await tx.dailySetting.findUnique({
     where: { date: sessionDate }
   });
