@@ -402,7 +402,7 @@ export default function EquipmentPage() {
               </div>
 
               <div className="text-[11px] text-[#8B5B43] bg-white/80 border border-[#E8DEC8] px-2.5 py-1.5 rounded-xl font-medium leading-relaxed">
-                💡 優惠試算：每租滿 {(parseInt(discountDraft.buy_hours, 10) || 3) + (parseInt(discountDraft.free_hours, 10) || 1)} 小時僅收 {discountDraft.buy_hours || 3} 小時租金（租 {(parseInt(discountDraft.buy_hours, 10) || 3) + (parseInt(discountDraft.free_hours, 10) || 1)}hr 付 {discountDraft.buy_hours || 3}hr、租 {((parseInt(discountDraft.buy_hours, 10) || 3) + (parseInt(discountDraft.free_hours, 10) || 1)) * 2}hr 付 {(parseInt(discountDraft.buy_hours, 10) || 3) * 2}hr）。
+                💡 <strong>計算方式</strong>：依「每台設備/每位」各自獨立計算時數（非全單時數總和累計）。例如 4 位預約 5 小時智能板，每台各享滿 4hr 折抵 1hr，4 台合計折抵 4 小時租金（非加總 20hr 算 5hr）。
               </div>
             </div>
           )}

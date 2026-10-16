@@ -207,14 +207,14 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
 
           {/* Equipment Discount Banner */}
           {equipmentDiscount.enabled && (
-            <div className="bg-[#FAF4EB] border border-[#E8DEC8] px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-between text-[#8B5B43]">
+            <div className="bg-[#FAF4EB] border border-[#E8DEC8] px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[#8B5B43]">
               <div className="flex items-center gap-2">
-                <Gift className="w-4 h-4 text-[#8B5B43]" />
-                <span>智能板「買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}」時數優惠生效中</span>
+                <Gift className="w-4 h-4 text-[#8B5B43] shrink-0" />
+                <span>智能板「買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}」生效中（每台獨立計算）</span>
               </div>
               {chargeableHours < rentalHours && (
-                <span className="bg-[#8B5B43] text-white text-[11px] px-2 py-0.5 rounded-full">
-                  已折抵 {rentalHours - chargeableHours} 小時
+                <span className="bg-[#8B5B43] text-white text-[11px] px-2.5 py-1 rounded-full shrink-0">
+                  每台折抵 {rentalHours - chargeableHours}hr（{totalBoards} 台共折抵 {totalBoards * (rentalHours - chargeableHours)} 小時）
                 </span>
               )}
             </div>
