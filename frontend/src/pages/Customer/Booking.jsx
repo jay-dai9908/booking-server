@@ -78,7 +78,7 @@ function Booking() {
         const formattedDate = format(selectedDate, 'yyyy-MM-dd');
         const sessionStarts = sortedSelectedSessions.map(s => s.start_time).join(',');
         const res = await api.get(`/equipment/availability?date=${formattedDate}&sessions=${sessionStarts}`);
-        setEquipmentConfigs(res.data.equipments || []);
+        setEquipmentConfigs(res.data.equipments || (Array.isArray(res.data) ? res.data : []));
         setAllowExceedPax(!!res.data.allow_exceed_pax);
       } catch (err) {
         console.error('Failed to fetch equipment availability:', err);

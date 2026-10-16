@@ -13,15 +13,23 @@ export const getAvailableEquipment = async (req, res) => {
       orderBy: { sort_order: 'asc' }
     });
 
+    const globalSetting = await prisma.globalSetting.findUnique({
+      where: { id: 1 }
+    });
+    const allow_exceed_pax = !!globalSetting?.allow_equipment_exceed_pax;
+
     if (configs.length === 0) {
-      return res.json([]);
+      return res.json({ equipments: [], allow_exceed_pax });
     }
 
     if (!date || !sessions) {
-      return res.json(configs.map(c => ({
-        ...c,
-        available_qty: c.id === 'bring_own' ? 9999 : (c.visibility_status === 'MAINTENANCE' ? 0 : (c.total_stock || 0))
-      })));
+      return res.json({
+        equipments: configs.map(c => ({
+          ...c,
+          available_qty: c.id === 'bring_own' ? 9999 : (c.visibility_status === 'MAINTENANCE' ? 0 : (c.total_stock || 0))
+        })),
+        allow_exceed_pax
+      });
     }
 
     const requestedSessions = Array.isArray(sessions) 
@@ -111,7 +119,10 @@ export const getAvailableEquipment = async (req, res) => {
       };
     });
 
-    res.json(results);
+    res.json({
+      equipments: results,
+      allow_exceed_pax
+    });
   } catch (error) {
     console.error('Error in getAvailableEquipment:', error);
     res.status(500).json({ error: '無法取得設備可用數量' });
