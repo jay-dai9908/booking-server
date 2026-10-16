@@ -523,7 +523,7 @@ function Booking() {
                 {/* Free baseline benefit banner */}
                 <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-[#6B5A4E] leading-relaxed">
                   <span className="text-base shrink-0">💡</span>
-                  <div>每位入場皆免費提供「一般傳統拼豆板」與 221 色豆子；同行者中僅需使用「智能引導拼豆板」的人員依實際需要台數加購即可（不必全員加購）。</div>
+                  <div>每位入場皆免費提供「一般傳統拼豆板」；同行者中僅需使用「智能引導拼豆板」的人員依實際需要裝置數加購即可（不必全員加購）。</div>
                 </div>
 
                 {/* State: Less than 2 contiguous hours */}
