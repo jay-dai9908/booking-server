@@ -119,6 +119,14 @@ export default function DailyReservationsList({ date, onOpenDetails }) {
                               不限時
                             </span>
                           )}
+                          {r.equipments && r.equipments.length > 0 && (
+                            <span 
+                              className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded flex items-center gap-0.5" 
+                              title={`智能板: ${r.equipments.map(e => `${e.equipment_name_snapshot}×${e.quantity}`).join('、')}`}
+                            >
+                              ⚙️ ×{r.equipments.reduce((sum, e) => sum + e.quantity, 0)}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4">

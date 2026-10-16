@@ -213,7 +213,9 @@ export const createReservation = async (req, res) => {
           if (!config) continue;
 
           const minHours = config.min_contiguous_hours || 2;
-          const rentalHours = Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
+          const rentalHours = totalHours < minHours 
+            ? totalHours 
+            : Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
 
           const singlePrice = Math.min(config.hourly_rate * rentalHours, config.daily_cap);
           const subtotal = singlePrice * qty;
@@ -993,7 +995,9 @@ export const adminCreateReservation = async (req, res) => {
           if (!config) continue;
 
           const minHours = config.min_contiguous_hours || 2;
-          const rentalHours = Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
+          const rentalHours = totalHours < minHours 
+            ? totalHours 
+            : Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
 
           const singlePrice = Math.min(config.hourly_rate * rentalHours, config.daily_cap);
           const subtotal = singlePrice * qty;

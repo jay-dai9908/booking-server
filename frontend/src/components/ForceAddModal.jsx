@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Users, X, Clock } from 'lucide-react';
+import { User, Phone, Users, X, Clock, Cpu, Plus, Minus } from 'lucide-react';
 import api from '../api/axios';
 
 export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sessions = [], onSuccess }) {
@@ -10,8 +10,19 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
     forceSplit: true
   });
   const [selectedSessions, setSelectedSessions] = useState([]);
+  const [equipmentConfigs, setEquipmentConfigs] = useState([]);
+  const [selectedEquipments, setSelectedEquipments] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Fetch equipment configs
+  useEffect(() => {
+    if (isOpen) {
+      api.get('/equipment/admin/configs')
+        .then(res => setEquipmentConfigs(res.data || []))
+        .catch(err => console.error('Failed to load configs:', err));
+    }
+  }, [isOpen]);
 
   // Initialize selected sessions with the currently viewed session
   useEffect(() => {
@@ -54,6 +65,14 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
       return sA.start_time.localeCompare(sB.start_time);
     });
 
+    const equipmentsPayload = Object.entries(selectedEquipments)
+      .filter(([_, qty]) => qty > 0)
+      .map(([equipment_id, quantity]) => ({
+        equipment_id,
+        quantity,
+        rental_hours: sortedSessionIds.length
+      }));
+
     try {
       await api.post('/reservations/admin', {
         session_ids: sortedSessionIds,
@@ -62,12 +81,14 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
         phone: formData.phone,
         isForceWait: true,
         forceSplit: formData.forceSplit,
-        isWalkIn: true
+        isWalkIn: true,
+        equipments: equipmentsPayload
       });
       
       onSuccess(); // triggers refetch
       onClose();
       setFormData({ name: '', phone: '', pax: 1, forceSplit: true });
+      setSelectedEquipments({});
     } catch (err) {
       setError(err.response?.data?.error || '建立失敗，請稍後再試');
     } finally {
@@ -202,6 +223,71 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
                 })}
               </div>
             </div>
+
+            {/* Smart Pegboard Equipment Selection */}
+            {equipmentConfigs.length > 0 && (
+              <div className="pt-3 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                    <Cpu className="w-4 h-4 text-indigo-600" />
+                    現場租借智能拼豆板 <span className="text-gray-400 font-normal">(選填)</span>
+                  </label>
+                  {(() => {
+                    const totalHours = Math.max(1, selectedSessions.length);
+                    const totalFee = equipmentConfigs.reduce((sum, c) => {
+                      const qty = selectedEquipments[c.id] || 0;
+                      const singlePrice = Math.min(c.hourly_rate * totalHours, c.daily_cap);
+                      return sum + singlePrice * qty;
+                    }, 0);
+                    return totalFee > 0 ? (
+                      <span className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-bold">
+                        加購小計 +NT$ {totalFee}
+                      </span>
+                    ) : null;
+                  })()}
+                </div>
+                <div className="space-y-2 bg-gray-50/70 p-3 rounded-2xl border border-gray-200">
+                  {equipmentConfigs.map(c => {
+                    const qty = selectedEquipments[c.id] || 0;
+                    const isBringOwn = c.id === 'bring_own';
+                    const totalHours = Math.max(1, selectedSessions.length);
+                    const singlePrice = Math.min(c.hourly_rate * totalHours, c.daily_cap);
+
+                    return (
+                      <div key={c.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-bold text-gray-800">{c.name}</span>
+                            <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded">NT${c.hourly_rate}/時</span>
+                          </div>
+                          <div className="text-[11px] text-gray-400 mt-0.5">
+                            {isBringOwn ? '自備設備場地充電費' : `單台上限 NT$${c.daily_cap} ｜ 時數計 NT$${singlePrice}`}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={qty <= 0}
+                            onClick={() => setSelectedEquipments(prev => ({ ...prev, [c.id]: Math.max(0, qty - 1) }))}
+                            className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center font-bold text-gray-700 transition-colors"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="w-6 text-center font-bold text-sm text-gray-800">{qty}</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedEquipments(prev => ({ ...prev, [c.id]: qty + 1 }))}
+                            className="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mt-8 flex gap-3">

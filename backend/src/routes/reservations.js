@@ -17,7 +17,7 @@ router.delete('/:id', verifyToken, cancelReservation);
 router.patch('/:booking_ref/equipment', verifyToken, modifyBookingEquipment);
 router.delete('/:id/record', ...reservationStaffAuth, deleteReservationRecord);
 router.get('/admin', ...reservationStaffAuth, getAdminReservations);
-router.get('/admin/:booking_ref/details', queryLimiter, ...reservationStaffAuth, getAdminReservationDetails);
+router.get('/admin/:booking_ref/details', ...reservationStaffAuth, getAdminReservationDetails);
 router.post('/admin', ...reservationStaffAuth, adminCreateReservation);
 router.post('/admin/:booking_ref/extend', ...reservationStaffAuth, extendReservation);
 router.patch('/admin/:booking_ref/payment', ...reservationStaffAuth, updatePaymentStatus);

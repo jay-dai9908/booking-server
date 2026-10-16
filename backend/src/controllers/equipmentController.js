@@ -602,7 +602,9 @@ export const modifyBookingEquipment = async (req, res) => {
 
       const config = configMap[eq.equipment_id];
       const minHours = config.min_contiguous_hours || 2;
-      const rentalHours = Math.max(minHours, Math.min(totalOrderHours, parseInt(eq.rental_hours, 10) || totalOrderHours));
+      const rentalHours = totalOrderHours < minHours 
+        ? totalOrderHours 
+        : Math.max(minHours, Math.min(totalOrderHours, parseInt(eq.rental_hours, 10) || totalOrderHours));
 
       const singleBoardPrice = Math.min(config.hourly_rate * rentalHours, config.daily_cap);
       const subtotalPrice = singleBoardPrice * qty;

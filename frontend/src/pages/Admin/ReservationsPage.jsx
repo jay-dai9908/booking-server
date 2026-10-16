@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Search, Plus, XCircle, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, XCircle, CheckCircle2, Cpu, Minus } from 'lucide-react';
 import api from '../../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from '../../components/ReservationDetailsModal';
 
@@ -24,7 +24,17 @@ export default function ReservationsPage() {
   const [manualName, setManualName] = useState('');
   const [manualPhone, setManualPhone] = useState('');
   const [manualPax, setManualPax] = useState(1);
+  const [manualEquipments, setManualEquipments] = useState({});
+  const [equipmentConfigs, setEquipmentConfigs] = useState([]);
   const [isManualLoading, setIsManualLoading] = useState(false);
+
+  useEffect(() => {
+    if (showManualBooking) {
+      api.get('/equipment/admin/configs')
+        .then(res => setEquipmentConfigs(res.data || []))
+        .catch(err => console.error('Failed to load configs:', err));
+    }
+  }, [showManualBooking]);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -134,6 +144,14 @@ export default function ReservationsPage() {
     }
     const sortedSessions = [...manualSelectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
     
+    const equipmentsPayload = Object.entries(manualEquipments)
+      .filter(([_, qty]) => qty > 0)
+      .map(([equipment_id, quantity]) => ({
+        equipment_id,
+        quantity,
+        rental_hours: sortedSessions.length
+      }));
+
     try {
       await api.post('/reservations/admin', {
         name: manualName,
@@ -141,7 +159,8 @@ export default function ReservationsPage() {
         session_ids: sortedSessions.map(s => s.id),
         pax: manualPax,
         forceSplit: manualForceSplit,
-        isWalkIn: true
+        isWalkIn: true,
+        equipments: equipmentsPayload
       });
       alert('手動預約建立成功！');
       setShowManualBooking(false);
@@ -149,6 +168,7 @@ export default function ReservationsPage() {
       setManualPhone('');
       setManualSelectedSessions([]);
       setManualForceSplit(true);
+      setManualEquipments({});
       fetchReservations();
     } catch (err) {
       alert(err.response?.data?.error || '手動預約失敗');
@@ -251,6 +271,14 @@ export default function ReservationsPage() {
                           {r.is_unlimited && (
                             <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
                               不限時
+                            </span>
+                          )}
+                          {r.equipments && r.equipments.length > 0 && (
+                            <span 
+                              className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded flex items-center gap-0.5" 
+                              title={`智能板: ${r.equipments.map(e => `${e.equipment_name_snapshot}×${e.quantity}`).join('、')}`}
+                            >
+                              ⚙️ ×{r.equipments.reduce((sum, e) => sum + e.quantity, 0)}
                             </span>
                           )}
                         </div>
@@ -402,6 +430,70 @@ export default function ReservationsPage() {
                       <option key={i + 1} value={i + 1}>{i + 1} 人</option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {manualSelectedSessions.length > 0 && equipmentConfigs.length > 0 && (
+                <div className="mb-6 pt-4 border-t border-gray-100 animate-in fade-in slide-in-from-bottom-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                      <Cpu className="w-4 h-4 text-gray-800" />
+                      加租智能拼豆板 <span className="text-gray-400 font-normal">(選填)</span>
+                    </label>
+                    {(() => {
+                      const totalHours = manualSelectedSessions.length;
+                      const totalFee = equipmentConfigs.reduce((sum, c) => {
+                        const qty = manualEquipments[c.id] || 0;
+                        const singlePrice = Math.min(c.hourly_rate * totalHours, c.daily_cap);
+                        return sum + singlePrice * qty;
+                      }, 0);
+                      return totalFee > 0 ? (
+                        <span className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-bold">
+                          加購小計 +NT$ {totalFee}
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
+                  <div className="space-y-2 bg-gray-50/70 p-3 rounded-2xl border border-gray-200">
+                    {equipmentConfigs.map(c => {
+                      const qty = manualEquipments[c.id] || 0;
+                      const isBringOwn = c.id === 'bring_own';
+                      const totalHours = manualSelectedSessions.length;
+                      const singlePrice = Math.min(c.hourly_rate * totalHours, c.daily_cap);
+
+                      return (
+                        <div key={c.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-bold text-gray-800">{c.name}</span>
+                              <span className="text-xs text-gray-600 font-semibold bg-gray-100 px-1.5 py-0.5 rounded">NT${c.hourly_rate}/時</span>
+                            </div>
+                            <div className="text-[11px] text-gray-400 mt-0.5">
+                              {isBringOwn ? '自備設備充電場地費' : `單台上限 NT$${c.daily_cap} ｜ 時數計 NT$${singlePrice}`}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={qty <= 0}
+                              onClick={() => setManualEquipments(prev => ({ ...prev, [c.id]: Math.max(0, qty - 1) }))}
+                              className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center font-bold text-gray-700 transition-colors"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <span className="w-6 text-center font-bold text-sm text-gray-800">{qty}</span>
+                            <button
+                              type="button"
+                              onClick={() => setManualEquipments(prev => ({ ...prev, [c.id]: qty + 1 }))}
+                              className="w-7 h-7 rounded-lg bg-gray-900 hover:bg-gray-800 text-white flex items-center justify-center font-bold transition-colors"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

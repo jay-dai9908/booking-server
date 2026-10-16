@@ -1,9 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { X, CheckCircle2, XCircle, Trash2, Pencil, Check } from 'lucide-react';
+import { X, CheckCircle2, XCircle, Trash2, Pencil, Check, Cpu } from 'lucide-react';
 import api from '../api/axios';
 import ExtendTimeModal from './ExtendTimeModal';
+import EquipmentAddonModal from './EquipmentAddonModal';
 
 export const getReservationStatusUI = (r) => {
   if (r.status === 'cancelled') {
@@ -34,6 +35,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
   const [showExtendModal, setShowExtendModal] = React.useState(false);
   const [isEditingAmount, setIsEditingAmount] = React.useState(false);
   const [editAmountValue, setEditAmountValue] = React.useState('');
+  const [showEquipmentModal, setShowEquipmentModal] = React.useState(false);
 
   if (!reservation) return null;
 
@@ -256,14 +258,31 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                   </div>
                 </div>
               )}
-              {reservation.equipments && reservation.equipments.length > 0 && (
-                <div className="sm:col-span-2 bg-amber-50/60 border border-amber-200/80 rounded-xl p-3.5">
-                  <h3 className="text-sm font-bold text-amber-900 mb-2 flex items-center gap-1.5">
+              {/* Smart Pegboard Section */}
+              <div className="sm:col-span-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-bold text-[#8B5B43] flex items-center gap-1.5">
                     ⚙️ 智能拼豆板租賃明細
                   </h3>
+                  {!readOnly && reservation.status !== 'cancelled' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowEquipmentModal(true)}
+                      className="text-xs bg-[#8B5B43] hover:bg-[#724a35] text-white px-2.5 py-1 rounded-lg transition-colors font-medium flex items-center gap-1 shadow-xs"
+                    >
+                      {reservation.equipments && reservation.equipments.length > 0 ? (
+                        <>✏️ 調整智能板</>
+                      ) : (
+                        <>➕ 加購/補登智能板</>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {reservation.equipments && reservation.equipments.length > 0 ? (
                   <div className="space-y-1.5">
                     {reservation.equipments.map((eq, i) => (
-                      <div key={i} className="flex items-center justify-between bg-white px-3 py-2 rounded-lg border border-amber-200 text-sm">
+                      <div key={i} className="flex items-center justify-between bg-white px-3 py-2 rounded-lg border border-[#E8DEC8] text-sm">
                         <span className="font-bold text-gray-800">{eq.equipment_name_snapshot} × {eq.quantity} 台</span>
                         <span className="text-xs font-bold text-[#8B5B43]">
                           時數: {eq.rental_hours} 小時 ｜ 加購小計: NT$ {eq.subtotal_price}
@@ -271,8 +290,21 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="flex items-center justify-between bg-white/80 px-3 py-2.5 rounded-lg border border-dashed border-[#DED7CE] text-xs text-gray-600">
+                    <span>此訂單尚未租賃智能拼豆板（使用免費基本拼豆板）</span>
+                    {!readOnly && reservation.status !== 'cancelled' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowEquipmentModal(true)}
+                        className="text-[#8B5B43] hover:underline font-bold text-xs flex items-center gap-0.5"
+                      >
+                        點此加租 &rarr;
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">當前狀態</h3>
@@ -363,6 +395,14 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                         <span>💰</span>
                         {reservation.is_paid ? '取消付費標記' : '標記為已付費'}
                       </button>
+                      <button 
+                        type="button"
+                        onClick={() => setShowEquipmentModal(true)}
+                        className="px-4 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 rounded-xl font-medium transition-colors flex items-center gap-1.5"
+                      >
+                        <Cpu className="w-4 h-4 text-amber-800" />
+                        {reservation.equipments && reservation.equipments.length > 0 ? '調整智能板' : '加購智能板'}
+                      </button>
                     </>
                   )}
                   
@@ -389,6 +429,30 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           if (onUpdate) onUpdate();
         }}
       />
+
+      {showEquipmentModal && (
+        <EquipmentAddonModal 
+          isOpen={showEquipmentModal}
+          onClose={() => setShowEquipmentModal(false)}
+          reservation={reservation}
+          isAdmin={true}
+          onSuccess={async (updatedData) => {
+            try {
+              const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
+              if (onUpdate) onUpdate(res.data);
+            } catch (e) {
+              if (updatedData && onUpdate) {
+                onUpdate({
+                  equipments: updatedData.equipments,
+                  total_amount: updatedData.total_amount
+                });
+              } else if (onUpdate) {
+                onUpdate();
+              }
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
