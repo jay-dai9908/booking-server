@@ -194,6 +194,7 @@ export const createReservation = async (req, res) => {
       // Apply Reshuffle Updates to existing reservations
       const sessionUpdates = []; 
       const newReservationsData = [];
+      const mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES')?.assigned_seats || [];
       
       // Smart Pegboard / Equipment fee calculation
       const equipments = req.body.equipments;
