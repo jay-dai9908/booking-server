@@ -89,6 +89,7 @@ export const getAvailableEquipment = async (req, res) => {
     const equipment_discount_enabled = globalSetting ? globalSetting.equipment_discount_enabled !== false : true;
     const equipment_discount_buy_hours = globalSetting?.equipment_discount_buy_hours ?? 3;
     const equipment_discount_free_hours = globalSetting?.equipment_discount_free_hours ?? 1;
+    const equipment_discount_stackable = globalSetting ? globalSetting.equipment_discount_stackable !== false : true;
 
     if (configs.length === 0) {
       return res.json({ 
@@ -97,7 +98,8 @@ export const getAvailableEquipment = async (req, res) => {
         show_equipment_live_stock,
         equipment_discount_enabled,
         equipment_discount_buy_hours,
-        equipment_discount_free_hours
+        equipment_discount_free_hours,
+        equipment_discount_stackable
       });
     }
 
@@ -111,7 +113,8 @@ export const getAvailableEquipment = async (req, res) => {
         show_equipment_live_stock,
         equipment_discount_enabled,
         equipment_discount_buy_hours,
-        equipment_discount_free_hours
+        equipment_discount_free_hours,
+        equipment_discount_stackable
       });
     }
 
@@ -208,7 +211,8 @@ export const getAvailableEquipment = async (req, res) => {
       show_equipment_live_stock,
       equipment_discount_enabled,
       equipment_discount_buy_hours,
-      equipment_discount_free_hours
+      equipment_discount_free_hours,
+      equipment_discount_stackable
     });
   } catch (error) {
     console.error('Error in getAvailableEquipment:', error);
@@ -235,7 +239,8 @@ export const getAdminEquipmentConfigs = async (req, res) => {
       show_equipment_live_stock: globalSetting?.show_equipment_live_stock !== false,
       equipment_discount_enabled: globalSetting ? globalSetting.equipment_discount_enabled !== false : true,
       equipment_discount_buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
-      equipment_discount_free_hours: globalSetting?.equipment_discount_free_hours ?? 1
+      equipment_discount_free_hours: globalSetting?.equipment_discount_free_hours ?? 1,
+      equipment_discount_stackable: globalSetting ? globalSetting.equipment_discount_stackable !== false : true
     });
   } catch (error) {
     console.error('Error fetching equipment configs:', error);
@@ -424,7 +429,8 @@ export const updateGlobalEquipmentSetting = async (req, res) => {
     show_equipment_live_stock,
     equipment_discount_enabled,
     equipment_discount_buy_hours,
-    equipment_discount_free_hours
+    equipment_discount_free_hours,
+    equipment_discount_stackable
   } = req.body;
 
   try {
@@ -435,7 +441,8 @@ export const updateGlobalEquipmentSetting = async (req, res) => {
         ...(show_equipment_live_stock !== undefined && { show_equipment_live_stock: !!show_equipment_live_stock }),
         ...(equipment_discount_enabled !== undefined && { equipment_discount_enabled: !!equipment_discount_enabled }),
         ...(equipment_discount_buy_hours !== undefined && { equipment_discount_buy_hours: Math.max(1, parseInt(equipment_discount_buy_hours, 10)) }),
-        ...(equipment_discount_free_hours !== undefined && { equipment_discount_free_hours: Math.max(1, parseInt(equipment_discount_free_hours, 10)) })
+        ...(equipment_discount_free_hours !== undefined && { equipment_discount_free_hours: Math.max(1, parseInt(equipment_discount_free_hours, 10)) }),
+        ...(equipment_discount_stackable !== undefined && { equipment_discount_stackable: !!equipment_discount_stackable })
       },
       create: {
         id: 1,
@@ -443,7 +450,8 @@ export const updateGlobalEquipmentSetting = async (req, res) => {
         show_equipment_live_stock: show_equipment_live_stock !== undefined ? !!show_equipment_live_stock : true,
         equipment_discount_enabled: equipment_discount_enabled !== undefined ? !!equipment_discount_enabled : true,
         equipment_discount_buy_hours: equipment_discount_buy_hours !== undefined ? Math.max(1, parseInt(equipment_discount_buy_hours, 10)) : 3,
-        equipment_discount_free_hours: equipment_discount_free_hours !== undefined ? Math.max(1, parseInt(equipment_discount_free_hours, 10)) : 1
+        equipment_discount_free_hours: equipment_discount_free_hours !== undefined ? Math.max(1, parseInt(equipment_discount_free_hours, 10)) : 1,
+        equipment_discount_stackable: equipment_discount_stackable !== undefined ? !!equipment_discount_stackable : true
       }
     });
 
@@ -707,6 +715,7 @@ export const modifyBookingEquipment = async (req, res) => {
     const discountEnabled = globalSetting ? globalSetting.equipment_discount_enabled !== false : true;
     const buyHours = globalSetting?.equipment_discount_buy_hours ?? 3;
     const freeHours = globalSetting?.equipment_discount_free_hours ?? 1;
+    const stackable = globalSetting ? globalSetting.equipment_discount_stackable !== false : true;
 
     let totalEquipmentFee = 0;
     const newEquipmentRecords = [];
@@ -721,7 +730,7 @@ export const modifyBookingEquipment = async (req, res) => {
         ? totalOrderHours 
         : Math.max(minHours, Math.min(totalOrderHours, parseInt(eq.rental_hours, 10) || totalOrderHours));
 
-      const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountEnabled, buyHours, freeHours);
+      const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountEnabled, buyHours, freeHours, stackable);
 
       const singleBoardPrice = (config.daily_cap && config.daily_cap > 0)
         ? Math.min(config.hourly_rate * chargeableHours, config.daily_cap)

@@ -25,7 +25,8 @@ export default function EquipmentPage() {
     show_equipment_live_stock: true,
     equipment_discount_enabled: true,
     equipment_discount_buy_hours: 3,
-    equipment_discount_free_hours: 1
+    equipment_discount_free_hours: 1,
+    equipment_discount_stackable: true
   });
   const [discountDraft, setDiscountDraft] = useState({
     buy_hours: 3,
@@ -66,7 +67,8 @@ export default function EquipmentPage() {
         show_equipment_live_stock: res.data.show_equipment_live_stock !== false,
         equipment_discount_enabled: res.data.equipment_discount_enabled !== false,
         equipment_discount_buy_hours: res.data.equipment_discount_buy_hours ?? 3,
-        equipment_discount_free_hours: res.data.equipment_discount_free_hours ?? 1
+        equipment_discount_free_hours: res.data.equipment_discount_free_hours ?? 1,
+        equipment_discount_stackable: res.data.equipment_discount_stackable !== false
       });
       setDiscountDraft({
         buy_hours: res.data.equipment_discount_buy_hours ?? 3,
@@ -169,7 +171,8 @@ export default function EquipmentPage() {
       await api.patch('/equipment/admin/settings', {
         equipment_discount_enabled: globalSettings.equipment_discount_enabled,
         equipment_discount_buy_hours: buy,
-        equipment_discount_free_hours: free
+        equipment_discount_free_hours: free,
+        equipment_discount_stackable: globalSettings.equipment_discount_stackable
       });
       setGlobalSettings(prev => ({
         ...prev,
@@ -401,8 +404,41 @@ export default function EquipmentPage() {
                 </button>
               </div>
 
+              {/* Stackable Toggle */}
+              <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#E8DEC8]/50">
+                <div>
+                  <div className="text-xs font-bold text-[#3E332B] flex items-center gap-1.5">
+                    <span>可疊加折抵</span>
+                    <span className="text-[10px] text-[#7A7067] font-normal">
+                      （{globalSettings.equipment_discount_stackable ? '已開啟：時數倍數累計贈送' : '已關閉：單次最多折抵一次'}）
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-[#7A7067] mt-0.5">
+                    {globalSettings.equipment_discount_stackable
+                      ? `例如滿 ${globalSettings.equipment_discount_buy_hours} 小時折 ${globalSettings.equipment_discount_free_hours} 小時、滿 ${globalSettings.equipment_discount_buy_hours * 2} 小時折 ${globalSettings.equipment_discount_free_hours * 2} 小時`
+                      : `超過 ${globalSettings.equipment_discount_buy_hours} 小時一律僅折抵 ${globalSettings.equipment_discount_free_hours} 小時`}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] font-bold text-[#4A3F35]">
+                    {globalSettings.equipment_discount_stackable ? '開啟' : '關閉'}
+                  </span>
+                  <div 
+                    onClick={() => !savingGlobal && handleToggleGlobalSetting('equipment_discount_stackable', !globalSettings.equipment_discount_stackable)}
+                    className={`relative w-[38px] h-[20px] rounded-full transition-colors duration-300 cursor-pointer ${
+                      globalSettings.equipment_discount_stackable ? 'bg-[#8B5B43]' : 'bg-gray-300'
+                    }`}
+                  >
+                    <div className={`absolute top-[2px] left-[2px] bg-white w-[16px] h-[16px] rounded-full shadow-sm transition-transform duration-300 ${
+                      globalSettings.equipment_discount_stackable ? 'translate-x-[18px]' : 'translate-x-0'
+                    }`} />
+                  </div>
+                </div>
+              </div>
+
               <div className="text-[11px] text-[#8B5B43] bg-white/80 border border-[#E8DEC8] px-2.5 py-1.5 rounded-xl font-medium leading-relaxed">
-                💡 <strong>計算方式</strong>：依「每台設備/每位」各自獨立計算時數（非全單時數總和累計）。例如 4 位預約 5 小時智能板，每台各享租滿 {globalSettings.equipment_discount_buy_hours} 小時享 {globalSettings.equipment_discount_free_hours} 小時免費，4 台合計折抵 4 小時租金（非加總 20hr 算 5hr）。
+                💡 <strong>計算方式</strong>：依「每台設備/每位」各自獨立計算時數（非全單時數總和累計）。例如 4 位預約 5 小時智能板，每台各享租滿 {globalSettings.equipment_discount_buy_hours} 小時享 {globalSettings.equipment_discount_free_hours} 小時免費，4 台合計折抵 4 小時租金{globalSettings.equipment_discount_stackable ? `；若預約 ${globalSettings.equipment_discount_buy_hours * 2} 小時則每台折抵 ${globalSettings.equipment_discount_free_hours * 2} 小時` : '（未開啟疊加時每台最多折抵一次）'}。
               </div>
             </div>
           )}

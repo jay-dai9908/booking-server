@@ -45,7 +45,8 @@ function Booking() {
   const [equipmentDiscount, setEquipmentDiscount] = useState({
     enabled: true,
     buy_hours: 3,
-    free_hours: 1
+    free_hours: 1,
+    stackable: true
   });
 
   // Calculate contiguous sessions
@@ -93,7 +94,8 @@ function Booking() {
         setEquipmentDiscount({
           enabled: res.data.equipment_discount_enabled !== false,
           buy_hours: res.data.equipment_discount_buy_hours ?? 3,
-          free_hours: res.data.equipment_discount_free_hours ?? 1
+          free_hours: res.data.equipment_discount_free_hours ?? 1,
+          stackable: res.data.equipment_discount_stackable !== false
         });
       } catch (err) {
         console.error('Failed to fetch equipment availability:', err);
@@ -262,7 +264,8 @@ function Booking() {
     rentalHours,
     equipmentDiscount.enabled,
     equipmentDiscount.buy_hours,
-    equipmentDiscount.free_hours
+    equipmentDiscount.free_hours,
+    equipmentDiscount.stackable
   );
 
   let totalEquipmentFee = 0;
@@ -645,7 +648,7 @@ function Booking() {
                                 <span>
                                   智能拼豆板時間優惠：<strong>買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}</strong>
                                   <span className="text-xs text-[#7A7067] font-normal ml-1 hidden sm:inline">
-                                    （每台獨立計算：租滿 {equipmentDiscount.buy_hours} 小時享 {equipmentDiscount.free_hours} 小時免費）
+                                    （每台獨立計算：租滿 {equipmentDiscount.buy_hours} 小時享 {equipmentDiscount.free_hours} 小時免費{equipmentDiscount.stackable ? '，可累計折抵' : ''}）
                                   </span>
                                 </span>
                               </div>

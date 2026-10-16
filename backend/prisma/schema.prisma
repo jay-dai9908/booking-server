@@ -77,6 +77,7 @@ model GlobalSetting {
   equipment_discount_enabled  Boolean  @default(true)
   equipment_discount_buy_hours Int     @default(3)
   equipment_discount_free_hours Int    @default(1)
+  equipment_discount_stackable Boolean @default(true)
 }
 
 model BannedIP {

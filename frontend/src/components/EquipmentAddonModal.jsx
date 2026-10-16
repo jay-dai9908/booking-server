@@ -59,7 +59,8 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
       setEquipmentDiscount({
         enabled: res.data.equipment_discount_enabled !== false,
         buy_hours: res.data.equipment_discount_buy_hours ?? 3,
-        free_hours: res.data.equipment_discount_free_hours ?? 1
+        free_hours: res.data.equipment_discount_free_hours ?? 1,
+        stackable: res.data.equipment_discount_stackable !== false
       });
 
       // Initialize selections with existing equipment
@@ -88,7 +89,8 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
     rentalHours,
     equipmentDiscount.enabled,
     equipmentDiscount.buy_hours,
-    equipmentDiscount.free_hours
+    equipmentDiscount.free_hours,
+    equipmentDiscount.stackable
   );
 
   // Calculate pricing difference

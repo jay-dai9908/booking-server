@@ -18,7 +18,8 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
   const [equipmentDiscount, setEquipmentDiscount] = useState({
     enabled: true,
     buy_hours: 3,
-    free_hours: 1
+    free_hours: 1,
+    stackable: true
   });
 
   // Fetch equipment configs
@@ -32,7 +33,8 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
             setEquipmentDiscount({
               enabled: res.data.equipment_discount_enabled !== false,
               buy_hours: res.data.equipment_discount_buy_hours ?? 3,
-              free_hours: res.data.equipment_discount_free_hours ?? 1
+              free_hours: res.data.equipment_discount_free_hours ?? 1,
+              stackable: res.data.equipment_discount_stackable !== false
             });
           }
         })
@@ -254,7 +256,8 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
                       totalHours,
                       equipmentDiscount.enabled,
                       equipmentDiscount.buy_hours,
-                      equipmentDiscount.free_hours
+                      equipmentDiscount.free_hours,
+                      equipmentDiscount.stackable
                     );
                     const totalFee = equipmentConfigs.reduce((sum, c) => {
                       const qty = selectedEquipments[c.id] || 0;
@@ -277,7 +280,8 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
                       totalHours,
                       equipmentDiscount.enabled,
                       equipmentDiscount.buy_hours,
-                      equipmentDiscount.free_hours
+                      equipmentDiscount.free_hours,
+                      equipmentDiscount.stackable
                     );
                     const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
 
