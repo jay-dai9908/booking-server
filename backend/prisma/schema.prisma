@@ -74,6 +74,9 @@ model GlobalSetting {
   is_lockdown_mode            Boolean  @default(false)
   allow_equipment_exceed_pax  Boolean  @default(false)
   show_equipment_live_stock   Boolean  @default(true)
+  equipment_discount_enabled  Boolean  @default(true)
+  equipment_discount_buy_hours Int     @default(3)
+  equipment_discount_free_hours Int    @default(1)
 }
 
 model BannedIP {

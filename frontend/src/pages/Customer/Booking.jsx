@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths, isBefore, startOfDay } from 'date-fns';
 import api from '../../api/axios';
 import { useNavigate } from 'react-router-dom';
+import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
 
 function Booking() {
   const navigate = useNavigate();
@@ -41,6 +42,11 @@ function Booking() {
   const [enableSmartBoard, setEnableSmartBoard] = useState(false);
   const [allowExceedPax, setAllowExceedPax] = useState(false);
   const [showLiveStock, setShowLiveStock] = useState(true);
+  const [equipmentDiscount, setEquipmentDiscount] = useState({
+    enabled: true,
+    buy_hours: 3,
+    free_hours: 1
+  });
 
   // Calculate contiguous sessions
   const sortedSelectedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
@@ -84,6 +90,11 @@ function Booking() {
         setEquipmentConfigs(res.data.equipments || (Array.isArray(res.data) ? res.data : []));
         setAllowExceedPax(!!res.data.allow_exceed_pax);
         setShowLiveStock(res.data.show_equipment_live_stock !== false);
+        setEquipmentDiscount({
+          enabled: res.data.equipment_discount_enabled !== false,
+          buy_hours: res.data.equipment_discount_buy_hours ?? 3,
+          free_hours: res.data.equipment_discount_free_hours ?? 1
+        });
       } catch (err) {
         console.error('Failed to fetch equipment availability:', err);
       }
@@ -247,14 +258,21 @@ function Booking() {
     }
   }, [pax, totalBoards, allowExceedPax]);
 
+  const chargeableRentalHours = calculateEquipmentChargeableHours(
+    rentalHours,
+    equipmentDiscount.enabled,
+    equipmentDiscount.buy_hours,
+    equipmentDiscount.free_hours
+  );
+
   let totalEquipmentFee = 0;
   const breakdownParts = [];
   visibleConfigs.forEach(c => {
     const qty = equipmentSelections[c.id] || 0;
     if (qty > 0) {
       const singlePrice = (c.daily_cap && c.daily_cap > 0)
-        ? Math.min(c.hourly_rate * rentalHours, c.daily_cap)
-        : (c.hourly_rate * rentalHours);
+        ? Math.min(c.hourly_rate * chargeableRentalHours, c.daily_cap)
+        : (c.hourly_rate * chargeableRentalHours);
       totalEquipmentFee += singlePrice * qty;
       breakdownParts.push(`${c.name}×${qty}`);
     }
@@ -282,6 +300,10 @@ function Booking() {
       });
     }
 
+    const discountSummary = (equipmentDiscount.enabled && chargeableRentalHours < rentalHours)
+      ? `（享「買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours}」優惠，折抵 ${rentalHours - chargeableRentalHours} 小時）`
+      : '';
+
     setConfirmModalData({
       date: format(selectedDate, 'yyyy-MM-dd'),
       timeRange: timeRangeStr,
@@ -291,7 +313,7 @@ function Booking() {
       equipments: activeEquipments,
       totalEquipmentFee,
       equipmentBreakdown: breakdownParts.length > 0 
-        ? `${breakdownParts.join(' + ')}，共 ${totalBoards} 台 × ${rentalHours} 小時`
+        ? `${breakdownParts.join(' + ')}，共 ${totalBoards} 台 × ${rentalHours} 小時${discountSummary}`
         : null
     });
   };
@@ -604,6 +626,30 @@ function Booking() {
                               ))}
                             </div>
                           )}
+
+                          {/* Promotional Banner */}
+                          {equipmentDiscount.enabled && (
+                            <div className="bg-[#FAF4EB] border border-[#E8DEC8] px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+                              <div className="flex items-center gap-2 text-[#8B5B43]">
+                                <span className="text-base">🎁</span>
+                                <span>
+                                  智能拼豆板時間優惠：<strong>買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}</strong>
+                                  <span className="text-xs text-[#7A7067] font-normal ml-1 hidden sm:inline">
+                                    （每滿 {equipmentDiscount.buy_hours + equipmentDiscount.free_hours} 小時折抵 {equipmentDiscount.free_hours} 小時租金）
+                                  </span>
+                                </span>
+                              </div>
+                              {rentalHours >= (equipmentDiscount.buy_hours + equipmentDiscount.free_hours) ? (
+                                <span className="bg-[#8B5B43] text-white text-[11px] px-2 py-0.5 rounded-full font-bold shrink-0 self-start sm:self-auto">
+                                  已享折抵 {rentalHours - chargeableRentalHours} 小時費用
+                                </span>
+                              ) : (
+                                <span className="text-amber-800 bg-amber-50 border border-amber-200 text-[11px] px-2 py-0.5 rounded-full font-bold shrink-0 self-start sm:self-auto">
+                                  租滿 {equipmentDiscount.buy_hours + equipmentDiscount.free_hours} 小時享免費 {equipmentDiscount.free_hours} 小時
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         {/* Equipment Rental Items (S, M, L) */}
@@ -737,11 +783,16 @@ function Booking() {
                         {totalBoards > 0 && (
                           <div className="bg-white/80 border border-[#E5DFD7] rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-bold text-sm text-[#3E332B]">🕒 使用時數 (至少 2 小時)</span>
                                 <span className="text-[11px] font-bold text-[#8B5B43] bg-[#F4EFE6] px-2 py-0.5 rounded">
                                   最少 2 小時
                                 </span>
+                                {equipmentDiscount.enabled && chargeableRentalHours < rentalHours && (
+                                  <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                                    享買{equipmentDiscount.buy_hours}送{equipmentDiscount.free_hours}：計費 {chargeableRentalHours} 小時
+                                  </span>
+                                )}
                               </div>
                               <span className="text-xs text-[#8C8279]">
                                 上限為本次預約最長連續時數 ({maxContiguous} 小時)
@@ -782,15 +833,23 @@ function Booking() {
                         {totalBoards > 0 && (
                           <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <div className="text-xs text-[#6B5A4E]">
-                              <span className="font-bold text-sm text-[#4A3F35] block mb-0.5">
-                                拼豆板加購金額小計： + NT$ {totalEquipmentFee}
-                              </span>
+                              <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                <span className="font-bold text-sm text-[#4A3F35]">
+                                  拼豆板加購金額小計： + NT$ {totalEquipmentFee}
+                                </span>
+                                {equipmentDiscount.enabled && chargeableRentalHours < rentalHours && (
+                                  <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                    已套用買{equipmentDiscount.buy_hours}送{equipmentDiscount.free_hours}優惠
+                                  </span>
+                                )}
+                              </div>
                               <span>
                                 {breakdownParts.join(' + ')}，共 {totalBoards} 台 × {rentalHours} 小時
+                                {equipmentDiscount.enabled && chargeableRentalHours < rentalHours ? `（計費 ${chargeableRentalHours} 小時，已免收 ${rentalHours - chargeableRentalHours} 小時）` : ''}
                                 {totalBoards < pax ? `；另 ${pax - totalBoards} 位使用免費一般板` : ''}
                               </span>
                             </div>
-                            {visibleConfigs.some(c => (equipmentSelections[c.id] || 0) > 0 && c.daily_cap && c.daily_cap > 0 && (c.hourly_rate * rentalHours >= c.daily_cap)) && (
+                            {visibleConfigs.some(c => (equipmentSelections[c.id] || 0) > 0 && c.daily_cap && c.daily_cap > 0 && (c.hourly_rate * chargeableRentalHours >= c.daily_cap)) && (
                               <span className="text-xs font-bold text-[#8B5B43] bg-white border border-[#E8DEC8] px-3 py-1 rounded-full shrink-0 self-end sm:self-auto">
                                 獨立單日封頂已套用
                               </span>

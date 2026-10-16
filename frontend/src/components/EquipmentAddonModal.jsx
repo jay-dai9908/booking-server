@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { X, AlertCircle, ShieldAlert, Check, Plus, Minus, Cpu } from 'lucide-react';
+import { X, AlertCircle, ShieldAlert, Check, Plus, Minus, Cpu, Gift } from 'lucide-react';
 import api from '../api/axios';
+import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 
 export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSuccess, isAdmin = false }) {
   if (!isOpen || !reservation) return null;
@@ -12,6 +13,11 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [equipmentDiscount, setEquipmentDiscount] = useState({
+    enabled: true,
+    buy_hours: 3,
+    free_hours: 1
+  });
 
   // Original quantities snapshot
   const oldQtys = React.useMemo(() => {
@@ -50,6 +56,11 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
       const res = await api.get(`/equipment/availability?date=${dateStr}&sessions=${sessionStarts}`);
       setConfigs(res.data.equipments || []);
       setAllowExceedPax(!!res.data.allow_exceed_pax);
+      setEquipmentDiscount({
+        enabled: res.data.equipment_discount_enabled !== false,
+        buy_hours: res.data.equipment_discount_buy_hours ?? 3,
+        free_hours: res.data.equipment_discount_free_hours ?? 1
+      });
 
       // Initialize selections with existing equipment
       const initial = {};
@@ -73,13 +84,20 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
   const totalBoards = visibleConfigs.reduce((sum, c) => sum + (selections[c.id] || 0), 0);
   const oldTotalBoards = Object.values(oldQtys).reduce((a, b) => a + b, 0);
 
+  const chargeableHours = calculateEquipmentChargeableHours(
+    rentalHours,
+    equipmentDiscount.enabled,
+    equipmentDiscount.buy_hours,
+    equipmentDiscount.free_hours
+  );
+
   // Calculate pricing difference
   let newEquipmentFee = 0;
   let oldEquipmentFee = 0;
   visibleConfigs.forEach(c => {
     const singlePrice = (c.daily_cap && c.daily_cap > 0)
-      ? Math.min(c.hourly_rate * rentalHours, c.daily_cap)
-      : (c.hourly_rate * rentalHours);
+      ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap)
+      : (c.hourly_rate * chargeableHours);
     const qty = selections[c.id] || 0;
     const oldQty = oldQtys[c.id] || 0;
     newEquipmentFee += singlePrice * qty;
@@ -186,6 +204,21 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
               尚可追加：{(allowExceedPax || isAdmin) ? '無限制' : `${Math.max(0, reservation.pax - totalBoards)} 台`}
             </span>
           </div>
+
+          {/* Equipment Discount Banner */}
+          {equipmentDiscount.enabled && (
+            <div className="bg-[#FAF4EB] border border-[#E8DEC8] px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-between text-[#8B5B43]">
+              <div className="flex items-center gap-2">
+                <Gift className="w-4 h-4 text-[#8B5B43]" />
+                <span>智能板「買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}」時數優惠生效中</span>
+              </div>
+              {chargeableHours < rentalHours && (
+                <span className="bg-[#8B5B43] text-white text-[11px] px-2 py-0.5 rounded-full">
+                  已折抵 {rentalHours - chargeableHours} 小時
+                </span>
+              )}
+            </div>
+          )}
 
           {loading ? (
             <div className="text-center py-10 text-[#8C8279]">

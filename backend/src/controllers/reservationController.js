@@ -2,6 +2,7 @@ import prisma from '../prismaClient.js';
 import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
+import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 
 // Helper function to group reservations by booking_ref
 const groupReservations = (reservations, equipmentsMap = {}) => {
@@ -204,6 +205,11 @@ export const createReservation = async (req, res) => {
         const configMap = {};
         allConfigs.forEach(c => { configMap[c.id] = c; });
 
+        const globalSetting = await tx.globalSetting.findUnique({ where: { id: 1 } });
+        const discountEnabled = globalSetting ? globalSetting.equipment_discount_enabled !== false : true;
+        const buyHours = globalSetting?.equipment_discount_buy_hours ?? 3;
+        const freeHours = globalSetting?.equipment_discount_free_hours ?? 1;
+
         const totalHours = session_ids.length;
         const coveredSessionsStrings = requestedSessions.map(s => `${s.start_time}-${s.end_time}`);
 
@@ -219,9 +225,11 @@ export const createReservation = async (req, res) => {
             ? totalHours 
             : Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
 
+          const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountEnabled, buyHours, freeHours);
+
           const singlePrice = (config.daily_cap && config.daily_cap > 0)
-            ? Math.min(config.hourly_rate * rentalHours, config.daily_cap)
-            : (config.hourly_rate * rentalHours);
+            ? Math.min(config.hourly_rate * chargeableHours, config.daily_cap)
+            : (config.hourly_rate * chargeableHours);
           const subtotal = singlePrice * qty;
           totalEquipmentFee += subtotal;
 
@@ -988,6 +996,11 @@ export const adminCreateReservation = async (req, res) => {
         const configMap = {};
         allConfigs.forEach(c => { configMap[c.id] = c; });
 
+        const globalSetting = await tx.globalSetting.findUnique({ where: { id: 1 } });
+        const discountEnabled = globalSetting ? globalSetting.equipment_discount_enabled !== false : true;
+        const buyHours = globalSetting?.equipment_discount_buy_hours ?? 3;
+        const freeHours = globalSetting?.equipment_discount_free_hours ?? 1;
+
         const totalHours = session_ids.length;
         const coveredSessionsStrings = requestedSessions.map(s => `${s.start_time}-${s.end_time}`);
 
@@ -1003,9 +1016,11 @@ export const adminCreateReservation = async (req, res) => {
             ? totalHours 
             : Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
 
+          const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountEnabled, buyHours, freeHours);
+
           const singlePrice = (config.daily_cap && config.daily_cap > 0)
-            ? Math.min(config.hourly_rate * rentalHours, config.daily_cap)
-            : (config.hourly_rate * rentalHours);
+            ? Math.min(config.hourly_rate * chargeableHours, config.daily_cap)
+            : (config.hourly_rate * chargeableHours);
           const subtotal = singlePrice * qty;
           totalEquipmentFee += subtotal;
 

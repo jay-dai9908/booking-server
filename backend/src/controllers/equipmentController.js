@@ -1,5 +1,6 @@
 import prisma from '../prismaClient.js';
 import { calculateTotalAmount } from './reservationController.js';
+import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 
 export const DEFAULT_EQUIPMENT_CONFIGS = [
   {
@@ -85,9 +86,19 @@ export const getAvailableEquipment = async (req, res) => {
     });
     const allow_exceed_pax = !!globalSetting?.allow_equipment_exceed_pax;
     const show_equipment_live_stock = globalSetting?.show_equipment_live_stock !== false;
+    const equipment_discount_enabled = globalSetting ? globalSetting.equipment_discount_enabled !== false : true;
+    const equipment_discount_buy_hours = globalSetting?.equipment_discount_buy_hours ?? 3;
+    const equipment_discount_free_hours = globalSetting?.equipment_discount_free_hours ?? 1;
 
     if (configs.length === 0) {
-      return res.json({ equipments: [], allow_exceed_pax, show_equipment_live_stock });
+      return res.json({ 
+        equipments: [], 
+        allow_exceed_pax, 
+        show_equipment_live_stock,
+        equipment_discount_enabled,
+        equipment_discount_buy_hours,
+        equipment_discount_free_hours
+      });
     }
 
     if (!date || !sessions) {
@@ -97,7 +108,10 @@ export const getAvailableEquipment = async (req, res) => {
           available_qty: c.id === 'bring_own' ? 9999 : (c.visibility_status === 'MAINTENANCE' ? 0 : (c.total_stock || 0))
         })),
         allow_exceed_pax,
-        show_equipment_live_stock
+        show_equipment_live_stock,
+        equipment_discount_enabled,
+        equipment_discount_buy_hours,
+        equipment_discount_free_hours
       });
     }
 
@@ -191,7 +205,10 @@ export const getAvailableEquipment = async (req, res) => {
     res.json({
       equipments: results,
       allow_exceed_pax,
-      show_equipment_live_stock
+      show_equipment_live_stock,
+      equipment_discount_enabled,
+      equipment_discount_buy_hours,
+      equipment_discount_free_hours
     });
   } catch (error) {
     console.error('Error in getAvailableEquipment:', error);
@@ -215,7 +232,10 @@ export const getAdminEquipmentConfigs = async (req, res) => {
     res.json({
       configs,
       allow_equipment_exceed_pax: !!globalSetting?.allow_equipment_exceed_pax,
-      show_equipment_live_stock: globalSetting?.show_equipment_live_stock !== false
+      show_equipment_live_stock: globalSetting?.show_equipment_live_stock !== false,
+      equipment_discount_enabled: globalSetting ? globalSetting.equipment_discount_enabled !== false : true,
+      equipment_discount_buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
+      equipment_discount_free_hours: globalSetting?.equipment_discount_free_hours ?? 1
     });
   } catch (error) {
     console.error('Error fetching equipment configs:', error);
@@ -399,19 +419,31 @@ export const deleteEquipmentConfig = async (req, res) => {
 
 // PATCH /api/admin/equipment/settings
 export const updateGlobalEquipmentSetting = async (req, res) => {
-  const { allow_equipment_exceed_pax, show_equipment_live_stock } = req.body;
+  const { 
+    allow_equipment_exceed_pax, 
+    show_equipment_live_stock,
+    equipment_discount_enabled,
+    equipment_discount_buy_hours,
+    equipment_discount_free_hours
+  } = req.body;
 
   try {
     const updated = await prisma.globalSetting.upsert({
       where: { id: 1 },
       update: {
         ...(allow_equipment_exceed_pax !== undefined && { allow_equipment_exceed_pax: !!allow_equipment_exceed_pax }),
-        ...(show_equipment_live_stock !== undefined && { show_equipment_live_stock: !!show_equipment_live_stock })
+        ...(show_equipment_live_stock !== undefined && { show_equipment_live_stock: !!show_equipment_live_stock }),
+        ...(equipment_discount_enabled !== undefined && { equipment_discount_enabled: !!equipment_discount_enabled }),
+        ...(equipment_discount_buy_hours !== undefined && { equipment_discount_buy_hours: Math.max(1, parseInt(equipment_discount_buy_hours, 10)) }),
+        ...(equipment_discount_free_hours !== undefined && { equipment_discount_free_hours: Math.max(1, parseInt(equipment_discount_free_hours, 10)) })
       },
       create: {
         id: 1,
         allow_equipment_exceed_pax: !!allow_equipment_exceed_pax,
-        show_equipment_live_stock: show_equipment_live_stock !== undefined ? !!show_equipment_live_stock : true
+        show_equipment_live_stock: show_equipment_live_stock !== undefined ? !!show_equipment_live_stock : true,
+        equipment_discount_enabled: equipment_discount_enabled !== undefined ? !!equipment_discount_enabled : true,
+        equipment_discount_buy_hours: equipment_discount_buy_hours !== undefined ? Math.max(1, parseInt(equipment_discount_buy_hours, 10)) : 3,
+        equipment_discount_free_hours: equipment_discount_free_hours !== undefined ? Math.max(1, parseInt(equipment_discount_free_hours, 10)) : 1
       }
     });
 
@@ -672,6 +704,10 @@ export const modifyBookingEquipment = async (req, res) => {
     const coveredSessionsStrings = reservations.map(r => `${r.session.start_time}-${r.session.end_time}`);
     const totalOrderHours = reservations.length;
 
+    const discountEnabled = globalSetting ? globalSetting.equipment_discount_enabled !== false : true;
+    const buyHours = globalSetting?.equipment_discount_buy_hours ?? 3;
+    const freeHours = globalSetting?.equipment_discount_free_hours ?? 1;
+
     let totalEquipmentFee = 0;
     const newEquipmentRecords = [];
 
@@ -685,9 +721,11 @@ export const modifyBookingEquipment = async (req, res) => {
         ? totalOrderHours 
         : Math.max(minHours, Math.min(totalOrderHours, parseInt(eq.rental_hours, 10) || totalOrderHours));
 
+      const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountEnabled, buyHours, freeHours);
+
       const singleBoardPrice = (config.daily_cap && config.daily_cap > 0)
-        ? Math.min(config.hourly_rate * rentalHours, config.daily_cap)
-        : (config.hourly_rate * rentalHours);
+        ? Math.min(config.hourly_rate * chargeableHours, config.daily_cap)
+        : (config.hourly_rate * chargeableHours);
       const subtotalPrice = singleBoardPrice * qty;
 
       totalEquipmentFee += subtotalPrice;

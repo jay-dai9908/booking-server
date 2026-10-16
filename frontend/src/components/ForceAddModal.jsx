@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Phone, Users, X, Clock, Cpu, Plus, Minus } from 'lucide-react';
 import api from '../api/axios';
+import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 
 export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sessions = [], onSuccess }) {
   const [formData, setFormData] = useState({
@@ -14,12 +15,27 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
   const [selectedEquipments, setSelectedEquipments] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [equipmentDiscount, setEquipmentDiscount] = useState({
+    enabled: true,
+    buy_hours: 3,
+    free_hours: 1
+  });
 
   // Fetch equipment configs
   useEffect(() => {
     if (isOpen) {
       api.get('/equipment/admin/configs')
-        .then(res => setEquipmentConfigs(res.data || []))
+        .then(res => {
+          const list = res.data?.configs || (Array.isArray(res.data) ? res.data : []);
+          setEquipmentConfigs(list);
+          if (res.data) {
+            setEquipmentDiscount({
+              enabled: res.data.equipment_discount_enabled !== false,
+              buy_hours: res.data.equipment_discount_buy_hours ?? 3,
+              free_hours: res.data.equipment_discount_free_hours ?? 1
+            });
+          }
+        })
         .catch(err => console.error('Failed to load configs:', err));
     }
   }, [isOpen]);
@@ -234,14 +250,20 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
                   </label>
                   {(() => {
                     const totalHours = Math.max(1, selectedSessions.length);
+                    const chargeableHours = calculateEquipmentChargeableHours(
+                      totalHours,
+                      equipmentDiscount.enabled,
+                      equipmentDiscount.buy_hours,
+                      equipmentDiscount.free_hours
+                    );
                     const totalFee = equipmentConfigs.reduce((sum, c) => {
                       const qty = selectedEquipments[c.id] || 0;
-                      const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * totalHours, c.daily_cap) : (c.hourly_rate * totalHours);
+                      const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
                       return sum + singlePrice * qty;
                     }, 0);
                     return totalFee > 0 ? (
                       <span className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-bold">
-                        加購小計 +NT$ {totalFee}
+                        加購小計 +NT$ {totalFee} {chargeableHours < totalHours ? `(享買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours})` : ''}
                       </span>
                     ) : null;
                   })()}
@@ -251,7 +273,13 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
                     const qty = selectedEquipments[c.id] || 0;
                     const isBringOwn = c.id === 'bring_own';
                     const totalHours = Math.max(1, selectedSessions.length);
-                    const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * totalHours, c.daily_cap) : (c.hourly_rate * totalHours);
+                    const chargeableHours = calculateEquipmentChargeableHours(
+                      totalHours,
+                      equipmentDiscount.enabled,
+                      equipmentDiscount.buy_hours,
+                      equipmentDiscount.free_hours
+                    );
+                    const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
 
                     return (
                       <div key={c.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs">

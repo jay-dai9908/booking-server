@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { Search, Plus, XCircle, CheckCircle2, Cpu, Minus } from 'lucide-react';
 import api from '../../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from '../../components/ReservationDetailsModal';
+import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
 
 export default function ReservationsPage() {
   const [reservations, setReservations] = useState([]);
@@ -27,11 +28,26 @@ export default function ReservationsPage() {
   const [manualEquipments, setManualEquipments] = useState({});
   const [equipmentConfigs, setEquipmentConfigs] = useState([]);
   const [isManualLoading, setIsManualLoading] = useState(false);
+  const [equipmentDiscount, setEquipmentDiscount] = useState({
+    enabled: true,
+    buy_hours: 3,
+    free_hours: 1
+  });
 
   useEffect(() => {
     if (showManualBooking) {
       api.get('/equipment/admin/configs')
-        .then(res => setEquipmentConfigs(res.data || []))
+        .then(res => {
+          const list = res.data?.configs || (Array.isArray(res.data) ? res.data : []);
+          setEquipmentConfigs(list);
+          if (res.data) {
+            setEquipmentDiscount({
+              enabled: res.data.equipment_discount_enabled !== false,
+              buy_hours: res.data.equipment_discount_buy_hours ?? 3,
+              free_hours: res.data.equipment_discount_free_hours ?? 1
+            });
+          }
+        })
         .catch(err => console.error('Failed to load configs:', err));
     }
   }, [showManualBooking]);
@@ -447,14 +463,20 @@ export default function ReservationsPage() {
                     </label>
                     {(() => {
                       const totalHours = manualSelectedSessions.length;
+                      const chargeableHours = calculateEquipmentChargeableHours(
+                        totalHours,
+                        equipmentDiscount.enabled,
+                        equipmentDiscount.buy_hours,
+                        equipmentDiscount.free_hours
+                      );
                       const totalFee = equipmentConfigs.reduce((sum, c) => {
                         const qty = manualEquipments[c.id] || 0;
-                        const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * totalHours, c.daily_cap) : (c.hourly_rate * totalHours);
+                        const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
                         return sum + singlePrice * qty;
                       }, 0);
                       return totalFee > 0 ? (
                         <span className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-bold">
-                          加購小計 +NT$ {totalFee}
+                          加購小計 +NT$ {totalFee} {chargeableHours < totalHours ? `(享買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours})` : ''}
                         </span>
                       ) : null;
                     })()}
@@ -464,7 +486,13 @@ export default function ReservationsPage() {
                       const qty = manualEquipments[c.id] || 0;
                       const isBringOwn = c.id === 'bring_own';
                       const totalHours = manualSelectedSessions.length;
-                      const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * totalHours, c.daily_cap) : (c.hourly_rate * totalHours);
+                      const chargeableHours = calculateEquipmentChargeableHours(
+                        totalHours,
+                        equipmentDiscount.enabled,
+                        equipmentDiscount.buy_hours,
+                        equipmentDiscount.free_hours
+                      );
+                      const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
 
                       return (
                         <div key={c.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs">

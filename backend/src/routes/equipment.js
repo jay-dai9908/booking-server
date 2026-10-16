@@ -17,6 +17,7 @@ router.get('/availability', getAvailableEquipment);
 
 // Admin endpoints
 router.get('/admin', verifyToken, requireAnyPermission(['sessions', 'seating', 'staff', 'equipment']), getAdminEquipmentConfigs);
+router.get('/admin/configs', verifyToken, requireAnyPermission(['sessions', 'seating', 'staff', 'equipment']), getAdminEquipmentConfigs);
 router.get('/admin/occupancy', verifyToken, requireAnyPermission(['sessions', 'seating', 'equipment']), getEquipmentOccupancy);
 router.put('/admin/:id', verifyToken, requireAnyPermission(['sessions', 'staff', 'equipment']), updateEquipmentConfig);
 router.post('/admin', verifyToken, requireAnyPermission(['sessions', 'staff', 'equipment']), createEquipmentConfig);

@@ -13,7 +13,8 @@ import {
   Layers,
   Wrench,
   Eye,
-  EyeOff
+  EyeOff,
+  Gift
 } from 'lucide-react';
 import api from '../../api/axios';
 
@@ -21,7 +22,14 @@ export default function EquipmentPage() {
   const [configs, setConfigs] = useState([]);
   const [globalSettings, setGlobalSettings] = useState({ 
     allow_equipment_exceed_pax: false,
-    show_equipment_live_stock: true
+    show_equipment_live_stock: true,
+    equipment_discount_enabled: true,
+    equipment_discount_buy_hours: 3,
+    equipment_discount_free_hours: 1
+  });
+  const [discountDraft, setDiscountDraft] = useState({
+    buy_hours: 3,
+    free_hours: 1
   });
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
@@ -55,7 +63,14 @@ export default function EquipmentPage() {
       setConfigs(res.data.configs || []);
       setGlobalSettings({
         allow_equipment_exceed_pax: !!res.data.allow_equipment_exceed_pax,
-        show_equipment_live_stock: res.data.show_equipment_live_stock !== false
+        show_equipment_live_stock: res.data.show_equipment_live_stock !== false,
+        equipment_discount_enabled: res.data.equipment_discount_enabled !== false,
+        equipment_discount_buy_hours: res.data.equipment_discount_buy_hours ?? 3,
+        equipment_discount_free_hours: res.data.equipment_discount_free_hours ?? 1
+      });
+      setDiscountDraft({
+        buy_hours: res.data.equipment_discount_buy_hours ?? 3,
+        free_hours: res.data.equipment_discount_free_hours ?? 1
       });
     } catch (err) {
       console.error('Failed to fetch equipment configs:', err);
@@ -146,6 +161,31 @@ export default function EquipmentPage() {
     }
   };
 
+  const handleSaveDiscountSetting = async () => {
+    setSavingGlobal(true);
+    try {
+      const buy = Math.max(1, parseInt(discountDraft.buy_hours, 10) || 3);
+      const free = Math.max(1, parseInt(discountDraft.free_hours, 10) || 1);
+      await api.patch('/equipment/admin/settings', {
+        equipment_discount_enabled: globalSettings.equipment_discount_enabled,
+        equipment_discount_buy_hours: buy,
+        equipment_discount_free_hours: free
+      });
+      setGlobalSettings(prev => ({
+        ...prev,
+        equipment_discount_buy_hours: buy,
+        equipment_discount_free_hours: free
+      }));
+      setDiscountDraft({ buy_hours: buy, free_hours: free });
+      showToast('已更新智能板時數優惠方案');
+    } catch (err) {
+      console.error(err);
+      alert('更新優惠設定失敗');
+    } finally {
+      setSavingGlobal(false);
+    }
+  };
+
   const handleCreateConfig = async (e) => {
     e.preventDefault();
     if (!newConfig.id || !newConfig.name) {
@@ -219,7 +259,7 @@ export default function EquipmentPage() {
       </div>
 
       {/* Global Settings Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Setting 1: Pax Quota Rule */}
         <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 flex items-center justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -288,6 +328,84 @@ export default function EquipmentPage() {
               }`} />
             </div>
           </div>
+        </div>
+
+        {/* Setting 3: Equipment Hours Promotion (Buy X Get Y) */}
+        <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 flex flex-col justify-between gap-3 md:col-span-2 lg:col-span-1">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="p-2 bg-white text-[#8B5B43] rounded-xl border border-[#E8DEC8] shrink-0 mt-0.5">
+                <Gift className="w-4 h-4" />
+              </span>
+              <div>
+                <h3 className="font-bold text-[#3E332B] text-sm">
+                  智能板時數優惠方案
+                </h3>
+                <p className="text-xs text-[#7A7067] mt-0.5 leading-relaxed">
+                  {globalSettings.equipment_discount_enabled
+                    ? `目前啟用：租借「買 ${globalSettings.equipment_discount_buy_hours} 送 ${globalSettings.equipment_discount_free_hours}」`
+                    : '時數優惠方案目前已停用'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-bold text-[#4A3F35]">
+                {globalSettings.equipment_discount_enabled ? '已啟用' : '已停用'}
+              </span>
+              <div 
+                onClick={() => !savingGlobal && handleToggleGlobalSetting('equipment_discount_enabled', !globalSettings.equipment_discount_enabled)}
+                className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-300 cursor-pointer ${
+                  globalSettings.equipment_discount_enabled ? 'bg-[#8B5B43]' : 'bg-gray-300'
+                }`}
+              >
+                <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full shadow-sm transition-transform duration-300 ${
+                  globalSettings.equipment_discount_enabled ? 'translate-x-[20px]' : 'translate-x-0'
+                }`} />
+              </div>
+            </div>
+          </div>
+
+          {globalSettings.equipment_discount_enabled && (
+            <div className="space-y-2 pt-2 border-t border-[#E8DEC8]/60">
+              <div className="flex items-center justify-between gap-2 text-xs font-bold text-[#3E332B]">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span>買</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    value={discountDraft.buy_hours}
+                    onChange={(e) => setDiscountDraft(prev => ({ ...prev, buy_hours: e.target.value }))}
+                    className="w-12 px-2 py-1 text-center bg-white border border-[#DED7CE] rounded-lg font-bold text-xs text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                  />
+                  <span>小時，送</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    value={discountDraft.free_hours}
+                    onChange={(e) => setDiscountDraft(prev => ({ ...prev, free_hours: e.target.value }))}
+                    className="w-12 px-2 py-1 text-center bg-white border border-[#DED7CE] rounded-lg font-bold text-xs text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                  />
+                  <span>小時</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveDiscountSetting}
+                  disabled={savingGlobal}
+                  className="px-3 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition-colors shrink-0 shadow-2xs disabled:opacity-50"
+                >
+                  儲存
+                </button>
+              </div>
+
+              <div className="text-[11px] text-[#8B5B43] bg-white/80 border border-[#E8DEC8] px-2.5 py-1.5 rounded-xl font-medium leading-relaxed">
+                💡 優惠試算：每租滿 {(parseInt(discountDraft.buy_hours, 10) || 3) + (parseInt(discountDraft.free_hours, 10) || 1)} 小時僅收 {discountDraft.buy_hours || 3} 小時租金（租 {(parseInt(discountDraft.buy_hours, 10) || 3) + (parseInt(discountDraft.free_hours, 10) || 1)}hr 付 {discountDraft.buy_hours || 3}hr、租 {((parseInt(discountDraft.buy_hours, 10) || 3) + (parseInt(discountDraft.free_hours, 10) || 1)) * 2}hr 付 {(parseInt(discountDraft.buy_hours, 10) || 3) * 2}hr）。
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
