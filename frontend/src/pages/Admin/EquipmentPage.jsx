@@ -270,9 +270,9 @@ export default function EquipmentPage() {
                   className="bg-white rounded-2xl border border-gray-200/90 shadow-sm p-5 space-y-4 hover:shadow-md transition-shadow relative"
                 >
                   {/* Card Header & 3-State Segmented Control */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
+                  <div className="space-y-3 border-b border-gray-100 pb-4">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-lg text-gray-900">{config.name}</span>
                         <span className="text-xs font-mono text-gray-400 bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
                           {config.id}
@@ -283,12 +283,12 @@ export default function EquipmentPage() {
                       </p>
                     </div>
 
-                    {/* 3-State Segmented Control */}
-                    <div className="inline-flex bg-gray-100 p-1 rounded-xl shrink-0 text-xs font-bold">
+                    {/* 3-State Segmented Control (Wrapped to full-width row) */}
+                    <div className="flex items-center justify-between bg-gray-100 p-1 rounded-xl text-xs font-bold w-full gap-1">
                       <button
                         type="button"
                         onClick={() => handleConfigChange(config.id, 'visibility_status', 'ACTIVE')}
-                        className={`px-3 py-1.5 rounded-lg transition-all ${
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-center transition-all whitespace-nowrap ${
                           config.visibility_status === 'ACTIVE' 
                             ? 'bg-emerald-600 text-white shadow-sm' 
                             : 'text-gray-600 hover:text-gray-900'
@@ -300,7 +300,7 @@ export default function EquipmentPage() {
                       <button
                         type="button"
                         onClick={() => handleConfigChange(config.id, 'visibility_status', 'MAINTENANCE')}
-                        className={`px-3 py-1.5 rounded-lg transition-all ${
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-center transition-all whitespace-nowrap ${
                           config.visibility_status === 'MAINTENANCE' 
                             ? 'bg-amber-600 text-white shadow-sm' 
                             : 'text-gray-600 hover:text-gray-900'
@@ -312,7 +312,7 @@ export default function EquipmentPage() {
                       <button
                         type="button"
                         onClick={() => handleConfigChange(config.id, 'visibility_status', 'HIDDEN')}
-                        className={`px-3 py-1.5 rounded-lg transition-all ${
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-center transition-all whitespace-nowrap ${
                           config.visibility_status === 'HIDDEN' 
                             ? 'bg-gray-600 text-white shadow-sm' 
                             : 'text-gray-600 hover:text-gray-900'
