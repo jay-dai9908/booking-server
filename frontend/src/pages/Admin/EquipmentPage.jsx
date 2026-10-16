@@ -402,7 +402,7 @@ export default function EquipmentPage() {
               </div>
 
               <div className="text-[11px] text-[#8B5B43] bg-white/80 border border-[#E8DEC8] px-2.5 py-1.5 rounded-xl font-medium leading-relaxed">
-                💡 <strong>計算方式</strong>：依「每台設備/每位」各自獨立計算時數（非全單時數總和累計）。例如 4 位預約 5 小時智能板，每台各享滿 4hr 折抵 1hr，4 台合計折抵 4 小時租金（非加總 20hr 算 5hr）。
+                💡 <strong>計算方式</strong>：依「每台設備/每位」各自獨立計算時數（非全單時數總和累計）。例如 4 位預約 5 小時智能板，每台各享租滿 {globalSettings.equipment_discount_buy_hours} 小時享 {globalSettings.equipment_discount_free_hours} 小時免費，4 台合計折抵 4 小時租金（非加總 20hr 算 5hr）。
               </div>
             </div>
           )}

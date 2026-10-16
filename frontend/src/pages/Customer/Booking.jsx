@@ -645,7 +645,7 @@ function Booking() {
                                 <span>
                                   智能拼豆板時間優惠：<strong>買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}</strong>
                                   <span className="text-xs text-[#7A7067] font-normal ml-1 hidden sm:inline">
-                                    （每台獨立計算：滿 {equipmentDiscount.buy_hours + equipmentDiscount.free_hours} 小時即折抵 {equipmentDiscount.free_hours} 小時）
+                                    （每台獨立計算：租滿 {equipmentDiscount.buy_hours} 小時享 {equipmentDiscount.free_hours} 小時免費）
                                   </span>
                                 </span>
                               </div>
@@ -659,7 +659,7 @@ function Booking() {
                                 </span>
                               ) : (
                                 <span className="text-amber-800 bg-amber-50 border border-amber-200 text-[11px] px-2 py-0.5 rounded-full font-bold shrink-0 self-start sm:self-auto">
-                                  租滿 {equipmentDiscount.buy_hours + equipmentDiscount.free_hours} 小時每台享免費 {equipmentDiscount.free_hours} 小時
+                                  租滿 {equipmentDiscount.buy_hours} 小時享 {equipmentDiscount.free_hours} 小時免費
                                 </span>
                               )}
                             </div>

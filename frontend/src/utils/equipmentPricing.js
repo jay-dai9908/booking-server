@@ -12,9 +12,9 @@ export const calculateEquipmentChargeableHours = (rentalHours, discountEnabled, 
   if (!discountEnabled || !buyHours || buyHours <= 0 || !freeHours || freeHours <= 0) {
     return hours;
   }
-  const cycle = buyHours + freeHours;
-  const fullCycles = Math.floor(hours / cycle);
-  const remainder = hours % cycle;
-  const chargeableRemainder = Math.min(remainder, buyHours);
-  return (fullCycles * buyHours) + chargeableRemainder;
+  if (hours < buyHours) {
+    return hours;
+  }
+  const freeCount = Math.floor(hours / buyHours) * freeHours;
+  return Math.max(0, hours - freeCount);
 };
