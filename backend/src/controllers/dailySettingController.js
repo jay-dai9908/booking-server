@@ -55,18 +55,16 @@ export const updateDailySetting = async (req, res) => {
 };
 
 export const batchUpdateDailySettings = async (req, res) => {
-  const { start_date, end_date, days_of_week, hourly_price, unlimited_price, allow_unlimited } = req.body;
+  const { start_date, end_date, days_of_week, hourly_price, unlimited_price, allow_unlimited, dates } = req.body;
 
-  if (!start_date || !end_date) {
-    return res.status(400).json({ error: 'start_date and end_date are required' });
-  }
+  let datesToUpdate = [];
 
-  try {
+  if (dates && Array.isArray(dates) && dates.length > 0) {
+    datesToUpdate = dates.map(d => new Date(d));
+  } else if (start_date && end_date) {
     const startDate = new Date(start_date);
     const endDate = new Date(end_date);
     
-    // Generate all dates in range
-    const datesToUpdate = [];
     let currentDate = new Date(startDate);
     while (currentDate <= endDate) {
       const day = currentDate.getDay(); // 0 (Sun) to 6 (Sat)
@@ -77,11 +75,19 @@ export const batchUpdateDailySettings = async (req, res) => {
       }
       currentDate.setDate(currentDate.getDate() + 1);
     }
+  } else {
+    return res.status(400).json({ error: '請提供日期陣列 (dates) 或起訖日期 (start_date, end_date)' });
+  }
 
+  if (datesToUpdate.length === 0) {
+    return res.status(400).json({ error: '未選取任何有效日期' });
+  }
+
+  try {
     const dataToUpdate = {};
     if (typeof allow_unlimited === 'boolean') dataToUpdate.allow_unlimited = allow_unlimited;
-    if (hourly_price !== undefined) dataToUpdate.hourly_price = hourly_price === null ? null : parseInt(hourly_price);
-    if (unlimited_price !== undefined) dataToUpdate.unlimited_price = unlimited_price === null ? null : parseInt(unlimited_price);
+    if (hourly_price !== undefined) dataToUpdate.hourly_price = (hourly_price === null || hourly_price === '') ? null : parseInt(hourly_price);
+    if (unlimited_price !== undefined) dataToUpdate.unlimited_price = (unlimited_price === null || unlimited_price === '') ? null : parseInt(unlimited_price);
 
     // Prisma doesn't support upsertMany, so we use a transaction
     const upserts = datesToUpdate.map(date => 
