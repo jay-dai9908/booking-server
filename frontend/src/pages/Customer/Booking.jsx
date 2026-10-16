@@ -243,7 +243,9 @@ function Booking() {
   visibleConfigs.forEach(c => {
     const qty = equipmentSelections[c.id] || 0;
     if (qty > 0) {
-      const singlePrice = Math.min(c.hourly_rate * rentalHours, c.daily_cap);
+      const singlePrice = (c.daily_cap && c.daily_cap > 0)
+        ? Math.min(c.hourly_rate * rentalHours, c.daily_cap)
+        : (c.hourly_rate * rentalHours);
       totalEquipmentFee += singlePrice * qty;
       breakdownParts.push(`${c.name}×${qty}`);
     }
@@ -614,9 +616,11 @@ function Booking() {
                                     <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded">
                                       NT$ {c.hourly_rate} /時
                                     </span>
-                                    <span className="text-xs text-[#8C8279]">
-                                      (單台日上限 NT${c.daily_cap})
-                                    </span>
+                                    {c.daily_cap && c.daily_cap > 0 && (
+                                      <span className="text-xs text-[#8C8279]">
+                                        (單台日上限 NT${c.daily_cap})
+                                      </span>
+                                    )}
                                   </div>
                                   {isMaintenance && (
                                     <div className="text-xs text-amber-700 font-bold mt-1">
@@ -674,9 +678,11 @@ function Booking() {
                                   <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded">
                                     NT$ {bringOwnConfig.hourly_rate} /時
                                   </span>
-                                  <span className="text-xs text-[#8C8279]">
-                                    (上限 NT${bringOwnConfig.daily_cap})
-                                  </span>
+                                  {bringOwnConfig.daily_cap && bringOwnConfig.daily_cap > 0 && (
+                                    <span className="text-xs text-[#8C8279]">
+                                      (上限 NT${bringOwnConfig.daily_cap})
+                                    </span>
+                                  )}
                                 </div>
                                 <p className="text-xs text-[#8C8279] leading-relaxed">
                                   同行者中若有自備智能拼豆板至店內使用，請選擇實際自備台數（每台每小時 NT$ 50，單台當日收費上限 NT$ 400）。
@@ -761,9 +767,11 @@ function Booking() {
                                 {totalBoards < pax ? `；另 ${pax - totalBoards} 位使用免費一般板` : ''}
                               </span>
                             </div>
-                            <span className="text-xs font-bold text-[#8B5B43] bg-white border border-[#E8DEC8] px-3 py-1 rounded-full shrink-0 self-end sm:self-auto">
-                              獨立單日封頂已套用
-                            </span>
+                            {visibleConfigs.some(c => (equipmentSelections[c.id] || 0) > 0 && c.daily_cap && c.daily_cap > 0 && (c.hourly_rate * rentalHours >= c.daily_cap)) && (
+                              <span className="text-xs font-bold text-[#8B5B43] bg-white border border-[#E8DEC8] px-3 py-1 rounded-full shrink-0 self-end sm:self-auto">
+                                獨立單日封頂已套用
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>

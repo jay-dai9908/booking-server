@@ -77,7 +77,9 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
   let newEquipmentFee = 0;
   let oldEquipmentFee = 0;
   visibleConfigs.forEach(c => {
-    const singlePrice = Math.min(c.hourly_rate * rentalHours, c.daily_cap);
+    const singlePrice = (c.daily_cap && c.daily_cap > 0)
+      ? Math.min(c.hourly_rate * rentalHours, c.daily_cap)
+      : (c.hourly_rate * rentalHours);
     const qty = selections[c.id] || 0;
     const oldQty = oldQtys[c.id] || 0;
     newEquipmentFee += singlePrice * qty;
@@ -233,9 +235,11 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
                         <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded">
                           NT$ {c.hourly_rate} /時
                         </span>
-                        <span className="text-xs text-[#8C8279]">
-                          (上限 NT${c.daily_cap})
-                        </span>
+                        {c.daily_cap && c.daily_cap > 0 && (
+                          <span className="text-xs text-[#8C8279]">
+                            (上限 NT${c.daily_cap})
+                          </span>
+                        )}
                         {isHidden && (
                           <span className="text-xs bg-gray-200 text-gray-700 font-bold px-1.5 py-0.5 rounded">
                             ⚪ 前台已隱藏

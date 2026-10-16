@@ -449,7 +449,7 @@ export default function ReservationsPage() {
                       const totalHours = manualSelectedSessions.length;
                       const totalFee = equipmentConfigs.reduce((sum, c) => {
                         const qty = manualEquipments[c.id] || 0;
-                        const singlePrice = Math.min(c.hourly_rate * totalHours, c.daily_cap);
+                        const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * totalHours, c.daily_cap) : (c.hourly_rate * totalHours);
                         return sum + singlePrice * qty;
                       }, 0);
                       return totalFee > 0 ? (
@@ -464,7 +464,7 @@ export default function ReservationsPage() {
                       const qty = manualEquipments[c.id] || 0;
                       const isBringOwn = c.id === 'bring_own';
                       const totalHours = manualSelectedSessions.length;
-                      const singlePrice = Math.min(c.hourly_rate * totalHours, c.daily_cap);
+                      const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * totalHours, c.daily_cap) : (c.hourly_rate * totalHours);
 
                       return (
                         <div key={c.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs">
@@ -474,7 +474,7 @@ export default function ReservationsPage() {
                               <span className="text-xs text-gray-600 font-semibold bg-gray-100 px-1.5 py-0.5 rounded">NT${c.hourly_rate}/時</span>
                             </div>
                             <div className="text-[11px] text-gray-400 mt-0.5">
-                              {isBringOwn ? '自備設備充電場地費' : `單台上限 NT$${c.daily_cap} ｜ 時數計 NT$${singlePrice}`}
+                              {isBringOwn ? '自備設備充電場地費' : (c.daily_cap && c.daily_cap > 0 ? `單台上限 NT$${c.daily_cap} ｜ 時數計 NT$${singlePrice}` : `依時數計 NT$${singlePrice} (無上限)`)}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">

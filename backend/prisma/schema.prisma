@@ -99,7 +99,7 @@ model EquipmentConfig {
   status_note          String?
   total_stock          Int?
   hourly_rate          Int
-  daily_cap            Int
+  daily_cap            Int?
   min_contiguous_hours Int                @default(2)
   allow_exceed_pax     Boolean            @default(false)
   sort_order           Int                @default(0)

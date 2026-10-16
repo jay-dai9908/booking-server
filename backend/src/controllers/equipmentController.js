@@ -318,7 +318,7 @@ export const updateEquipmentConfig = async (req, res) => {
         ...(status_note !== undefined && { status_note }),
         ...(total_stock !== undefined && { total_stock: total_stock === null ? null : parseInt(total_stock, 10) }),
         ...(hourly_rate !== undefined && { hourly_rate: parseInt(hourly_rate, 10) }),
-        ...(daily_cap !== undefined && { daily_cap: parseInt(daily_cap, 10) }),
+        ...(daily_cap !== undefined && { daily_cap: (daily_cap === null || daily_cap === '' || isNaN(parseInt(daily_cap, 10)) || parseInt(daily_cap, 10) <= 0) ? null : parseInt(daily_cap, 10) }),
         ...(min_contiguous_hours !== undefined && { min_contiguous_hours: parseInt(min_contiguous_hours, 10) }),
         ...(sort_order !== undefined && { sort_order: parseInt(sort_order, 10) })
       }
@@ -338,8 +338,8 @@ export const updateEquipmentConfig = async (req, res) => {
 export const createEquipmentConfig = async (req, res) => {
   const { id, name, visibility_status, status_note, total_stock, hourly_rate, daily_cap, min_contiguous_hours, sort_order } = req.body;
 
-  if (!id || !name || hourly_rate === undefined || daily_cap === undefined) {
-    return res.status(400).json({ error: '請提供完整的規格資料 (代碼、名稱、費率與封頂價)' });
+  if (!id || !name || hourly_rate === undefined) {
+    return res.status(400).json({ error: '請提供完整的規格資料 (代碼、名稱與費率)' });
   }
 
   try {
@@ -356,7 +356,7 @@ export const createEquipmentConfig = async (req, res) => {
         status_note,
         total_stock: total_stock !== null && total_stock !== undefined ? parseInt(total_stock, 10) : null,
         hourly_rate: parseInt(hourly_rate, 10),
-        daily_cap: parseInt(daily_cap, 10),
+        daily_cap: (daily_cap === null || daily_cap === '' || isNaN(parseInt(daily_cap, 10)) || parseInt(daily_cap, 10) <= 0) ? null : parseInt(daily_cap, 10),
         min_contiguous_hours: parseInt(min_contiguous_hours || 2, 10),
         sort_order: parseInt(sort_order || 0, 10)
       }
@@ -679,7 +679,9 @@ export const modifyBookingEquipment = async (req, res) => {
         ? totalOrderHours 
         : Math.max(minHours, Math.min(totalOrderHours, parseInt(eq.rental_hours, 10) || totalOrderHours));
 
-      const singleBoardPrice = Math.min(config.hourly_rate * rentalHours, config.daily_cap);
+      const singleBoardPrice = (config.daily_cap && config.daily_cap > 0)
+        ? Math.min(config.hourly_rate * rentalHours, config.daily_cap)
+        : (config.hourly_rate * rentalHours);
       const subtotalPrice = singleBoardPrice * qty;
 
       totalEquipmentFee += subtotalPrice;

@@ -105,7 +105,7 @@ export default function EquipmentPage() {
         status_note: config.status_note,
         total_stock: config.id === 'bring_own' ? null : parseInt(config.total_stock, 10),
         hourly_rate: parseInt(config.hourly_rate, 10),
-        daily_cap: parseInt(config.daily_cap, 10),
+        daily_cap: (config.daily_cap === null || config.daily_cap === '' || isNaN(parseInt(config.daily_cap, 10)) || parseInt(config.daily_cap, 10) <= 0) ? null : parseInt(config.daily_cap, 10),
         min_contiguous_hours: parseInt(config.min_contiguous_hours, 10)
       };
 
@@ -153,7 +153,7 @@ export default function EquipmentPage() {
         ...newConfig,
         total_stock: parseInt(newConfig.total_stock, 10),
         hourly_rate: parseInt(newConfig.hourly_rate, 10),
-        daily_cap: parseInt(newConfig.daily_cap, 10),
+        daily_cap: (newConfig.daily_cap === null || newConfig.daily_cap === '' || isNaN(parseInt(newConfig.daily_cap, 10)) || parseInt(newConfig.daily_cap, 10) <= 0) ? null : parseInt(newConfig.daily_cap, 10),
         min_contiguous_hours: parseInt(newConfig.min_contiguous_hours, 10)
       });
       setShowAddModal(false);
@@ -377,18 +377,44 @@ export default function EquipmentPage() {
                     </div>
 
                     {/* Daily Cap */}
-                    <div className="bg-gray-50/70 p-3 rounded-xl border border-gray-100">
-                      <label className="text-gray-500 font-medium block mb-1">單台單日收費上限</label>
-                      <div className="flex items-center gap-1">
-                        <span className="text-gray-500 font-bold shrink-0">NT$</span>
-                        <input
-                          type="number"
-                          min="0"
-                          value={config.daily_cap ?? 0}
-                          onChange={(e) => handleConfigChange(config.id, 'daily_cap', e.target.value)}
-                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg font-bold text-sm text-gray-800 bg-white"
-                        />
+                    <div className="bg-gray-50/70 p-3 rounded-xl border border-gray-100 flex flex-col justify-between">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-gray-600 font-medium text-xs">單台單日收費上限</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isCurrentlyUnlimited = config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0;
+                            handleConfigChange(config.id, 'daily_cap', isCurrentlyUnlimited ? 500 : null);
+                          }}
+                          className={`text-[11px] px-2 py-0.5 rounded-full font-bold transition-all flex items-center gap-1 cursor-pointer select-none ${
+                            config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0 ? 'bg-amber-600' : 'bg-gray-400'}`}></span>
+                          {config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0 ? '✨ 無上限 (已隱藏)' : '設為無上限'}
+                        </button>
                       </div>
+
+                      {config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0 ? (
+                        <div className="py-1 px-2.5 bg-amber-50/80 border border-amber-200 rounded-lg text-xs font-bold text-amber-800 flex items-center justify-between">
+                          <span>無上限 (依時數計費)</span>
+                          <span className="text-[10px] text-amber-600">顧客端隱藏上限</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span className="text-gray-500 font-bold shrink-0 text-xs">NT$</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={config.daily_cap ?? ''}
+                            onChange={(e) => handleConfigChange(config.id, 'daily_cap', e.target.value)}
+                            placeholder="請輸入上限金額"
+                            className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg font-bold text-sm text-gray-800 bg-white"
+                          />
+                        </div>
+                      )}
                     </div>
 
                     {/* Min Hours */}
@@ -643,15 +669,37 @@ export default function EquipmentPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-gray-600 font-bold mb-1">單台日上限 (NT$)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={newConfig.daily_cap}
-                    onChange={(e) => setNewConfig(prev => ({ ...prev, daily_cap: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-gray-600 font-bold text-sm">單台日上限 (NT$)</label>
+                    <button
+                      type="button"
+                      onClick={() => setNewConfig(prev => ({ 
+                        ...prev, 
+                        daily_cap: prev.daily_cap === null ? 500 : null 
+                      }))}
+                      className={`text-xs px-2 py-0.5 rounded-full font-bold cursor-pointer ${
+                        newConfig.daily_cap === null
+                          ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                          : 'bg-gray-200 text-gray-600'
+                      }`}
+                    >
+                      {newConfig.daily_cap === null ? '✨ 無上限 (已隱藏)' : '設為無上限'}
+                    </button>
+                  </div>
+                  {newConfig.daily_cap === null ? (
+                    <div className="py-2 px-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800">
+                      無收費上限（依租借時數累計收費）
+                    </div>
+                  ) : (
+                    <input
+                      type="number"
+                      min="1"
+                      value={newConfig.daily_cap || ''}
+                      onChange={(e) => setNewConfig(prev => ({ ...prev, daily_cap: e.target.value }))}
+                      placeholder="請輸入上限金額 (NT$)"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="block text-gray-600 font-bold mb-1">最低連續時數</label>
