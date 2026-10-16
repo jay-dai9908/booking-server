@@ -73,6 +73,7 @@ model GlobalSetting {
   weekend_unlimited_price     Int      @default(800)
   is_lockdown_mode            Boolean  @default(false)
   allow_equipment_exceed_pax  Boolean  @default(false)
+  show_equipment_live_stock   Boolean  @default(true)
 }
 
 model BannedIP {

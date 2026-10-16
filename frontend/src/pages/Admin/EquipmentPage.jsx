@@ -19,7 +19,10 @@ import api from '../../api/axios';
 
 export default function EquipmentPage() {
   const [configs, setConfigs] = useState([]);
-  const [globalSettings, setGlobalSettings] = useState({ allow_equipment_exceed_pax: false });
+  const [globalSettings, setGlobalSettings] = useState({ 
+    allow_equipment_exceed_pax: false,
+    show_equipment_live_stock: true
+  });
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [savingGlobal, setSavingGlobal] = useState(false);
@@ -50,9 +53,10 @@ export default function EquipmentPage() {
     try {
       const res = await api.get('/equipment/admin');
       setConfigs(res.data.configs || []);
-      if (res.data.settings) {
-        setGlobalSettings(res.data.settings);
-      }
+      setGlobalSettings({
+        allow_equipment_exceed_pax: !!res.data.allow_equipment_exceed_pax,
+        show_equipment_live_stock: res.data.show_equipment_live_stock !== false
+      });
     } catch (err) {
       console.error('Failed to fetch equipment configs:', err);
     } finally {
@@ -126,14 +130,14 @@ export default function EquipmentPage() {
     }
   };
 
-  const handleToggleGlobalSetting = async (allowExceed) => {
+  const handleToggleGlobalSetting = async (key, val) => {
     setSavingGlobal(true);
     try {
       await api.patch('/equipment/admin/settings', {
-        allow_equipment_exceed_pax: allowExceed
+        [key]: val
       });
-      setGlobalSettings(prev => ({ ...prev, allow_equipment_exceed_pax: allowExceed }));
-      showToast('已更新全域訂單設備配額規則');
+      setGlobalSettings(prev => ({ ...prev, [key]: val }));
+      showToast('已更新全域設備設定');
     } catch (err) {
       console.error(err);
       alert('更新設定失敗');
@@ -214,35 +218,75 @@ export default function EquipmentPage() {
         </button>
       </div>
 
-      {/* Global Setting Banner */}
-      <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <span className="p-2 bg-white text-[#8B5B43] rounded-xl border border-[#E8DEC8] shrink-0 mt-0.5">
-            <Settings className="w-5 h-5" />
-          </span>
-          <div>
-            <h3 className="font-bold text-[#3E332B] text-base">
-              單筆訂單設備台數上限規則
-            </h3>
-            <p className="text-xs text-[#7A7067] mt-0.5 leading-relaxed">
-              預設限制單筆訂單「租用板 + 自帶板總台數」不可超過該筆預約人數（pax），避免單人霸佔多台設備或計費爭議。
-            </p>
+      {/* Global Settings Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Setting 1: Pax Quota Rule */}
+        <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 flex items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <span className="p-2 bg-white text-[#8B5B43] rounded-xl border border-[#E8DEC8] shrink-0 mt-0.5">
+              <Settings className="w-4 h-4" />
+            </span>
+            <div>
+              <h3 className="font-bold text-[#3E332B] text-sm">
+                單單總設備上限規則
+              </h3>
+              <p className="text-xs text-[#7A7067] mt-0.5 leading-relaxed">
+                {globalSettings.allow_equipment_exceed_pax
+                  ? '允許超過預約人數（可任意自由加購）'
+                  : '預約總台數不可超過訂單人數（防霸佔）'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[11px] font-bold text-[#4A3F35]">
+              {globalSettings.allow_equipment_exceed_pax ? '無人數限制' : '限制人數'}
+            </span>
+            <div 
+              onClick={() => !savingGlobal && handleToggleGlobalSetting('allow_equipment_exceed_pax', !globalSettings.allow_equipment_exceed_pax)}
+              className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-300 cursor-pointer ${
+                globalSettings.allow_equipment_exceed_pax ? 'bg-amber-600' : 'bg-[#8B5B43]'
+              }`}
+            >
+              <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full shadow-sm transition-transform duration-300 ${
+                globalSettings.allow_equipment_exceed_pax ? 'translate-x-[20px]' : 'translate-x-0'
+              }`} />
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
-          <span className="text-xs font-bold text-[#4A3F35]">
-            {globalSettings.allow_equipment_exceed_pax ? '允許超過人數' : '受人數嚴格限制'}
-          </span>
-          <div 
-            onClick={() => !savingGlobal && handleToggleGlobalSetting(!globalSettings.allow_equipment_exceed_pax)}
-            className={`relative w-[50px] h-[28px] rounded-full transition-colors duration-300 cursor-pointer ${
-              globalSettings.allow_equipment_exceed_pax ? 'bg-amber-600' : 'bg-[#8B5B43]'
-            }`}
-          >
-            <div className={`absolute top-[3px] left-[3px] bg-white w-[22px] h-[22px] rounded-full shadow-sm transition-transform duration-300 ${
-              globalSettings.allow_equipment_exceed_pax ? 'translate-x-[22px]' : 'translate-x-0'
-            }`} />
+        {/* Setting 2: Customer Live Stock Visibility */}
+        <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 flex items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <span className="p-2 bg-white text-[#8B5B43] rounded-xl border border-[#E8DEC8] shrink-0 mt-0.5">
+              <Eye className="w-4 h-4" />
+            </span>
+            <div>
+              <h3 className="font-bold text-[#3E332B] text-sm">
+                顧客端即時庫存狀況卡片
+              </h3>
+              <p className="text-xs text-[#7A7067] mt-0.5 leading-relaxed">
+                {globalSettings.show_equipment_live_stock !== false
+                  ? '顧客預約頁顯示頂部「✨ 即時庫存狀況」'
+                  : '已在顧客預約頁隱藏即時庫存狀況卡片'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[11px] font-bold text-[#4A3F35]">
+              {globalSettings.show_equipment_live_stock !== false ? '顯示庫存' : '隱藏卡片'}
+            </span>
+            <div 
+              onClick={() => !savingGlobal && handleToggleGlobalSetting('show_equipment_live_stock', globalSettings.show_equipment_live_stock === false)}
+              className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-300 cursor-pointer ${
+                globalSettings.show_equipment_live_stock !== false ? 'bg-[#8B5B43]' : 'bg-gray-300'
+              }`}
+            >
+              <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full shadow-sm transition-transform duration-300 ${
+                globalSettings.show_equipment_live_stock !== false ? 'translate-x-[20px]' : 'translate-x-0'
+              }`} />
+            </div>
           </div>
         </div>
       </div>

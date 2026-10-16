@@ -84,9 +84,10 @@ export const getAvailableEquipment = async (req, res) => {
       where: { id: 1 }
     });
     const allow_exceed_pax = !!globalSetting?.allow_equipment_exceed_pax;
+    const show_equipment_live_stock = globalSetting?.show_equipment_live_stock !== false;
 
     if (configs.length === 0) {
-      return res.json({ equipments: [], allow_exceed_pax });
+      return res.json({ equipments: [], allow_exceed_pax, show_equipment_live_stock });
     }
 
     if (!date || !sessions) {
@@ -95,7 +96,8 @@ export const getAvailableEquipment = async (req, res) => {
           ...c,
           available_qty: c.id === 'bring_own' ? 9999 : (c.visibility_status === 'MAINTENANCE' ? 0 : (c.total_stock || 0))
         })),
-        allow_exceed_pax
+        allow_exceed_pax,
+        show_equipment_live_stock
       });
     }
 
@@ -188,7 +190,8 @@ export const getAvailableEquipment = async (req, res) => {
 
     res.json({
       equipments: results,
-      allow_exceed_pax
+      allow_exceed_pax,
+      show_equipment_live_stock
     });
   } catch (error) {
     console.error('Error in getAvailableEquipment:', error);
@@ -211,7 +214,8 @@ export const getAdminEquipmentConfigs = async (req, res) => {
 
     res.json({
       configs,
-      allow_equipment_exceed_pax: !!globalSetting?.allow_equipment_exceed_pax
+      allow_equipment_exceed_pax: !!globalSetting?.allow_equipment_exceed_pax,
+      show_equipment_live_stock: globalSetting?.show_equipment_live_stock !== false
     });
   } catch (error) {
     console.error('Error fetching equipment configs:', error);
@@ -395,17 +399,19 @@ export const deleteEquipmentConfig = async (req, res) => {
 
 // PATCH /api/admin/equipment/settings
 export const updateGlobalEquipmentSetting = async (req, res) => {
-  const { allow_equipment_exceed_pax } = req.body;
+  const { allow_equipment_exceed_pax, show_equipment_live_stock } = req.body;
 
   try {
     const updated = await prisma.globalSetting.upsert({
       where: { id: 1 },
       update: {
-        allow_equipment_exceed_pax: !!allow_equipment_exceed_pax
+        ...(allow_equipment_exceed_pax !== undefined && { allow_equipment_exceed_pax: !!allow_equipment_exceed_pax }),
+        ...(show_equipment_live_stock !== undefined && { show_equipment_live_stock: !!show_equipment_live_stock })
       },
       create: {
         id: 1,
-        allow_equipment_exceed_pax: !!allow_equipment_exceed_pax
+        allow_equipment_exceed_pax: !!allow_equipment_exceed_pax,
+        show_equipment_live_stock: show_equipment_live_stock !== undefined ? !!show_equipment_live_stock : true
       }
     });
 

@@ -37,8 +37,10 @@ function Booking() {
   const [equipmentConfigs, setEquipmentConfigs] = useState([]);
   const [equipmentSelections, setEquipmentSelections] = useState({}); // { [id]: qty }
   const [rentalHours, setRentalHours] = useState(2);
+  const [hasManuallyAdjustedRentalHours, setHasManuallyAdjustedRentalHours] = useState(false);
   const [enableSmartBoard, setEnableSmartBoard] = useState(false);
   const [allowExceedPax, setAllowExceedPax] = useState(false);
+  const [showLiveStock, setShowLiveStock] = useState(true);
 
   // Calculate contiguous sessions
   const sortedSelectedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
@@ -66,6 +68,7 @@ function Booking() {
     setIsUnlimited(false);
     setEquipmentSelections({});
     setEnableSmartBoard(false);
+    setHasManuallyAdjustedRentalHours(false);
   }, [selectedDate]);
 
   useEffect(() => {
@@ -80,6 +83,7 @@ function Booking() {
         const res = await api.get(`/equipment/availability?date=${formattedDate}&sessions=${sessionStarts}`);
         setEquipmentConfigs(res.data.equipments || (Array.isArray(res.data) ? res.data : []));
         setAllowExceedPax(!!res.data.allow_exceed_pax);
+        setShowLiveStock(res.data.show_equipment_live_stock !== false);
       } catch (err) {
         console.error('Failed to fetch equipment availability:', err);
       }
@@ -87,18 +91,23 @@ function Booking() {
     fetchEquipmentAvailability();
   }, [selectedDate, selectedSessions]);
 
-  // Adjust rentalHours when maxContiguous changes
+  // Adjust rentalHours when maxContiguous changes (defaults to full duration unless manually adjusted)
   useEffect(() => {
     if (maxContiguous >= 2) {
-      setRentalHours(prev => Math.min(Math.max(2, prev), maxContiguous));
+      if (!hasManuallyAdjustedRentalHours) {
+        setRentalHours(maxContiguous);
+      } else {
+        setRentalHours(prev => Math.min(Math.max(2, prev), maxContiguous));
+      }
     } else {
       setRentalHours(2);
+      setHasManuallyAdjustedRentalHours(false);
       if (enableSmartBoard) {
         setEnableSmartBoard(false);
         setEquipmentSelections({});
       }
     }
-  }, [maxContiguous]);
+  }, [maxContiguous, hasManuallyAdjustedRentalHours]);
 
   const fetchDailySetting = async (date) => {
     try {
@@ -548,9 +557,15 @@ function Booking() {
                   <div className="border border-[#E8DEC8] bg-[#FAF8F5] rounded-2xl p-4 sm:p-5 space-y-4">
                     <div 
                       onClick={() => {
-                        setEnableSmartBoard(!enableSmartBoard);
-                        if (enableSmartBoard) {
+                        const next = !enableSmartBoard;
+                        setEnableSmartBoard(next);
+                        if (!next) {
                           setEquipmentSelections({});
+                          setHasManuallyAdjustedRentalHours(false);
+                        } else {
+                          if (!hasManuallyAdjustedRentalHours) {
+                            setRentalHours(maxContiguous);
+                          }
                         }
                       }}
                       className="flex items-center justify-between cursor-pointer select-none"
@@ -579,14 +594,16 @@ function Booking() {
                           </div>
                           
                           {/* Live stock pills */}
-                          <div className="text-[11px] sm:text-xs text-[#7A7067] bg-white/70 border border-[#E8DEC8] px-3 py-2 rounded-xl flex items-center flex-wrap gap-2">
-                            <span className="font-bold text-[#8B5B43]">✨ 即時庫存狀況：</span>
-                            {visibleConfigs.filter(c => c.id !== 'bring_own').map(c => (
-                              <span key={c.id} className="bg-[#FAF7F2] px-2 py-0.5 rounded border border-[#E5DFD7]">
-                                {c.name} : <strong className={c.available_qty === 0 ? 'text-red-500' : 'text-[#3E332B]'}>{c.available_qty}</strong> / {c.total_stock} 個可用
-                              </span>
-                            ))}
-                          </div>
+                          {showLiveStock && (
+                            <div className="text-[11px] sm:text-xs text-[#7A7067] bg-white/70 border border-[#E8DEC8] px-3 py-2 rounded-xl flex items-center flex-wrap gap-2">
+                              <span className="font-bold text-[#8B5B43]">✨ 即時庫存狀況：</span>
+                              {visibleConfigs.filter(c => c.id !== 'bring_own').map(c => (
+                                <span key={c.id} className="bg-[#FAF7F2] px-2 py-0.5 rounded border border-[#E5DFD7]">
+                                  {c.name} : <strong className={c.available_qty === 0 ? 'text-red-500' : 'text-[#3E332B]'}>{c.available_qty}</strong> / {c.total_stock} 個可用
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Equipment Rental Items (S, M, L) */}
@@ -735,7 +752,10 @@ function Booking() {
                               <button
                                 type="button"
                                 disabled={rentalHours <= 2}
-                                onClick={() => setRentalHours(h => Math.max(2, h - 1))}
+                                onClick={() => {
+                                  setHasManuallyAdjustedRentalHours(true);
+                                  setRentalHours(h => Math.max(2, h - 1));
+                                }}
                                 className="w-7 h-7 flex items-center justify-center rounded bg-white text-[#8B5B43] font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#F0EBE1] transition-colors"
                               >
                                 -
@@ -746,7 +766,10 @@ function Booking() {
                               <button
                                 type="button"
                                 disabled={rentalHours >= maxContiguous}
-                                onClick={() => setRentalHours(h => Math.min(maxContiguous, h + 1))}
+                                onClick={() => {
+                                  setHasManuallyAdjustedRentalHours(true);
+                                  setRentalHours(h => Math.min(maxContiguous, h + 1));
+                                }}
                                 className="w-7 h-7 flex items-center justify-center rounded bg-white text-[#8B5B43] font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#F0EBE1] transition-colors"
                               >
                                 +
