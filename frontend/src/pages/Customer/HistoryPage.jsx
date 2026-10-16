@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import { format } from 'date-fns';
 import CustomerReservationDetailsModal, { getReservationStatusUI } from '../../components/CustomerReservationDetailsModal';
+import EquipmentAddonModal from '../../components/EquipmentAddonModal';
 
 export default function HistoryPage() {
   const navigate = useNavigate();
@@ -45,6 +46,9 @@ export default function HistoryPage() {
 
   const upcomingReservations = formattedReservations.filter(r => !isPast(r.session_date, r.start_time));
   const pastReservations = formattedReservations.filter(r => isPast(r.session_date, r.start_time));
+
+  const [addonReservation, setAddonReservation] = useState(null);
+  const [noticeModal, setNoticeModal] = useState(null);
 
   const displayList = activeTab === 'upcoming' ? upcomingReservations : pastReservations;
 
@@ -117,16 +121,44 @@ export default function HistoryPage() {
             )}
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {displayList.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)).map((r, i) => {
               const statusUI = getReservationStatusUI(r);
+
+              // 4-Tier foolproof calculation
+              const now = new Date();
+              const isCancelled = r.status === 'cancelled';
+              const sessionCount = r.session_count || (r.sessions ? r.sessions.length : 1);
+
+              const [endH, endM] = (r.end_time || '00:00').split(':').map(Number);
+              const bookingEndTime = new Date(r.session_date);
+              bookingEndTime.setHours(endH, endM, 0, 0);
+
+              const [startH, startM] = (r.start_time || '00:00').split(':').map(Number);
+              const bookingStartTime = new Date(r.session_date);
+              bookingStartTime.setHours(startH, startM, 0, 0);
+
+              const isExpired = now >= bookingEndTime;
+              const effectiveStart = new Date(Math.max(now.getTime(), bookingStartTime.getTime()));
+              const remainingMinutes = (bookingEndTime.getTime() - effectiveStart.getTime()) / (60 * 1000);
+
+              const totalBoards = (r.equipments || []).reduce((sum, e) => sum + e.quantity, 0);
+              const remainingPax = Math.max(0, r.pax - totalBoards);
+
+              // Equipment breakdown label
+              let equipmentLabel = '未加購 (全員使用免費一般板)';
+              if (r.equipments && r.equipments.length > 0) {
+                const parts = r.equipments.map(e => `${e.equipment_name_snapshot} ×${e.quantity}`);
+                equipmentLabel = `${parts.join('、')} (${r.equipments[0].rental_hours}hr)${remainingPax > 0 ? ` ｜ 尚有 ${remainingPax} 人可追加` : ''}`;
+              }
+
               return (
                 <div 
                   key={i}
                   onClick={() => setSelectedReservation(r)}
-                  className="group flex flex-col bg-white p-5 rounded-[16px] border border-transparent hover:border-[#EBE5DF] shadow-[0_4px_12px_rgba(139,91,67,0.05)] transition-all cursor-pointer"
+                  className="group flex flex-col bg-white p-5 rounded-[16px] border border-transparent hover:border-[#EBE5DF] shadow-[0_4px_12px_rgba(139,91,67,0.05)] transition-all cursor-pointer space-y-3"
                 >
-                  <div className="flex justify-between items-start mb-3">
+                  <div className="flex justify-between items-start">
                     <div>
                       <span className="font-bold text-[#3E332B] text-lg block mb-1.5">
                         {format(new Date(r.session_date), 'yyyy/MM/dd')}
@@ -141,6 +173,67 @@ export default function HistoryPage() {
                       {statusUI.icon} {statusUI.text}
                     </span>
                   </div>
+
+                  {/* Smart Pegboard Info Bar */}
+                  <div className="bg-[#FAF7F2] rounded-xl p-3 border border-[#E8DEC8]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-[#4A3F35] shrink-0">⚙️ 智能拼豆板：</span>
+                      {totalBoards > 0 ? (
+                        <span className="bg-[#EDE6DD] text-[#4A3F35] font-bold px-2.5 py-1 rounded-lg">
+                          {equipmentLabel}
+                        </span>
+                      ) : (
+                        <span className="text-[#8C8279]">
+                          {equipmentLabel}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Foolproof Action Buttons */}
+                    {!isCancelled && !isExpired && (
+                      <div className="self-end sm:self-auto shrink-0">
+                        {remainingMinutes < 120 ? (
+                          /* State C: Less than 2 hours remaining */
+                          <div className="flex flex-col items-end">
+                            <button
+                              disabled
+                              className="bg-gray-100 text-gray-400 text-xs px-3 py-1.5 rounded-full font-bold cursor-not-allowed border border-gray-200"
+                            >
+                              ⏰ 剩餘時數不足 2hr (無法補約智能板)
+                            </button>
+                            <span className="text-[10px] text-[#A8A19A] mt-1 text-right max-w-[240px]">
+                              💡 距離離場已不足2小時，線上已關閉補約，如需借用請洽店員
+                            </span>
+                          </div>
+                        ) : sessionCount < 2 ? (
+                          /* State B: Less than 2 hours booking */
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNoticeModal({
+                                title: '時段條件未滿足',
+                                message: '⚠️ 租用智能拼豆板需至少連續 2 小時（目前您的訂單僅 1 小時）。現場如有需要可洽門市人員為您協助。'
+                              });
+                            }}
+                            className="bg-[#FAF7F2] border border-[#D5CFC9] text-[#8B5B43] hover:bg-[#F4EFE6] text-xs px-3 py-1.5 rounded-full font-bold transition-colors"
+                          >
+                            ➕ 補預約智能板 (需滿2小時)
+                          </button>
+                        ) : (
+                          /* State A: Normal add-on / modify */
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAddonReservation(r);
+                            }}
+                            className="bg-[#8B5B43] hover:bg-[#724a35] text-white text-xs px-3.5 py-1.5 rounded-full font-bold shadow-sm transition-colors flex items-center gap-1"
+                          >
+                            {totalBoards > 0 ? '✏️ 追加/修改智能板' : '➕ 補預約智能板'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   
                   <div className="flex items-center justify-between border-t border-[#F4EFE6] pt-3 mt-1">
                     <div className="flex items-center gap-2">
@@ -150,6 +243,11 @@ export default function HistoryPage() {
                       {r.is_unlimited && (
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#A67C52] bg-[#F4EFE6] px-2 py-0.5 rounded-full border border-[#D5CFC9]">
                           ✨ 不限時
+                        </span>
+                      )}
+                      {r.total_amount != null && (
+                        <span className="text-sm font-bold text-[#3E332B] ml-2">
+                          總額 NT$ {r.total_amount}
                         </span>
                       )}
                     </div>
@@ -162,12 +260,49 @@ export default function HistoryPage() {
         )}
       </main>
 
+      {/* Notice Alert Modal */}
+      {noticeModal && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setNoticeModal(null)} />
+          <div className="bg-white rounded-[24px] shadow-xl w-full max-w-sm overflow-hidden relative z-10 p-6 text-center space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center mx-auto text-2xl">
+              ⚠️
+            </div>
+            <h3 className="text-lg font-bold text-[#3E332B]">{noticeModal.title}</h3>
+            <p className="text-sm text-[#7A7067] leading-relaxed">{noticeModal.message}</p>
+            <button
+              onClick={() => setNoticeModal(null)}
+              className="w-full py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-full font-bold text-sm transition-colors"
+            >
+              我知道了
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Equipment Retroactive Add-on Modal */}
+      {addonReservation && (
+        <EquipmentAddonModal
+          reservation={addonReservation}
+          isOpen={!!addonReservation}
+          onClose={() => setAddonReservation(null)}
+          onSuccess={() => {
+            fetchReservations();
+          }}
+        />
+      )}
+
       {/* Detail Modal */}
       {selectedReservation && (
         <CustomerReservationDetailsModal 
           reservation={selectedReservation} 
           onClose={() => setSelectedReservation(null)} 
           onUpdate={fetchReservations}
+          onOpenEquipmentAddon={() => {
+            const target = selectedReservation;
+            setSelectedReservation(null);
+            setAddonReservation(target);
+          }}
         />
       )}
     </div>

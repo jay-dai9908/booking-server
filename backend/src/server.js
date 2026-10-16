@@ -10,6 +10,7 @@ import userRoutes from './routes/users.js';
 import dailySettingsRoutes from './routes/dailySettings.js';
 import accountingRoutes from './routes/accounting.js';
 import staffRoutes from './routes/staff.js';
+import equipmentRoutes from './routes/equipment.js';
 import { startCronJobs } from './cronJobs.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -48,6 +49,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/daily-settings', dailySettingsRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/staff', staffRoutes);
+app.use('/api/equipment', equipmentRoutes);
+
 
 
 // Basic error handler

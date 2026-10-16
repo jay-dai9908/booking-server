@@ -11,7 +11,8 @@ import {
   Grid, 
   Banknote,
   ShieldCheck,
-  User
+  User,
+  Cpu
 } from 'lucide-react';
 import api from '../api/axios';
 
@@ -49,6 +50,7 @@ export default function AdminLayout() {
   const allNavLinks = [
     { to: '/admin/sessions', perm: 'sessions', icon: <CalendarRange className="w-5 h-5" />, label: '營業時段設定' },
     { to: '/admin/reservations', perm: 'reservations', icon: <Users className="w-5 h-5" />, label: '預約訂單總覽' },
+    { to: '/admin/equipment', perm: 'equipment', fallbackPerm: 'sessions', icon: <Cpu className="w-5 h-5" />, label: '智能板庫存管理' },
     { to: '/admin/members', perm: 'members', icon: <UserCog className="w-5 h-5" />, label: '會員管理' },
     { to: '/admin/weekly', perm: 'weekly', icon: <CalendarDays className="w-5 h-5" />, label: '周營業狀況' },
     { to: '/admin/seating', perm: 'seating', icon: <Grid className="w-5 h-5" />, label: '帶位圖管理' },
@@ -61,7 +63,10 @@ export default function AdminLayout() {
     if (!adminInfo) return false;
     if (adminInfo.isSuperAdmin) return true;
     if (link.superAdminOnly) return false;
-    return Array.isArray(adminInfo.permissions) && adminInfo.permissions.includes(link.perm);
+    return Array.isArray(adminInfo.permissions) && (
+      adminInfo.permissions.includes(link.perm) || 
+      (link.fallbackPerm && adminInfo.permissions.includes(link.fallbackPerm))
+    );
   });
 
   // Guard: if current path is forbidden or root /admin, redirect to first allowed route

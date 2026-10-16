@@ -33,12 +33,72 @@ function Booking() {
 
   const [allowUnlimited, setAllowUnlimited] = useState(true);
 
+  // Smart Pegboard (Equipment) state
+  const [equipmentConfigs, setEquipmentConfigs] = useState([]);
+  const [equipmentSelections, setEquipmentSelections] = useState({}); // { [id]: qty }
+  const [rentalHours, setRentalHours] = useState(2);
+  const [enableSmartBoard, setEnableSmartBoard] = useState(false);
+  const [allowExceedPax, setAllowExceedPax] = useState(false);
+
+  // Calculate contiguous sessions
+  const sortedSelectedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+  let maxContiguous = 0;
+  let currentContiguous = 0;
+  for (let i = 0; i < sortedSelectedSessions.length; i++) {
+    if (i === 0) {
+      currentContiguous = 1;
+    } else {
+      if (sortedSelectedSessions[i].start_time === sortedSelectedSessions[i - 1].end_time) {
+        currentContiguous += 1;
+      } else {
+        currentContiguous = 1;
+      }
+    }
+    if (currentContiguous > maxContiguous) {
+      maxContiguous = currentContiguous;
+    }
+  }
+
   useEffect(() => {
     fetchSessions(selectedDate);
     fetchDailySetting(selectedDate);
     setSelectedSessions([]);
     setIsUnlimited(false);
+    setEquipmentSelections({});
+    setEnableSmartBoard(false);
   }, [selectedDate]);
+
+  useEffect(() => {
+    const fetchEquipmentAvailability = async () => {
+      if (selectedSessions.length === 0) {
+        setEquipmentConfigs([]);
+        return;
+      }
+      try {
+        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
+        const sessionStarts = sortedSelectedSessions.map(s => s.start_time).join(',');
+        const res = await api.get(`/equipment/availability?date=${formattedDate}&sessions=${sessionStarts}`);
+        setEquipmentConfigs(res.data.equipments || []);
+        setAllowExceedPax(!!res.data.allow_exceed_pax);
+      } catch (err) {
+        console.error('Failed to fetch equipment availability:', err);
+      }
+    };
+    fetchEquipmentAvailability();
+  }, [selectedDate, selectedSessions]);
+
+  // Adjust rentalHours when maxContiguous changes
+  useEffect(() => {
+    if (maxContiguous >= 2) {
+      setRentalHours(prev => Math.min(Math.max(2, prev), maxContiguous));
+    } else {
+      setRentalHours(2);
+      if (enableSmartBoard) {
+        setEnableSmartBoard(false);
+        setEquipmentSelections({});
+      }
+    }
+  }, [maxContiguous]);
 
   const fetchDailySetting = async (date) => {
     try {
@@ -157,6 +217,38 @@ function Booking() {
     }
   };
 
+  const visibleConfigs = equipmentConfigs.filter(c => c.visibility_status !== 'HIDDEN');
+  const totalBoards = visibleConfigs.reduce((sum, c) => sum + (equipmentSelections[c.id] || 0), 0);
+
+  // If pax drops and !allowExceedPax, clamp selections
+  useEffect(() => {
+    if (!allowExceedPax && totalBoards > pax) {
+      let excess = totalBoards - pax;
+      const newSel = { ...equipmentSelections };
+      for (const c of [...visibleConfigs].reverse()) {
+        const currentQty = newSel[c.id] || 0;
+        if (currentQty > 0) {
+          const deduction = Math.min(excess, currentQty);
+          newSel[c.id] = currentQty - deduction;
+          excess -= deduction;
+          if (excess <= 0) break;
+        }
+      }
+      setEquipmentSelections(newSel);
+    }
+  }, [pax, totalBoards, allowExceedPax]);
+
+  let totalEquipmentFee = 0;
+  const breakdownParts = [];
+  visibleConfigs.forEach(c => {
+    const qty = equipmentSelections[c.id] || 0;
+    if (qty > 0) {
+      const singlePrice = Math.min(c.hourly_rate * rentalHours, c.daily_cap);
+      totalEquipmentFee += singlePrice * qty;
+      breakdownParts.push(`${c.name}×${qty}`);
+    }
+  });
+
   const handleBooking = () => {
     if (selectedSessions.length === 0) return;
     
@@ -164,12 +256,32 @@ function Booking() {
     const sortedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
     const timeRangeStr = `${sortedSessions[0].start_time} - ${sortedSessions[sortedSessions.length - 1].end_time}`;
     
+    const activeEquipments = [];
+    if (enableSmartBoard && maxContiguous >= 2) {
+      visibleConfigs.forEach(c => {
+        const qty = equipmentSelections[c.id] || 0;
+        if (qty > 0) {
+          activeEquipments.push({
+            equipment_id: c.id,
+            name: c.name,
+            quantity: qty,
+            rental_hours: rentalHours
+          });
+        }
+      });
+    }
+
     setConfirmModalData({
       date: format(selectedDate, 'yyyy-MM-dd'),
       timeRange: timeRangeStr,
       pax: pax,
       sortedSessions,
-      isUnlimited
+      isUnlimited,
+      equipments: activeEquipments,
+      totalEquipmentFee,
+      equipmentBreakdown: breakdownParts.length > 0 
+        ? `${breakdownParts.join(' + ')}，共 ${totalBoards} 台 × ${rentalHours} 小時`
+        : null
     });
   };
 
@@ -180,17 +292,21 @@ function Booking() {
       await api.post('/reservations', {
         session_ids: data.sortedSessions.map(s => s.id),
         pax: parseInt(data.pax),
-        isUnlimited: data.isUnlimited
+        isUnlimited: data.isUnlimited,
+        equipments: data.equipments
       });
       setAlertModalData({ type: 'success', title: '預約成功！', message: '期待在拾光製所為您服務。' });
       fetchSessions(selectedDate); // Refresh capacities
       setSelectedSessions([]);
+      setEquipmentSelections({});
+      setEnableSmartBoard(false);
     } catch (err) {
       if (err.response?.status === 409 && err.response?.data?.error?.includes('拆散')) {
         setSplitBookingData({
           session_ids: data.sortedSessions.map(s => s.id),
           pax: parseInt(data.pax),
-          isUnlimited: data.isUnlimited
+          isUnlimited: data.isUnlimited,
+          equipments: data.equipments
         });
         setShowSplitModal(true);
       } else {
@@ -210,6 +326,8 @@ function Booking() {
       setAlertModalData({ type: 'success', title: '預約成功！', message: '期待在拾光製所為您服務。' });
       fetchSessions(selectedDate);
       setSelectedSessions([]);
+      setEquipmentSelections({});
+      setEnableSmartBoard(false);
       setShowSplitModal(false);
       setSplitBookingData(null);
     } catch (err) {
@@ -366,36 +484,294 @@ function Booking() {
           )}
         </section>
 
-        {/* Pax and Submit */}
+        {/* Pax and Equipment */}
         {selectedSessions.length > 0 && maxAvailablePax > 0 && (
-          <section className="bg-wood-card p-6 rounded-2xl shadow-warm animate-fade-in-up">
-            <h2 className="text-lg font-bold mb-4">3. 確認預約人數</h2>
-            <div className="flex flex-col sm:flex-row gap-4 items-end">
-              <div className="w-full sm:w-1/3">
-                <label className="block text-sm text-wood-textMuted mb-3">
-                  預約人數 <span className="opacity-70">(最多 {maxAvailablePax} 人)</span>
-                </label>
-                <div className="flex items-center justify-between bg-[#F9F7F3] border border-[#D5CFC9] rounded-xl p-2 w-full max-w-[200px]">
-                  <button
-                    onClick={() => setPax(Math.max(1, pax - 1))}
-                    disabled={pax <= 1}
-                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-[#D5CFC9] text-[#8B5B43] bg-white transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
-                  >
-                    <svg className="w-5 h-5 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 12H4"></path></svg>
-                  </button>
-                  <div className="w-16 text-center text-[17px] font-bold text-[#3E332B] flex items-center justify-center">
-                    {pax} 人
+          <section className="bg-wood-card p-6 rounded-2xl shadow-warm animate-fade-in-up space-y-6">
+            <div>
+              <h2 className="text-lg font-bold mb-4">3. 確認預約人數與智能拼豆板加購</h2>
+              <div className="flex flex-col sm:flex-row gap-4 items-end">
+                <div className="w-full sm:w-1/3">
+                  <label className="block text-sm text-wood-textMuted mb-3">
+                    預約人數 <span className="opacity-70">(最多 {maxAvailablePax} 人)</span>
+                  </label>
+                  <div className="flex items-center justify-between bg-[#F9F7F3] border border-[#D5CFC9] rounded-xl p-2 w-full max-w-[200px]">
+                    <button
+                      onClick={() => setPax(Math.max(1, pax - 1))}
+                      disabled={pax <= 1}
+                      className="w-9 h-9 flex items-center justify-center rounded-lg border border-[#D5CFC9] text-[#8B5B43] bg-white transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
+                    >
+                      <svg className="w-5 h-5 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 12H4"></path></svg>
+                    </button>
+                    <div className="w-16 text-center text-[17px] font-bold text-[#3E332B] flex items-center justify-center">
+                      {pax} 人
+                    </div>
+                    <button
+                      onClick={() => setPax(Math.min(maxAvailablePax, pax + 1))}
+                      disabled={pax >= maxAvailablePax}
+                      className="w-9 h-9 flex items-center justify-center rounded-lg border border-[#D5CFC9] text-[#8B5B43] bg-white transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
+                    >
+                      <svg className="w-5 h-5 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4"></path></svg>
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setPax(Math.min(maxAvailablePax, pax + 1))}
-                    disabled={pax >= maxAvailablePax}
-                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-[#D5CFC9] text-[#8B5B43] bg-white transition-all duration-200 hover:bg-[#F0EBE1] disabled:opacity-30 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-white"
-                  >
-                    <svg className="w-5 h-5 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4"></path></svg>
-                  </button>
                 </div>
               </div>
             </div>
+
+            {/* Smart Pegboard Section (Only rendered if there are visible configs) */}
+            {visibleConfigs.length > 0 && (
+              <div className="pt-4 border-t border-[#E8DEC8]/80 space-y-4">
+                {/* Free baseline benefit banner */}
+                <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-[#6B5A4E] leading-relaxed">
+                  <span className="text-base shrink-0">💡</span>
+                  <div>每位入場皆免費提供「一般傳統拼豆板」與 221 色豆子；同行者中僅需使用「智能引導拼豆板」的人員依實際需要台數加購即可（不必全員加購）。</div>
+                </div>
+
+                {/* State: Less than 2 contiguous hours */}
+                {maxContiguous < 2 ? (
+                  <div className="border-2 border-dashed border-amber-300/80 bg-amber-50/50 rounded-2xl p-4 sm:p-5 relative transition-all">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-sm text-[#4A3F35] flex items-center gap-1.5">
+                        <span>⚙️</span> 智能拼豆板租賃 (Smart Pegboard)
+                      </span>
+                      <span className="text-xs font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-full">
+                        🔒 需連續 2 時段
+                      </span>
+                    </div>
+                    <div className="text-xs text-amber-900 bg-amber-100/70 p-3 rounded-xl border border-amber-200/60 leading-relaxed font-medium">
+                      ⚠️ 時段條件未滿足：加購/租用智能拼豆板需至少預約「連續 2 個時段 (2 小時)」。目前所選最長連續時段為 {maxContiguous} 個，暫無法勾選加購。
+                    </div>
+                  </div>
+                ) : (
+                  /* State: 2 or more contiguous hours available */
+                  <div className="border border-[#E8DEC8] bg-[#FAF8F5] rounded-2xl p-4 sm:p-5 space-y-4">
+                    <div 
+                      onClick={() => {
+                        setEnableSmartBoard(!enableSmartBoard);
+                        if (enableSmartBoard) {
+                          setEquipmentSelections({});
+                        }
+                      }}
+                      className="flex items-center justify-between cursor-pointer select-none"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">⚙️</span>
+                        <span className="text-[15px] font-bold text-[#4A3F35]">
+                          加購/租用智能拼豆板 (Smart Pegboard)
+                        </span>
+                      </div>
+                      <div className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-300 shrink-0 ${enableSmartBoard ? 'bg-[#8B5B43]' : 'bg-[#D5CFC9]'}`}>
+                        <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full shadow-sm transition-transform duration-300 ${enableSmartBoard ? 'translate-x-[20px]' : 'translate-x-0'}`}></div>
+                      </div>
+                    </div>
+
+                    {enableSmartBoard && (
+                      <div className="pt-3 border-t border-[#E8DEC8]/60 space-y-4">
+                        {/* Quota & Live Stock Info */}
+                        <div className="space-y-2">
+                          <div className="bg-[#EDE6DD] text-[#4A3F35] px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2">
+                            <span>👥</span>
+                            <span>
+                              本單預約 {pax} 人：目前已選購 {totalBoards} 台智能板
+                              （{allowExceedPax ? '可依需求多選' : `尚可為同行者加選 ${Math.max(0, pax - totalBoards)} 台，其餘人員使用免費傳統板`}）
+                            </span>
+                          </div>
+                          
+                          {/* Live stock pills */}
+                          <div className="text-[11px] sm:text-xs text-[#7A7067] bg-white/70 border border-[#E8DEC8] px-3 py-2 rounded-xl flex items-center flex-wrap gap-2">
+                            <span className="font-bold text-[#8B5B43]">✨ 即時庫存狀況：</span>
+                            {visibleConfigs.filter(c => c.id !== 'bring_own').map(c => (
+                              <span key={c.id} className="bg-[#FAF7F2] px-2 py-0.5 rounded border border-[#E5DFD7]">
+                                {c.name} : <strong className={c.available_qty === 0 ? 'text-red-500' : 'text-[#3E332B]'}>{c.available_qty}</strong> / {c.total_stock} 個可用
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Equipment Rental Items (S, M, L) */}
+                        <div className="space-y-3">
+                          {visibleConfigs.filter(c => c.id !== 'bring_own').map(c => {
+                            const qty = equipmentSelections[c.id] || 0;
+                            const isMaintenance = c.visibility_status === 'MAINTENANCE';
+                            const isOutOfStock = !isMaintenance && c.available_qty <= 0;
+                            const maxAllowedForThis = allowExceedPax 
+                              ? (c.available_qty || 0)
+                              : Math.min(c.available_qty || 0, qty + Math.max(0, pax - totalBoards));
+
+                            return (
+                              <div 
+                                key={c.id}
+                                className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
+                                  isMaintenance 
+                                    ? 'bg-[#F2EFE9] border-[#DED7CE] opacity-75' 
+                                    : qty > 0 
+                                      ? 'bg-white border-[#8B5B43] shadow-sm' 
+                                      : 'bg-white/80 border-[#E5DFD7]'
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-[15px] text-[#3E332B]">📚 {c.name}</span>
+                                    <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded">
+                                      NT$ {c.hourly_rate} /時
+                                    </span>
+                                    <span className="text-xs text-[#8C8279]">
+                                      (單台日上限 NT${c.daily_cap})
+                                    </span>
+                                  </div>
+                                  {isMaintenance && (
+                                    <div className="text-xs text-amber-700 font-bold mt-1">
+                                      🔧 {c.status_note || '設備維護中，暫停借用'}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Counter */}
+                                <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                                  <span className="text-xs text-[#8C8279]">
+                                    {isMaintenance ? '暫停借用' : isOutOfStock ? '時段已滿' : `庫存剩 ${c.available_qty}`}
+                                  </span>
+                                  <div className="flex items-center bg-[#F9F7F3] border border-[#D5CFC9] rounded-lg p-1">
+                                    <button
+                                      type="button"
+                                      disabled={isMaintenance || qty <= 0}
+                                      onClick={() => setEquipmentSelections(prev => ({ ...prev, [c.id]: Math.max(0, qty - 1) }))}
+                                      className="w-7 h-7 flex items-center justify-center rounded bg-white text-[#8B5B43] font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#F0EBE1] transition-colors"
+                                    >
+                                      -
+                                    </button>
+                                    <span className="w-10 text-center font-bold text-sm text-[#3E332B]">
+                                      {qty} 台
+                                    </span>
+                                    <button
+                                      type="button"
+                                      disabled={isMaintenance || isOutOfStock || qty >= maxAllowedForThis}
+                                      onClick={() => setEquipmentSelections(prev => ({ ...prev, [c.id]: qty + 1 }))}
+                                      className="w-7 h-7 flex items-center justify-center rounded bg-white text-[#8B5B43] font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#F0EBE1] transition-colors"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Bring Own Smart Pegboard Option */}
+                        {visibleConfigs.some(c => c.id === 'bring_own') && (() => {
+                          const bringOwnConfig = visibleConfigs.find(c => c.id === 'bring_own');
+                          const qty = equipmentSelections['bring_own'] || 0;
+                          const isMaintenance = bringOwnConfig.visibility_status === 'MAINTENANCE';
+                          const maxAllowed = allowExceedPax ? 99 : (qty + Math.max(0, pax - totalBoards));
+
+                          return (
+                            <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                              qty > 0 ? 'bg-white border-[#8B5B43] shadow-sm' : 'bg-white/60 border-[#E5DFD7]'
+                            }`}>
+                              <div className="max-w-md">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-bold text-[15px] text-[#3E332B]">✨ 自帶智能拼豆板 (Bring Own)</span>
+                                  <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded">
+                                    NT$ {bringOwnConfig.hourly_rate} /時
+                                  </span>
+                                  <span className="text-xs text-[#8C8279]">
+                                    (上限 NT${bringOwnConfig.daily_cap})
+                                  </span>
+                                </div>
+                                <p className="text-xs text-[#8C8279] leading-relaxed">
+                                  同行者中若有自備智能拼豆板至店內使用，請選擇實際自備台數（每台每小時 NT$ 50，單台當日收費上限 NT$ 400）。
+                                </p>
+                              </div>
+                              
+                              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                                <div className="flex items-center bg-[#F9F7F3] border border-[#D5CFC9] rounded-lg p-1">
+                                  <button
+                                    type="button"
+                                    disabled={isMaintenance || qty <= 0}
+                                    onClick={() => setEquipmentSelections(prev => ({ ...prev, bring_own: Math.max(0, qty - 1) }))}
+                                    className="w-7 h-7 flex items-center justify-center rounded bg-white text-[#8B5B43] font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#F0EBE1] transition-colors"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="w-10 text-center font-bold text-sm text-[#3E332B]">
+                                    {qty} 台
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={isMaintenance || qty >= maxAllowed}
+                                    onClick={() => setEquipmentSelections(prev => ({ ...prev, bring_own: qty + 1 }))}
+                                    className="w-7 h-7 flex items-center justify-center rounded bg-white text-[#8B5B43] font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#F0EBE1] transition-colors"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Rental Hours Selector */}
+                        {totalBoards > 0 && (
+                          <div className="bg-white/80 border border-[#E5DFD7] rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-sm text-[#3E332B]">🕒 使用時數 (至少 2 小時)</span>
+                                <span className="text-[11px] font-bold text-[#8B5B43] bg-[#F4EFE6] px-2 py-0.5 rounded">
+                                  最少 2 小時
+                                </span>
+                              </div>
+                              <span className="text-xs text-[#8C8279]">
+                                上限為本次預約最長連續時數 ({maxContiguous} 小時)
+                              </span>
+                            </div>
+
+                            <div className="flex items-center bg-[#F9F7F3] border border-[#D5CFC9] rounded-lg p-1 self-end sm:self-auto">
+                              <button
+                                type="button"
+                                disabled={rentalHours <= 2}
+                                onClick={() => setRentalHours(h => Math.max(2, h - 1))}
+                                className="w-7 h-7 flex items-center justify-center rounded bg-white text-[#8B5B43] font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#F0EBE1] transition-colors"
+                              >
+                                -
+                              </button>
+                              <span className="w-16 text-center font-bold text-sm text-[#3E332B]">
+                                {rentalHours} 小時
+                              </span>
+                              <button
+                                type="button"
+                                disabled={rentalHours >= maxContiguous}
+                                onClick={() => setRentalHours(h => Math.min(maxContiguous, h + 1))}
+                                className="w-7 h-7 flex items-center justify-center rounded bg-white text-[#8B5B43] font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#F0EBE1] transition-colors"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Subtotal Display */}
+                        {totalBoards > 0 && (
+                          <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="text-xs text-[#6B5A4E]">
+                              <span className="font-bold text-sm text-[#4A3F35] block mb-0.5">
+                                拼豆板加購金額小計： + NT$ {totalEquipmentFee}
+                              </span>
+                              <span>
+                                {breakdownParts.join(' + ')}，共 {totalBoards} 台 × {rentalHours} 小時
+                                {totalBoards < pax ? `；另 ${pax - totalBoards} 位使用免費一般板` : ''}
+                              </span>
+                            </div>
+                            <span className="text-xs font-bold text-[#8B5B43] bg-white border border-[#E8DEC8] px-3 py-1 rounded-full shrink-0 self-end sm:self-auto">
+                              獨立單日封頂已套用
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         )}
       </main>
@@ -408,8 +784,13 @@ function Booking() {
               <div className="font-bold">
                 已選擇 {selectedSessions.length} 個時段
               </div>
-              <div className="text-wood-textMuted font-medium">
-                人數: {pax} 人
+              <div className="text-wood-textMuted font-medium flex items-center gap-2">
+                <span>人數: {pax} 人</span>
+                {totalBoards > 0 && enableSmartBoard && (
+                  <span className="text-wood-primary font-bold">
+                    | 智能板: {totalBoards} 台 (+NT${totalEquipmentFee})
+                  </span>
+                )}
               </div>
             </div>
             <button
@@ -522,6 +903,15 @@ function Booking() {
                   <span className="w-16 font-medium text-[#8C8279]">👥 人數</span>
                   <span className="font-bold">{confirmModalData.pax} 人</span>
                 </div>
+                {confirmModalData.equipments && confirmModalData.equipments.length > 0 && (
+                  <div className="flex items-start text-[#3E332B] border-t border-dashed border-[#E5DFD7] pt-2">
+                    <span className="w-16 font-medium text-[#8C8279] shrink-0">⚙️ 設備</span>
+                    <div>
+                      <span className="font-bold block text-sm">{confirmModalData.equipmentBreakdown}</span>
+                      <span className="text-xs text-[#8B5B43] font-bold">加購小計: +NT$ {confirmModalData.totalEquipmentFee}</span>
+                    </div>
+                  </div>
+                )}
               </div>
               
               <div className="flex items-center justify-center gap-3">

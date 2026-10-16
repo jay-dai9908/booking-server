@@ -65,12 +65,13 @@ model DailySetting {
 }
 
 model GlobalSetting {
-  id              Int      @id @default(1)
-  weekday_hourly_price    Int      @default(100)
-  weekday_unlimited_price Int      @default(550)
-  weekend_hourly_price    Int      @default(150)
-  weekend_unlimited_price Int      @default(800)
-  is_lockdown_mode        Boolean  @default(false)
+  id                          Int      @id @default(1)
+  weekday_hourly_price        Int      @default(100)
+  weekday_unlimited_price     Int      @default(550)
+  weekend_hourly_price        Int      @default(150)
+  weekend_unlimited_price     Int      @default(800)
+  is_lockdown_mode            Boolean  @default(false)
+  allow_equipment_exceed_pax  Boolean  @default(false)
 }
 
 model BannedIP {
@@ -89,4 +90,37 @@ model AdminUser {
   is_active   Boolean  @default(true)
   created_at  DateTime @default(now())
 }
+
+model EquipmentConfig {
+  id                   String             @id
+  name                 String
+  visibility_status    String             @default("ACTIVE") // ACTIVE, MAINTENANCE, HIDDEN
+  status_note          String?
+  total_stock          Int?
+  hourly_rate          Int
+  daily_cap            Int
+  min_contiguous_hours Int                @default(2)
+  allow_exceed_pax     Boolean            @default(false)
+  sort_order           Int                @default(0)
+  created_at           DateTime           @default(now())
+
+  booking_equipments   BookingEquipment[]
+}
+
+model BookingEquipment {
+  id                      Int             @id @default(autoincrement())
+  booking_ref             String
+  equipment_id            String
+  equipment_name_snapshot String
+  quantity                Int             @default(1)
+  rental_hours            Int             @default(2)
+  subtotal_price          Int             @default(0)
+  covered_sessions        String[]        @default([])
+  created_at              DateTime        @default(now())
+
+  equipment               EquipmentConfig @relation(fields: [equipment_id], references: [id])
+
+  @@index([booking_ref])
+}
+
 

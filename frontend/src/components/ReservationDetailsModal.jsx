@@ -256,6 +256,24 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                   </div>
                 </div>
               )}
+              {reservation.equipments && reservation.equipments.length > 0 && (
+                <div className="sm:col-span-2 bg-amber-50/60 border border-amber-200/80 rounded-xl p-3.5">
+                  <h3 className="text-sm font-bold text-amber-900 mb-2 flex items-center gap-1.5">
+                    ⚙️ 智能拼豆板租賃明細
+                  </h3>
+                  <div className="space-y-1.5">
+                    {reservation.equipments.map((eq, i) => (
+                      <div key={i} className="flex items-center justify-between bg-white px-3 py-2 rounded-lg border border-amber-200 text-sm">
+                        <span className="font-bold text-gray-800">{eq.equipment_name_snapshot} × {eq.quantity} 台</span>
+                        <span className="text-xs font-bold text-[#8B5B43]">
+                          時數: {eq.rental_hours} 小時 ｜ 加購小計: NT$ {eq.subtotal_price}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">當前狀態</h3>
                 <div className="mt-1">

@@ -23,12 +23,23 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [showForceAddModal, setShowForceAddModal] = useState(false);
   const [targetSwapSeat, setTargetSwapSeat] = useState(null); // string e.g., 'B1-1'
+  const [occupancyData, setOccupancyData] = useState(null);
   
   const pollingRef = useRef(null);
 
   useEffect(() => {
     fetchSessions();
+    fetchOccupancy();
   }, [selectedDate]);
+
+  const fetchOccupancy = async () => {
+    try {
+      const res = await api.get(`/equipment/admin/occupancy?date=${selectedDate}`);
+      setOccupancyData(res.data);
+    } catch (err) {
+      console.error('Failed to fetch occupancy:', err);
+    }
+  };
 
   useEffect(() => {
     if (selectedSessionId) {
@@ -268,6 +279,11 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
                 {occupant.is_walk_in && <span className="text-orange-500 mr-0.5">🚶</span>}
                 {occupant.user?.name}
                 {occupant.is_paid && <span className="ml-0.5" title="已付費">💰</span>}
+                {occupant.equipments && occupant.equipments.length > 0 && (
+                  <span className="ml-0.5" title={`智能拼豆板: ${occupant.equipments.map(e => `${e.equipment_name_snapshot}×${e.quantity}`).join('、')}`}>
+                    ⚙️
+                  </span>
+                )}
               </div>
               {occupant.booking_end_time && (
                 <div className={`text-[10px] -mt-0.5 font-bold ${isLastHour ? 'text-red-500' : 'opacity-80'}`}>
@@ -320,7 +336,50 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
 
       {/* Main Seating Area */}
       {selectedSessionId ? (
-        <div className="space-y-8">
+        <div className="space-y-4">
+          {/* Equipment Occupancy Strip for current session */}
+          {occupancyData && occupancyData.configs && (
+            <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 text-xs">
+              <span className="font-bold text-[#8B5B43] flex items-center gap-1.5">
+                <span>⚙️</span> 本時段智能拼豆板借用率：
+              </span>
+              <div className="flex items-center flex-wrap gap-2">
+                {occupancyData.configs.filter(c => c.id !== 'bring_own').map(c => {
+                  const sessionOcc = occupancyData.occupancy?.[selectedSessionId] || {};
+                  const booked = sessionOcc[c.id] || 0;
+                  const total = c.total_stock || 0;
+                  const isFull = total > 0 && booked >= total;
+                  return (
+                    <span 
+                      key={c.id} 
+                      className={`px-2.5 py-1 rounded-lg font-bold border ${
+                        isFull 
+                          ? 'bg-red-50 text-red-700 border-red-200' 
+                          : booked > 0 
+                            ? 'bg-amber-50 text-amber-800 border-amber-200' 
+                            : 'bg-white text-gray-600 border-[#E8DEC8]'
+                      }`}
+                    >
+                      {c.name}: {booked}/{total} {isFull ? '(滿)' : ''}
+                    </span>
+                  );
+                })}
+                {(() => {
+                  const sessionOcc = occupancyData.occupancy?.[selectedSessionId] || {};
+                  const bringOwnCount = sessionOcc['bring_own'] || 0;
+                  if (bringOwnCount > 0) {
+                    return (
+                      <span className="px-2.5 py-1 rounded-lg font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                        自帶板: {bringOwnCount} 台
+                      </span>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+            </div>
+          )}
+
           <div className="bg-white p-8 rounded-2xl shadow-sm border">
           <div className="max-w-4xl mx-auto flex flex-col gap-12">
             

@@ -1,6 +1,6 @@
 import React from 'react';
 import { format } from 'date-fns';
-import { X, CheckCircle2, XCircle, Calendar, Users, Phone } from 'lucide-react';
+import { X, CheckCircle2, XCircle, Calendar, Users, Phone, Cpu } from 'lucide-react';
 import api from '../api/axios';
 
 export const getReservationStatusUI = (r) => {
@@ -28,7 +28,7 @@ export const getReservationStatusUI = (r) => {
   return { text: '預約成功', icon: <CheckCircle2 className="w-4 h-4"/>, colorClass: 'text-[#8B5B43]', bgClass: 'bg-[#F4EFE6]' };
 };
 
-export default function CustomerReservationDetailsModal({ reservation, onClose, onUpdate }) {
+export default function CustomerReservationDetailsModal({ reservation, onClose, onUpdate, onOpenEquipmentAddon }) {
   if (!reservation) return null;
 
   const handleCancelReservation = async () => {
@@ -115,6 +115,43 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                 <p className="text-base font-medium text-[#7A7067]">{reservation.user?.phone || '未提供'}</p>
               </div>
             </div>
+
+            <div className="border-b border-dashed border-[#E5DFD7] pb-5">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-[#7A7067] flex items-center gap-1.5">
+                  <Cpu className="w-4 h-4" /> 智能拼豆板設備
+                </h3>
+                {reservation.status !== 'cancelled' && !isPast && onOpenEquipmentAddon && (
+                  <button
+                    onClick={onOpenEquipmentAddon}
+                    className="text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] hover:bg-[#EBE5DF] px-3 py-1 rounded-full transition-colors"
+                  >
+                    {reservation.equipments && reservation.equipments.length > 0 ? '✏️ 追加/修改' : '➕ 補預約智能板'}
+                  </button>
+                )}
+              </div>
+              {reservation.equipments && reservation.equipments.length > 0 ? (
+                <div className="space-y-1.5">
+                  {reservation.equipments.map((eq, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm bg-white p-2.5 rounded-xl border border-[#E5DFD7]">
+                      <span className="font-bold text-[#2C241E]">{eq.equipment_name_snapshot} × {eq.quantity} 台</span>
+                      <span className="text-xs font-bold text-[#8B5B43]">
+                        {eq.rental_hours} 小時 ｜ NT$ {eq.subtotal_price}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-[#8C8279]">未加購智能拼豆板（全員使用免費傳統板）</p>
+              )}
+            </div>
+
+            {reservation.total_amount != null && (
+              <div className="border-b border-dashed border-[#E5DFD7] pb-5 flex items-center justify-between">
+                <h3 className="text-sm font-medium text-[#7A7067]">預計結帳總額</h3>
+                <span className="text-lg font-bold text-[#8B5B43]">NT$ {reservation.total_amount}</span>
+              </div>
+            )}
 
             <div>
               <h3 className="text-sm font-medium text-[#7A7067] mb-2">當前狀態</h3>

@@ -15,7 +15,8 @@ import {
   Eye, 
   EyeOff, 
   X,
-  AlertCircle
+  AlertCircle,
+  Cpu
 } from 'lucide-react';
 import api from '../../api/axios';
 
@@ -61,6 +62,13 @@ const AVAILABLE_PERMISSIONS = [
     desc: '營業額報表、收款明細與未付款追蹤', 
     icon: Banknote,
     color: 'text-rose-700 bg-rose-50 border-rose-200' 
+  },
+  { 
+    id: 'equipment', 
+    label: '智能板庫存管理', 
+    desc: '調整智能拼豆板庫存、時租費率與前台狀態', 
+    icon: Cpu,
+    color: 'text-amber-800 bg-amber-50 border-amber-200' 
   },
 ];
 

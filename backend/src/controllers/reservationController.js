@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
 
 // Helper function to group reservations by booking_ref
-const groupReservations = (reservations) => {
+const groupReservations = (reservations, equipmentsMap = {}) => {
   const groups = {};
   for (const r of reservations) {
     const ref = r.booking_ref;
@@ -78,10 +78,12 @@ const groupReservations = (reservations) => {
       is_paid: group.is_paid,
       total_amount: group.total_amount,
       cancelled_at: group.cancelled_at,
-      cancelled_by: group.cancelled_by
+      cancelled_by: group.cancelled_by,
+      equipments: equipmentsMap[group.booking_ref] || []
     };
   });
 };
+
 
 // Helper function to calculate total amount based on pricing rules
 export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlimited) => {
@@ -133,7 +135,7 @@ export const createReservation = async (req, res) => {
     const result = await prisma.$transaction(async (tx) => {
       // 1. Get the requested sessions
       const requestedSessions = await tx.$queryRaw`
-        SELECT id, max_capacity, session_date
+        SELECT id, max_capacity, session_date, start_time, end_time
         FROM "Session" 
         WHERE id IN (${Prisma.join(session_ids)}) 
         FOR UPDATE
@@ -190,10 +192,48 @@ export const createReservation = async (req, res) => {
       const sessionUpdates = []; 
       const newReservationsData = [];
       
-      const mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
+      // Smart Pegboard / Equipment fee calculation
+      const equipments = req.body.equipments;
+      let totalEquipmentFee = 0;
+      const newEquipmentRecords = [];
+
+      if (Array.isArray(equipments) && equipments.length > 0) {
+        const allConfigs = await tx.equipmentConfig.findMany();
+        const configMap = {};
+        allConfigs.forEach(c => { configMap[c.id] = c; });
+
+        const totalHours = session_ids.length;
+        const coveredSessionsStrings = requestedSessions.map(s => `${s.start_time}-${s.end_time}`);
+
+        for (const eq of equipments) {
+          const qty = parseInt(eq.quantity, 10) || 0;
+          if (qty <= 0) continue;
+
+          const config = configMap[eq.equipment_id];
+          if (!config) continue;
+
+          const minHours = config.min_contiguous_hours || 2;
+          const rentalHours = Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
+
+          const singlePrice = Math.min(config.hourly_rate * rentalHours, config.daily_cap);
+          const subtotal = singlePrice * qty;
+          totalEquipmentFee += subtotal;
+
+          newEquipmentRecords.push({
+            booking_ref,
+            equipment_id: eq.equipment_id,
+            equipment_name_snapshot: config.name,
+            quantity: qty,
+            rental_hours: rentalHours,
+            subtotal_price: subtotal,
+            covered_sessions: coveredSessionsStrings
+          });
+        }
+      }
 
       const is_unlimited = req.body.isUnlimited === true;
-      const totalAmount = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
+      const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
+      const totalAmount = baseSeatingPrice + totalEquipmentFee;
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -230,10 +270,17 @@ export const createReservation = async (req, res) => {
         data: newReservationsData
       });
 
+      if (newEquipmentRecords.length > 0) {
+        await tx.bookingEquipment.createMany({
+          data: newEquipmentRecords
+        });
+      }
+
       return { booking_ref, count: newReservations.count };
     });
 
     res.status(201).json({ message: 'Reservation successful', reservation: result });
+
 
   } catch (error) {
     console.error('Reservation error:', error);
@@ -309,8 +356,19 @@ export const getAdminReservations = async (req, res) => {
       }
     });
 
+    // Fetch equipment bookings for these reservations
+    const bookingRefs = [...new Set(reservations.map(r => r.booking_ref))];
+    const equipments = await prisma.bookingEquipment.findMany({
+      where: { booking_ref: { in: bookingRefs } }
+    });
+    const equipmentsMap = {};
+    equipments.forEach(eq => {
+      if (!equipmentsMap[eq.booking_ref]) equipmentsMap[eq.booking_ref] = [];
+      equipmentsMap[eq.booking_ref].push(eq);
+    });
+
     // Group them
-    let grouped = groupReservations(reservations);
+    let grouped = groupReservations(reservations, equipmentsMap);
     
     // Sort grouped reservations by session_date ascending, then start_time ascending
     grouped.sort((a, b) => {
@@ -364,14 +422,17 @@ export const getAdminReservationDetails = async (req, res) => {
     }
     
     let firstRes = reservations[0];
-    
+    const eqRecords = await prisma.bookingEquipment.findMany({ where: { booking_ref } });
+    const eqTotal = eqRecords.reduce((sum, e) => sum + e.subtotal_price, 0);
+
     // Auto-recalculate if unpaid and not manually overridden
     if (!firstRes.is_paid && !firstRes.is_amount_manual) {
       await prisma.$transaction(async (tx) => {
         const sessionDate = firstRes.session.session_date;
         const pax = firstRes.pax;
         const is_unlimited = firstRes.is_unlimited;
-        const totalAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
+        const baseAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
+        const totalAmount = baseAmount + eqTotal;
         
         if (totalAmount !== firstRes.total_amount) {
           await tx.reservation.updateMany({
@@ -384,7 +445,8 @@ export const getAdminReservationDetails = async (req, res) => {
       });
     }
 
-    const grouped = groupReservations(reservations);
+    const equipmentsMap = { [booking_ref]: eqRecords };
+    const grouped = groupReservations(reservations, equipmentsMap);
     res.json(grouped[0]);
   } catch (error) {
     console.error('Error fetching reservation details:', error);
@@ -407,7 +469,17 @@ export const getMyReservations = async (req, res) => {
       }
     });
 
-    const grouped = groupReservations(reservations);
+    const bookingRefs = [...new Set(reservations.map(r => r.booking_ref))];
+    const equipments = await prisma.bookingEquipment.findMany({
+      where: { booking_ref: { in: bookingRefs } }
+    });
+    const equipmentsMap = {};
+    equipments.forEach(eq => {
+      if (!equipmentsMap[eq.booking_ref]) equipmentsMap[eq.booking_ref] = [];
+      equipmentsMap[eq.booking_ref].push(eq);
+    });
+
+    const grouped = groupReservations(reservations, equipmentsMap);
     res.json(grouped);
   } catch (error) {
     console.error('Error fetching my reservations:', error);
@@ -741,17 +813,23 @@ export const getSessionSeats = async (req, res) => {
     }
     // --- End Self-Healing ---
 
-    // Find the end_time of the entire booking for each reservation
     const bookingRefs = [...new Set(reservations.map(r => r.booking_ref))];
-    const allRelatedReservations = await prisma.reservation.findMany({
-      where: {
-        booking_ref: { in: bookingRefs },
-        status: 'confirmed'
-      },
-      include: {
-        session: true
-      }
-    });
+    const [allRelatedReservations, equipments] = await Promise.all([
+      prisma.reservation.findMany({
+        where: {
+          booking_ref: { in: bookingRefs },
+          status: 'confirmed'
+        },
+        include: {
+          session: true
+        }
+      }),
+      prisma.bookingEquipment.findMany({
+        where: {
+          booking_ref: { in: bookingRefs }
+        }
+      })
+    ]);
 
     const endTimeMap = {};
     allRelatedReservations.forEach(r => {
@@ -760,9 +838,16 @@ export const getSessionSeats = async (req, res) => {
       }
     });
 
+    const equipmentsMap = {};
+    equipments.forEach(eq => {
+      if (!equipmentsMap[eq.booking_ref]) equipmentsMap[eq.booking_ref] = [];
+      equipmentsMap[eq.booking_ref].push(eq);
+    });
+
     const reservationsWithEndTime = reservations.map(r => ({
       ...r,
-      booking_end_time: endTimeMap[r.booking_ref] || session.end_time
+      booking_end_time: endTimeMap[r.booking_ref] || session.end_time,
+      equipments: equipmentsMap[r.booking_ref] || []
     }));
 
     res.json({
@@ -811,7 +896,7 @@ export const adminCreateReservation = async (req, res) => {
 
       // 1. Get the requested sessions
       const requestedSessions = await tx.$queryRaw`
-        SELECT id, max_capacity, session_date
+        SELECT id, max_capacity, session_date, start_time, end_time
         FROM "Session" 
         WHERE id IN (${Prisma.join(session_ids)}) 
         FOR UPDATE
@@ -887,9 +972,49 @@ export const adminCreateReservation = async (req, res) => {
         }
       }
 
+      // Smart Pegboard / Equipment fee calculation
+      const equipments = req.body.equipments;
+      let totalEquipmentFee = 0;
+      const newEquipmentRecords = [];
+
+      if (Array.isArray(equipments) && equipments.length > 0) {
+        const allConfigs = await tx.equipmentConfig.findMany();
+        const configMap = {};
+        allConfigs.forEach(c => { configMap[c.id] = c; });
+
+        const totalHours = session_ids.length;
+        const coveredSessionsStrings = requestedSessions.map(s => `${s.start_time}-${s.end_time}`);
+
+        for (const eq of equipments) {
+          const qty = parseInt(eq.quantity, 10) || 0;
+          if (qty <= 0) continue;
+
+          const config = configMap[eq.equipment_id];
+          if (!config) continue;
+
+          const minHours = config.min_contiguous_hours || 2;
+          const rentalHours = Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
+
+          const singlePrice = Math.min(config.hourly_rate * rentalHours, config.daily_cap);
+          const subtotal = singlePrice * qty;
+          totalEquipmentFee += subtotal;
+
+          newEquipmentRecords.push({
+            booking_ref,
+            equipment_id: eq.equipment_id,
+            equipment_name_snapshot: config.name,
+            quantity: qty,
+            rental_hours: rentalHours,
+            subtotal_price: subtotal,
+            covered_sessions: coveredSessionsStrings
+          });
+        }
+      }
+
       const newReservationsData = [];
       const is_unlimited = req.body.isUnlimited === true || req.body.isUnlimited === 'true';
-      const totalAmount = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
+      const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
+      const totalAmount = baseSeatingPrice + totalEquipmentFee;
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -914,6 +1039,12 @@ export const adminCreateReservation = async (req, res) => {
       const newReservations = await tx.reservation.createMany({
         data: newReservationsData
       });
+
+      if (newEquipmentRecords.length > 0) {
+        await tx.bookingEquipment.createMany({
+          data: newEquipmentRecords
+        });
+      }
 
       return { booking_ref, count: newReservations.count };
     });
