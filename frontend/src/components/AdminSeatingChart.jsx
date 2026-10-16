@@ -401,7 +401,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
-                        已報到
+                        已報到 {selectedSeat.reservation.checked_in_at && `(${format(new Date(selectedSeat.reservation.checked_in_at), 'HH:mm')})`}
                       </button>
                     ) : (
                       <button 
@@ -409,7 +409,11 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
                           onCheckIn(selectedSeat.reservation.booking_ref);
                           setSelectedSeat(prev => ({
                             ...prev,
-                            reservation: { ...prev.reservation, attendance: 'checked_in' }
+                            reservation: { 
+                              ...prev.reservation, 
+                              attendance: 'checked_in',
+                              checked_in_at: new Date()
+                            }
                           }));
                           setTimeout(() => fetchSeatingData(false), 500);
                         }}

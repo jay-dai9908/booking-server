@@ -16,6 +16,7 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
         pax: r.pax,
         status: r.status,
         attendance: r.attendance,
+        checked_in_at: r.checked_in_at || null,
         created_at: r.created_at,
         session_date: r.session.session_date,
         sessions: [],
@@ -79,6 +80,7 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
       total_amount: group.total_amount,
       cancelled_at: group.cancelled_at,
       cancelled_by: group.cancelled_by,
+      checked_in_at: group.checked_in_at || null,
       equipments: equipmentsMap[group.booking_ref] || []
     };
   });
@@ -1239,16 +1241,28 @@ export const updateAttendance = async (req, res) => {
   const { attendance } = req.body; // 'checked_in', 'no_show', or null
 
   try {
+    const dataToUpdate = { attendance };
+    if (attendance === 'checked_in') {
+      dataToUpdate.checked_in_at = new Date();
+    } else {
+      dataToUpdate.checked_in_at = null;
+    }
+
     const updated = await prisma.reservation.updateMany({
       where: { booking_ref },
-      data: { attendance }
+      data: dataToUpdate
     });
 
     if (updated.count === 0) {
       return res.status(404).json({ error: 'Reservation not found' });
     }
 
-    res.json({ message: 'Attendance updated successfully', count: updated.count });
+    res.json({ 
+      message: 'Attendance updated successfully', 
+      count: updated.count,
+      attendance,
+      checked_in_at: dataToUpdate.checked_in_at
+    });
   } catch (error) {
     console.error('Error updating attendance:', error);
     res.status(500).json({ error: 'Failed to update attendance' });

@@ -41,8 +41,11 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
 
   const handleUpdateAttendance = async (attendance) => {
     try {
-      await api.patch(`/reservations/${reservation.booking_ref}/attendance`, { attendance });
-      if (onUpdate) onUpdate({ attendance });
+      const res = await api.patch(`/reservations/${reservation.booking_ref}/attendance`, { attendance });
+      if (onUpdate) onUpdate({ 
+        attendance,
+        checked_in_at: res.data?.checked_in_at 
+      });
     } catch (err) {
       console.error(err);
       alert('更新狀態失敗');
@@ -152,6 +155,42 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                 <h3 className="text-sm font-medium text-gray-500 mb-1">聯絡電話</h3>
                 <p className="text-lg font-bold text-gray-900">{reservation.user?.phone || '未提供'}</p>
               </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-1">當前狀態</h3>
+                <div className="mt-1">
+                  {(() => {
+                    const rFormatted = {
+                      ...reservation,
+                      start_time: reservation.start_time || reservation.session?.start_time,
+                      session_date: reservation.session_date || reservation.session?.session_date
+                    };
+                    const statusUI = getReservationStatusUI(rFormatted);
+                    return (
+                      <div className="flex items-center flex-wrap gap-2">
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                          {statusUI.icon} {statusUI.text}
+                        </span>
+                        {reservation.attendance === 'checked_in' && (
+                          <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                            🕒 報到時間：{reservation.checked_in_at ? format(new Date(reservation.checked_in_at), 'MM/dd HH:mm') : '已完成'}
+                          </span>
+                        )}
+                        {reservation.status === 'cancelled' && reservation.cancelled_at && (
+                          <span className="text-xs sm:text-sm text-gray-500">
+                            取消於 {format(new Date(reservation.cancelled_at), 'MM/dd HH:mm')} 
+                            ({reservation.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})
+                          </span>
+                        )}
+                        {reservation.is_force_split && (
+                          <span className="inline-flex items-center px-2 py-1 bg-amber-50 text-amber-600 border border-amber-200 rounded-md text-xs font-bold tracking-wide">
+                            顧客同意拆桌
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
             </div>
             
             <div className="space-y-4">
@@ -258,86 +297,55 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                   </div>
                 </div>
               )}
-              {/* Smart Pegboard Section */}
-              <div className="sm:col-span-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl p-3.5">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-bold text-[#8B5B43] flex items-center gap-1.5">
-                    ⚙️ 智能拼豆板租賃明細
-                  </h3>
-                  {!readOnly && reservation.status !== 'cancelled' && (
-                    <button
-                      type="button"
-                      onClick={() => setShowEquipmentModal(true)}
-                      className="text-xs bg-[#8B5B43] hover:bg-[#724a35] text-white px-2.5 py-1 rounded-lg transition-colors font-medium flex items-center gap-1 shadow-xs"
-                    >
-                      {reservation.equipments && reservation.equipments.length > 0 ? (
-                        <>✏️ 調整智能板</>
-                      ) : (
-                        <>➕ 加購/補登智能板</>
-                      )}
-                    </button>
-                  )}
-                </div>
+            </div>
+          </div>
 
-                {reservation.equipments && reservation.equipments.length > 0 ? (
-                  <div className="space-y-1.5">
-                    {reservation.equipments.map((eq, i) => (
-                      <div key={i} className="flex items-center justify-between bg-white px-3 py-2 rounded-lg border border-[#E8DEC8] text-sm">
-                        <span className="font-bold text-gray-800">{eq.equipment_name_snapshot} × {eq.quantity} 台</span>
-                        <span className="text-xs font-bold text-[#8B5B43]">
-                          時數: {eq.rental_hours} 小時 ｜ 加購小計: NT$ {eq.subtotal_price}
-                        </span>
-                      </div>
-                    ))}
+          {/* Smart Pegboard Section (Full width across the modal) */}
+          <div className="mb-8 bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-2.5">
+              <h3 className="text-sm font-bold text-[#8B5B43] flex items-center gap-1.5 whitespace-nowrap">
+                ⚙️ 智能拼豆板租賃明細
+              </h3>
+              {!readOnly && reservation.status !== 'cancelled' && (
+                <button
+                  type="button"
+                  onClick={() => setShowEquipmentModal(true)}
+                  className="text-xs bg-[#8B5B43] hover:bg-[#724a35] text-white px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 shadow-xs whitespace-nowrap"
+                >
+                  {reservation.equipments && reservation.equipments.length > 0 ? (
+                    <>✏️ 調整智能板</>
+                  ) : (
+                    <>➕ 加購/補登智能板</>
+                  )}
+                </button>
+              )}
+            </div>
+
+            {reservation.equipments && reservation.equipments.length > 0 ? (
+              <div className="space-y-2">
+                {reservation.equipments.map((eq, i) => (
+                  <div key={i} className="flex items-center justify-between bg-white px-3.5 py-2.5 rounded-xl border border-[#E8DEC8] text-sm">
+                    <span className="font-bold text-gray-800">{eq.equipment_name_snapshot} × {eq.quantity} 台</span>
+                    <span className="text-xs font-bold text-[#8B5B43]">
+                      時數: {eq.rental_hours} 小時 ｜ 加購小計: NT$ {eq.subtotal_price}
+                    </span>
                   </div>
-                ) : (
-                  <div className="flex items-center justify-between bg-white/80 px-3 py-2.5 rounded-lg border border-dashed border-[#DED7CE] text-xs text-gray-600">
-                    <span>此訂單尚未租賃智能拼豆板（使用免費基本拼豆板）</span>
-                    {!readOnly && reservation.status !== 'cancelled' && (
-                      <button
-                        type="button"
-                        onClick={() => setShowEquipmentModal(true)}
-                        className="text-[#8B5B43] hover:underline font-bold text-xs flex items-center gap-0.5"
-                      >
-                        點此加租 &rarr;
-                      </button>
-                    )}
-                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between bg-white/80 px-3.5 py-2.5 rounded-xl border border-dashed border-[#DED7CE] text-xs sm:text-sm text-gray-600">
+                <span>此訂單尚未租賃智能拼豆板（全員使用免費基本拼豆板）</span>
+                {!readOnly && reservation.status !== 'cancelled' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowEquipmentModal(true)}
+                    className="text-[#8B5B43] hover:underline font-bold text-xs sm:text-sm flex items-center gap-0.5 whitespace-nowrap ml-2"
+                  >
+                    點此加租 &rarr;
+                  </button>
                 )}
               </div>
-
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-1">當前狀態</h3>
-                <div className="mt-1">
-                  {(() => {
-                    const rFormatted = {
-                      ...reservation,
-                      start_time: reservation.start_time || reservation.session?.start_time,
-                      session_date: reservation.session_date || reservation.session?.session_date
-                    };
-                    const statusUI = getReservationStatusUI(rFormatted);
-                    return (
-                      <div className="flex items-center">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                          {statusUI.icon} {statusUI.text}
-                        </span>
-                        {reservation.status === 'cancelled' && reservation.cancelled_at && (
-                          <span className="ml-3 text-sm text-gray-500">
-                            取消於 {format(new Date(reservation.cancelled_at), 'MM/dd HH:mm')} 
-                            ({reservation.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})
-                          </span>
-                        )}
-                        {reservation.is_force_split && (
-                          <span className="ml-2 inline-flex items-center px-2 py-1 bg-amber-50 text-amber-600 border border-amber-200 rounded-md text-xs font-bold tracking-wide">
-                            顧客同意拆桌
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Actions */}

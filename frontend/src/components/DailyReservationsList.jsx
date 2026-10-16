@@ -133,6 +133,11 @@ export default function DailyReservationsList({ date, onOpenDetails }) {
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
                           {statusUI.icon} {statusUI.text}
                         </span>
+                        {r.attendance === 'checked_in' && r.checked_in_at && (
+                          <div className="mt-1 text-[11px] font-medium text-blue-600 flex items-center gap-0.5">
+                            <span>🕒 報到 {format(new Date(r.checked_in_at), 'HH:mm')}</span>
+                          </div>
+                        )}
                         {r.status === 'cancelled' && r.cancelled_at && (
                           <div className="mt-1 text-[11px] text-gray-500 flex flex-col gap-0.5">
                             <span>{format(new Date(r.cancelled_at), 'MM/dd HH:mm')}</span>

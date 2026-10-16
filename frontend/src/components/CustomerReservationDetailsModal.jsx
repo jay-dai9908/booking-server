@@ -159,6 +159,11 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full font-medium text-sm ${statusUI.bgClass} ${statusUI.colorClass}`}>
                   {statusUI.icon} {statusUI.text}
                 </span>
+                {reservation.attendance === 'checked_in' && (
+                  <span className="text-xs sm:text-sm font-semibold text-[#5A6B4E] bg-[#DDE3D5]/80 px-2.5 py-1 rounded-full border border-[#C5D0B9]">
+                    🕒 報到時間：{reservation.checked_in_at ? format(new Date(reservation.checked_in_at), 'MM/dd HH:mm') : '已完成'}
+                  </span>
+                )}
                 {reservation.status === 'cancelled' && reservation.cancelled_at && (
                   <span className="text-sm text-[#8C8279]">
                     取消於 {format(new Date(reservation.cancelled_at), 'MM/dd HH:mm')} 
