@@ -11,6 +11,7 @@ import dailySettingsRoutes from './routes/dailySettings.js';
 import accountingRoutes from './routes/accounting.js';
 import staffRoutes from './routes/staff.js';
 import equipmentRoutes from './routes/equipment.js';
+import { ensureDefaultEquipmentConfigs } from './controllers/equipmentController.js';
 import { startCronJobs } from './cronJobs.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -24,8 +25,10 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Start background cron jobs
-// Start background cron jobs
 startCronJobs();
+
+// Ensure default smart pegboard configurations exist
+ensureDefaultEquipmentConfigs();
 
 app.set('trust proxy', 1);
 

@@ -1,11 +1,78 @@
 import prisma from '../prismaClient.js';
 import { calculateTotalAmount } from './reservationController.js';
 
+export const DEFAULT_EQUIPMENT_CONFIGS = [
+  {
+    id: 'pegboard_s',
+    name: '小板 (52×52)',
+    visibility_status: 'ACTIVE',
+    total_stock: 5,
+    hourly_rate: 100,
+    daily_cap: 500,
+    min_contiguous_hours: 2,
+    allow_exceed_pax: false,
+    sort_order: 1
+  },
+  {
+    id: 'pegboard_m',
+    name: '中板 (78×78)',
+    visibility_status: 'ACTIVE',
+    total_stock: 2,
+    hourly_rate: 120,
+    daily_cap: 600,
+    min_contiguous_hours: 2,
+    allow_exceed_pax: false,
+    sort_order: 2
+  },
+  {
+    id: 'pegboard_l',
+    name: '大板 (104×104)',
+    visibility_status: 'ACTIVE',
+    total_stock: 3,
+    hourly_rate: 140,
+    daily_cap: 700,
+    min_contiguous_hours: 2,
+    allow_exceed_pax: false,
+    sort_order: 3
+  },
+  {
+    id: 'bring_own',
+    name: '自帶智能拼豆板',
+    visibility_status: 'ACTIVE',
+    total_stock: null,
+    hourly_rate: 50,
+    daily_cap: 400,
+    min_contiguous_hours: 1,
+    allow_exceed_pax: false,
+    sort_order: 4
+  }
+];
+
+export const ensureDefaultEquipmentConfigs = async () => {
+  try {
+    for (const item of DEFAULT_EQUIPMENT_CONFIGS) {
+      const existing = await prisma.equipmentConfig.findUnique({
+        where: { id: item.id }
+      });
+      if (!existing) {
+        await prisma.equipmentConfig.create({
+          data: item
+        });
+        console.log(`[EquipmentConfig] Auto-seeded default item: ${item.id} (${item.name})`);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to ensure default equipment configs:', err);
+  }
+};
+
 // GET /api/equipment/availability?date=YYYY-MM-DD&sessions=13:00,14:00
 export const getAvailableEquipment = async (req, res) => {
   const { date, sessions } = req.query;
 
   try {
+    await ensureDefaultEquipmentConfigs();
+
     const configs = await prisma.equipmentConfig.findMany({
       where: {
         visibility_status: { not: 'HIDDEN' }
@@ -132,6 +199,8 @@ export const getAvailableEquipment = async (req, res) => {
 // GET /api/admin/equipment
 export const getAdminEquipmentConfigs = async (req, res) => {
   try {
+    await ensureDefaultEquipmentConfigs();
+
     const configs = await prisma.equipmentConfig.findMany({
       orderBy: { sort_order: 'asc' }
     });
@@ -355,6 +424,8 @@ export const getEquipmentOccupancy = async (req, res) => {
   }
 
   try {
+    await ensureDefaultEquipmentConfigs();
+
     const targetDate = new Date(date);
     const sessions = await prisma.session.findMany({
       where: { session_date: targetDate },
@@ -435,6 +506,8 @@ export const modifyBookingEquipment = async (req, res) => {
   }
 
   try {
+    await ensureDefaultEquipmentConfigs();
+
     // 1. Fetch reservation group
     const reservations = await prisma.reservation.findMany({
       where: { booking_ref },
