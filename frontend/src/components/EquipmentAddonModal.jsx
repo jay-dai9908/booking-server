@@ -230,7 +230,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-[15px] text-[#3E332B]">
-                          {isBringOwn ? '✨' : '📚'} {c.name}
+                          {isBringOwn ? '✨' : '🧩'} {c.name}
                         </span>
                         <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded">
                           NT$ {c.hourly_rate} /時
