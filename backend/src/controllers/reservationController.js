@@ -292,7 +292,7 @@ export const createReservation = async (req, res) => {
         });
       }
 
-      return { booking_ref, count: newReservations.count };
+      return { booking_ref, count: newReservations.count, assigned_seats: mySeats, total_amount: totalAmount };
     });
 
     res.status(201).json({ message: 'Reservation successful', reservation: result });

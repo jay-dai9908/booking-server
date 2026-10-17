@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, CalendarClock, History } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarClock, History, Search, RefreshCw, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import { format } from 'date-fns';
-import CustomerReservationDetailsModal, { getReservationStatusUI } from '../../components/CustomerReservationDetailsModal';
+import CustomerReservationDetailsModal, { getReservationStatusUI, formatBookingRef } from '../../components/CustomerReservationDetailsModal';
 import EquipmentAddonModal from '../../components/EquipmentAddonModal';
 
 export default function HistoryPage() {
@@ -12,6 +12,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('upcoming'); // 'upcoming' or 'past'
   const [selectedReservation, setSelectedReservation] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const fetchReservations = async () => {
     try {
@@ -50,7 +51,18 @@ export default function HistoryPage() {
   const [addonReservation, setAddonReservation] = useState(null);
   const [noticeModal, setNoticeModal] = useState(null);
 
-  const displayList = activeTab === 'upcoming' ? upcomingReservations : pastReservations;
+  const baseList = activeTab === 'upcoming' ? upcomingReservations : pastReservations;
+
+  const displayList = baseList.filter(r => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase().trim();
+    const shortRef = formatBookingRef(r.booking_ref).toLowerCase();
+    const fullRef = (r.booking_ref || '').toLowerCase();
+    const dateStr = format(new Date(r.session_date), 'yyyy/MM/dd yyyy-MM-dd').toLowerCase();
+    const seatsStr = (r.assigned_seats || []).join(' ').toLowerCase();
+    const nameStr = (r.user?.name || '').toLowerCase();
+    return shortRef.includes(term) || fullRef.includes(term) || dateStr.includes(term) || seatsStr.includes(term) || nameStr.includes(term);
+  });
 
   return (
     <div className="min-h-screen bg-[#F7F4F0] flex flex-col">
@@ -70,7 +82,7 @@ export default function HistoryPage() {
       </header>
 
       {/* Tabs */}
-      <div className="px-4 pt-6 pb-4 max-w-3xl mx-auto w-full">
+      <div className="px-4 pt-6 pb-3 max-w-3xl mx-auto w-full">
         <div className="flex bg-[#EBE5DF] p-1 rounded-full relative">
           <button
             onClick={() => setActiveTab('upcoming')}
@@ -91,6 +103,36 @@ export default function HistoryPage() {
         </div>
       </div>
 
+      {/* Search Bar & Refresh */}
+      <div className="px-4 pb-3 max-w-3xl mx-auto w-full flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="🔍 篩選我的預約 (代碼 BK-XXXX、日期或座位)..."
+            className="w-full pl-9 pr-8 py-2.5 bg-white border border-[#E5DFD7] rounded-xl text-xs sm:text-sm text-[#2C241E] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5B43]/30 shadow-sm"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <button
+          onClick={() => { setLoading(true); fetchReservations(); }}
+          disabled={loading}
+          className="p-2.5 bg-white border border-[#E5DFD7] hover:bg-[#F9F7F3] rounded-xl text-[#8B5B43] transition-colors flex items-center justify-center shrink-0 shadow-sm"
+          title="重新整理"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
       {/* List */}
       <main className="flex-1 px-4 pb-8 max-w-3xl mx-auto w-full">
         {loading ? (
@@ -107,11 +149,20 @@ export default function HistoryPage() {
               )}
             </div>
             <p className="text-[#8C8279] text-base mb-6 font-medium whitespace-pre-line">
-              {activeTab === 'upcoming' 
-                ? "目前沒有即將到來的預約喔\n快來安排一場手作時光吧！" 
-                : "目前還沒有歷史預約紀錄喔！"}
+              {searchTerm 
+                ? "查無符合篩選條件的預約紀錄\n請嘗試更換關鍵字！"
+                : (activeTab === 'upcoming' 
+                    ? "目前沒有即將到來的預約喔\n快來安排一場手作時光吧！" 
+                    : "目前還沒有歷史預約紀錄喔！")}
             </p>
-            {activeTab === 'upcoming' && (
+            {searchTerm ? (
+              <button 
+                onClick={() => setSearchTerm('')}
+                className="bg-white border border-[#D5CFC9] text-[#8B5B43] hover:bg-[#FAF7F2] px-6 py-2.5 rounded-full font-bold shadow-sm transition-colors text-sm"
+              >
+                清除搜尋條件
+              </button>
+            ) : activeTab === 'upcoming' && (
               <button 
                 onClick={() => navigate('/booking')}
                 className="bg-[#8B5B43] text-white px-8 py-3 rounded-full font-bold shadow-sm hover:bg-[#A67C52] transition-colors"
@@ -158,18 +209,28 @@ export default function HistoryPage() {
                   onClick={() => setSelectedReservation(r)}
                   className="group flex flex-col bg-white p-5 rounded-[16px] border border-transparent hover:border-[#EBE5DF] shadow-[0_4px_12px_rgba(139,91,67,0.05)] transition-all cursor-pointer space-y-3"
                 >
-                  <div className="flex justify-between items-start">
+                  <div className="flex justify-between items-start gap-2">
                     <div>
-                      <span className="font-bold text-[#3E332B] text-lg block mb-1.5">
-                        {format(new Date(r.session_date), 'yyyy/MM/dd')}
-                      </span>
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-bold text-[#3E332B] text-lg">
+                          {format(new Date(r.session_date), 'yyyy/MM/dd')}
+                        </span>
+                        <span className="font-mono text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] px-2 py-0.5 rounded-md border border-[#E8DEC8]">
+                          #{formatBookingRef(r.booking_ref)}
+                        </span>
+                        {r.assigned_seats && r.assigned_seats.length > 0 && (
+                          <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                            💺 {r.assigned_seats.join(', ')}
+                          </span>
+                        )}
+                      </div>
                       <span className="text-sm font-medium text-[#8C8279] bg-[#F4EFE6] px-2.5 py-1 rounded-md inline-block">
                         {r.time_blocks 
                           ? r.time_blocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ')
                           : `${r.start_time} - ${r.end_time}`}
                       </span>
                     </div>
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shrink-0 ${statusUI.bgClass} ${statusUI.colorClass}`}>
                       {statusUI.icon} {statusUI.text}
                     </span>
                   </div>
@@ -270,12 +331,20 @@ export default function HistoryPage() {
             </div>
             <h3 className="text-lg font-bold text-[#3E332B]">{noticeModal.title}</h3>
             <p className="text-sm text-[#7A7067] leading-relaxed">{noticeModal.message}</p>
-            <button
-              onClick={() => setNoticeModal(null)}
-              className="w-full py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-full font-bold text-sm transition-colors"
-            >
-              我知道了
-            </button>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => setNoticeModal(null)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full font-bold text-sm transition-colors"
+              >
+                我知道了
+              </button>
+              <button
+                onClick={() => { setNoticeModal(null); navigate('/booking'); }}
+                className="flex-1 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-full font-bold text-sm transition-colors shadow-sm"
+              >
+                前往新預約
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths, isBefore, startOfDay } from 'date-fns';
+import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths, isBefore, startOfDay, getDay } from 'date-fns';
+import { RefreshCw, Copy, Check, CalendarPlus } from 'lucide-react';
 import api from '../../api/axios';
 import { useNavigate } from 'react-router-dom';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
+import { formatBookingRef, getGoogleCalendarUrl } from '../../components/CustomerReservationDetailsModal';
 
 function Booking() {
   const navigate = useNavigate();
@@ -17,7 +19,24 @@ function Booking() {
   const [showUnlimitedWarningModal, setShowUnlimitedWarningModal] = useState(false);
   const [confirmModalData, setConfirmModalData] = useState(null);
   const [alertModalData, setAlertModalData] = useState(null);
+  const [ticketModalData, setTicketModalData] = useState(null);
+  const [copiedTicketRef, setCopiedTicketRef] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
+
+  // Global & Daily Pricing states
+  const [globalPricing, setGlobalPricing] = useState({
+    weekday_hourly: 100,
+    weekday_unlimited: 350,
+    weekend_hourly: 120,
+    weekend_unlimited: 400
+  });
+  const [dailyPricing, setDailyPricing] = useState({
+    hourly: null,
+    unlimited: null
+  });
+  const [userInfo, setUserInfo] = useState(null);
+  const [monthOpenDatesSet, setMonthOpenDatesSet] = useState(new Set());
 
   // Generate calendar dates for the current month view
   const monthStart = startOfMonth(currentMonth);
@@ -49,6 +68,16 @@ function Booking() {
     stackable: true
   });
 
+  // Calculate pricing based on selectedDate
+  const isWeekend = [0, 6].includes(getDay(selectedDate));
+  const effectiveHourlyPrice = (dailyPricing.hourly !== null && dailyPricing.hourly !== undefined && dailyPricing.hourly !== '')
+    ? Number(dailyPricing.hourly)
+    : (isWeekend ? Number(globalPricing.weekend_hourly || 120) : Number(globalPricing.weekday_hourly || 100));
+
+  const effectiveUnlimitedPrice = (dailyPricing.unlimited !== null && dailyPricing.unlimited !== undefined && dailyPricing.unlimited !== '')
+    ? Number(dailyPricing.unlimited)
+    : (isWeekend ? Number(globalPricing.weekend_unlimited || 400) : Number(globalPricing.weekday_unlimited || 350));
+
   // Calculate contiguous sessions
   const sortedSelectedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
   let maxContiguous = 0;
@@ -67,6 +96,57 @@ function Booking() {
       maxContiguous = currentContiguous;
     }
   }
+
+  useEffect(() => {
+    const fetchGlobal = async () => {
+      try {
+        const res = await api.get('/daily-settings/global');
+        if (res.data) {
+          setGlobalPricing({
+            weekday_hourly: res.data.weekday_hourly_price || 100,
+            weekday_unlimited: res.data.weekday_unlimited_price || 350,
+            weekend_hourly: res.data.weekend_hourly_price || 120,
+            weekend_unlimited: res.data.weekend_unlimited_price || 400
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch global pricing:', err);
+      }
+    };
+    const fetchUser = async () => {
+      try {
+        const res = await api.get('/auth/me');
+        if (res.data) setUserInfo(res.data);
+      } catch (err) {
+        // Guest or not logged in
+      }
+    };
+    fetchGlobal();
+    fetchUser();
+  }, []);
+
+  const fetchMonthSessions = async (monthDate = currentMonth) => {
+    try {
+      const mStart = format(startOfWeek(startOfMonth(monthDate)), 'yyyy-MM-dd');
+      const mEnd = format(endOfWeek(endOfMonth(monthDate)), 'yyyy-MM-dd');
+      const res = await api.get(`/sessions?start_date=${mStart}&end_date=${mEnd}`);
+      if (Array.isArray(res.data)) {
+        const set = new Set();
+        res.data.forEach(s => {
+          if (s.session_date) {
+            set.add(format(new Date(s.session_date), 'yyyy-MM-dd'));
+          }
+        });
+        setMonthOpenDatesSet(set);
+      }
+    } catch (err) {
+      console.error('Failed to fetch month sessions for calendar:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchMonthSessions(currentMonth);
+  }, [currentMonth]);
 
   useEffect(() => {
     fetchSessions(selectedDate);
@@ -127,6 +207,10 @@ function Booking() {
       const formattedDate = format(date, 'yyyy-MM-dd');
       const res = await api.get(`/daily-settings?date=${formattedDate}`);
       setAllowUnlimited(res.data.allow_unlimited);
+      setDailyPricing({
+        hourly: res.data.hourly_price,
+        unlimited: res.data.unlimited_price
+      });
     } catch (err) {
       console.error('Error fetching daily setting:', err);
     }
@@ -144,6 +228,15 @@ function Booking() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleForceSync = async () => {
+    setIsSyncing(true);
+    await Promise.all([
+      fetchSessions(selectedDate),
+      fetchDailySetting(selectedDate)
+    ]);
+    setTimeout(() => setIsSyncing(false), 500);
   };
 
   const isSessionPast = (session) => {
@@ -291,6 +384,14 @@ function Booking() {
   const totalDiscountHours = totalBoards * discountHoursPerBoard;
   const totalSavedFee = Math.max(0, totalOriginalEquipmentFee - totalEquipmentFee);
 
+  // Seating and Grand Total Pricing calculations
+  const rawSeatingFee = pax * effectiveHourlyPrice * selectedSessions.length;
+  const cappedSeatingFee = (allowUnlimited && isUnlimited)
+    ? Math.min(rawSeatingFee, pax * effectiveUnlimitedPrice)
+    : rawSeatingFee;
+  const seatingPassDiscount = Math.max(0, rawSeatingFee - cappedSeatingFee);
+  const estimatedGrandTotal = cappedSeatingFee + (enableSmartBoard ? totalEquipmentFee : 0);
+
   const handleBooking = () => {
     if (selectedSessions.length === 0) return;
     
@@ -325,6 +426,7 @@ function Booking() {
       isUnlimited,
       equipments: activeEquipments,
       totalEquipmentFee,
+      estimatedGrandTotal,
       equipmentBreakdown: breakdownParts.length > 0 
         ? `${breakdownParts.join(' + ')}，共 ${totalBoards} 台 × ${rentalHours} 小時${discountSummary}`
         : null
@@ -335,13 +437,29 @@ function Booking() {
     const data = confirmModalData;
     setConfirmModalData(null);
     try {
-      await api.post('/reservations', {
+      const res = await api.post('/reservations', {
         session_ids: data.sortedSessions.map(s => s.id),
         pax: parseInt(data.pax),
         isUnlimited: data.isUnlimited,
         equipments: data.equipments
       });
-      setAlertModalData({ type: 'success', title: '預約成功！', message: '期待在拾光製所為您服務。' });
+      
+      const reservationData = res.data?.reservation || {};
+      const newRef = reservationData.booking_ref || '';
+      const assignedSeats = reservationData.assigned_seats || [];
+      const finalAmount = reservationData.total_amount != null ? reservationData.total_amount : estimatedGrandTotal;
+
+      setTicketModalData({
+        booking_ref: newRef,
+        date: data.date,
+        timeRange: data.timeRange,
+        pax: data.pax,
+        assigned_seats: assignedSeats,
+        isUnlimited: data.isUnlimited,
+        equipments: data.equipments,
+        total_amount: finalAmount
+      });
+
       fetchSessions(selectedDate); // Refresh capacities
       setSelectedSessions([]);
       setEquipmentSelections({});
@@ -365,11 +483,30 @@ function Booking() {
   const confirmSplitBooking = async () => {
     if (!splitBookingData) return;
     try {
-      await api.post('/reservations', {
+      const res = await api.post('/reservations', {
         ...splitBookingData,
         forceSplit: true
       });
-      setAlertModalData({ type: 'success', title: '預約成功！', message: '期待在拾光製所為您服務。' });
+
+      const reservationData = res.data?.reservation || {};
+      const newRef = reservationData.booking_ref || '';
+      const assignedSeats = reservationData.assigned_seats || [];
+      const finalAmount = reservationData.total_amount != null ? reservationData.total_amount : estimatedGrandTotal;
+
+      const sorted = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+      const timeRange = sorted.length > 0 ? `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time}` : '';
+
+      setTicketModalData({
+        booking_ref: newRef,
+        date: format(selectedDate, 'yyyy-MM-dd'),
+        timeRange: timeRange,
+        pax: splitBookingData.pax,
+        assigned_seats: assignedSeats,
+        isUnlimited: splitBookingData.isUnlimited,
+        equipments: splitBookingData.equipments,
+        total_amount: finalAmount
+      });
+
       fetchSessions(selectedDate);
       setSelectedSessions([]);
       setEquipmentSelections({});
@@ -386,23 +523,42 @@ function Booking() {
 
   return (
     <div className="min-h-screen bg-wood-bg text-wood-textMain pb-24 font-sans transition-colors duration-300">
+      {/* Top Announcement Banner */}
+      <div className="bg-[#FAF4EB] border-b border-[#E8DEC8] px-4 py-2.5 text-xs sm:text-sm text-[#8B5B43] font-medium text-center flex items-center justify-center gap-2">
+        <span className="shrink-0 font-bold">🔔 即時公告：</span>
+        <span>✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠</span>
+      </div>
+
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-wood-bg/80 backdrop-blur-md border-b border-wood-border px-4 py-4 mb-6">
-        <div className="max-w-3xl mx-auto flex justify-between items-center">
+      <header className="sticky top-0 z-40 bg-wood-bg/90 backdrop-blur-md border-b border-wood-border px-4 py-3.5 mb-6">
+        <div className="max-w-3xl mx-auto flex justify-between items-center gap-3">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="拾光製所 Logo" className="w-8 h-8 object-cover rounded-full" />
-            <h1 className="text-xl font-bold tracking-wide">拾光製所 拼豆時段預約系統</h1>
+            <h1 className="text-lg sm:text-xl font-bold tracking-wide">拾光製所 拼豆預約系統</h1>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {userInfo?.name && (
+              <span className="hidden sm:inline-flex items-center gap-1 text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] border border-[#E8DEC8] px-3 py-1.5 rounded-full">
+                👤 {userInfo.name}
+              </span>
+            )}
+            <a 
+              href={import.meta.env.VITE_LINE_OA_URL || 'https://lin.ee/vsZhRW5'} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-xs sm:text-sm font-semibold text-[#06C755] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1"
+            >
+              💬 官方 LINE
+            </a>
             <button 
               onClick={() => navigate('/history')}
-              className="whitespace-nowrap text-sm font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-4 py-1.5 rounded-full transition-all duration-200 ease-in-out"
+              className="whitespace-nowrap text-xs sm:text-sm font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-3 sm:px-4 py-1.5 rounded-full transition-all duration-200 ease-in-out"
             >
               預約紀錄
             </button>
             <button 
               onClick={() => { api.post('/auth/logout').then(() => window.location.href = '/') }}
-              className="whitespace-nowrap text-sm font-medium text-[#8C8279] bg-transparent hover:bg-[#F4EFE6] hover:text-[#4A3F35] px-3 py-1.5 rounded-full transition-all duration-200 ease-in-out"
+              className="whitespace-nowrap text-xs sm:text-sm font-medium text-[#8C8279] bg-transparent hover:bg-[#F4EFE6] hover:text-[#4A3F35] px-2.5 py-1.5 rounded-full transition-all duration-200 ease-in-out"
             >
               登出
             </button>
@@ -411,11 +567,53 @@ function Booking() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 space-y-6">
+        {/* Rates Quickview Dual Cards */}
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div className="bg-wood-card p-4 rounded-2xl border border-wood-border shadow-warm">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
+                  ☕ 平日入場 (週一~週五)
+                </span>
+                <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded-full">
+                  平日特惠
+                </span>
+              </div>
+              <p className="font-semibold text-sm text-[#8B5B43]">
+                每小時 NT$ {globalPricing.weekday_hourly} ｜ 不限時暢玩封頂 NT$ {globalPricing.weekday_unlimited} / 人
+              </p>
+            </div>
+
+            <div className="bg-wood-card p-4 rounded-2xl border border-wood-border shadow-warm">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
+                  🌟 假日入場 (週六/週日)
+                </span>
+                <span className="text-xs bg-[#EDE6DD] text-[#4A3F35] font-bold px-2 py-0.5 rounded-full">
+                  週末假日
+                </span>
+              </div>
+              <p className="font-semibold text-sm text-[#8B5B43]">
+                每小時 NT$ {globalPricing.weekend_hourly} ｜ 不限時暢玩封頂 NT$ {globalPricing.weekend_unlimited} / 人
+              </p>
+            </div>
+          </div>
+          <div className="text-[11px] text-[#8C8279] px-1 flex items-center gap-1.5">
+            <span>💡</span>
+            <span>費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品</span>
+          </div>
+        </div>
+
         {/* Date Selector */}
         <section className="bg-wood-card p-6 rounded-2xl shadow-warm">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold">1. 選擇日期</h2>
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-lg font-bold">1. 選擇日期</h2>
+              <span className="text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] px-2.5 py-1 rounded-full border border-[#E8DEC8]">
+                已選：{format(selectedDate, 'yyyy-MM-dd')} ({isWeekend ? '假日' : '平日'})
+              </span>
+            </div>
+            <div className="flex items-center gap-2 self-end sm:self-auto">
               <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 text-wood-textMuted hover:text-wood-primary hover:bg-wood-bg/50 rounded-full transition-all">&lt;</button>
               <span className="font-bold tracking-wide">{format(currentMonth, 'yyyy年 MM月')}</span>
               <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-2 text-wood-textMuted hover:text-wood-primary hover:bg-wood-bg/50 rounded-full transition-all">&gt;</button>
@@ -433,49 +631,100 @@ function Booking() {
               const isSelected = isSameDay(date, selectedDate);
               const isCurrentMonth = isSameMonth(date, currentMonth);
               const isPast = isBefore(startOfDay(date), startOfDay(new Date()));
+              const isToday = isSameDay(date, new Date());
+              const dateStr = format(date, 'yyyy-MM-dd');
+              const hasSessions = monthOpenDatesSet.has(dateStr);
+              const isPending = !isPast && isCurrentMonth && !hasSessions;
               
               return (
                 <div key={i} className="flex justify-center items-center aspect-square">
                   <button
                     disabled={isPast}
                     onClick={() => setSelectedDate(date)}
-                    className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full text-sm font-medium transition-all duration-200 flex items-center justify-center ${
+                    className={`w-9 h-9 sm:w-11 sm:h-11 rounded-full text-sm font-medium transition-all duration-200 flex flex-col items-center justify-center relative ${
                       !isCurrentMonth ? 'text-wood-border bg-transparent' : 
                       isPast ? 'text-wood-border cursor-not-allowed' :
                       isSelected ? 'bg-wood-primary text-white shadow-md transform scale-105' :
                       'text-wood-textMain hover:bg-[#F0EBE1] hover:text-wood-primary'
                     }`}
                   >
-                    {format(date, 'd')}
+                    <span className="leading-none">{format(date, 'd')}</span>
+                    {isToday && (
+                      <span className={`text-[9px] font-bold leading-none mt-0.5 ${isSelected ? 'text-white/90' : 'text-[#8B5B43]'}`}>
+                        今天
+                      </span>
+                    )}
+                    {isPending && !isSelected && !isToday && (
+                      <span className="text-[8px] font-medium leading-none text-red-400 mt-0.5">
+                        待開放
+                      </span>
+                    )}
                   </button>
                 </div>
               );
             })}
           </div>
+
+          {!loading && sessions.length === 0 && (
+            <div className="mt-4 p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2.5 text-xs text-red-800">
+              <span className="text-base shrink-0">⚠️</span>
+              <span>
+                注意：您目前選取的日期 ({format(selectedDate, 'yyyy-MM-dd')}) 店家標記為「暫不開放預約 (或公休)」，請選擇其他開放日期。
+              </span>
+            </div>
+          )}
         </section>
 
         {/* Time Selector */}
         <section className="bg-wood-card p-6 rounded-2xl shadow-warm">
           <div className="flex flex-col gap-4 mb-6">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center gap-2">
               <h2 className="text-lg font-bold">2. 選擇時段 (可複選)</h2>
-              {selectedSessions.length > 0 && (
-                <span className="text-sm bg-wood-bg text-wood-primary px-3 py-1.5 rounded-full font-bold">
-                  已選 {selectedSessions.length} 小時
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleForceSync}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1 text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] hover:bg-[#EDE6DD] px-3 py-1.5 rounded-full transition-all shadow-2xs"
+                  title="強制同步最新人數"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>同步人數</span>
+                </button>
+                {selectedSessions.length > 0 && (
+                  <span className="text-sm bg-wood-bg text-wood-primary px-3 py-1.5 rounded-full font-bold">
+                    已選 {selectedSessions.length} 小時
+                  </span>
+                )}
+              </div>
             </div>
             {sessions.length > 0 && allowUnlimited && (
               <div className="flex flex-col gap-2">
                 <div 
                   onClick={handleUnlimitedClick}
-                  className="flex flex-row items-center justify-between sm:justify-start sm:gap-6 bg-[#F9F7F3] rounded-2xl px-4 py-3 cursor-pointer select-none transition-all duration-300 hover:bg-[#F3EFE9]"
+                  className={`flex flex-row items-center justify-between bg-[#F9F7F3] border rounded-2xl px-4 py-3 cursor-pointer select-none transition-all duration-300 ${
+                    isUnlimited ? 'border-[#8B5B43] bg-[#FAF4EB]' : 'border-transparent hover:bg-[#F3EFE9]'
+                  }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="text-[18px] leading-none text-[#4A3F35]">✨</span>
-                    <span className="text-[15px] font-bold text-[#4A3F35]">
-                      開啟不限時
-                    </span>
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-[20px] leading-none">✨</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[15px] font-bold text-[#4A3F35]">
+                          {isUnlimited ? '✨ 不限時暢玩模式已開啟！' : '開啟不限時暢玩'}
+                        </span>
+                        {!isUnlimited && (
+                          <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full">
+                            推薦首選
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-[#7A7067] font-medium mt-0.5">
+                        {isUnlimited 
+                          ? `享當日單人封頂上限 NT$ ${effectiveUnlimitedPrice}/人（原每小時 NT$ ${effectiveHourlyPrice}）`
+                          : `玩滿時數享最高封頂 NT$ ${effectiveUnlimitedPrice}/人`}
+                      </div>
+                    </div>
                   </div>
                   
                   {/* Toggle Switch */}
@@ -495,37 +744,45 @@ function Booking() {
           ) : sessions.length === 0 ? (
             <div className="text-center text-wood-textMuted py-8">此日期目前無開放時段</div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {sessions.map(session => {
-                const isPast = isSessionPast(session);
-                const isFull = session.remaining_capacity === 0;
-                const isDisabled = isPast || isFull;
-                const isSelected = !!selectedSessions.find(s => s.id === session.id);
-                
-                return (
-                  <button
-                    key={session.id}
-                    disabled={isDisabled}
-                    onClick={() => toggleSession(session)}
-                    className={`h-full py-3 px-2 rounded-xl border flex flex-col justify-center items-center transition-all duration-200 focus:outline-none focus:border-wood-primary ${
-                      isPast
-                        ? 'bg-[#F0EBE6] border-transparent text-[#A8A19A] cursor-not-allowed opacity-70'
-                        : isFull 
-                          ? 'bg-wood-bg/50 border-wood-border text-wood-border cursor-not-allowed opacity-70' 
-                          : isSelected
-                            ? 'border-wood-primary bg-wood-primary text-white shadow-md transform scale-105'
-                            : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
-                    }`}
-                  >
-                    <span className={`font-bold mb-1 text-[15px] sm:text-base whitespace-nowrap ${isSelected ? 'text-white' : ''}`}>
-                      {session.start_time}~{session.end_time}
-                    </span>
-                    <span className={`text-xs font-medium ${isPast ? 'text-[#A8A19A]' : isFull ? 'text-red-400/70' : isSelected ? 'text-white/90' : 'text-wood-sageText'}`}>
-                      {isPast ? '已逾時' : isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人`}
-                    </span>
-                  </button>
-                )
-              })}
+            <div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {sessions.map(session => {
+                  const isPast = isSessionPast(session);
+                  const isFull = session.remaining_capacity === 0;
+                  const isDisabled = isPast || isFull;
+                  const isSelected = !!selectedSessions.find(s => s.id === session.id);
+                  
+                  return (
+                    <button
+                      key={session.id}
+                      disabled={isDisabled}
+                      onClick={() => toggleSession(session)}
+                      className={`h-full py-3 px-2 rounded-xl border flex flex-col justify-center items-center transition-all duration-200 focus:outline-none focus:border-wood-primary ${
+                        isPast
+                          ? 'bg-[#F0EBE6] border-transparent text-[#A8A19A] cursor-not-allowed opacity-70'
+                          : isFull 
+                            ? 'bg-wood-bg/50 border-wood-border text-wood-border cursor-not-allowed opacity-70' 
+                            : isSelected
+                              ? 'border-wood-primary bg-wood-primary text-white shadow-md transform scale-105'
+                              : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center gap-1 font-bold mb-1 text-[15px] sm:text-base whitespace-nowrap">
+                        <span>{session.start_time}~{session.end_time}</span>
+                        {isSelected && <span className="text-xs font-black">✓</span>}
+                      </div>
+                      <div className={`text-xs font-medium ${isPast ? 'text-[#A8A19A]' : isFull ? 'text-red-400/70' : isSelected ? 'text-white/90' : 'text-wood-sageText'}`}>
+                        {isPast ? '已逾時' : isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人 ｜ NT$ ${effectiveHourlyPrice}`}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 text-center text-xs text-[#8C8279] flex items-center justify-center gap-1.5">
+                <span>💡</span>
+                <span>請預留離場前 10 分鐘讓店家為您的作品壓平成型</span>
+              </div>
             </div>
           )}
         </section>
@@ -535,9 +792,9 @@ function Booking() {
           <section className="bg-wood-card p-6 rounded-2xl shadow-warm animate-fade-in-up space-y-6">
             <div>
               <h2 className="text-lg font-bold mb-4">3. 確認預約人數與智能拼豆板加購</h2>
-              <div className="flex flex-col sm:flex-row gap-4 items-end">
-                <div className="w-full sm:w-1/3">
-                  <label className="block text-sm text-wood-textMuted mb-3">
+              <div className="flex flex-col gap-4">
+                <div className="w-full">
+                  <label className="block text-sm text-wood-textMuted mb-2">
                     預約人數 <span className="opacity-70">(最多 {maxAvailablePax} 人)</span>
                   </label>
                   <div className="flex items-center justify-between bg-[#F9F7F3] border border-[#D5CFC9] rounded-xl p-2 w-full max-w-[200px]">
@@ -558,6 +815,32 @@ function Booking() {
                     >
                       <svg className="w-5 h-5 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4"></path></svg>
                     </button>
+                  </div>
+
+                  {/* Quick Pax Pills */}
+                  <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-[#8C8279] font-bold">常用：</span>
+                    {[1, 2, 3, 4, 6, 8].map(num => {
+                      const isDisabled = num > maxAvailablePax;
+                      const isActive = pax === num;
+                      return (
+                        <button
+                          key={num}
+                          type="button"
+                          disabled={isDisabled}
+                          onClick={() => setPax(num)}
+                          className={`text-xs px-3 py-1 rounded-full font-bold transition-all ${
+                            isActive
+                              ? 'bg-[#8B5B43] text-white shadow-2xs'
+                              : isDisabled
+                                ? 'bg-gray-100 text-gray-300 cursor-not-allowed border border-gray-200'
+                                : 'bg-[#FAF7F2] text-[#6D5D52] hover:bg-[#F0EBE1] border border-[#D5CFC9]'
+                          }`}
+                        >
+                          {num}位
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -879,30 +1162,105 @@ function Booking() {
                 )}
               </div>
             )}
+
+            {/* Smart Pricing & Breakdown Card */}
+            <div className="bg-[#FDFCFA] border border-[#E8DEC8] rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-[#E8DEC8]/70 pb-3">
+                <span className="font-bold text-base text-[#3E332B] flex items-center gap-2">
+                  <span>✨</span> 預約明細與智慧計價
+                </span>
+                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
+                  現場報到付款
+                </span>
+              </div>
+
+              {/* Selected Sessions Chips */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-[#7A7067]">已選時段：</span>
+                {sortedSelectedSessions.map(s => (
+                  <span
+                    key={s.id}
+                    onClick={() => toggleSession(s)}
+                    className="group cursor-pointer inline-flex items-center gap-1 bg-[#F4EFE6] hover:bg-red-50 text-[#8B5B43] hover:text-red-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-[#E5DFD7] transition-colors"
+                    title="點擊取消此時段"
+                  >
+                    <span>{s.start_time}-{s.end_time}</span>
+                    <span className="text-[10px] opacity-60 group-hover:opacity-100">✕</span>
+                  </span>
+                ))}
+              </div>
+
+              {/* Price Details */}
+              <div className="space-y-2 text-xs sm:text-sm text-[#6D5D52] pt-1">
+                <div className="flex justify-between items-center">
+                  <span>預約入場費用 ({pax}人 × {selectedSessions.length}小時)：</span>
+                  <span className="font-semibold text-[#3E332B]">NT$ {rawSeatingFee}</span>
+                </div>
+
+                {seatingPassDiscount > 0 && (
+                  <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl flex items-center justify-between text-emerald-900">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base">🎉</span>
+                      <div>
+                        <div className="font-bold">暢玩封頂優惠已生效！</div>
+                        <div className="text-[11px] text-emerald-700">單人入場費已自動折抵至最高封頂上限 NT$ {effectiveUnlimitedPrice}</div>
+                      </div>
+                    </div>
+                    <span className="font-bold text-emerald-700 text-sm sm:text-base">- NT$ {seatingPassDiscount}</span>
+                  </div>
+                )}
+
+                {enableSmartBoard && totalBoards > 0 && (
+                  <div className="flex justify-between items-center border-t border-dashed border-[#E5DFD7] pt-2">
+                    <div>
+                      <span className="font-bold text-[#8B5B43]">智能拼豆板加購小計 ({totalBoards}台 × {rentalHours}hr)：</span>
+                      {equipmentDiscount.enabled && discountHoursPerBoard > 0 && (
+                        <span className="block text-[11px] text-emerald-700 font-medium">
+                          享買{equipmentDiscount.buy_hours}送{equipmentDiscount.free_hours}，每台實計 {chargeableRentalHours}hr（共省 NT${totalSavedFee}）
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-bold text-[#8B5B43] text-sm">+ NT$ {totalEquipmentFee}</span>
+                  </div>
+                )}
+
+                <div className="border-t border-[#E8DEC8] pt-3 flex justify-between items-baseline">
+                  <span className="font-bold text-sm sm:text-base text-[#3E332B]">預估應付總金額：</span>
+                  <div className="text-right">
+                    <span className="text-xl sm:text-2xl font-black text-[#8B5B43]">NT$ {estimatedGrandTotal}</span>
+                    <span className="block text-[10px] text-[#A8A19A]">現場報到核對後付款</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
         )}
       </main>
 
       {/* Booking Footer Action */}
       {selectedSessions.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-wood-bg/90 backdrop-blur-md border-t border-wood-border z-50">
-          <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <div className="text-sm">
-              <div className="font-bold">
-                已選擇 {selectedSessions.length} 個時段
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-wood-bg/95 backdrop-blur-md border-t border-wood-border z-50 shadow-lg">
+          <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
+            <div>
+              <div className="font-bold flex items-baseline gap-1.5">
+                <span className="text-xs sm:text-sm text-[#4A3F35]">預估應付總額:</span>
+                <span className="text-lg sm:text-2xl font-black text-wood-primary">
+                  NT$ {estimatedGrandTotal}
+                </span>
+                <span className="text-[11px] text-wood-textMuted font-normal hidden sm:inline">(現場付款)</span>
               </div>
-              <div className="text-wood-textMuted font-medium flex items-center gap-2">
-                <span>人數: {pax} 人</span>
+              <div className="text-wood-textMuted font-medium flex items-center gap-2 text-xs">
+                <span>{pax} 人 ｜ {selectedSessions.length} 小時</span>
                 {totalBoards > 0 && enableSmartBoard && (
                   <span className="text-wood-primary font-bold">
-                    | 智能板: {totalBoards} 台 (+NT${totalEquipmentFee})
+                    ｜ 智能板 {totalBoards} 台
                   </span>
                 )}
               </div>
             </div>
             <button
               onClick={handleBooking}
-              className="bg-wood-primary hover:bg-wood-primaryHover text-white px-8 py-3 rounded-xl font-bold shadow-warm transition-all duration-200 transform hover:-translate-y-1"
+              className="bg-wood-primary hover:bg-wood-primaryHover text-white px-7 sm:px-9 py-3 rounded-xl font-bold shadow-warm transition-all duration-200 transform hover:-translate-y-0.5 shrink-0"
             >
               送出預約
             </button>
@@ -1019,6 +1377,10 @@ function Booking() {
                     </div>
                   </div>
                 )}
+                <div className="flex items-center justify-between text-[#3E332B] border-t border-dashed border-[#E5DFD7] pt-2">
+                  <span className="font-medium text-[#8C8279]">💰 預估總額</span>
+                  <span className="font-bold text-[#8B5B43] text-lg">NT$ {confirmModalData.estimatedGrandTotal || estimatedGrandTotal}</span>
+                </div>
               </div>
               
               <div className="flex items-center justify-center gap-3">
@@ -1077,6 +1439,114 @@ function Booking() {
           </div>
         </div>
       )}
+
+      {/* Reservation Voucher / Confirmation Ticket Modal */}
+      {ticketModalData && (() => {
+        const shortRef = formatBookingRef(ticketModalData.booking_ref);
+        const [startT, endT] = ticketModalData.timeRange.split(' - ');
+        const gcalUrl = getGoogleCalendarUrl({
+          session_date: ticketModalData.date,
+          start_time: startT,
+          end_time: endT,
+          booking_ref: ticketModalData.booking_ref,
+          pax: ticketModalData.pax,
+          assigned_seats: ticketModalData.assigned_seats,
+          total_amount: ticketModalData.total_amount
+        });
+
+        return (
+          <div className="fixed inset-0 z-[140] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+            <div className="bg-white rounded-[28px] shadow-2xl w-full max-w-md overflow-hidden relative z-10 p-6 sm:p-7 text-center animate-zoom-in">
+              <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+                <Check className="w-8 h-8 stroke-[2.5]" />
+              </div>
+              <p className="text-xs font-bold text-emerald-700 uppercase tracking-widest mb-1">RESERVATION CONFIRMED</p>
+              <h2 className="text-2xl font-black text-[#2C241E] mb-4">手作預約成功！</h2>
+
+              {/* Short Ref Box */}
+              <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 mb-5 flex items-center justify-between">
+                <div className="text-left">
+                  <div className="text-[11px] font-bold text-[#8C8279]">專屬預約編號</div>
+                  <div className="text-lg font-mono font-black text-[#8B5B43]">{shortRef}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(shortRef);
+                    setCopiedTicketRef(true);
+                    setTimeout(() => setCopiedTicketRef(false), 2000);
+                  }}
+                  className="px-3 py-1.5 bg-white border border-[#D5CFC9] hover:border-[#8B5B43] rounded-xl text-xs font-bold text-[#6D5D52] hover:text-[#8B5B43] transition-colors flex items-center gap-1 shadow-2xs"
+                >
+                  {copiedTicketRef ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-600">已複製</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>複製編號</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Details Summary */}
+              <div className="bg-[#FDFCFA] border border-[#EBE5DF] rounded-2xl p-4 text-xs sm:text-sm text-left space-y-2 mb-6">
+                <div className="flex justify-between items-center">
+                  <span className="text-[#8C8279]">📅 預約日期：</span>
+                  <span className="font-bold text-[#2C241E]">{ticketModalData.date}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[#8C8279]">🕒 預約時段：</span>
+                  <span className="font-bold text-[#2C241E]">{ticketModalData.timeRange}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[#8C8279]">👥 預約人數：</span>
+                  <span className="font-bold text-[#2C241E]">{ticketModalData.pax} 人</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[#8C8279]">💺 分配座位：</span>
+                  <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    {ticketModalData.assigned_seats?.length > 0 ? ticketModalData.assigned_seats.join(', ') : '現場由店員安排'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-baseline border-t border-dashed border-[#E5DFD7] pt-2">
+                  <span className="text-[#8C8279]">💰 預估結帳總額：</span>
+                  <span className="font-bold text-base text-[#8B5B43]">NT$ {ticketModalData.total_amount}</span>
+                </div>
+              </div>
+
+              {/* Dual Action Buttons */}
+              <div className="space-y-2.5">
+                {gcalUrl && (
+                  <a
+                    href={gcalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 px-4 rounded-xl font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors flex items-center justify-center gap-2"
+                  >
+                    <CalendarPlus className="w-4 h-4 text-[#8B5B43]" />
+                    加入 Google 行事曆
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTicketModalData(null);
+                    navigate('/history');
+                  }}
+                  className="w-full py-3 px-4 rounded-xl font-bold text-xs sm:text-sm bg-[#8B5B43] hover:bg-[#724a35] text-white transition-colors shadow-sm"
+                >
+                  ✓ 查看我的預約紀錄
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { height: 6px; }

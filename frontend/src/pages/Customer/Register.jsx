@@ -5,15 +5,20 @@ function Register({ setUserRole }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setIsSubmitting(true);
+    setError('');
     try {
       await api.post('/auth/register', { name, phone });
       setUserRole('customer');
       window.location.href = '/booking';
     } catch (err) {
       setError(err.response?.data?.error || '註冊失敗');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -30,32 +35,39 @@ function Register({ setUserRole }) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-wood-textMuted font-medium mb-2 text-sm">真實姓名</label>
+            <label className="block text-wood-textMuted font-medium mb-2 text-sm">
+              👤 預約人姓名或稱呼 <span className="text-red-500 font-bold">* 必填</span>
+            </label>
             <input 
               type="text" 
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full px-4 py-3 border border-wood-border rounded-xl focus:ring-2 focus:ring-wood-primary/50 outline-none bg-wood-bg/50 text-wood-textMain font-medium transition-colors"
-              placeholder="請輸入真實姓名"
+              placeholder="例：林曉婷 或 Luca"
             />
           </div>
           <div>
-            <label className="block text-wood-textMuted font-medium mb-2 text-sm">手機號碼</label>
+            <label className="block text-wood-textMuted font-medium mb-2 text-sm">
+              📱 手機號碼 <span className="text-red-500 font-bold">* 必填</span>
+            </label>
             <input 
               type="tel" 
               required
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="w-full px-4 py-3 border border-wood-border rounded-xl focus:ring-2 focus:ring-wood-primary/50 outline-none bg-wood-bg/50 text-wood-textMain font-medium transition-colors"
-              placeholder="0912345678"
+              placeholder="例：0912345678"
             />
           </div>
           <button 
             type="submit"
-            className="w-full bg-wood-primary hover:bg-wood-primaryHover text-white font-bold py-4 px-4 rounded-xl transition-all duration-300 mt-6 shadow-warm transform hover:-translate-y-1"
+            disabled={isSubmitting}
+            className={`w-full bg-wood-primary hover:bg-wood-primaryHover text-white font-bold py-4 px-4 rounded-xl transition-all duration-300 mt-6 shadow-warm transform hover:-translate-y-1 flex items-center justify-center gap-2 ${
+              isSubmitting ? 'opacity-70 cursor-not-allowed' : ''
+            }`}
           >
-            完成註冊並前往預約
+            {isSubmitting ? '🔄 與系統同步最新資料中...' : '完成註冊並前往預約'}
           </button>
         </form>
       </div>

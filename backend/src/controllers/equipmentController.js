@@ -319,7 +319,8 @@ export const updateEquipmentConfig = async (req, res) => {
               booking_ref: r.booking_ref,
               name: r.user?.name || '未知顧客',
               phone: r.user?.phone || '',
-              quantity: eq.quantity
+              quantity: eq.quantity,
+              session_time: `${r.session.start_time}-${r.session.end_time}`
             });
           }
         });
@@ -327,12 +328,17 @@ export const updateEquipmentConfig = async (req, res) => {
         for (const slotKey of Object.keys(sessionOccupancy)) {
           const slot = sessionOccupancy[slotKey];
           if ((newStatus !== 'ACTIVE' && slot.totalBooked > 0) || (newStock !== null && slot.totalBooked > newStock)) {
-            warnings.push({
-              date: slot.date,
-              time: slot.time,
-              totalBooked: slot.totalBooked,
-              newStock: newStatus !== 'ACTIVE' ? 0 : newStock,
-              orders: slot.affectedOrders
+            slot.affectedOrders.forEach(order => {
+              warnings.push({
+                date: slot.date,
+                session: order.session_time || slot.time,
+                booking_ref: order.booking_ref,
+                customer_name: order.name || '未知顧客',
+                customer_phone: order.phone || '無電話',
+                booked_qty: order.quantity,
+                totalBooked: slot.totalBooked,
+                newStock: newStatus !== 'ACTIVE' ? 0 : newStock
+              });
             });
           }
         }
@@ -503,12 +509,18 @@ export const getEquipmentOccupancy = async (req, res) => {
     });
 
     const configs = await prisma.equipmentConfig.findMany({
-      where: { id: { not: 'bring_own' } },
       orderBy: { sort_order: 'asc' }
     });
 
     const sessionSummary = {};
+    const occupancy = {};
+
     sessions.forEach(sess => {
+      occupancy[sess.id] = {};
+      configs.forEach(cfg => {
+        occupancy[sess.id][cfg.id] = 0;
+      });
+
       sessionSummary[sess.start_time] = {
         session_id: sess.id,
         start_time: sess.start_time,
@@ -517,23 +529,33 @@ export const getEquipmentOccupancy = async (req, res) => {
       };
 
       configs.forEach(cfg => {
-        sessionSummary[sess.start_time].boards[cfg.id] = {
-          id: cfg.id,
-          name: cfg.name,
-          total: cfg.total_stock || 0,
-          booked: 0
-        };
+        if (cfg.id !== 'bring_own') {
+          sessionSummary[sess.start_time].boards[cfg.id] = {
+            id: cfg.id,
+            name: cfg.name,
+            total: cfg.total_stock || 0,
+            booked: 0
+          };
+        }
       });
 
       bookedEquipments.forEach(be => {
         const sessSet = bookingSessionsMap[be.booking_ref];
-        if (sessSet && sessSet.has(sess.start_time) && sessionSummary[sess.start_time].boards[be.equipment_id]) {
-          sessionSummary[sess.start_time].boards[be.equipment_id].booked += be.quantity;
+        if (sessSet && sessSet.has(sess.start_time)) {
+          occupancy[sess.id][be.equipment_id] = (occupancy[sess.id][be.equipment_id] || 0) + be.quantity;
+          if (sessionSummary[sess.start_time]?.boards?.[be.equipment_id]) {
+            sessionSummary[sess.start_time].boards[be.equipment_id].booked += be.quantity;
+          }
         }
       });
     });
 
-    res.json(sessionSummary);
+    res.json({
+      sessions,
+      configs,
+      occupancy,
+      sessionSummary
+    });
   } catch (error) {
     console.error('Error fetching equipment occupancy:', error);
     res.status(500).json({ error: '無法取得設備佔用狀態' });
