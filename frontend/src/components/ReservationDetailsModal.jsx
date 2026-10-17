@@ -433,8 +433,13 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
         isOpen={showExtendModal}
         onClose={() => setShowExtendModal(false)}
         reservation={reservation}
-        onSuccess={() => {
-          if (onUpdate) onUpdate();
+        onSuccess={async () => {
+          try {
+            const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
+            if (onUpdate) onUpdate(res.data);
+          } catch (err) {
+            if (onUpdate) onUpdate();
+          }
         }}
       />
 

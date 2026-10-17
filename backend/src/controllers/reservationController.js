@@ -30,6 +30,26 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
         cancelled_at: r.cancelled_at || null,
         cancelled_by: r.cancelled_by || null
       };
+    } else {
+      // Synchronize attendance and check-in timestamp across all segments
+      if (r.attendance === 'checked_in') {
+        groups[ref].attendance = 'checked_in';
+      } else if (!groups[ref].attendance && r.attendance) {
+        groups[ref].attendance = r.attendance;
+      }
+
+      if (r.checked_in_at) {
+        if (!groups[ref].checked_in_at || new Date(r.checked_in_at) < new Date(groups[ref].checked_in_at)) {
+          groups[ref].checked_in_at = r.checked_in_at;
+        }
+      }
+
+      if (r.is_paid) {
+        groups[ref].is_paid = true;
+      }
+      if (r.total_amount != null && groups[ref].total_amount == null) {
+        groups[ref].total_amount = r.total_amount;
+      }
     }
     groups[ref].sessions.push(r.session);
   }
@@ -463,7 +483,23 @@ export const getAdminReservationDetails = async (req, res) => {
 
     const equipmentsMap = { [booking_ref]: eqRecords };
     const grouped = groupReservations(reservations, equipmentsMap);
-    res.json(grouped[0]);
+    const result = grouped[0];
+
+    // If attendance was desynced across session segments in database, auto-heal them
+    if (result && result.attendance) {
+      const needsSync = reservations.some(r => r.attendance !== result.attendance || (result.checked_in_at && !r.checked_in_at));
+      if (needsSync) {
+        prisma.reservation.updateMany({
+          where: { booking_ref },
+          data: {
+            attendance: result.attendance,
+            checked_in_at: result.checked_in_at
+          }
+        }).catch(e => console.error('Error auto-healing reservation details attendance:', e));
+      }
+    }
+
+    res.json(result);
   } catch (error) {
     console.error('Error fetching reservation details:', error);
     res.status(500).json({ error: 'Failed to fetch reservation details' });
@@ -848,11 +884,46 @@ export const getSessionSeats = async (req, res) => {
     ]);
 
     const endTimeMap = {};
+    const attendanceMap = {};
+    const checkedInAtMap = {};
+
     allRelatedReservations.forEach(r => {
       if (!endTimeMap[r.booking_ref] || r.session.end_time > endTimeMap[r.booking_ref]) {
         endTimeMap[r.booking_ref] = r.session.end_time;
       }
+      if (r.attendance === 'checked_in') {
+        attendanceMap[r.booking_ref] = 'checked_in';
+      } else if (!attendanceMap[r.booking_ref] && r.attendance) {
+        attendanceMap[r.booking_ref] = r.attendance;
+      }
+      if (r.checked_in_at) {
+        if (!checkedInAtMap[r.booking_ref] || new Date(r.checked_in_at) < new Date(checkedInAtMap[r.booking_ref])) {
+          checkedInAtMap[r.booking_ref] = r.checked_in_at;
+        }
+      }
     });
+
+    // Auto-heal any desynced attendance records in database
+    const desyncedRefs = [];
+    allRelatedReservations.forEach(r => {
+      const targetAtt = attendanceMap[r.booking_ref];
+      const targetTime = checkedInAtMap[r.booking_ref];
+      if (targetAtt && (r.attendance !== targetAtt || (targetTime && !r.checked_in_at))) {
+        desyncedRefs.push(r.booking_ref);
+      }
+    });
+    if (desyncedRefs.length > 0) {
+      const uniqueRefs = [...new Set(desyncedRefs)];
+      for (const uRef of uniqueRefs) {
+        prisma.reservation.updateMany({
+          where: { booking_ref: uRef },
+          data: {
+            attendance: attendanceMap[uRef],
+            checked_in_at: checkedInAtMap[uRef]
+          }
+        }).catch(err => console.error('Failed to auto-heal attendance desync in getSessionSeats:', err));
+      }
+    }
 
     const equipmentsMap = {};
     equipments.forEach(eq => {
@@ -862,6 +933,8 @@ export const getSessionSeats = async (req, res) => {
 
     const reservationsWithEndTime = reservations.map(r => ({
       ...r,
+      attendance: attendanceMap[r.booking_ref] || r.attendance,
+      checked_in_at: checkedInAtMap[r.booking_ref] || r.checked_in_at,
       booking_end_time: endTimeMap[r.booking_ref] || session.end_time,
       equipments: equipmentsMap[r.booking_ref] || []
     }));
@@ -1117,6 +1190,27 @@ export const extendReservation = async (req, res) => {
       const baseReservation = existingReservations[0];
       const { user_id, pax, assigned_seats, is_walk_in } = baseReservation;
 
+      // Inherit attendance, checked_in_at, and payment details
+      const checkedInRes = existingReservations.find(r => r.attendance === 'checked_in') || existingReservations.find(r => r.attendance != null);
+      const inheritedAttendance = checkedInRes ? checkedInRes.attendance : (baseReservation.attendance || null);
+      const inheritedCheckedInAt = checkedInRes ? checkedInRes.checked_in_at : (baseReservation.checked_in_at || null);
+
+      const paidRes = existingReservations.find(r => r.is_paid) || baseReservation;
+      const inheritedIsPaid = paidRes.is_paid || false;
+      const inheritedPaidAt = paidRes.paid_at || null;
+      const inheritedIsAmountManual = baseReservation.is_amount_manual || false;
+
+      // Ensure all existing segments have consistent attendance & checked_in_at
+      if (inheritedAttendance) {
+        await tx.reservation.updateMany({
+          where: { booking_ref },
+          data: {
+            attendance: inheritedAttendance,
+            checked_in_at: inheritedCheckedInAt
+          }
+        });
+      }
+
       // Ensure sessions exist
       const sessions = await tx.session.findMany({
         where: { id: { in: session_ids } },
@@ -1211,7 +1305,12 @@ export const extendReservation = async (req, res) => {
           is_force_split: forceSplit === true || forceSplit === 'true',
           is_walk_in,
           is_unlimited,
-          total_amount: totalAmount
+          total_amount: totalAmount,
+          attendance: inheritedAttendance,
+          checked_in_at: inheritedCheckedInAt,
+          is_paid: inheritedIsPaid,
+          paid_at: inheritedPaidAt,
+          is_amount_manual: inheritedIsAmountManual
         });
       }
 
