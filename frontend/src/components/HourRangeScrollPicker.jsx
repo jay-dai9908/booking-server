@@ -1,98 +1,179 @@
 import React, { useRef, useEffect } from 'react';
-import { ChevronUp, ChevronDown, Clock, Sparkles } from 'lucide-react';
+import { ChevronUp, ChevronDown, Clock } from 'lucide-react';
 
 const START_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 const END_HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
 const ITEM_HEIGHT = 40; // 40px
 
 export default function HourRangeScrollPicker({ startTime, setStartTime, endTime, setEndTime }) {
-  const startH = parseInt((startTime || '10:00').split(':')[0], 10);
-  const endH = parseInt((endTime || '11:00').split(':')[0], 10);
+  const startH = parseInt((startTime || '13:00').split(':')[0], 10);
+  const endH = parseInt((endTime || '21:00').split(':')[0], 10);
 
   const startContainerRef = useRef(null);
   const endContainerRef = useRef(null);
-  const isScrollingRef = useRef(false);
+  
+  // Lock flag to prevent onScroll from overriding programmatic selection
+  const isProgrammaticRef = useRef(false);
+  const programmaticTimerRef = useRef(null);
+  const startScrollTimerRef = useRef(null);
+  const endScrollTimerRef = useRef(null);
 
   // Scroll to active index
   const scrollWheelToIndex = (container, index, smooth = true) => {
     if (!container) return;
     const targetTop = index * ITEM_HEIGHT;
+    if (Math.abs(container.scrollTop - targetTop) < 2) return;
+
+    isProgrammaticRef.current = true;
+    if (programmaticTimerRef.current) {
+      clearTimeout(programmaticTimerRef.current);
+    }
+
     container.scrollTo({
       top: targetTop,
       behavior: smooth ? 'smooth' : 'auto'
     });
+
+    programmaticTimerRef.current = setTimeout(() => {
+      isProgrammaticRef.current = false;
+    }, smooth ? 450 : 50);
   };
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (programmaticTimerRef.current) clearTimeout(programmaticTimerRef.current);
+      if (startScrollTimerRef.current) clearTimeout(startScrollTimerRef.current);
+      if (endScrollTimerRef.current) clearTimeout(endScrollTimerRef.current);
+    };
+  }, []);
 
   // Center wheels on mount and when props change externally
   useEffect(() => {
+    if (isProgrammaticRef.current) return;
     const sIdx = START_HOURS.indexOf(startH);
     if (sIdx >= 0 && startContainerRef.current) {
-      scrollWheelToIndex(startContainerRef.current, sIdx, false);
+      const targetTop = sIdx * ITEM_HEIGHT;
+      if (Math.abs(startContainerRef.current.scrollTop - targetTop) > 2) {
+        scrollWheelToIndex(startContainerRef.current, sIdx, false);
+      }
     }
   }, [startH]);
 
   useEffect(() => {
+    if (isProgrammaticRef.current) return;
     const eIdx = END_HOURS.indexOf(endH);
     if (eIdx >= 0 && endContainerRef.current) {
-      scrollWheelToIndex(endContainerRef.current, eIdx, false);
+      const targetTop = eIdx * ITEM_HEIGHT;
+      if (Math.abs(endContainerRef.current.scrollTop - targetTop) > 2) {
+        scrollWheelToIndex(endContainerRef.current, eIdx, false);
+      }
     }
   }, [endH]);
 
-  const handleSelectStart = (h) => {
+  const handleSelectStart = (h, shouldScroll = true) => {
     const formatted = `${h.toString().padStart(2, '0')}:00`;
     setStartTime(formatted);
-    const sIdx = START_HOURS.indexOf(h);
-    if (sIdx >= 0 && startContainerRef.current) {
-      scrollWheelToIndex(startContainerRef.current, sIdx, true);
+    if (shouldScroll) {
+      const sIdx = START_HOURS.indexOf(h);
+      if (sIdx >= 0 && startContainerRef.current) {
+        scrollWheelToIndex(startContainerRef.current, sIdx, true);
+      }
     }
     // Auto-advance endTime if endH <= h
     if (endH <= h) {
       const nextEnd = Math.min(23, h + 1);
       setEndTime(`${nextEnd.toString().padStart(2, '0')}:00`);
-      const eIdx = END_HOURS.indexOf(nextEnd);
+      if (shouldScroll) {
+        const eIdx = END_HOURS.indexOf(nextEnd);
+        if (eIdx >= 0 && endContainerRef.current) {
+          scrollWheelToIndex(endContainerRef.current, eIdx, true);
+        }
+      }
+    }
+  };
+
+  const handleSelectEnd = (h, shouldScroll = true) => {
+    if (h <= startH) return;
+    const formatted = `${h.toString().padStart(2, '0')}:00`;
+    setEndTime(formatted);
+    if (shouldScroll) {
+      const eIdx = END_HOURS.indexOf(h);
       if (eIdx >= 0 && endContainerRef.current) {
         scrollWheelToIndex(endContainerRef.current, eIdx, true);
       }
     }
   };
 
-  const handleSelectEnd = (h) => {
-    if (h <= startH) return;
-    const formatted = `${h.toString().padStart(2, '0')}:00`;
-    setEndTime(formatted);
-    const eIdx = END_HOURS.indexOf(h);
-    if (eIdx >= 0 && endContainerRef.current) {
-      scrollWheelToIndex(endContainerRef.current, eIdx, true);
-    }
-  };
-
   const applyPreset = (s, e) => {
+    isProgrammaticRef.current = true;
+    if (programmaticTimerRef.current) {
+      clearTimeout(programmaticTimerRef.current);
+    }
     setStartTime(s);
     setEndTime(e);
-    const sH = parseInt(s.split(':')[0], 10);
-    const eH = parseInt(e.split(':')[0], 10);
-    const sIdx = START_HOURS.indexOf(sH);
-    const eIdx = END_HOURS.indexOf(eH);
+    const newStartH = parseInt(s.split(':')[0], 10);
+    const newEndH = parseInt(e.split(':')[0], 10);
+    const sIdx = START_HOURS.indexOf(newStartH);
+    const eIdx = END_HOURS.indexOf(newEndH);
     if (sIdx >= 0 && startContainerRef.current) {
       scrollWheelToIndex(startContainerRef.current, sIdx, true);
     }
     if (eIdx >= 0 && endContainerRef.current) {
       scrollWheelToIndex(endContainerRef.current, eIdx, true);
     }
+    programmaticTimerRef.current = setTimeout(() => {
+      isProgrammaticRef.current = false;
+    }, 450);
   };
 
   const stepStart = (delta) => {
     const currIdx = START_HOURS.indexOf(startH);
     const nextIdx = Math.max(0, Math.min(START_HOURS.length - 1, currIdx + delta));
-    handleSelectStart(START_HOURS[nextIdx]);
+    handleSelectStart(START_HOURS[nextIdx], true);
   };
 
   const stepEnd = (delta) => {
     const currIdx = END_HOURS.indexOf(endH);
     const nextIdx = Math.max(0, Math.min(END_HOURS.length - 1, currIdx + delta));
     if (END_HOURS[nextIdx] > startH) {
-      handleSelectEnd(END_HOURS[nextIdx]);
+      handleSelectEnd(END_HOURS[nextIdx], true);
     }
+  };
+
+  // Debounced scroll listener for user touch/mouse wheel interactions
+  const handleStartScroll = (e) => {
+    if (isProgrammaticRef.current) return;
+    if (startScrollTimerRef.current) clearTimeout(startScrollTimerRef.current);
+    const target = e.currentTarget;
+    startScrollTimerRef.current = setTimeout(() => {
+      if (isProgrammaticRef.current) return;
+      const st = target.scrollTop;
+      const idx = Math.round(st / ITEM_HEIGHT);
+      if (idx >= 0 && idx < START_HOURS.length) {
+        const picked = START_HOURS[idx];
+        if (picked !== startH) {
+          handleSelectStart(picked, false);
+        }
+      }
+    }, 120);
+  };
+
+  const handleEndScroll = (e) => {
+    if (isProgrammaticRef.current) return;
+    if (endScrollTimerRef.current) clearTimeout(endScrollTimerRef.current);
+    const target = e.currentTarget;
+    endScrollTimerRef.current = setTimeout(() => {
+      if (isProgrammaticRef.current) return;
+      const st = target.scrollTop;
+      const idx = Math.round(st / ITEM_HEIGHT);
+      if (idx >= 0 && idx < END_HOURS.length) {
+        const picked = END_HOURS[idx];
+        if (picked > startH && picked !== endH) {
+          handleSelectEnd(picked, false);
+        }
+      }
+    }, 120);
   };
 
   const durationHours = Math.max(0, endH - startH);
@@ -111,10 +192,10 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
           <button
             type="button"
             onClick={() => applyPreset('13:00', '21:00')}
-            className={`px-2.5 py-1 text-xs rounded-full border transition-all font-medium flex items-center gap-1 ${
+            className={`px-3 py-1.5 text-xs rounded-full border transition-all font-bold flex items-center gap-1 ${
               startTime === '13:00' && endTime === '21:00'
-                ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
-                : 'bg-white text-[#5C4E42] border-[#E8DEC8] hover:bg-[#FAF4EB] hover:border-[#8B5B43]'
+                ? 'bg-gray-900 text-white border-gray-900 shadow-sm'
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50 hover:border-amber-400'
             }`}
           >
             ☀️ 平日 (13:00~21:00)
@@ -122,10 +203,10 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
           <button
             type="button"
             onClick={() => applyPreset('09:00', '21:00')}
-            className={`px-2.5 py-1 text-xs rounded-full border transition-all font-medium flex items-center gap-1 ${
+            className={`px-3 py-1.5 text-xs rounded-full border transition-all font-bold flex items-center gap-1 ${
               startTime === '09:00' && endTime === '21:00'
-                ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
-                : 'bg-white text-[#5C4E42] border-[#E8DEC8] hover:bg-[#FAF4EB] hover:border-[#8B5B43]'
+                ? 'bg-gray-900 text-white border-gray-900 shadow-sm'
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50 hover:border-amber-400'
             }`}
           >
             🌟 假日 (09:00~21:00)
@@ -133,10 +214,10 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
           <button
             type="button"
             onClick={() => applyPreset('10:00', '22:00')}
-            className={`px-2.5 py-1 text-xs rounded-full border transition-all font-medium flex items-center gap-1 ${
+            className={`px-3 py-1.5 text-xs rounded-full border transition-all font-bold flex items-center gap-1 ${
               startTime === '10:00' && endTime === '22:00'
-                ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
-                : 'bg-white text-[#5C4E42] border-[#E8DEC8] hover:bg-[#FAF4EB] hover:border-[#8B5B43]'
+                ? 'bg-gray-900 text-white border-gray-900 shadow-sm'
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50 hover:border-amber-400'
             }`}
           >
             ⏰ 全天 (10:00~22:00)
@@ -183,29 +264,14 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
               <div
                 ref={startContainerRef}
                 className="h-full overflow-y-auto snap-y snap-mandatory pt-[60px] pb-[60px] no-scrollbar scroll-smooth relative z-5"
-                onScroll={(e) => {
-                  if (isScrollingRef.current) return;
-                  const st = e.currentTarget.scrollTop;
-                  const idx = Math.round(st / ITEM_HEIGHT);
-                  if (idx >= 0 && idx < START_HOURS.length) {
-                    const picked = START_HOURS[idx];
-                    if (picked !== startH) {
-                      const formatted = `${picked.toString().padStart(2, '0')}:00`;
-                      setStartTime(formatted);
-                      if (endH <= picked) {
-                        const nextEnd = Math.min(23, picked + 1);
-                        setEndTime(`${nextEnd.toString().padStart(2, '0')}:00`);
-                      }
-                    }
-                  }
-                }}
+                onScroll={handleStartScroll}
               >
                 {START_HOURS.map((h) => {
                   const isSelected = h === startH;
                   return (
                     <div
                       key={h}
-                      onClick={() => handleSelectStart(h)}
+                      onClick={() => handleSelectStart(h, true)}
                       className={`h-[40px] snap-center flex items-center justify-center cursor-pointer transition-all ${
                         isSelected
                           ? 'text-[#8B5B43] font-bold text-base scale-105'
@@ -256,17 +322,7 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
               <div
                 ref={endContainerRef}
                 className="h-full overflow-y-auto snap-y snap-mandatory pt-[60px] pb-[60px] no-scrollbar scroll-smooth relative z-5"
-                onScroll={(e) => {
-                  if (isScrollingRef.current) return;
-                  const st = e.currentTarget.scrollTop;
-                  const idx = Math.round(st / ITEM_HEIGHT);
-                  if (idx >= 0 && idx < END_HOURS.length) {
-                    const picked = END_HOURS[idx];
-                    if (picked > startH && picked !== endH) {
-                      setEndTime(`${picked.toString().padStart(2, '0')}:00`);
-                    }
-                  }
-                }}
+                onScroll={handleEndScroll}
               >
                 {END_HOURS.map((h) => {
                   const isSelected = h === endH;
@@ -274,7 +330,7 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
                   return (
                     <div
                       key={h}
-                      onClick={() => !isDisabled && handleSelectEnd(h)}
+                      onClick={() => !isDisabled && handleSelectEnd(h, true)}
                       className={`h-[40px] snap-center flex items-center justify-center transition-all ${
                         isDisabled
                           ? 'text-gray-300 opacity-20 cursor-not-allowed pointer-events-none'
