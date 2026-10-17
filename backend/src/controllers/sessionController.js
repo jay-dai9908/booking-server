@@ -59,9 +59,13 @@ export const createBulkSessions = async (req, res) => {
   const { session_dates, session_date, start_time, end_time, max_capacity } = req.body;
   const dates = session_dates || (session_date ? [session_date] : []);
 
-  if (dates.length === 0 || !start_time || !end_time || max_capacity === undefined) {
-    return res.status(400).json({ error: 'All fields are required' });
+  if (dates.length === 0 || !start_time || !end_time) {
+    return res.status(400).json({ error: 'Dates, start time and end time are required' });
   }
+
+  const capacity = (max_capacity !== undefined && max_capacity !== null && max_capacity !== '') 
+    ? parseInt(max_capacity, 10) 
+    : 10;
 
   try {
     const startHour = parseInt(start_time.split(':')[0], 10);
@@ -80,7 +84,7 @@ export const createBulkSessions = async (req, res) => {
           session_date: targetDate,
           start_time: `${h.toString().padStart(2, '0')}:00`,
           end_time: `${(h + 1).toString().padStart(2, '0')}:00`,
-          max_capacity: parseInt(max_capacity, 10),
+          max_capacity: capacity,
         });
       }
     }

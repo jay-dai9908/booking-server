@@ -36,7 +36,7 @@ export default function SessionsPage() {
 
   const [startTime, setStartTime] = useState('13:00');
   const [endTime, setEndTime] = useState('21:00');
-  const [maxCapacity, setMaxCapacity] = useState(5);
+  const [maxCapacity, setMaxCapacity] = useState(10);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -494,7 +494,7 @@ export default function SessionsPage() {
               {/* Max Capacity Input */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  每時段容納人數 (預設 5 人)
+                  每時段容納人數 (預設 10 人)
                 </label>
                 <input
                   type="number"
