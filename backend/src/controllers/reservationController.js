@@ -959,7 +959,7 @@ export const getSessionSeats = async (req, res) => {
 };
 
 export const adminCreateReservation = async (req, res) => {
-  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn } = req.body;
+  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, attendance, autoCheckIn } = req.body;
   
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !pax || pax <= 0) {
     return res.status(400).json({ error: 'Valid session_ids array and pax are required.' });
@@ -1130,6 +1130,10 @@ export const adminCreateReservation = async (req, res) => {
       const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
       const totalAmount = baseSeatingPrice + totalEquipmentFee;
 
+      const shouldAutoCheckIn = attendance === 'checked_in' || autoCheckIn === true || autoCheckIn === 'true' || isWalkIn === true || isWalkIn === 'true' || isForceWait === true || isForceWait === 'true';
+      const checkInStatus = shouldAutoCheckIn ? 'checked_in' : (attendance || null);
+      const checkInTime = shouldAutoCheckIn ? new Date() : null;
+
       for (const sessionId of session_ids) {
         newReservationsData.push({
           booking_ref,
@@ -1137,6 +1141,8 @@ export const adminCreateReservation = async (req, res) => {
           user_id: targetUser.id,
           pax: parseInt(pax, 10),
           status: 'confirmed',
+          attendance: checkInStatus,
+          checked_in_at: checkInTime,
           assigned_seats: mySeats,
           is_force_split: forceSplit === true || forceSplit === 'true',
           is_walk_in: isWalkIn === true || isWalkIn === 'true',

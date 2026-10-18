@@ -63,7 +63,8 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name || formData.pax < 1) {
+    const paxNum = parseInt(formData.pax, 10);
+    if (!formData.name || !paxNum || paxNum < 1) {
       setError('請填寫顧客姓名，且人數必須大於 0');
       return;
     }
@@ -94,12 +95,14 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
     try {
       await api.post('/reservations/admin', {
         session_ids: sortedSessionIds,
-        pax: formData.pax,
+        pax: paxNum,
         name: formData.name,
         phone: formData.phone,
         isForceWait: true,
         forceSplit: formData.forceSplit,
         isWalkIn: true,
+        autoCheckIn: true,
+        attendance: 'checked_in',
         equipments: equipmentsPayload
       });
       
@@ -180,19 +183,58 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
             {/* Pax */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">預約人數</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
-                  <Users className="w-5 h-5" />
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    required
+                    value={formData.pax}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setFormData(prev => ({ ...prev, pax: '' }));
+                      } else {
+                        const parsed = parseInt(val, 10);
+                        setFormData(prev => ({ ...prev, pax: isNaN(parsed) ? '' : parsed }));
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!formData.pax || parseInt(formData.pax, 10) < 1) {
+                        setFormData(prev => ({ ...prev, pax: 1 }));
+                      }
+                    }}
+                    className="w-full pl-11 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                  />
                 </div>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  required
-                  value={formData.pax}
-                  onChange={(e) => setFormData({...formData, pax: parseInt(e.target.value) || 1})}
-                  className="w-full pl-11 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                />
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const current = parseInt(formData.pax, 10) || 1;
+                      setFormData(prev => ({ ...prev, pax: Math.max(1, current - 1) }));
+                    }}
+                    className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 flex items-center justify-center font-bold text-gray-700 transition-all"
+                    title="減少人數"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const current = parseInt(formData.pax, 10) || 0;
+                      setFormData(prev => ({ ...prev, pax: current + 1 }));
+                    }}
+                    className="w-10 h-10 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 active:scale-95 flex items-center justify-center font-bold transition-all"
+                    title="增加人數"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
 
