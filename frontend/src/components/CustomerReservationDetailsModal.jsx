@@ -33,10 +33,9 @@ export const getGoogleCalendarUrl = (res) => {
     const endUTC = toGCalISO(endObj);
 
     const shortRef = formatBookingRef(res.booking_ref);
-    const seats = (res.assigned_seats && res.assigned_seats.length > 0) ? res.assigned_seats.join(', ') : '現場安排';
     const text = encodeURIComponent('拾光製所 手作拼豆預約');
     const details = encodeURIComponent(
-      `預約編號：${shortRef}\n人數：${res.pax}人\n座位：${seats}\n預估總額：NT$ ${res.total_amount || 0}\n\n期待您的到來！預約現場保留 15 分鐘。`
+      `預約編號：${shortRef}\n人數：${res.pax}人\n預估總額：NT$ ${res.total_amount || 0}\n\n期待您的到來！預約現場保留 15 分鐘。`
     );
     const location = encodeURIComponent('拾光製所');
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startUTC}/${endUTC}&details=${details}&location=${location}`;
@@ -184,17 +183,6 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
               </div>
             </div>
 
-            {/* Assigned Seats */}
-            <div className="border-b border-dashed border-[#E5DFD7] pb-5">
-              <h3 className="text-sm font-medium text-[#7A7067] mb-1.5 flex items-center gap-1.5">
-                💺 分配桌號 / 座位
-              </h3>
-              <p className="text-base font-bold text-[#2C241E]">
-                {reservation.assigned_seats && reservation.assigned_seats.length > 0 
-                  ? reservation.assigned_seats.join(', ') 
-                  : '現場由店員安排'}
-              </p>
-            </div>
 
             {/* Contact Info */}
             <div className="border-b border-dashed border-[#E5DFD7] pb-5">

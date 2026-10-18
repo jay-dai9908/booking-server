@@ -111,7 +111,7 @@ export default function HistoryPage() {
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="🔍 篩選我的預約 (代碼 BK-XXXX、日期或座位)..."
+            placeholder="🔍 篩選我的預約 (代碼 BK-XXXX、日期)..."
             className="w-full pl-9 pr-8 py-2.5 bg-white border border-[#E5DFD7] rounded-xl text-xs sm:text-sm text-[#2C241E] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5B43]/30 shadow-sm"
           />
           {searchTerm && (
@@ -218,11 +218,6 @@ export default function HistoryPage() {
                         <span className="font-mono text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] px-2 py-0.5 rounded-md border border-[#E8DEC8]">
                           #{formatBookingRef(r.booking_ref)}
                         </span>
-                        {r.assigned_seats && r.assigned_seats.length > 0 && (
-                          <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                            💺 {r.assigned_seats.join(', ')}
-                          </span>
-                        )}
                       </div>
                       <span className="text-sm font-medium text-[#8C8279] bg-[#F4EFE6] px-2.5 py-1 rounded-md inline-block">
                         {r.time_blocks 

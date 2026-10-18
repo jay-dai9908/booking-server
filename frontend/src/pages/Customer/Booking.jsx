@@ -1585,12 +1585,6 @@ function Booking() {
                   <span className="text-[#8C8279]">👥 預約人數：</span>
                   <span className="font-bold text-[#2C241E]">{ticketModalData.pax} 人</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[#8C8279]">💺 分配座位：</span>
-                  <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                    {ticketModalData.assigned_seats?.length > 0 ? ticketModalData.assigned_seats.join(', ') : '現場由店員安排'}
-                  </span>
-                </div>
                 <div className="flex justify-between items-baseline border-t border-dashed border-[#E5DFD7] pt-2">
                   <span className="text-[#8C8279]">💰 預估結帳總額：</span>
                   <span className="font-bold text-base text-[#8B5B43]">NT$ {ticketModalData.total_amount}</span>
