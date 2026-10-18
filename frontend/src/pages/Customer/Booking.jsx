@@ -306,21 +306,16 @@ function Booking() {
       newSelected.push(startSession);
     }
 
-    let count = 1;
     let currentIndex = startIndex + 1;
     
-    while (count < 6 && currentIndex < sessions.length) {
+    while (currentIndex < sessions.length) {
       const nextSession = sessions[currentIndex];
       if (nextSession.remaining_capacity > 0 && !isSessionPast(nextSession)) {
         if (!newSelected.find(s => s.id === nextSession.id)) {
           newSelected.push(nextSession);
         }
-        count++;
-        currentIndex++;
-      } else {
-        // Stop if we hit a full or past session to maintain contiguity
-        break;
       }
+      currentIndex++;
     }
     return newSelected;
   };
@@ -331,6 +326,11 @@ function Booking() {
       if (prev.length > 0) {
         const sortedSelected = [...prev].sort((a, b) => a.start_time.localeCompare(b.start_time));
         return applyUnlimitedMacro(sortedSelected[0], []);
+      } else {
+        const firstAvailable = sessions.find(s => s.remaining_capacity > 0 && !isSessionPast(s));
+        if (firstAvailable) {
+          return applyUnlimitedMacro(firstAvailable, []);
+        }
       }
       return prev;
     });
@@ -845,11 +845,6 @@ function Booking() {
                   );
                 })}
               </div>
-
-              <div className="mt-4 text-center text-xs text-[#8C8279] flex items-center justify-center gap-1.5">
-                <span>💡</span>
-                <span>請預留離場前 10 分鐘讓店家為您的作品壓平成型</span>
-              </div>
             </div>
           )}
         </section>
@@ -1235,9 +1230,6 @@ function Booking() {
               <div className="flex items-center justify-between border-b border-[#E8DEC8]/70 pb-3">
                 <span className="font-bold text-base text-[#3E332B] flex items-center gap-2">
                   <span>✨</span> 預約明細與智慧計價
-                </span>
-                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
-                  現場報到付款
                 </span>
               </div>
 
