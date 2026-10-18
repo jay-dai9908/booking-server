@@ -859,11 +859,6 @@ function Booking() {
           <div className="flex flex-col gap-4 mb-6">
             <div className="flex justify-between items-center gap-2">
               <h2 className="text-lg font-bold">2. 選擇時段 (可複選)</h2>
-              {selectedSessions.length > 0 && (
-                <span className="text-sm bg-wood-bg text-wood-primary px-3 py-1.5 rounded-full font-bold">
-                  已選 {selectedSessions.length} 小時
-                </span>
-              )}
             </div>
             {sessions.length > 0 && allowUnlimited && (
               <div className="flex flex-col gap-2">
