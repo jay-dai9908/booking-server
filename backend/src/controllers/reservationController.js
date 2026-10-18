@@ -227,10 +227,14 @@ export const createReservation = async (req, res) => {
         allConfigs.forEach(c => { configMap[c.id] = c; });
 
         const globalSetting = await tx.globalSetting.findUnique({ where: { id: 1 } });
-        const discountEnabled = globalSetting ? globalSetting.equipment_discount_enabled !== false : true;
-        const buyHours = globalSetting?.equipment_discount_buy_hours ?? 3;
-        const freeHours = globalSetting?.equipment_discount_free_hours ?? 1;
-        const stackable = globalSetting ? globalSetting.equipment_discount_stackable !== false : true;
+        const discountConfig = {
+          enabled: globalSetting ? globalSetting.equipment_discount_enabled !== false : true,
+          buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
+          free_hours: globalSetting?.equipment_discount_free_hours ?? 1,
+          tier2_enabled: !!globalSetting?.equipment_discount2_enabled,
+          tier2_buy_hours: globalSetting?.equipment_discount2_buy_hours ?? 8,
+          tier2_free_hours: globalSetting?.equipment_discount2_free_hours ?? 4
+        };
 
         const totalHours = session_ids.length;
         const coveredSessionsStrings = requestedSessions.map(s => `${s.start_time}-${s.end_time}`);
@@ -247,7 +251,7 @@ export const createReservation = async (req, res) => {
             ? totalHours 
             : Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
 
-          const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountEnabled, buyHours, freeHours, stackable);
+          const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountConfig);
 
           const singlePrice = (config.daily_cap && config.daily_cap > 0)
             ? Math.min(config.hourly_rate * chargeableHours, config.daily_cap)
@@ -1072,10 +1076,14 @@ export const adminCreateReservation = async (req, res) => {
         allConfigs.forEach(c => { configMap[c.id] = c; });
 
         const globalSetting = await tx.globalSetting.findUnique({ where: { id: 1 } });
-        const discountEnabled = globalSetting ? globalSetting.equipment_discount_enabled !== false : true;
-        const buyHours = globalSetting?.equipment_discount_buy_hours ?? 3;
-        const freeHours = globalSetting?.equipment_discount_free_hours ?? 1;
-        const stackable = globalSetting ? globalSetting.equipment_discount_stackable !== false : true;
+        const discountConfig = {
+          enabled: globalSetting ? globalSetting.equipment_discount_enabled !== false : true,
+          buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
+          free_hours: globalSetting?.equipment_discount_free_hours ?? 1,
+          tier2_enabled: !!globalSetting?.equipment_discount2_enabled,
+          tier2_buy_hours: globalSetting?.equipment_discount2_buy_hours ?? 8,
+          tier2_free_hours: globalSetting?.equipment_discount2_free_hours ?? 4
+        };
 
         const totalHours = session_ids.length;
         const coveredSessionsStrings = requestedSessions.map(s => `${s.start_time}-${s.end_time}`);
@@ -1092,7 +1100,7 @@ export const adminCreateReservation = async (req, res) => {
             ? totalHours 
             : Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
 
-          const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountEnabled, buyHours, freeHours, stackable);
+          const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountConfig);
 
           const singlePrice = (config.daily_cap && config.daily_cap > 0)
             ? Math.min(config.hourly_rate * chargeableHours, config.daily_cap)

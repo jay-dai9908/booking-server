@@ -72,11 +72,11 @@ function Booking() {
     enabled: true,
     buy_hours: 3,
     free_hours: 1,
-    stackable: true
+    stackable: true,
+    tier2_enabled: false,
+    tier2_buy_hours: 8,
+    tier2_free_hours: 4
   });
-  const customerBuyHours = (equipmentDiscount.buy_hours && equipmentDiscount.free_hours && equipmentDiscount.buy_hours > equipmentDiscount.free_hours)
-    ? (equipmentDiscount.buy_hours - equipmentDiscount.free_hours)
-    : equipmentDiscount.buy_hours;
 
   // Calculate pricing based on selectedDate
   const isWeekend = [0, 6].includes(getDay(selectedDate));
@@ -225,7 +225,10 @@ function Booking() {
           enabled: res.data.equipment_discount_enabled !== false,
           buy_hours: res.data.equipment_discount_buy_hours ?? 3,
           free_hours: res.data.equipment_discount_free_hours ?? 1,
-          stackable: res.data.equipment_discount_stackable !== false
+          stackable: res.data.equipment_discount_stackable !== false,
+          tier2_enabled: !!res.data.equipment_discount2_enabled,
+          tier2_buy_hours: res.data.equipment_discount2_buy_hours ?? 8,
+          tier2_free_hours: res.data.equipment_discount2_free_hours ?? 4
         });
       } catch (err) {
         console.error('Failed to fetch equipment availability:', err);
@@ -405,10 +408,7 @@ function Booking() {
 
   const chargeableRentalHours = calculateEquipmentChargeableHours(
     rentalHours,
-    equipmentDiscount.enabled,
-    equipmentDiscount.buy_hours,
-    equipmentDiscount.free_hours,
-    equipmentDiscount.stackable
+    equipmentDiscount
   );
 
   let totalEquipmentFee = 0;
@@ -462,8 +462,12 @@ function Booking() {
       });
     }
 
+    const promoDesc = equipmentDiscount.tier2_enabled
+      ? `買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours} / 買${equipmentDiscount.tier2_buy_hours}送${equipmentDiscount.tier2_free_hours}（金額擇優）`
+      : `買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours}`;
+
     const discountSummary = (equipmentDiscount.enabled && discountHoursPerBoard > 0)
-      ? `（享「買${customerBuyHours}送${equipmentDiscount.free_hours}」：每台折抵 ${discountHoursPerBoard} 小時，${totalBoards} 台共折抵 ${totalDiscountHours} 小時）`
+      ? `（享「${promoDesc}」：每台折抵 ${discountHoursPerBoard} 小時，${totalBoards} 台共折抵 ${totalDiscountHours} 小時）`
       : '';
 
     setConfirmModalData({
@@ -993,12 +997,19 @@ function Booking() {
                             <div className="bg-[#FAF4EB] border border-[#E8DEC8] px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
                               <div className="flex items-center gap-2 text-[#8B5B43]">
                                 <span className="text-base">🎁</span>
-                                <span>
-                                  智能拼豆板時間優惠：<strong>買 {customerBuyHours} 送 {equipmentDiscount.free_hours}</strong>
-                                  <span className="text-xs text-[#7A7067] font-normal ml-1 hidden sm:inline">
-                                    （每台獨立計算：租滿 {equipmentDiscount.buy_hours} 小時享 {equipmentDiscount.free_hours} 小時免費{equipmentDiscount.stackable ? '，可累計折抵' : ''}）
+                                <div>
+                                  <span>
+                                    智能拼豆板時間優惠：<strong>買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}</strong>
+                                    {equipmentDiscount.tier2_enabled && (
+                                      <span> ｜ <strong>買 {equipmentDiscount.tier2_buy_hours} 送 {equipmentDiscount.tier2_free_hours}</strong></span>
+                                    )}
                                   </span>
-                                </span>
+                                  <span className="text-xs text-[#7A7067] font-normal ml-1 hidden sm:inline">
+                                    {equipmentDiscount.tier2_enabled 
+                                      ? '（每台獨立計算，系統自動依時數金額擇優計價）'
+                                      : `（每台獨立計算：租滿 ${equipmentDiscount.buy_hours} 小時享 ${equipmentDiscount.free_hours} 小時免費）`}
+                                  </span>
+                                </div>
                               </div>
                               {totalBoards > 0 && discountHoursPerBoard > 0 ? (
                                 <span className="bg-[#8B5B43] text-white text-[11px] px-2.5 py-1 rounded-full font-bold shrink-0 self-start sm:self-auto">
@@ -1010,7 +1021,9 @@ function Booking() {
                                 </span>
                               ) : (
                                 <span className="text-amber-800 bg-amber-50 border border-amber-200 text-[11px] px-2 py-0.5 rounded-full font-bold shrink-0 self-start sm:self-auto">
-                                  租滿 {equipmentDiscount.buy_hours} 小時享 {equipmentDiscount.free_hours} 小時免費
+                                  {equipmentDiscount.tier2_enabled
+                                    ? `租滿享買 ${equipmentDiscount.buy_hours} 送 ${equipmentDiscount.free_hours} 或買 ${equipmentDiscount.tier2_buy_hours} 送 ${equipmentDiscount.tier2_free_hours} 最優計價`
+                                    : `租滿 ${equipmentDiscount.buy_hours} 小時享 ${equipmentDiscount.free_hours} 小時免費`}
                                 </span>
                               )}
                             </div>
@@ -1281,7 +1294,7 @@ function Booking() {
                       <span className="font-bold text-[#8B5B43]">智能拼豆板加購小計 ({totalBoards}台 × {rentalHours}hr)：</span>
                       {equipmentDiscount.enabled && discountHoursPerBoard > 0 && (
                         <span className="block text-[11px] text-emerald-700 font-medium">
-                          享買{customerBuyHours}送{equipmentDiscount.free_hours}，每台實計 {chargeableRentalHours}hr（共省 NT${totalSavedFee}）
+                          享時數優惠{equipmentDiscount.tier2_enabled ? '擇優計價' : `（買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours}）`}，每台實計 {chargeableRentalHours}hr（共省 NT${totalSavedFee}）
                         </span>
                       )}
                     </div>

@@ -1,22 +1,81 @@
 /**
- * Calculate chargeable hours for equipment based on "Buy X get Y free" promotion
+ * Calculate chargeable hours for equipment based on multi-tier "Buy X get Y free" promotion
+ * Optimal calculation (金額擇優計價): Finds the minimum chargeable hours for the customer.
+ * Supports single-tier (legacy args or config object) and multi-tier promotions.
+ *
  * @param {number} rentalHours - Total hours rented
- * @param {boolean} discountEnabled - Whether promotion is enabled
- * @param {number} buyHours - Buy X hours (e.g. 3)
- * @param {number} freeHours - Get Y hours free (e.g. 1)
- * @param {boolean} stackable - Whether discount can be stacked across multiple cycles
- * @returns {number} Chargeable hours
+ * @param {object|boolean} discountConfig - Discount configuration object or enabled flag
+ * @param {number} [legacyBuyHours] - Legacy parameter for backward compatibility
+ * @param {number} [legacyFreeHours] - Legacy parameter for backward compatibility
+ * @param {boolean} [legacyStackable=true] - Legacy parameter for backward compatibility
+ * @returns {number} Minimum chargeable hours
  */
-export const calculateEquipmentChargeableHours = (rentalHours, discountEnabled, buyHours, freeHours, stackable = true) => {
+export const calculateEquipmentChargeableHours = (
+  rentalHours,
+  discountConfig,
+  legacyBuyHours,
+  legacyFreeHours,
+  legacyStackable = true
+) => {
   const hours = parseInt(rentalHours, 10) || 0;
   if (hours <= 0) return 0;
-  if (!discountEnabled || !buyHours || buyHours <= 0 || !freeHours || freeHours <= 0) {
+
+  let t1Enabled = false;
+  let t1Buy = 3;
+  let t1Free = 1;
+  let t2Enabled = false;
+  let t2Buy = 8;
+  let t2Free = 4;
+
+  if (typeof discountConfig === 'object' && discountConfig !== null) {
+    t1Enabled = discountConfig.enabled !== false;
+    t1Buy = Math.max(1, parseInt(discountConfig.buy_hours, 10) || 3);
+    t1Free = Math.max(1, parseInt(discountConfig.free_hours, 10) || 1);
+    t2Enabled = discountConfig.tier2_enabled === true;
+    t2Buy = Math.max(1, parseInt(discountConfig.tier2_buy_hours, 10) || 8);
+    t2Free = Math.max(1, parseInt(discountConfig.tier2_free_hours, 10) || 4);
+  } else {
+    t1Enabled = discountConfig !== false;
+    t1Buy = Math.max(1, parseInt(legacyBuyHours, 10) || 3);
+    t1Free = Math.max(1, parseInt(legacyFreeHours, 10) || 1);
+  }
+
+  if (!t1Enabled && !t2Enabled) {
     return hours;
   }
-  if (hours < buyHours) {
-    return hours;
+
+  // Dynamic Programming table: cost[h] = minimum chargeable hours to cover h hours
+  // Each tier package of (buy + free) hours charges 'buy' hours.
+  // Within [buy, buy + free], a customer can cap at 'buy' hours (package ceiling optimization).
+  const maxH = Math.max(hours, 24);
+  const cost = new Array(maxH + 1).fill(0);
+
+  for (let h = 1; h <= maxH; h++) {
+    cost[h] = cost[h - 1] + 1;
+
+    if (t1Enabled) {
+      const cycle1 = t1Buy + t1Free;
+      const prev1 = Math.max(0, h - cycle1);
+      cost[h] = Math.min(cost[h], cost[prev1] + t1Buy);
+      if (h <= cycle1 && h >= t1Buy) {
+        cost[h] = Math.min(cost[h], t1Buy);
+      }
+    }
+
+    if (t2Enabled) {
+      const cycle2 = t2Buy + t2Free;
+      const prev2 = Math.max(0, h - cycle2);
+      cost[h] = Math.min(cost[h], cost[prev2] + t2Buy);
+      if (h <= cycle2 && h >= t2Buy) {
+        cost[h] = Math.min(cost[h], t2Buy);
+      }
+    }
   }
-  const cycles = stackable !== false ? Math.floor(hours / buyHours) : 1;
-  const freeCount = cycles * freeHours;
-  return Math.max(0, hours - freeCount);
+
+  // Monotonicity guarantee: cost[h] <= cost[h+1]
+  for (let h = maxH - 1; h >= 1; h--) {
+    cost[h] = Math.min(cost[h], cost[h + 1]);
+  }
+
+  return Math.min(hours, cost[hours]);
 };

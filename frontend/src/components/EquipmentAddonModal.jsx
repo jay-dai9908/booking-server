@@ -16,9 +16,11 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
   const [equipmentDiscount, setEquipmentDiscount] = useState({
     enabled: true,
     buy_hours: 3,
-    free_hours: 1
+    free_hours: 1,
+    tier2_enabled: false,
+    tier2_buy_hours: 8,
+    tier2_free_hours: 4
   });
-  const customerBuyHours = (equipmentDiscount.buy_hours && equipmentDiscount.free_hours && equipmentDiscount.buy_hours > equipmentDiscount.free_hours) ? (equipmentDiscount.buy_hours - equipmentDiscount.free_hours) : equipmentDiscount.buy_hours;
 
   // Original quantities snapshot
   const oldQtys = React.useMemo(() => {
@@ -61,7 +63,10 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
         enabled: res.data.equipment_discount_enabled !== false,
         buy_hours: res.data.equipment_discount_buy_hours ?? 3,
         free_hours: res.data.equipment_discount_free_hours ?? 1,
-        stackable: res.data.equipment_discount_stackable !== false
+        stackable: res.data.equipment_discount_stackable !== false,
+        tier2_enabled: !!res.data.equipment_discount2_enabled,
+        tier2_buy_hours: res.data.equipment_discount2_buy_hours ?? 8,
+        tier2_free_hours: res.data.equipment_discount2_free_hours ?? 4
       });
 
       // Initialize selections with existing equipment
@@ -88,10 +93,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
 
   const chargeableHours = calculateEquipmentChargeableHours(
     rentalHours,
-    equipmentDiscount.enabled,
-    equipmentDiscount.buy_hours,
-    equipmentDiscount.free_hours,
-    equipmentDiscount.stackable
+    equipmentDiscount
   );
 
   // Calculate pricing difference
@@ -213,7 +215,10 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
             <div className="bg-[#FAF4EB] border border-[#E8DEC8] px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[#8B5B43]">
               <div className="flex items-center gap-2">
                 <Gift className="w-4 h-4 text-[#8B5B43] shrink-0" />
-                <span>智能板「買 {customerBuyHours} 送 {equipmentDiscount.free_hours}」生效中（每台獨立計算）</span>
+                <span>
+                  智能板「買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}
+                  {equipmentDiscount.tier2_enabled ? ` ｜ 買 ${equipmentDiscount.tier2_buy_hours} 送 ${equipmentDiscount.tier2_free_hours}（金額自動擇優）` : ''}」生效中
+                </span>
               </div>
               {chargeableHours < rentalHours && (
                 <span className="bg-[#8B5B43] text-white text-[11px] px-2.5 py-1 rounded-full shrink-0">

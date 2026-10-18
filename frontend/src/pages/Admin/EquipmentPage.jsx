@@ -26,11 +26,17 @@ export default function EquipmentPage() {
     equipment_discount_enabled: true,
     equipment_discount_buy_hours: 3,
     equipment_discount_free_hours: 1,
-    equipment_discount_stackable: true
+    equipment_discount_stackable: true,
+    equipment_discount2_enabled: false,
+    equipment_discount2_buy_hours: 8,
+    equipment_discount2_free_hours: 4
   });
   const [discountDraft, setDiscountDraft] = useState({
     buy_hours: 3,
-    free_hours: 1
+    free_hours: 1,
+    tier2_enabled: false,
+    tier2_buy_hours: 8,
+    tier2_free_hours: 4
   });
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
@@ -68,11 +74,17 @@ export default function EquipmentPage() {
         equipment_discount_enabled: res.data.equipment_discount_enabled !== false,
         equipment_discount_buy_hours: res.data.equipment_discount_buy_hours ?? 3,
         equipment_discount_free_hours: res.data.equipment_discount_free_hours ?? 1,
-        equipment_discount_stackable: res.data.equipment_discount_stackable !== false
+        equipment_discount_stackable: res.data.equipment_discount_stackable !== false,
+        equipment_discount2_enabled: !!res.data.equipment_discount2_enabled,
+        equipment_discount2_buy_hours: res.data.equipment_discount2_buy_hours ?? 8,
+        equipment_discount2_free_hours: res.data.equipment_discount2_free_hours ?? 4
       });
       setDiscountDraft({
         buy_hours: res.data.equipment_discount_buy_hours ?? 3,
-        free_hours: res.data.equipment_discount_free_hours ?? 1
+        free_hours: res.data.equipment_discount_free_hours ?? 1,
+        tier2_enabled: !!res.data.equipment_discount2_enabled,
+        tier2_buy_hours: res.data.equipment_discount2_buy_hours ?? 8,
+        tier2_free_hours: res.data.equipment_discount2_free_hours ?? 4
       });
     } catch (err) {
       console.error('Failed to fetch equipment configs:', err);
@@ -168,18 +180,34 @@ export default function EquipmentPage() {
     try {
       const buy = Math.max(1, parseInt(discountDraft.buy_hours, 10) || 3);
       const free = Math.max(1, parseInt(discountDraft.free_hours, 10) || 1);
+      const t2_enabled = !!discountDraft.tier2_enabled;
+      const t2_buy = Math.max(1, parseInt(discountDraft.tier2_buy_hours, 10) || 8);
+      const t2_free = Math.max(1, parseInt(discountDraft.tier2_free_hours, 10) || 4);
+
       await api.patch('/equipment/admin/settings', {
         equipment_discount_enabled: globalSettings.equipment_discount_enabled,
         equipment_discount_buy_hours: buy,
         equipment_discount_free_hours: free,
-        equipment_discount_stackable: globalSettings.equipment_discount_stackable
+        equipment_discount_stackable: globalSettings.equipment_discount_stackable,
+        equipment_discount2_enabled: t2_enabled,
+        equipment_discount2_buy_hours: t2_buy,
+        equipment_discount2_free_hours: t2_free
       });
       setGlobalSettings(prev => ({
         ...prev,
         equipment_discount_buy_hours: buy,
-        equipment_discount_free_hours: free
+        equipment_discount_free_hours: free,
+        equipment_discount2_enabled: t2_enabled,
+        equipment_discount2_buy_hours: t2_buy,
+        equipment_discount2_free_hours: t2_free
       }));
-      setDiscountDraft({ buy_hours: buy, free_hours: free });
+      setDiscountDraft({
+        buy_hours: buy,
+        free_hours: free,
+        tier2_enabled: t2_enabled,
+        tier2_buy_hours: t2_buy,
+        tier2_free_hours: t2_free
+      });
       showToast('已更新智能板時數優惠方案');
     } catch (err) {
       console.error(err);
@@ -333,7 +361,7 @@ export default function EquipmentPage() {
           </div>
         </div>
 
-        {/* Setting 3: Equipment Hours Promotion (Buy X Get Y) */}
+        {/* Setting 3: Equipment Hours Promotion (Buy X Get Y) Multi-Tier */}
         <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 flex flex-col justify-between gap-3 md:col-span-2 lg:col-span-1">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-3">
@@ -346,7 +374,7 @@ export default function EquipmentPage() {
                 </h3>
                 <p className="text-xs text-[#7A7067] mt-0.5 leading-relaxed">
                   {globalSettings.equipment_discount_enabled
-                    ? `目前啟用：租借「買 ${globalSettings.equipment_discount_buy_hours} 送 ${globalSettings.equipment_discount_free_hours}」`
+                    ? `啟用中：買 ${globalSettings.equipment_discount_buy_hours} 送 ${globalSettings.equipment_discount_free_hours}${globalSettings.equipment_discount2_enabled ? ` ｜ 買 ${globalSettings.equipment_discount2_buy_hours} 送 ${globalSettings.equipment_discount2_free_hours}（金額自動擇優）` : ''}`
                     : '時數優惠方案目前已停用'}
                 </p>
               </div>
@@ -370,9 +398,14 @@ export default function EquipmentPage() {
           </div>
 
           {globalSettings.equipment_discount_enabled && (
-            <div className="space-y-2 pt-2 border-t border-[#E8DEC8]/60">
-              <div className="flex items-center justify-between gap-2 text-xs font-bold text-[#3E332B]">
-                <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="space-y-3 pt-2 border-t border-[#E8DEC8]/60">
+              {/* Tier 1 */}
+              <div className="bg-white/80 p-2.5 rounded-xl border border-[#E8DEC8]">
+                <div className="text-xs font-bold text-[#3E332B] mb-1.5 flex items-center justify-between">
+                  <span>條件一（基礎優惠）</span>
+                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">已啟用</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-[#3E332B] font-bold flex-wrap">
                   <span>買</span>
                   <input
                     type="number"
@@ -380,7 +413,7 @@ export default function EquipmentPage() {
                     max="24"
                     value={discountDraft.buy_hours}
                     onChange={(e) => setDiscountDraft(prev => ({ ...prev, buy_hours: e.target.value }))}
-                    className="w-12 px-2 py-1 text-center bg-white border border-[#DED7CE] rounded-lg font-bold text-xs text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                    className="w-12 px-1.5 py-1 text-center bg-white border border-[#DED7CE] rounded-lg font-bold text-xs text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
                   />
                   <span>小時，送</span>
                   <input
@@ -389,56 +422,77 @@ export default function EquipmentPage() {
                     max="24"
                     value={discountDraft.free_hours}
                     onChange={(e) => setDiscountDraft(prev => ({ ...prev, free_hours: e.target.value }))}
-                    className="w-12 px-2 py-1 text-center bg-white border border-[#DED7CE] rounded-lg font-bold text-xs text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                    className="w-12 px-1.5 py-1 text-center bg-white border border-[#DED7CE] rounded-lg font-bold text-xs text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
                   />
                   <span>小時</span>
                 </div>
+              </div>
 
+              {/* Tier 2 */}
+              <div className="bg-white/80 p-2.5 rounded-xl border border-[#E8DEC8]">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-xs font-bold text-[#3E332B]">條件二（高階 / 長時數優惠）</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-[#4A3F35]">
+                      {discountDraft.tier2_enabled ? '已啟用' : '未啟用'}
+                    </span>
+                    <div 
+                      onClick={() => setDiscountDraft(prev => ({ ...prev, tier2_enabled: !prev.tier2_enabled }))}
+                      className={`relative w-[34px] h-[18px] rounded-full transition-colors duration-300 cursor-pointer ${
+                        discountDraft.tier2_enabled ? 'bg-[#8B5B43]' : 'bg-gray-300'
+                      }`}
+                    >
+                      <div className={`absolute top-[2px] left-[2px] bg-white w-[14px] h-[14px] rounded-full shadow-sm transition-transform duration-300 ${
+                        discountDraft.tier2_enabled ? 'translate-x-[16px]' : 'translate-x-0'
+                      }`} />
+                    </div>
+                  </div>
+                </div>
+
+                {discountDraft.tier2_enabled ? (
+                  <div className="flex items-center gap-1.5 text-xs text-[#3E332B] font-bold flex-wrap">
+                    <span>買</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="24"
+                      value={discountDraft.tier2_buy_hours}
+                      onChange={(e) => setDiscountDraft(prev => ({ ...prev, tier2_buy_hours: e.target.value }))}
+                      className="w-12 px-1.5 py-1 text-center bg-white border border-[#DED7CE] rounded-lg font-bold text-xs text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                    />
+                    <span>小時，送</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="24"
+                      value={discountDraft.tier2_free_hours}
+                      onChange={(e) => setDiscountDraft(prev => ({ ...prev, tier2_free_hours: e.target.value }))}
+                      className="w-12 px-1.5 py-1 text-center bg-white border border-[#DED7CE] rounded-lg font-bold text-xs text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                    />
+                    <span>小時</span>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-[#A8A19A]">
+                    可自訂第二組滿送門檻（例如買 8 送 4），系統將自動為顧客金額擇優。
+                  </div>
+                )}
+              </div>
+
+              {/* Save Button */}
+              <div className="flex justify-end pt-1">
                 <button
                   type="button"
                   onClick={handleSaveDiscountSetting}
                   disabled={savingGlobal}
-                  className="px-3 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition-colors shrink-0 shadow-2xs disabled:opacity-50"
+                  className="w-full sm:w-auto px-4 py-1.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition-colors shadow-2xs disabled:opacity-50"
                 >
-                  儲存
+                  {savingGlobal ? '儲存中...' : '儲存時數優惠方案'}
                 </button>
               </div>
 
-              {/* Stackable Toggle */}
-              <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#E8DEC8]/50">
-                <div>
-                  <div className="text-xs font-bold text-[#3E332B] flex items-center gap-1.5">
-                    <span>可疊加折抵</span>
-                    <span className="text-[10px] text-[#7A7067] font-normal">
-                      （{globalSettings.equipment_discount_stackable ? '已開啟：時數倍數累計贈送' : '已關閉：單次最多折抵一次'}）
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-[#7A7067] mt-0.5">
-                    {globalSettings.equipment_discount_stackable
-                      ? `例如滿 ${globalSettings.equipment_discount_buy_hours} 小時折 ${globalSettings.equipment_discount_free_hours} 小時、滿 ${globalSettings.equipment_discount_buy_hours * 2} 小時折 ${globalSettings.equipment_discount_free_hours * 2} 小時`
-                      : `超過 ${globalSettings.equipment_discount_buy_hours} 小時一律僅折抵 ${globalSettings.equipment_discount_free_hours} 小時`}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[11px] font-bold text-[#4A3F35]">
-                    {globalSettings.equipment_discount_stackable ? '開啟' : '關閉'}
-                  </span>
-                  <div 
-                    onClick={() => !savingGlobal && handleToggleGlobalSetting('equipment_discount_stackable', !globalSettings.equipment_discount_stackable)}
-                    className={`relative w-[38px] h-[20px] rounded-full transition-colors duration-300 cursor-pointer ${
-                      globalSettings.equipment_discount_stackable ? 'bg-[#8B5B43]' : 'bg-gray-300'
-                    }`}
-                  >
-                    <div className={`absolute top-[2px] left-[2px] bg-white w-[16px] h-[16px] rounded-full shadow-sm transition-transform duration-300 ${
-                      globalSettings.equipment_discount_stackable ? 'translate-x-[18px]' : 'translate-x-0'
-                    }`} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="text-[11px] text-[#8B5B43] bg-white/80 border border-[#E8DEC8] px-2.5 py-1.5 rounded-xl font-medium leading-relaxed">
-                💡 <strong>計算方式</strong>：依「每台設備/每位」各自獨立計算時數（非全單時數總和累計）。例如 4 位預約 5 小時智能板，每台各享租滿 {globalSettings.equipment_discount_buy_hours} 小時享 {globalSettings.equipment_discount_free_hours} 小時免費，4 台合計折抵 4 小時租金{globalSettings.equipment_discount_stackable ? `；若預約 ${globalSettings.equipment_discount_buy_hours * 2} 小時則每台折抵 ${globalSettings.equipment_discount_free_hours * 2} 小時` : '（未開啟疊加時每台最多折抵一次）'}。
+              {/* Explanatory Note */}
+              <div className="text-[11px] text-[#8B5B43] bg-white/80 border border-[#E8DEC8] px-2.5 py-2 rounded-xl font-medium leading-relaxed">
+                💡 <strong>金額自動擇優計價</strong>：系統動態規劃為顧客計算最低應付時數。例如設定「買 3 送 1」與「買 8 送 4」，租借 11 小時時，因買 8 送 4 方案只需付 8 小時（比 9 小時更划算），系統將自動擇優套用收取 8 小時（直接折抵 3 小時）！每台設備獨立計算。
               </div>
             </div>
           )}
