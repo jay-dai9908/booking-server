@@ -714,7 +714,7 @@ function Booking() {
               const isToday = isSameDay(date, new Date());
               const dateStr = format(date, 'yyyy-MM-dd');
               const hasSessions = monthOpenDatesSet.has(dateStr);
-              const isPending = !isPast && isCurrentMonth && !hasSessions;
+              const isOpen = !isPast && isCurrentMonth && hasSessions;
               
               return (
                 <div key={i} className="flex justify-center items-center aspect-square">
@@ -729,15 +729,19 @@ function Booking() {
                     }`}
                   >
                     <span className="leading-none">{format(date, 'd')}</span>
-                    {isToday && (
-                      <span className={`text-[9px] font-bold leading-none mt-0.5 ${isSelected ? 'text-white/90' : 'text-[#8B5B43]'}`}>
-                        今天
+                    {isToday ? (
+                      <span className="flex items-center gap-0.5 mt-0.5">
+                        <span className={`text-[8px] font-bold leading-none ${isSelected ? 'text-white/90' : 'text-[#8B5B43]'}`}>
+                          今天
+                        </span>
+                        {isOpen && (
+                          <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-emerald-500'}`} />
+                        )}
                       </span>
-                    )}
-                    {isPending && !isSelected && !isToday && (
-                      <span className="text-[8px] font-medium leading-none text-red-400 mt-0.5">
-                        待開放
-                      </span>
+                    ) : (
+                      isOpen && (
+                        <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-emerald-500'} mt-1`} />
+                      )
                     )}
                   </button>
                 </div>
@@ -760,23 +764,11 @@ function Booking() {
           <div className="flex flex-col gap-4 mb-6">
             <div className="flex justify-between items-center gap-2">
               <h2 className="text-lg font-bold">2. 選擇時段 (可複選)</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleForceSync}
-                  disabled={isSyncing}
-                  className="flex items-center gap-1 text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] hover:bg-[#EDE6DD] px-3 py-1.5 rounded-full transition-all shadow-2xs"
-                  title="強制同步最新人數"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span>同步人數</span>
-                </button>
-                {selectedSessions.length > 0 && (
-                  <span className="text-sm bg-wood-bg text-wood-primary px-3 py-1.5 rounded-full font-bold">
-                    已選 {selectedSessions.length} 小時
-                  </span>
-                )}
-              </div>
+              {selectedSessions.length > 0 && (
+                <span className="text-sm bg-wood-bg text-wood-primary px-3 py-1.5 rounded-full font-bold">
+                  已選 {selectedSessions.length} 小時
+                </span>
+              )}
             </div>
             {sessions.length > 0 && allowUnlimited && (
               <div className="flex flex-col gap-2">
@@ -793,11 +785,6 @@ function Booking() {
                         <span className="text-[15px] font-bold text-[#4A3F35]">
                           {isUnlimited ? '✨ 不限時暢玩模式已開啟！' : '開啟不限時暢玩'}
                         </span>
-                        {!isUnlimited && (
-                          <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full">
-                            推薦首選
-                          </span>
-                        )}
                       </div>
                       <div className="text-xs text-[#7A7067] font-medium mt-0.5">
                         {isUnlimited 
