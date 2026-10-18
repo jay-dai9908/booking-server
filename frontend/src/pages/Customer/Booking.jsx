@@ -74,6 +74,9 @@ function Booking() {
     free_hours: 1,
     stackable: true
   });
+  const customerBuyHours = (equipmentDiscount.buy_hours && equipmentDiscount.free_hours && equipmentDiscount.buy_hours > equipmentDiscount.free_hours)
+    ? (equipmentDiscount.buy_hours - equipmentDiscount.free_hours)
+    : equipmentDiscount.buy_hours;
 
   // Calculate pricing based on selectedDate
   const isWeekend = [0, 6].includes(getDay(selectedDate));
@@ -460,7 +463,7 @@ function Booking() {
     }
 
     const discountSummary = (equipmentDiscount.enabled && discountHoursPerBoard > 0)
-      ? `（享「買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours}」：每台折抵 ${discountHoursPerBoard} 小時，${totalBoards} 台共折抵 ${totalDiscountHours} 小時）`
+      ? `（享「買${customerBuyHours}送${equipmentDiscount.free_hours}」：每台折抵 ${discountHoursPerBoard} 小時，${totalBoards} 台共折抵 ${totalDiscountHours} 小時）`
       : '';
 
     setConfirmModalData({
@@ -991,7 +994,7 @@ function Booking() {
                               <div className="flex items-center gap-2 text-[#8B5B43]">
                                 <span className="text-base">🎁</span>
                                 <span>
-                                  智能拼豆板時間優惠：<strong>買 {equipmentDiscount.buy_hours} 送 {equipmentDiscount.free_hours}</strong>
+                                  智能拼豆板時間優惠：<strong>買 {customerBuyHours} 送 {equipmentDiscount.free_hours}</strong>
                                   <span className="text-xs text-[#7A7067] font-normal ml-1 hidden sm:inline">
                                     （每台獨立計算：租滿 {equipmentDiscount.buy_hours} 小時享 {equipmentDiscount.free_hours} 小時免費{equipmentDiscount.stackable ? '，可累計折抵' : ''}）
                                   </span>
@@ -1152,7 +1155,7 @@ function Booking() {
                                 </span>
                                 {equipmentDiscount.enabled && discountHoursPerBoard > 0 && (
                                   <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                                    享買{equipmentDiscount.buy_hours}送{equipmentDiscount.free_hours}：每台實計 {chargeableRentalHours} 小時（各免收 {discountHoursPerBoard} 小時）
+                                    享買{customerBuyHours}送{equipmentDiscount.free_hours}：每台實計 {chargeableRentalHours} 小時（各免收 {discountHoursPerBoard} 小時）
                                   </span>
                                 )}
                               </div>
@@ -1201,7 +1204,7 @@ function Booking() {
                                 </span>
                                 {equipmentDiscount.enabled && discountHoursPerBoard > 0 && (
                                   <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                                    已套用買{equipmentDiscount.buy_hours}送{equipmentDiscount.free_hours}（每台折抵 {discountHoursPerBoard}hr，{totalBoards} 台共省 NT${totalSavedFee}）
+                                    已套用買{customerBuyHours}送{equipmentDiscount.free_hours}（每台折抵 {discountHoursPerBoard}hr，{totalBoards} 台共省 NT${totalSavedFee}）
                                   </span>
                                 )}
                               </div>
@@ -1278,7 +1281,7 @@ function Booking() {
                       <span className="font-bold text-[#8B5B43]">智能拼豆板加購小計 ({totalBoards}台 × {rentalHours}hr)：</span>
                       {equipmentDiscount.enabled && discountHoursPerBoard > 0 && (
                         <span className="block text-[11px] text-emerald-700 font-medium">
-                          享買{equipmentDiscount.buy_hours}送{equipmentDiscount.free_hours}，每台實計 {chargeableRentalHours}hr（共省 NT${totalSavedFee}）
+                          享買{customerBuyHours}送{equipmentDiscount.free_hours}，每台實計 {chargeableRentalHours}hr（共省 NT${totalSavedFee}）
                         </span>
                       )}
                     </div>
