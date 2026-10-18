@@ -132,7 +132,17 @@ export const getGlobalSetting = async (req, res) => {
 };
 
 export const updateGlobalSetting = async (req, res) => {
-  const { weekday_hourly_price, weekday_unlimited_price, weekend_hourly_price, weekend_unlimited_price } = req.body;
+  const { 
+    weekday_hourly_price, 
+    weekday_unlimited_price, 
+    weekend_hourly_price, 
+    weekend_unlimited_price,
+    show_price_cards,
+    show_announcement,
+    announcement_text,
+    show_line_button,
+    line_button_url
+  } = req.body;
 
   try {
     const dataToUpdate = {};
@@ -140,6 +150,11 @@ export const updateGlobalSetting = async (req, res) => {
     if (weekday_unlimited_price !== undefined) dataToUpdate.weekday_unlimited_price = parseInt(weekday_unlimited_price);
     if (weekend_hourly_price !== undefined) dataToUpdate.weekend_hourly_price = parseInt(weekend_hourly_price);
     if (weekend_unlimited_price !== undefined) dataToUpdate.weekend_unlimited_price = parseInt(weekend_unlimited_price);
+    if (show_price_cards !== undefined) dataToUpdate.show_price_cards = Boolean(show_price_cards);
+    if (show_announcement !== undefined) dataToUpdate.show_announcement = Boolean(show_announcement);
+    if (announcement_text !== undefined) dataToUpdate.announcement_text = announcement_text;
+    if (show_line_button !== undefined) dataToUpdate.show_line_button = Boolean(show_line_button);
+    if (line_button_url !== undefined) dataToUpdate.line_button_url = line_button_url;
 
     const setting = await prisma.globalSetting.upsert({
       where: { id: 1 },
@@ -149,7 +164,12 @@ export const updateGlobalSetting = async (req, res) => {
         weekday_hourly_price: dataToUpdate.weekday_hourly_price ?? 100,
         weekday_unlimited_price: dataToUpdate.weekday_unlimited_price ?? 550,
         weekend_hourly_price: dataToUpdate.weekend_hourly_price ?? 150,
-        weekend_unlimited_price: dataToUpdate.weekend_unlimited_price ?? 800
+        weekend_unlimited_price: dataToUpdate.weekend_unlimited_price ?? 800,
+        show_price_cards: dataToUpdate.show_price_cards ?? true,
+        show_announcement: dataToUpdate.show_announcement ?? true,
+        announcement_text: dataToUpdate.announcement_text ?? "✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠",
+        show_line_button: dataToUpdate.show_line_button ?? true,
+        line_button_url: dataToUpdate.line_button_url ?? "https://lin.ee/vsZhRW5"
       }
     });
 

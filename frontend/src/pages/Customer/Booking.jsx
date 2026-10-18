@@ -31,6 +31,11 @@ function Booking() {
     weekend_hourly: 120,
     weekend_unlimited: 400
   });
+  const [showPriceCards, setShowPriceCards] = useState(true);
+  const [showAnnouncement, setShowAnnouncement] = useState(true);
+  const [announcementText, setAnnouncementText] = useState('');
+  const [showLineButton, setShowLineButton] = useState(true);
+  const [lineButtonUrl, setLineButtonUrl] = useState('');
   const [dailyPricing, setDailyPricing] = useState({
     hourly: null,
     unlimited: null
@@ -108,6 +113,11 @@ function Booking() {
             weekend_hourly: res.data.weekend_hourly_price || 120,
             weekend_unlimited: res.data.weekend_unlimited_price || 400
           });
+          setShowPriceCards(res.data.show_price_cards !== false);
+          setShowAnnouncement(res.data.show_announcement !== false);
+          setAnnouncementText(res.data.announcement_text || '');
+          setShowLineButton(res.data.show_line_button !== false);
+          setLineButtonUrl(res.data.line_button_url || '');
         }
       } catch (err) {
         console.error('Failed to fetch global pricing:', err);
@@ -524,41 +534,58 @@ function Booking() {
   return (
     <div className="min-h-screen bg-wood-bg text-wood-textMain pb-24 font-sans transition-colors duration-300">
       {/* Top Announcement Banner */}
-      <div className="bg-[#FAF4EB] border-b border-[#E8DEC8] px-4 py-2.5 text-xs sm:text-sm text-[#8B5B43] font-medium text-center flex items-center justify-center gap-2">
-        <span className="shrink-0 font-bold">🔔 即時公告：</span>
-        <span>✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠</span>
-      </div>
+      {showAnnouncement && (
+        <div className="bg-[#FAF4EB] border-b border-[#E8DEC8] px-4 py-2.5 text-xs text-[#8B5B43] font-medium text-center flex items-center justify-center gap-2">
+          <span className="shrink-0 font-bold flex items-center gap-1">🔔 系統公告：</span>
+          <span className="line-clamp-2 sm:line-clamp-none">
+            {announcementText || '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠'}
+          </span>
+        </div>
+      )}
 
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-wood-bg/90 backdrop-blur-md border-b border-wood-border px-4 py-3.5 mb-6">
-        <div className="max-w-3xl mx-auto flex justify-between items-center gap-3">
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="拾光製所 Logo" className="w-8 h-8 object-cover rounded-full" />
-            <h1 className="text-lg sm:text-xl font-bold tracking-wide">拾光製所 拼豆預約系統</h1>
+      <header className="sticky top-0 z-40 bg-wood-bg/95 backdrop-blur-md border-b border-wood-border px-3 sm:px-4 py-3 mb-6 shadow-xs">
+        <div className="max-w-3xl mx-auto flex justify-between items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <img 
+              src="/logo.png" 
+              alt="拾光製所 Logo" 
+              className="w-9 h-9 sm:w-10 sm:h-10 object-cover rounded-full shrink-0 shadow-2xs border border-[#E8DEC8]" 
+            />
+            <div className="min-w-0 flex flex-col justify-center">
+              <h1 className="text-sm sm:text-lg font-bold tracking-tight text-[#2C241E] whitespace-nowrap leading-tight">
+                拾光製所
+              </h1>
+              <span className="text-[10px] sm:text-xs text-[#8C8279] font-medium whitespace-nowrap leading-tight block">
+                拼豆時段預約系統
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             {userInfo?.name && (
-              <span className="hidden sm:inline-flex items-center gap-1 text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] border border-[#E8DEC8] px-3 py-1.5 rounded-full">
+              <span className="hidden md:inline-flex items-center gap-1 text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] border border-[#E8DEC8] px-2.5 py-1 rounded-full">
                 👤 {userInfo.name}
               </span>
             )}
-            <a 
-              href={import.meta.env.VITE_LINE_OA_URL || 'https://lin.ee/vsZhRW5'} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-xs sm:text-sm font-semibold text-[#06C755] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1"
-            >
-              💬 官方 LINE
-            </a>
+            {showLineButton && (
+              <a 
+                href={lineButtonUrl || import.meta.env.VITE_LINE_OA_URL || 'https://lin.ee/vsZhRW5'} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-xs font-bold text-[#06C755] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 sm:px-3 py-1.5 rounded-full transition-colors flex items-center gap-1 shrink-0 shadow-2xs"
+              >
+                💬 官方 LINE
+              </a>
+            )}
             <button 
               onClick={() => navigate('/history')}
-              className="whitespace-nowrap text-xs sm:text-sm font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-3 sm:px-4 py-1.5 rounded-full transition-all duration-200 ease-in-out"
+              className="whitespace-nowrap text-xs font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-2.5 sm:px-3.5 py-1.5 rounded-full transition-all duration-200 ease-in-out shrink-0 shadow-2xs"
             >
               預約紀錄
             </button>
             <button 
               onClick={() => { api.post('/auth/logout').then(() => window.location.href = '/') }}
-              className="whitespace-nowrap text-xs sm:text-sm font-medium text-[#8C8279] bg-transparent hover:bg-[#F4EFE6] hover:text-[#4A3F35] px-2.5 py-1.5 rounded-full transition-all duration-200 ease-in-out"
+              className="whitespace-nowrap text-xs font-medium text-[#8C8279] bg-transparent hover:bg-[#F4EFE6] hover:text-[#4A3F35] px-2 py-1.5 rounded-full transition-all duration-200 ease-in-out shrink-0"
             >
               登出
             </button>
@@ -568,41 +595,43 @@ function Booking() {
 
       <main className="max-w-3xl mx-auto px-4 space-y-6">
         {/* Rates Quickview Dual Cards */}
-        <div className="space-y-2">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            <div className="bg-wood-card p-4 rounded-2xl border border-wood-border shadow-warm">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
-                  ☕ 平日入場 (週一~週五)
-                </span>
-                <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded-full">
-                  平日特惠
-                </span>
+        {showPriceCards && (
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div className="bg-wood-card p-4 rounded-2xl border border-wood-border shadow-warm">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
+                    ☕ 平日入場 (週一~週五)
+                  </span>
+                  <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded-full">
+                    平日特惠
+                  </span>
+                </div>
+                <p className="font-semibold text-sm text-[#8B5B43]">
+                  每小時 NT$ {globalPricing.weekday_hourly} ｜ 不限時暢玩封頂 NT$ {globalPricing.weekday_unlimited} / 人
+                </p>
               </div>
-              <p className="font-semibold text-sm text-[#8B5B43]">
-                每小時 NT$ {globalPricing.weekday_hourly} ｜ 不限時暢玩封頂 NT$ {globalPricing.weekday_unlimited} / 人
-              </p>
-            </div>
 
-            <div className="bg-wood-card p-4 rounded-2xl border border-wood-border shadow-warm">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
-                  🌟 假日入場 (週六/週日)
-                </span>
-                <span className="text-xs bg-[#EDE6DD] text-[#4A3F35] font-bold px-2 py-0.5 rounded-full">
-                  週末假日
-                </span>
+              <div className="bg-wood-card p-4 rounded-2xl border border-wood-border shadow-warm">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
+                    🌟 假日入場 (週六/週日)
+                  </span>
+                  <span className="text-xs bg-[#EDE6DD] text-[#4A3F35] font-bold px-2 py-0.5 rounded-full">
+                    週末假日
+                  </span>
+                </div>
+                <p className="font-semibold text-sm text-[#8B5B43]">
+                  每小時 NT$ {globalPricing.weekend_hourly} ｜ 不限時暢玩封頂 NT$ {globalPricing.weekend_unlimited} / 人
+                </p>
               </div>
-              <p className="font-semibold text-sm text-[#8B5B43]">
-                每小時 NT$ {globalPricing.weekend_hourly} ｜ 不限時暢玩封頂 NT$ {globalPricing.weekend_unlimited} / 人
-              </p>
+            </div>
+            <div className="text-[11px] text-[#8C8279] px-1 flex items-center gap-1.5">
+              <span>💡</span>
+              <span>費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品</span>
             </div>
           </div>
-          <div className="text-[11px] text-[#8C8279] px-1 flex items-center gap-1.5">
-            <span>💡</span>
-            <span>費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品</span>
-          </div>
-        </div>
+        )}
 
         {/* Date Selector */}
         <section className="bg-wood-card p-6 rounded-2xl shadow-warm">

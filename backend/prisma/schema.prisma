@@ -78,6 +78,11 @@ model GlobalSetting {
   equipment_discount_buy_hours Int     @default(3)
   equipment_discount_free_hours Int    @default(1)
   equipment_discount_stackable Boolean @default(true)
+  show_price_cards            Boolean  @default(true)
+  show_announcement           Boolean  @default(true)
+  announcement_text           String?  @default("✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠")
+  show_line_button            Boolean  @default(true)
+  line_button_url             String?  @default("https://lin.ee/vsZhRW5")
 }
 
 model BannedIP {
