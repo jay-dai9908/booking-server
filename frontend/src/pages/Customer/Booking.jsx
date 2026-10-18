@@ -1632,7 +1632,7 @@ function Booking() {
                 <Check className="w-8 h-8 stroke-[2.5]" />
               </div>
               <p className="text-xs font-bold text-emerald-700 uppercase tracking-widest mb-1">RESERVATION CONFIRMED</p>
-              <h2 className="text-2xl font-black text-[#2C241E] mb-4">手作預約成功！</h2>
+              <h2 className="text-2xl font-black text-[#2C241E] mb-4">預約成功！</h2>
 
               {/* Short Ref Box */}
               <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 mb-5 flex items-center justify-between">
