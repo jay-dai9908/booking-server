@@ -6,6 +6,52 @@ import { useNavigate } from 'react-router-dom';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
 import { formatBookingRef, getGoogleCalendarUrl } from '../../components/CustomerReservationDetailsModal';
 
+const GLOBAL_SETTINGS_CACHE_KEY = 'shiguang_booking_global_settings_cache';
+
+const getInitialGlobalSettings = () => {
+  try {
+    const raw = localStorage.getItem(GLOBAL_SETTINGS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          pricing: {
+            weekday_hourly: Number(parsed.weekday_hourly) || 100,
+            weekday_unlimited: Number(parsed.weekday_unlimited) || 600,
+            weekend_hourly: Number(parsed.weekend_hourly) || 150,
+            weekend_unlimited: Number(parsed.weekend_unlimited) || 800
+          },
+          showPriceCards: parsed.showPriceCards !== false,
+          priceNoticeText: parsed.priceNoticeText ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品',
+          showAnnouncement: parsed.showAnnouncement !== false,
+          announcementText: parsed.announcementText ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠',
+          showLineButton: parsed.showLineButton !== false,
+          lineButtonUrl: parsed.lineButtonUrl || 'https://lin.ee/vsZhRW5',
+          isLoaded: true
+        };
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return {
+    pricing: {
+      weekday_hourly: 100,
+      weekday_unlimited: 600,
+      weekend_hourly: 150,
+      weekend_unlimited: 800
+    },
+    showPriceCards: true,
+    priceNoticeText: '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品',
+    showAnnouncement: true,
+    announcementText: '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠',
+    showLineButton: true,
+    lineButtonUrl: 'https://lin.ee/vsZhRW5',
+    isLoaded: false
+  };
+};
+
 function Booking() {
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -24,20 +70,17 @@ function Booking() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
 
-  // Global & Daily Pricing states
-  const [globalPricing, setGlobalPricing] = useState({
-    weekday_hourly: 100,
-    weekday_unlimited: 350,
-    weekend_hourly: 120,
-    weekend_unlimited: 400
-  });
-  const [showPriceCards, setShowPriceCards] = useState(true);
-  const [priceNoticeText, setPriceNoticeText] = useState('');
-  const [showAnnouncement, setShowAnnouncement] = useState(true);
-  const [announcementText, setAnnouncementText] = useState('');
+  // Global & Daily Pricing states (initialized from cache/DB defaults to eliminate flicker)
+  const initialSettings = useMemo(() => getInitialGlobalSettings(), []);
+  const [globalPricing, setGlobalPricing] = useState(initialSettings.pricing);
+  const [showPriceCards, setShowPriceCards] = useState(initialSettings.showPriceCards);
+  const [priceNoticeText, setPriceNoticeText] = useState(initialSettings.priceNoticeText);
+  const [showAnnouncement, setShowAnnouncement] = useState(initialSettings.showAnnouncement);
+  const [announcementText, setAnnouncementText] = useState(initialSettings.announcementText);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
-  const [showLineButton, setShowLineButton] = useState(true);
-  const [lineButtonUrl, setLineButtonUrl] = useState('');
+  const [showLineButton, setShowLineButton] = useState(initialSettings.showLineButton);
+  const [lineButtonUrl, setLineButtonUrl] = useState(initialSettings.lineButtonUrl);
+  const [isGlobalLoaded, setIsGlobalLoaded] = useState(initialSettings.isLoaded);
   const [dailyPricing, setDailyPricing] = useState({
     hourly: null,
     unlimited: null
@@ -82,11 +125,11 @@ function Booking() {
   const isWeekend = [0, 6].includes(getDay(selectedDate));
   const effectiveHourlyPrice = (dailyPricing.hourly !== null && dailyPricing.hourly !== undefined && dailyPricing.hourly !== '')
     ? Number(dailyPricing.hourly)
-    : (isWeekend ? Number(globalPricing.weekend_hourly || 120) : Number(globalPricing.weekday_hourly || 100));
+    : (isWeekend ? Number(globalPricing.weekend_hourly || 150) : Number(globalPricing.weekday_hourly || 100));
 
   const effectiveUnlimitedPrice = (dailyPricing.unlimited !== null && dailyPricing.unlimited !== undefined && dailyPricing.unlimited !== '')
     ? Number(dailyPricing.unlimited)
-    : (isWeekend ? Number(globalPricing.weekend_unlimited || 400) : Number(globalPricing.weekday_unlimited || 350));
+    : (isWeekend ? Number(globalPricing.weekend_unlimited || 800) : Number(globalPricing.weekday_unlimited || 600));
 
   // Calculate contiguous sessions
   const sortedSelectedSessions = useMemo(() => {
@@ -146,18 +189,44 @@ function Booking() {
       try {
         const res = await api.get('/daily-settings/global');
         if (res.data) {
-          setGlobalPricing({
-            weekday_hourly: res.data.weekday_hourly_price || 100,
-            weekday_unlimited: res.data.weekday_unlimited_price || 350,
-            weekend_hourly: res.data.weekend_hourly_price || 120,
-            weekend_unlimited: res.data.weekend_unlimited_price || 400
-          });
-          setShowPriceCards(res.data.show_price_cards !== false);
-          setPriceNoticeText(res.data.price_notice_text || '');
-          setShowAnnouncement(res.data.show_announcement !== false);
-          setAnnouncementText(res.data.announcement_text || '');
-          setShowLineButton(res.data.show_line_button !== false);
-          setLineButtonUrl(res.data.line_button_url || '');
+          const pricing = {
+            weekday_hourly: Number(res.data.weekday_hourly_price) || 100,
+            weekday_unlimited: Number(res.data.weekday_unlimited_price) || 600,
+            weekend_hourly: Number(res.data.weekend_hourly_price) || 150,
+            weekend_unlimited: Number(res.data.weekend_unlimited_price) || 800
+          };
+          const cardsVisible = res.data.show_price_cards !== false;
+          const notice = res.data.price_notice_text ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品';
+          const announceVisible = res.data.show_announcement !== false;
+          const announce = res.data.announcement_text ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
+          const lineVisible = res.data.show_line_button !== false;
+          const lineUrl = res.data.line_button_url || 'https://lin.ee/vsZhRW5';
+
+          setGlobalPricing(pricing);
+          setShowPriceCards(cardsVisible);
+          setPriceNoticeText(notice);
+          setShowAnnouncement(announceVisible);
+          setAnnouncementText(announce);
+          setShowLineButton(lineVisible);
+          setLineButtonUrl(lineUrl);
+          setIsGlobalLoaded(true);
+
+          try {
+            localStorage.setItem(GLOBAL_SETTINGS_CACHE_KEY, JSON.stringify({
+              weekday_hourly: pricing.weekday_hourly,
+              weekday_unlimited: pricing.weekday_unlimited,
+              weekend_hourly: pricing.weekend_hourly,
+              weekend_unlimited: pricing.weekend_unlimited,
+              showPriceCards: cardsVisible,
+              priceNoticeText: notice,
+              showAnnouncement: announceVisible,
+              announcementText: announce,
+              showLineButton: lineVisible,
+              lineButtonUrl: lineUrl
+            }));
+          } catch (e) {
+            // ignore
+          }
         }
       } catch (err) {
         console.error('Failed to fetch global pricing:', err);

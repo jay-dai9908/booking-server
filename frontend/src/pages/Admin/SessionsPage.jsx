@@ -114,6 +114,9 @@ export default function SessionsPage() {
         show_line_button: showLineButton,
         line_button_url: lineButtonUrl
       });
+      try {
+        localStorage.removeItem('shiguang_booking_global_settings_cache');
+      } catch (e) {}
       alert('顧客端首頁顯示設定已成功更新！');
     } catch (err) {
       console.error(err);
@@ -171,6 +174,9 @@ export default function SessionsPage() {
         weekend_hourly_price: globalWeekendHourly || null,
         weekend_unlimited_price: globalWeekendUnlimited || null
       });
+      try {
+        localStorage.removeItem('shiguang_booking_global_settings_cache');
+      } catch (e) {}
       alert('全店預設價格更新成功！');
     } catch (err) {
       alert('更新失敗');
