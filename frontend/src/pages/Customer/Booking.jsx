@@ -34,6 +34,7 @@ function Booking() {
   const [showPriceCards, setShowPriceCards] = useState(true);
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const [announcementText, setAnnouncementText] = useState('');
+  const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [showLineButton, setShowLineButton] = useState(true);
   const [lineButtonUrl, setLineButtonUrl] = useState('');
   const [dailyPricing, setDailyPricing] = useState({
@@ -568,11 +569,26 @@ function Booking() {
     <div className="min-h-screen bg-wood-bg text-wood-textMain pb-24 font-sans transition-colors duration-300">
       {/* Top Announcement Banner */}
       {showAnnouncement && (
-        <div className="bg-[#FAF4EB] border-b border-[#E8DEC8] px-4 py-2.5 text-xs text-[#8B5B43] font-medium text-center flex items-center justify-center gap-2">
-          <span className="shrink-0 font-bold flex items-center gap-1">🔔 系統公告：</span>
-          <span className="line-clamp-2 sm:line-clamp-none">
-            {announcementText || '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠'}
-          </span>
+        <div 
+          onClick={() => setShowAnnouncementModal(true)}
+          className="bg-[#FAF4EB] hover:bg-[#F3E9DA] active:bg-[#EFE3D2] border-b border-[#E8DEC8] px-3 sm:px-4 py-2 text-xs text-[#8B5B43] font-medium transition-colors cursor-pointer select-none"
+          title="點擊查看完整公告"
+        >
+          <div className="max-w-3xl mx-auto flex items-center justify-between gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <span className="shrink-0 font-bold flex items-center gap-1 text-[#6D432E]">
+                <span>🔔</span>
+                <span>系統公告：</span>
+              </span>
+              <span className="truncate text-left text-[#7A5038]">
+                {announcementText || '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠'}
+              </span>
+            </div>
+            <span className="shrink-0 text-[11px] font-bold text-[#8B5B43] bg-[#F0E4D3] hover:bg-[#E5D7C2] px-2 py-0.5 rounded-full flex items-center gap-0.5 transition-colors">
+              <span>詳情</span>
+              <span className="text-[12px]">›</span>
+            </span>
+          </div>
         </div>
       )}
 
@@ -1612,6 +1628,46 @@ function Booking() {
           </div>
         );
       })()}
+
+      {/* Announcement Modal */}
+      {showAnnouncementModal && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/40 backdrop-blur-[4px] animate-fade-in" 
+            onClick={() => setShowAnnouncementModal(false)} 
+          />
+          <div className="bg-white rounded-[24px] shadow-[0_16px_32px_rgba(139,91,67,0.15)] border border-[#E8DEC8] w-full max-w-md overflow-hidden relative z-10 animate-zoom-in p-6">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F0EBE1] mb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🔔</span>
+                <h3 className="text-base sm:text-lg font-bold text-[#3E332B]">系統公告</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAnnouncementModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors text-base"
+                aria-label="關閉"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="bg-[#FAF7F2] border border-[#E8DEC8]/80 rounded-2xl p-4 sm:p-5 text-sm sm:text-base text-[#5C4D42] leading-relaxed whitespace-pre-wrap break-words max-h-[60vh] overflow-y-auto">
+              {announcementText || '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠'}
+            </div>
+
+            <div className="mt-5">
+              <button
+                type="button"
+                onClick={() => setShowAnnouncementModal(false)}
+                className="w-full py-3 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl shadow-sm transition-colors text-sm sm:text-base"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { height: 6px; }
