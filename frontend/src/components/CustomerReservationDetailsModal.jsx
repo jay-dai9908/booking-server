@@ -33,12 +33,12 @@ export const getGoogleCalendarUrl = (res) => {
     const endUTC = toGCalISO(endObj);
 
     const shortRef = formatBookingRef(res.booking_ref);
-    const text = encodeURIComponent('拾光製所 手作拼豆預約');
+    const text = encodeURIComponent('拾光製所 拼豆預約');
     const details = encodeURIComponent(
       `預約編號：${shortRef}\n人數：${res.pax}人\n預估總額：NT$ ${res.total_amount || 0}\n\n期待您的到來！預約現場保留 15 分鐘。`
     );
     const location = encodeURIComponent('拾光製所');
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startUTC}/${endUTC}&details=${details}&location=${location}`;
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startUTC}/${endUTC}&details=${details}&location=${location}&openExternalBrowser=1`;
   } catch (e) {
     return null;
   }
@@ -261,6 +261,12 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                 href={gcalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => {
+                  if (typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)) {
+                    e.preventDefault();
+                    window.location.href = gcalUrl;
+                  }
+                }}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors"
               >
                 <CalendarPlus className="w-4 h-4 text-[#8B5B43]" />

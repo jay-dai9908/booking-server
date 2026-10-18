@@ -1690,6 +1690,12 @@ function Booking() {
                     href={gcalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={(e) => {
+                      if (typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)) {
+                        e.preventDefault();
+                        window.location.href = gcalUrl;
+                      }
+                    }}
                     className="w-full py-3 px-4 rounded-xl font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors flex items-center justify-center gap-2"
                   >
                     <CalendarPlus className="w-4 h-4 text-[#8B5B43]" />
