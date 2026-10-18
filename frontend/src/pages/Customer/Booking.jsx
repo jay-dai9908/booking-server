@@ -120,6 +120,7 @@ function Booking() {
     tier2_buy_hours: 8,
     tier2_free_hours: 4
   });
+  const customerBuyHours = equipmentDiscount.buy_hours;
 
   // Calculate pricing based on selectedDate
   const isWeekend = [0, 6].includes(getDay(selectedDate));
@@ -1253,7 +1254,7 @@ function Booking() {
                                 </span>
                                 {equipmentDiscount.enabled && discountHoursPerBoard > 0 && (
                                   <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                                    享買{customerBuyHours}送{equipmentDiscount.free_hours}：每台實計 {chargeableRentalHours} 小時（各免收 {discountHoursPerBoard} 小時）
+                                    享時數優惠{equipmentDiscount.tier2_enabled ? '擇優計價' : `（買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours}）`}：每台實計 {chargeableRentalHours} 小時（各免收 {discountHoursPerBoard} 小時）
                                   </span>
                                 )}
                               </div>
@@ -1302,7 +1303,7 @@ function Booking() {
                                 </span>
                                 {equipmentDiscount.enabled && discountHoursPerBoard > 0 && (
                                   <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                                    已套用買{customerBuyHours}送{equipmentDiscount.free_hours}（每台折抵 {discountHoursPerBoard}hr，{totalBoards} 台共省 NT${totalSavedFee}）
+                                    已套用時數優惠{equipmentDiscount.tier2_enabled ? '擇優折抵' : `（買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours}）`}（每台折抵 {discountHoursPerBoard}hr，{totalBoards} 台共省 NT${totalSavedFee}）
                                   </span>
                                 )}
                               </div>
