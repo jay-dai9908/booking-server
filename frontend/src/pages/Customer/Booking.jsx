@@ -683,19 +683,19 @@ function Booking() {
       )}
 
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-wood-bg/95 backdrop-blur-md border-b border-wood-border px-3 sm:px-4 py-3 mb-6 shadow-xs">
+      <header className="sticky top-0 z-40 bg-wood-bg/95 backdrop-blur-md border-b border-wood-border px-3 sm:px-4 py-3 sm:py-3.5 mb-6 shadow-xs">
         <div className="max-w-3xl mx-auto flex justify-between items-center gap-2 sm:gap-4">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
             <img 
               src="/logo.png" 
               alt="拾光製所 Logo" 
-              className="w-9 h-9 sm:w-10 sm:h-10 object-cover rounded-full shrink-0 shadow-2xs border border-[#E8DEC8]" 
+              className="w-12 h-12 sm:w-14 sm:h-14 object-cover rounded-full shrink-0 shadow-xs border border-[#E8DEC8]" 
             />
             <div className="min-w-0 flex flex-col justify-center">
-              <h1 className="text-sm sm:text-lg font-bold tracking-tight text-[#2C241E] whitespace-nowrap leading-tight">
+              <h1 className="text-lg sm:text-2xl font-black tracking-tight text-[#2C241E] whitespace-nowrap leading-tight">
                 拾光製所
               </h1>
-              <span className="text-[10px] sm:text-xs text-[#8C8279] font-medium whitespace-nowrap leading-tight block">
+              <span className="text-[11px] sm:text-xs text-[#8C8279] font-medium whitespace-nowrap leading-tight block mt-0.5">
                 拼豆時段預約系統
               </span>
             </div>
