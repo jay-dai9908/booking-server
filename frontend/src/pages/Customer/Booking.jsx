@@ -16,10 +16,10 @@ const getInitialGlobalSettings = () => {
       if (parsed && typeof parsed === 'object') {
         return {
           pricing: {
-            weekday_hourly: Number(parsed.weekday_hourly) || 100,
-            weekday_unlimited: Number(parsed.weekday_unlimited) || 600,
-            weekend_hourly: Number(parsed.weekend_hourly) || 150,
-            weekend_unlimited: Number(parsed.weekend_unlimited) || 800
+            weekday_hourly: Number(parsed.weekday_hourly) || 150,
+            weekday_unlimited: Number(parsed.weekday_unlimited) || 750,
+            weekend_hourly: Number(parsed.weekend_hourly) || 180,
+            weekend_unlimited: Number(parsed.weekend_unlimited) || 1100
           },
           showPriceCards: parsed.showPriceCards !== false,
           priceNoticeText: parsed.priceNoticeText ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品',
@@ -37,10 +37,10 @@ const getInitialGlobalSettings = () => {
 
   return {
     pricing: {
-      weekday_hourly: 100,
-      weekday_unlimited: 600,
-      weekend_hourly: 150,
-      weekend_unlimited: 800
+      weekday_hourly: 150,
+      weekday_unlimited: 750,
+      weekend_hourly: 180,
+      weekend_unlimited: 1100
     },
     showPriceCards: true,
     priceNoticeText: '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品',
@@ -125,11 +125,11 @@ function Booking() {
   const isWeekend = [0, 6].includes(getDay(selectedDate));
   const effectiveHourlyPrice = (dailyPricing.hourly !== null && dailyPricing.hourly !== undefined && dailyPricing.hourly !== '')
     ? Number(dailyPricing.hourly)
-    : (isWeekend ? Number(globalPricing.weekend_hourly || 150) : Number(globalPricing.weekday_hourly || 100));
+    : (isWeekend ? Number(globalPricing.weekend_hourly || 180) : Number(globalPricing.weekday_hourly || 150));
 
   const effectiveUnlimitedPrice = (dailyPricing.unlimited !== null && dailyPricing.unlimited !== undefined && dailyPricing.unlimited !== '')
     ? Number(dailyPricing.unlimited)
-    : (isWeekend ? Number(globalPricing.weekend_unlimited || 800) : Number(globalPricing.weekday_unlimited || 600));
+    : (isWeekend ? Number(globalPricing.weekend_unlimited || 1100) : Number(globalPricing.weekday_unlimited || 750));
 
   // Calculate contiguous sessions
   const sortedSelectedSessions = useMemo(() => {
@@ -190,10 +190,10 @@ function Booking() {
         const res = await api.get('/daily-settings/global');
         if (res.data) {
           const pricing = {
-            weekday_hourly: Number(res.data.weekday_hourly_price) || 100,
-            weekday_unlimited: Number(res.data.weekday_unlimited_price) || 600,
-            weekend_hourly: Number(res.data.weekend_hourly_price) || 150,
-            weekend_unlimited: Number(res.data.weekend_unlimited_price) || 800
+            weekday_hourly: Number(res.data.weekday_hourly_price) || 150,
+            weekday_unlimited: Number(res.data.weekday_unlimited_price) || 750,
+            weekend_hourly: Number(res.data.weekend_hourly_price) || 180,
+            weekend_unlimited: Number(res.data.weekend_unlimited_price) || 1100
           };
           const cardsVisible = res.data.show_price_cards !== false;
           const notice = res.data.price_notice_text ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品';
@@ -404,14 +404,24 @@ function Booking() {
     
     if (isUnlimited) {
       setSelectedSessions(prev => {
-        const sorted = [...prev].sort((a, b) => a.start_time.localeCompare(b.start_time));
-        const currentStart = sorted[0];
-        // If clicking the current start session again, unselect (clear)
-        if (currentStart && currentStart.id === session.id) {
-          return [];
+        // If nothing is selected yet, clicking this session selects it and all subsequent sessions to end of day
+        if (prev.length === 0) {
+          return applyUnlimitedMacro(session);
         }
-        // Otherwise, this clicked session is the expected arrival time: auto-check this session and all subsequent ones
-        return applyUnlimitedMacro(session);
+
+        const isAlreadySelected = !!prev.find(s => s.id === session.id);
+        if (isAlreadySelected) {
+          // Allow customer to uncheck sessions (e.g. leaving earlier than closing, or adjusting times)
+          return prev.filter(s => s.id !== session.id);
+        } else {
+          // If customer clicks an unselected session earlier than current start, extend from new arrival time
+          const sorted = [...prev].sort((a, b) => a.start_time.localeCompare(b.start_time));
+          const currentStart = sorted[0];
+          if (currentStart && session.start_time < currentStart.start_time) {
+            return applyUnlimitedMacro(session);
+          }
+          return [...prev, session];
+        }
       });
       return;
     }
@@ -504,7 +514,8 @@ function Booking() {
 
   // Seating and Grand Total Pricing calculations
   const rawSeatingFee = pax * effectiveHourlyPrice * selectedSessions.length;
-  const cappedSeatingFee = (allowUnlimited && isUnlimited)
+  const isCapped = allowUnlimited && (isUnlimited || (effectiveUnlimitedPrice > 0 && rawSeatingFee >= pax * effectiveUnlimitedPrice));
+  const cappedSeatingFee = isCapped
     ? Math.min(rawSeatingFee, pax * effectiveUnlimitedPrice)
     : rawSeatingFee;
   const seatingPassDiscount = Math.max(0, rawSeatingFee - cappedSeatingFee);
@@ -538,12 +549,14 @@ function Booking() {
       ? `（享「${promoDesc}」：每台折抵 ${discountHoursPerBoard} 小時，${totalBoards} 台共折抵 ${totalDiscountHours} 小時）`
       : '';
 
+    const effectiveIsUnlimited = isUnlimited || isCapped;
+
     setConfirmModalData({
       date: format(selectedDate, 'yyyy-MM-dd'),
       timeRange: timeRangeStr,
       pax: pax,
       sortedSessions,
-      isUnlimited,
+      isUnlimited: effectiveIsUnlimited,
       equipments: activeEquipments,
       totalEquipmentFee,
       estimatedGrandTotal,
@@ -878,8 +891,8 @@ function Booking() {
                   {isUnlimited
                     ? selectedSessions.length === 0
                       ? '👉 請點選您的「預計到店時段」，系統將為您自動勾選後續所有時段！'
-                      : `* 已自 ${[...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time))[0]?.start_time} 自動勾選至當日營業結束（可點擊其他時段隨時更改到店時間）`
-                    : '* 請根據實際預計來店時間進行勾選'}
+                      : `* 已自 ${[...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time))[0]?.start_time} 自動勾選（可點擊任一時段微調提早離場或更改到店）`
+                    : '* 請根據實際預計來店時間進行勾選（滿時數系統將自動套用封頂優惠）'}
                 </span>
               </div>
             )}

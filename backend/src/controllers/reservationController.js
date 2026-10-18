@@ -118,6 +118,7 @@ export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, i
 
   let hourly_price = dailySetting?.hourly_price;
   let unlimited_price = dailySetting?.unlimited_price;
+  const allow_unlimited = dailySetting?.allow_unlimited ?? true;
 
   // If daily setting doesn't have prices, fallback to GlobalSetting
   if (hourly_price == null || unlimited_price == null) {
@@ -126,12 +127,13 @@ export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, i
     });
     
     // Determine if sessionDate is weekend (0 = Sunday, 6 = Saturday)
-    const dayOfWeek = new Date(sessionDate).getDay();
+    const dateObj = new Date(sessionDate);
+    const dayOfWeek = isNaN(dateObj.getTime()) ? 0 : dateObj.getUTCDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
     if (!globalSetting) {
-      hourly_price = hourly_price ?? (isWeekend ? 150 : 100);
-      unlimited_price = unlimited_price ?? (isWeekend ? 800 : 550);
+      hourly_price = hourly_price ?? (isWeekend ? 180 : 150);
+      unlimited_price = unlimited_price ?? (isWeekend ? 1100 : 750);
     } else {
       hourly_price = hourly_price ?? (isWeekend ? globalSetting.weekend_hourly_price : globalSetting.weekday_hourly_price);
       unlimited_price = unlimited_price ?? (isWeekend ? globalSetting.weekend_unlimited_price : globalSetting.weekday_unlimited_price);
@@ -141,7 +143,10 @@ export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, i
   const calculatedHourlyTotal = pax * hourly_price * sessionCount;
   const calculatedUnlimitedTotal = pax * unlimited_price;
 
-  return Math.min(calculatedHourlyTotal, calculatedUnlimitedTotal);
+  if (allow_unlimited) {
+    return Math.min(calculatedHourlyTotal, calculatedUnlimitedTotal);
+  }
+  return calculatedHourlyTotal;
 };
 
 export const createReservation = async (req, res) => {
