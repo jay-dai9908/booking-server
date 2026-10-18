@@ -370,27 +370,18 @@ function Booking() {
     return now >= sessionTime;
   };
 
-  const applyUnlimitedMacro = (startSession, currentSelected) => {
-    if (!startSession) return currentSelected;
+  const applyUnlimitedMacro = (startSession) => {
+    if (!startSession) return [];
     
     const startIndex = sessions.findIndex(s => s.id === startSession.id);
-    if (startIndex === -1) return currentSelected;
+    if (startIndex === -1) return [];
 
-    let newSelected = [...currentSelected];
-    if (!newSelected.find(s => s.id === startSession.id)) {
-      newSelected.push(startSession);
-    }
-
-    let currentIndex = startIndex + 1;
-    
-    while (currentIndex < sessions.length) {
-      const nextSession = sessions[currentIndex];
-      if (nextSession.remaining_capacity > 0 && !isSessionPast(nextSession)) {
-        if (!newSelected.find(s => s.id === nextSession.id)) {
-          newSelected.push(nextSession);
-        }
+    const newSelected = [];
+    for (let i = startIndex; i < sessions.length; i++) {
+      const s = sessions[i];
+      if (s.remaining_capacity > 0 && !isSessionPast(s)) {
+        newSelected.push(s);
       }
-      currentIndex++;
     }
     return newSelected;
   };
@@ -399,30 +390,38 @@ function Booking() {
     setIsUnlimited(true);
     setSelectedSessions(prev => {
       if (prev.length > 0) {
+        // If sessions are already selected, use the earliest selected session as arrival time
         const sortedSelected = [...prev].sort((a, b) => a.start_time.localeCompare(b.start_time));
-        return applyUnlimitedMacro(sortedSelected[0], []);
-      } else {
-        const firstAvailable = sessions.find(s => s.remaining_capacity > 0 && !isSessionPast(s));
-        if (firstAvailable) {
-          return applyUnlimitedMacro(firstAvailable, []);
-        }
+        return applyUnlimitedMacro(sortedSelected[0]);
       }
-      return prev;
+      // If no session selected yet, keep empty and let the customer click their expected arrival time
+      return [];
     });
   };
 
   const toggleSession = (session) => {
     if (session.remaining_capacity === 0 || isSessionPast(session)) return;
     
+    if (isUnlimited) {
+      setSelectedSessions(prev => {
+        const sorted = [...prev].sort((a, b) => a.start_time.localeCompare(b.start_time));
+        const currentStart = sorted[0];
+        // If clicking the current start session again, unselect (clear)
+        if (currentStart && currentStart.id === session.id) {
+          return [];
+        }
+        // Otherwise, this clicked session is the expected arrival time: auto-check this session and all subsequent ones
+        return applyUnlimitedMacro(session);
+      });
+      return;
+    }
+
     setSelectedSessions(prev => {
       const isSelected = prev.find(s => s.id === session.id);
       
       if (isSelected) {
         return prev.filter(s => s.id !== session.id);
       } else {
-        if (isUnlimited && prev.length === 0) {
-          return applyUnlimitedMacro(session, []);
-        }
         return [...prev, session];
       }
     });
@@ -876,7 +875,11 @@ function Booking() {
                   </div>
                 </div>
                 <span className="text-xs text-wood-textMuted font-medium px-2">
-                  * 請根據實際預計來店時間進行勾選
+                  {isUnlimited
+                    ? selectedSessions.length === 0
+                      ? '👉 請點選您的「預計到店時段」，系統將為您自動勾選後續所有時段！'
+                      : `* 已自 ${[...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time))[0]?.start_time} 自動勾選至當日營業結束（可點擊其他時段隨時更改到店時間）`
+                    : '* 請根據實際預計來店時間進行勾選'}
                 </span>
               </div>
             )}
