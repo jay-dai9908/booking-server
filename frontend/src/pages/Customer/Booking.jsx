@@ -864,29 +864,30 @@ function Booking() {
               <div className="flex flex-col gap-2">
                 <div 
                   onClick={handleUnlimitedClick}
-                  className={`flex flex-row items-center justify-between bg-[#F9F7F3] border rounded-2xl px-4 py-3 cursor-pointer select-none transition-all duration-300 ${
+                  className={`flex flex-col gap-2 bg-[#F9F7F3] border rounded-2xl px-4 py-3 cursor-pointer select-none transition-all duration-300 ${
                     isUnlimited ? 'border-[#8B5B43] bg-[#FAF4EB]' : 'border-transparent hover:bg-[#F3EFE9]'
                   }`}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-[20px] leading-none">✨</span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[15px] font-bold text-[#4A3F35]">
-                          {isUnlimited ? '✨ 不限時暢玩模式已開啟！' : '開啟不限時暢玩'}
-                        </span>
-                      </div>
-                      <div className="text-xs text-[#7A7067] font-medium mt-0.5">
-                        {isUnlimited 
-                          ? `享當日單人封頂上限 NT$ ${effectiveUnlimitedPrice}/人（原每小時 NT$ ${effectiveHourlyPrice}）`
-                          : `玩滿時數享最高封頂 NT$ ${effectiveUnlimitedPrice}/人`}
-                      </div>
-                    </div>
+                  {/* 第一行：標題全寬，字不跳行 */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[18px] leading-none">✨</span>
+                    <span className="text-[15px] font-bold text-[#4A3F35] whitespace-nowrap">
+                      {isUnlimited ? '不限時暢玩模式已開啟！' : '開啟不限時暢玩'}
+                    </span>
                   </div>
-                  
-                  {/* Toggle Switch */}
-                  <div className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-300 shrink-0 ${isUnlimited ? 'bg-[#8B5B43]' : 'bg-[#D5CFC9]'}`}>
-                    <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full shadow-sm transition-transform duration-300 ${isUnlimited ? 'translate-x-[20px]' : 'translate-x-0'}`}></div>
+
+                  {/* 第二行：費用說明與不限時開關按鈕 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs text-[#7A7067] font-medium leading-relaxed">
+                      {isUnlimited 
+                        ? `享當日單人封頂上限 NT$ ${effectiveUnlimitedPrice}/人（原每小時 NT$ ${effectiveHourlyPrice}）`
+                        : `玩滿時數享最高封頂 NT$ ${effectiveUnlimitedPrice}/人`}
+                    </div>
+                    
+                    {/* Toggle Switch */}
+                    <div className={`relative w-[44px] h-[24px] rounded-full transition-colors duration-300 shrink-0 ${isUnlimited ? 'bg-[#8B5B43]' : 'bg-[#D5CFC9]'}`}>
+                      <div className={`absolute top-[2px] left-[2px] bg-white w-[20px] h-[20px] rounded-full shadow-sm transition-transform duration-300 ${isUnlimited ? 'translate-x-[20px]' : 'translate-x-0'}`}></div>
+                    </div>
                   </div>
                 </div>
                 <span className="text-xs text-wood-textMuted font-medium px-2">
