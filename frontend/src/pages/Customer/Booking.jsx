@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths, isBefore, startOfDay, getDay } from 'date-fns';
 import { RefreshCw, Copy, Check, CalendarPlus } from 'lucide-react';
 import api from '../../api/axios';
@@ -84,7 +84,41 @@ function Booking() {
     : (isWeekend ? Number(globalPricing.weekend_unlimited || 400) : Number(globalPricing.weekday_unlimited || 350));
 
   // Calculate contiguous sessions
-  const sortedSelectedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+  const sortedSelectedSessions = useMemo(() => {
+    return [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+  }, [selectedSessions]);
+
+  const mergedSelectedTimeBlocks = useMemo(() => {
+    if (sortedSelectedSessions.length === 0) return [];
+    const blocks = [];
+    let currentBlock = null;
+    for (const session of sortedSelectedSessions) {
+      if (!currentBlock) {
+        currentBlock = {
+          start_time: session.start_time,
+          end_time: session.end_time,
+          sessions: [session]
+        };
+      } else {
+        if (session.start_time === currentBlock.end_time) {
+          currentBlock.end_time = session.end_time;
+          currentBlock.sessions.push(session);
+        } else {
+          blocks.push(currentBlock);
+          currentBlock = {
+            start_time: session.start_time,
+            end_time: session.end_time,
+            sessions: [session]
+          };
+        }
+      }
+    }
+    if (currentBlock) {
+      blocks.push(currentBlock);
+    }
+    return blocks;
+  }, [sortedSelectedSessions]);
+
   let maxContiguous = 0;
   let currentContiguous = 0;
   for (let i = 0; i < sortedSelectedSessions.length; i++) {
@@ -405,9 +439,7 @@ function Booking() {
   const handleBooking = () => {
     if (selectedSessions.length === 0) return;
     
-    // Sort selected sessions by start time to display nicely
-    const sortedSessions = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
-    const timeRangeStr = `${sortedSessions[0].start_time} - ${sortedSessions[sortedSessions.length - 1].end_time}`;
+    const timeRangeStr = mergedSelectedTimeBlocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ');
     
     const activeEquipments = [];
     if (enableSmartBoard && maxContiguous >= 2) {
@@ -503,8 +535,9 @@ function Booking() {
       const assignedSeats = reservationData.assigned_seats || [];
       const finalAmount = reservationData.total_amount != null ? reservationData.total_amount : estimatedGrandTotal;
 
-      const sorted = [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
-      const timeRange = sorted.length > 0 ? `${sorted[0].start_time} - ${sorted[sorted.length - 1].end_time}` : '';
+      const timeRange = mergedSelectedTimeBlocks.length > 0
+        ? mergedSelectedTimeBlocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ')
+        : '';
 
       setTicketModalData({
         booking_ref: newRef,
@@ -801,7 +834,7 @@ function Booking() {
                         {isSelected && <span className="text-xs font-black">✓</span>}
                       </div>
                       <div className={`text-xs font-medium ${isPast ? 'text-[#A8A19A]' : isFull ? 'text-red-400/70' : isSelected ? 'text-white/90' : 'text-wood-sageText'}`}>
-                        {isPast ? '已逾時' : isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人 ｜ NT$ ${effectiveHourlyPrice}`}
+                        {isPast ? '已逾時' : isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人`}
                       </div>
                     </button>
                   );
@@ -1206,14 +1239,17 @@ function Booking() {
               {/* Selected Sessions Chips */}
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-xs font-bold text-[#7A7067]">已選時段：</span>
-                {sortedSelectedSessions.map(s => (
+                {mergedSelectedTimeBlocks.map((b, idx) => (
                   <span
-                    key={s.id}
-                    onClick={() => toggleSession(s)}
-                    className="group cursor-pointer inline-flex items-center gap-1 bg-[#F4EFE6] hover:bg-red-50 text-[#8B5B43] hover:text-red-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-[#E5DFD7] transition-colors"
+                    key={`${b.start_time}-${b.end_time}-${idx}`}
+                    onClick={() => {
+                      const idsToRemove = new Set(b.sessions.map(s => s.id));
+                      setSelectedSessions(prev => prev.filter(s => !idsToRemove.has(s.id)));
+                    }}
+                    className="group cursor-pointer inline-flex items-center gap-1.5 bg-[#F4EFE6] hover:bg-red-50 text-[#8B5B43] hover:text-red-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-[#E5DFD7] transition-colors"
                     title="點擊取消此時段"
                   >
-                    <span>{s.start_time}-{s.end_time}</span>
+                    <span>{b.start_time} ~ {b.end_time} {b.sessions.length > 1 ? `(共 ${b.sessions.length} 小時)` : '(1 小時)'}</span>
                     <span className="text-[10px] opacity-60 group-hover:opacity-100">✕</span>
                   </span>
                 ))}
