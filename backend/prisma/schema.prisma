@@ -79,6 +79,7 @@ model GlobalSetting {
   equipment_discount_free_hours Int    @default(1)
   equipment_discount_stackable Boolean @default(true)
   show_price_cards            Boolean  @default(true)
+  price_notice_text           String?  @default("費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品")
   show_announcement           Boolean  @default(true)
   announcement_text           String?  @default("✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠")
   show_line_button            Boolean  @default(true)

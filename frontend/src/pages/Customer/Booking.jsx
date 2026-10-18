@@ -32,6 +32,7 @@ function Booking() {
     weekend_unlimited: 400
   });
   const [showPriceCards, setShowPriceCards] = useState(true);
+  const [priceNoticeText, setPriceNoticeText] = useState('');
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const [announcementText, setAnnouncementText] = useState('');
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
@@ -149,6 +150,7 @@ function Booking() {
             weekend_unlimited: res.data.weekend_unlimited_price || 400
           });
           setShowPriceCards(res.data.show_price_cards !== false);
+          setPriceNoticeText(res.data.price_notice_text || '');
           setShowAnnouncement(res.data.show_announcement !== false);
           setAnnouncementText(res.data.announcement_text || '');
           setShowLineButton(res.data.show_line_button !== false);
@@ -677,7 +679,7 @@ function Booking() {
             </div>
             <div className="text-[11px] text-[#8C8279] px-1 flex items-center gap-1.5">
               <span>💡</span>
-              <span>費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品</span>
+              <span>{priceNoticeText || '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品'}</span>
             </div>
           </div>
         )}

@@ -54,6 +54,7 @@ export default function SessionsPage() {
   
   // Customer Display Settings States
   const [showPriceCards, setShowPriceCards] = useState(true);
+  const [priceNoticeText, setPriceNoticeText] = useState('');
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const [announcementText, setAnnouncementText] = useState('');
   const [showLineButton, setShowLineButton] = useState(true);
@@ -91,6 +92,7 @@ export default function SessionsPage() {
       setGlobalWeekendHourly(res.data.weekend_hourly_price || '');
       setGlobalWeekendUnlimited(res.data.weekend_unlimited_price || '');
       setShowPriceCards(res.data.show_price_cards !== false);
+      setPriceNoticeText(res.data.price_notice_text ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品');
       setShowAnnouncement(res.data.show_announcement !== false);
       setAnnouncementText(res.data.announcement_text ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠');
       setShowLineButton(res.data.show_line_button !== false);
@@ -106,6 +108,7 @@ export default function SessionsPage() {
     try {
       await api.put('/daily-settings/global', {
         show_price_cards: showPriceCards,
+        price_notice_text: priceNoticeText,
         show_announcement: showAnnouncement,
         announcement_text: announcementText,
         show_line_button: showLineButton,
@@ -936,6 +939,19 @@ export default function SessionsPage() {
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
               </label>
             </div>
+            {showPriceCards && (
+              <div className="pt-3 border-t border-gray-200/60">
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">價格卡下方備註提醒文字</label>
+                <textarea 
+                  rows="3"
+                  value={priceNoticeText}
+                  onChange={e => setPriceNoticeText(e.target.value)}
+                  placeholder="留空將顯示系統預設備註提醒"
+                  className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none leading-relaxed"
+                />
+                <span className="text-[10px] text-gray-400 mt-1 block">顯示於價格卡下方的「💡」小字提醒</span>
+              </div>
+            )}
             <div className="text-[11px] text-gray-400 bg-white/70 p-2 rounded-lg border border-gray-100">
               {showPriceCards ? '🟢 目前狀態：顧客端將顯示平假日價格說明卡' : '⚪ 目前狀態：顧客端將隱藏價格卡，版面直接由預約日期開始'}
             </div>
