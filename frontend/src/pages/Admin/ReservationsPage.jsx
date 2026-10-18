@@ -25,6 +25,7 @@ export default function ReservationsPage() {
   const [manualName, setManualName] = useState('');
   const [manualPhone, setManualPhone] = useState('');
   const [manualPax, setManualPax] = useState(1);
+  const [manualForceSplit, setManualForceSplit] = useState(true);
   const [manualEquipments, setManualEquipments] = useState({});
   const [equipmentConfigs, setEquipmentConfigs] = useState([]);
   const [isManualLoading, setIsManualLoading] = useState(false);

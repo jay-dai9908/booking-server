@@ -136,6 +136,7 @@ function Booking() {
   const sortedSelectedSessions = useMemo(() => {
     return [...selectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
   }, [selectedSessions]);
+  const sortedSessions = sortedSelectedSessions;
 
   const mergedSelectedTimeBlocks = useMemo(() => {
     if (sortedSelectedSessions.length === 0) return [];
@@ -523,48 +524,53 @@ function Booking() {
   const estimatedGrandTotal = cappedSeatingFee + (enableSmartBoard ? totalEquipmentFee : 0);
 
   const handleBooking = () => {
-    if (selectedSessions.length === 0) return;
-    
-    const timeRangeStr = mergedSelectedTimeBlocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ');
-    
-    const activeEquipments = [];
-    if (enableSmartBoard && maxContiguous >= 2) {
-      visibleConfigs.forEach(c => {
-        const qty = equipmentSelections[c.id] || 0;
-        if (qty > 0) {
-          activeEquipments.push({
-            equipment_id: c.id,
-            name: c.name,
-            quantity: qty,
-            rental_hours: rentalHours
-          });
-        }
+    try {
+      if (selectedSessions.length === 0) return;
+      
+      const timeRangeStr = mergedSelectedTimeBlocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ');
+      
+      const activeEquipments = [];
+      if (enableSmartBoard && maxContiguous >= 2) {
+        visibleConfigs.forEach(c => {
+          const qty = equipmentSelections[c.id] || 0;
+          if (qty > 0) {
+            activeEquipments.push({
+              equipment_id: c.id,
+              name: c.name,
+              quantity: qty,
+              rental_hours: rentalHours
+            });
+          }
+        });
+      }
+
+      const promoDesc = equipmentDiscount.tier2_enabled
+        ? `買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours} / 買${equipmentDiscount.tier2_buy_hours}送${equipmentDiscount.tier2_free_hours}（金額擇優）`
+        : `買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours}`;
+
+      const discountSummary = (equipmentDiscount.enabled && discountHoursPerBoard > 0)
+        ? `（享「${promoDesc}」：每台折抵 ${discountHoursPerBoard} 小時，${totalBoards} 台共折抵 ${totalDiscountHours} 小時）`
+        : '';
+
+      const effectiveIsUnlimited = isUnlimited || isCapped;
+
+      setConfirmModalData({
+        date: format(selectedDate, 'yyyy-MM-dd'),
+        timeRange: timeRangeStr,
+        pax: pax,
+        sortedSessions: sortedSelectedSessions,
+        isUnlimited: effectiveIsUnlimited,
+        equipments: activeEquipments,
+        totalEquipmentFee,
+        estimatedGrandTotal,
+        equipmentBreakdown: breakdownParts.length > 0 
+          ? `${breakdownParts.join(' + ')}，共 ${totalBoards} 台 × ${rentalHours} 小時${discountSummary}`
+          : null
       });
+    } catch (err) {
+      console.error('Error preparing booking modal:', err);
+      setAlertModalData({ type: 'error', title: '系統提示', message: '處理預約資訊時發生錯誤，請重新整理頁面再試' });
     }
-
-    const promoDesc = equipmentDiscount.tier2_enabled
-      ? `買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours} / 買${equipmentDiscount.tier2_buy_hours}送${equipmentDiscount.tier2_free_hours}（金額擇優）`
-      : `買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours}`;
-
-    const discountSummary = (equipmentDiscount.enabled && discountHoursPerBoard > 0)
-      ? `（享「${promoDesc}」：每台折抵 ${discountHoursPerBoard} 小時，${totalBoards} 台共折抵 ${totalDiscountHours} 小時）`
-      : '';
-
-    const effectiveIsUnlimited = isUnlimited || isCapped;
-
-    setConfirmModalData({
-      date: format(selectedDate, 'yyyy-MM-dd'),
-      timeRange: timeRangeStr,
-      pax: pax,
-      sortedSessions,
-      isUnlimited: effectiveIsUnlimited,
-      equipments: activeEquipments,
-      totalEquipmentFee,
-      estimatedGrandTotal,
-      equipmentBreakdown: breakdownParts.length > 0 
-        ? `${breakdownParts.join(' + ')}，共 ${totalBoards} 台 × ${rentalHours} 小時${discountSummary}`
-        : null
-    });
   };
 
   const executeBooking = async () => {
