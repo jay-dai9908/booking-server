@@ -33,7 +33,10 @@ export default function ReservationsPage() {
     enabled: true,
     buy_hours: 3,
     free_hours: 1,
-    stackable: true
+    stackable: true,
+    tier2_enabled: false,
+    tier2_buy_hours: 8,
+    tier2_free_hours: 4
   });
 
   useEffect(() => {
@@ -47,7 +50,10 @@ export default function ReservationsPage() {
               enabled: res.data.equipment_discount_enabled !== false,
               buy_hours: res.data.equipment_discount_buy_hours ?? 3,
               free_hours: res.data.equipment_discount_free_hours ?? 1,
-              stackable: res.data.equipment_discount_stackable !== false
+              stackable: res.data.equipment_discount_stackable !== false,
+              tier2_enabled: !!res.data.equipment_discount2_enabled,
+              tier2_buy_hours: res.data.equipment_discount2_buy_hours ?? 8,
+              tier2_free_hours: res.data.equipment_discount2_free_hours ?? 4
             });
           }
         })
@@ -479,21 +485,22 @@ export default function ReservationsPage() {
                     </label>
                     {(() => {
                       const totalHours = manualSelectedSessions.length;
-                      const chargeableHours = calculateEquipmentChargeableHours(
-                        totalHours,
-                        equipmentDiscount.enabled,
-                        equipmentDiscount.buy_hours,
-                        equipmentDiscount.free_hours,
-                        equipmentDiscount.stackable
-                      );
+                      const chargeableHours = calculateEquipmentChargeableHours(totalHours, equipmentDiscount);
                       const totalFee = equipmentConfigs.reduce((sum, c) => {
                         const qty = manualEquipments[c.id] || 0;
                         const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
                         return sum + singlePrice * qty;
                       }, 0);
+                      const discountText = (() => {
+                        if (chargeableHours >= totalHours) return '';
+                        if (equipmentDiscount.tier2_enabled && totalHours >= equipmentDiscount.tier2_buy_hours) {
+                          return `(享二階買${equipmentDiscount.tier2_buy_hours}送${equipmentDiscount.tier2_free_hours})`;
+                        }
+                        return `(享買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours})`;
+                      })();
                       return totalFee > 0 ? (
                         <span className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-bold">
-                          加購小計 +NT$ {totalFee} {chargeableHours < totalHours ? `(享買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours})` : ''}
+                          加購小計 +NT$ {totalFee} {discountText}
                         </span>
                       ) : null;
                     })()}
@@ -503,13 +510,7 @@ export default function ReservationsPage() {
                       const qty = manualEquipments[c.id] || 0;
                       const isBringOwn = c.id === 'bring_own';
                       const totalHours = manualSelectedSessions.length;
-                      const chargeableHours = calculateEquipmentChargeableHours(
-                        totalHours,
-                        equipmentDiscount.enabled,
-                        equipmentDiscount.buy_hours,
-                        equipmentDiscount.free_hours,
-                        equipmentDiscount.stackable
-                      );
+                      const chargeableHours = calculateEquipmentChargeableHours(totalHours, equipmentDiscount);
                       const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
 
                       return (

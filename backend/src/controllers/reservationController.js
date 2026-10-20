@@ -188,6 +188,72 @@ export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, i
   return calculatedHourlyTotal;
 };
 
+/**
+ * Master unified order recalculation engine
+ * Ensures seating fees (with unlimited auto-cap), equipment fees (with buy/free discounts & daily caps),
+ * addon amounts, and valid promo discounts are never wiped or desynchronized across operations.
+ */
+export const recalculateReservationTotal = async (txOrPrisma, booking_ref) => {
+  const reservations = await txOrPrisma.reservation.findMany({
+    where: { booking_ref, status: 'confirmed' },
+    include: { session: true }
+  });
+  if (!reservations || reservations.length === 0) return 0;
+  const firstRes = reservations[0];
+  if (firstRes.is_amount_manual) {
+    return firstRes.total_amount;
+  }
+
+  const sessionDate = firstRes.session.session_date;
+  const pax = firstRes.pax;
+  const is_unlimited = Boolean(firstRes.is_unlimited);
+  const baseSeatingPrice = await calculateTotalAmount(txOrPrisma, sessionDate, pax, reservations.length, is_unlimited);
+
+  const eqRecords = await txOrPrisma.bookingEquipment.findMany({
+    where: { booking_ref }
+  });
+  const equipmentTotal = eqRecords.reduce((sum, e) => sum + (e.subtotal_price || 0), 0);
+  const addonsAmount = firstRes.addons_amount || 0;
+  const subtotalBeforeDiscount = baseSeatingPrice + equipmentTotal + addonsAmount;
+
+  let discountAmount = firstRes.discount_amount || 0;
+  if (firstRes.promo_code) {
+    try {
+      const { hourly_price } = await getEffectiveDailyRates(txOrPrisma, sessionDate);
+      const promoEval = await evaluatePromoCode(txOrPrisma, {
+        code: firstRes.promo_code,
+        session_date: sessionDate,
+        pax,
+        hours: reservations.length,
+        is_unlimited,
+        base_amount: subtotalBeforeDiscount,
+        hourly_price,
+        user_id: firstRes.user_id,
+        skip_usage_check: true,
+        seating_amount: baseSeatingPrice,
+        equipment_amount: equipmentTotal
+      });
+      if (promoEval.valid) {
+        discountAmount = promoEval.discount_amount;
+      }
+    } catch (err) {
+      console.warn(`[recalculateReservationTotal] Promo re-eval failed for ${booking_ref}:`, err);
+    }
+  }
+
+  const finalTotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
+
+  await txOrPrisma.reservation.updateMany({
+    where: { booking_ref },
+    data: {
+      total_amount: finalTotal,
+      discount_amount: discountAmount
+    }
+  });
+
+  return finalTotal;
+};
+
 export const createReservation = async (req, res) => {
   const { session_ids, pax, forceSplit } = req.body;
   const userId = req.user.id;
@@ -200,6 +266,12 @@ export const createReservation = async (req, res) => {
     const booking_ref = crypto.randomUUID();
 
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify customer blacklist status
+      const user = await tx.user.findUnique({ where: { id: userId } });
+      if (user?.is_blacklisted) {
+        throw new Error('BLACKLISTED_USER');
+      }
+
       // 1. Get the requested sessions
       const requestedSessions = await tx.$queryRaw`
         SELECT id, max_capacity, session_date, start_time, end_time
@@ -271,6 +343,20 @@ export const createReservation = async (req, res) => {
         allConfigs.forEach(c => { configMap[c.id] = c; });
 
         const globalSetting = await tx.globalSetting.findUnique({ where: { id: 1 } });
+        const allowExceedPax = globalSetting?.allow_equipment_exceed_pax === true;
+
+        // Verify total requested boards against pax quota
+        let totalNonOwnBoards = 0;
+        for (const eq of equipments) {
+          const qty = parseInt(eq.quantity, 10) || 0;
+          if (qty > 0 && eq.equipment_id !== 'bring_own') {
+            totalNonOwnBoards += qty;
+          }
+        }
+        if (!allowExceedPax && totalNonOwnBoards > parseInt(pax, 10)) {
+          throw new Error('EQUIPMENT_EXCEED_PAX');
+        }
+
         const discountConfig = {
           enabled: globalSetting ? globalSetting.equipment_discount_enabled !== false : true,
           buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
@@ -281,7 +367,20 @@ export const createReservation = async (req, res) => {
         };
 
         const totalHours = session_ids.length;
-        const coveredSessionsStrings = requestedSessions.map(s => `${s.start_time}-${s.end_time}`);
+        const sortedReqSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+        // Pre-fetch all confirmed reservations and their equipment on this date to verify stock
+        const dateReservations = await tx.reservation.findMany({
+          where: {
+            session: { session_date: sessionDate },
+            status: 'confirmed'
+          },
+          include: { session: true }
+        });
+        const activeBookingRefs = Array.from(new Set(dateReservations.map(r => r.booking_ref)));
+        const bookedEquipments = await tx.bookingEquipment.findMany({
+          where: { booking_ref: { in: activeBookingRefs } }
+        });
 
         for (const eq of equipments) {
           const qty = parseInt(eq.quantity, 10) || 0;
@@ -290,10 +389,43 @@ export const createReservation = async (req, res) => {
           const config = configMap[eq.equipment_id];
           if (!config) continue;
 
+          if (eq.equipment_id !== 'bring_own' && config.visibility_status !== 'ACTIVE') {
+            throw new Error(`EQUIPMENT_UNAVAILABLE:智能拼豆板「${config.name}」目前維護中，暫停借用。`);
+          }
+
           const minHours = config.min_contiguous_hours || 2;
           const rentalHours = totalHours < minHours 
             ? totalHours 
             : Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
+
+          // Accurately cover ONLY the first rentalHours sessions
+          const eqCoveredSessions = sortedReqSessions.slice(0, rentalHours).map(s => `${s.start_time}-${s.end_time}`);
+
+          // Real-time stock verification across each covered session
+          if (eq.equipment_id !== 'bring_own') {
+            const totalStock = config.total_stock || 0;
+            for (const sess of sortedReqSessions.slice(0, rentalHours)) {
+              const sessTimeStr = `${sess.start_time}-${sess.end_time}`;
+              let bookedInThisSession = 0;
+              for (const be of bookedEquipments) {
+                if (be.equipment_id !== eq.equipment_id) continue;
+                let isCovered = false;
+                if (Array.isArray(be.covered_sessions) && be.covered_sessions.length > 0) {
+                  isCovered = be.covered_sessions.some(cs => cs === sess.start_time || cs === sessTimeStr || cs.startsWith(sess.start_time));
+                } else {
+                  const bRes = dateReservations.filter(r => r.booking_ref === be.booking_ref);
+                  isCovered = bRes.some(r => r.session?.start_time === sess.start_time);
+                }
+                if (isCovered) {
+                  bookedInThisSession += be.quantity;
+                }
+              }
+
+              if (bookedInThisSession + qty > totalStock) {
+                throw new Error(`EQUIPMENT_OUT_OF_STOCK:智能拼豆板「${config.name}」在 ${sess.start_time} 時段庫存不足（僅剩 ${Math.max(0, totalStock - bookedInThisSession)} 台）`);
+              }
+            }
+          }
 
           const chargeableHours = calculateEquipmentChargeableHours(rentalHours, discountConfig);
 
@@ -310,7 +442,7 @@ export const createReservation = async (req, res) => {
             quantity: qty,
             rental_hours: rentalHours,
             subtotal_price: subtotal,
-            covered_sessions: coveredSessionsStrings
+            covered_sessions: eqCoveredSessions
           });
         }
       }
@@ -332,7 +464,9 @@ export const createReservation = async (req, res) => {
           is_unlimited,
           base_amount: subtotalAmount,
           hourly_price,
-          user_id: userId
+          user_id: userId,
+          seating_amount: baseSeatingPrice,
+          equipment_amount: totalEquipmentFee
         });
         if (!promoEval.valid) {
           throw new Error(`PROMO_ERROR:${promoEval.error}`);
@@ -398,6 +532,18 @@ export const createReservation = async (req, res) => {
 
   } catch (error) {
     console.error('Reservation error:', error);
+    if (error.message === 'BLACKLISTED_USER') {
+      return res.status(403).json({ error: '您的帳號目前無法使用線上預約服務，請直接聯繫門市人員。' });
+    }
+    if (error.message && error.message.startsWith('EQUIPMENT_OUT_OF_STOCK:')) {
+      return res.status(409).json({ error: error.message.replace('EQUIPMENT_OUT_OF_STOCK:', '') });
+    }
+    if (error.message && error.message.startsWith('EQUIPMENT_UNAVAILABLE:')) {
+      return res.status(400).json({ error: error.message.replace('EQUIPMENT_UNAVAILABLE:', '') });
+    }
+    if (error.message === 'EQUIPMENT_EXCEED_PAX') {
+      return res.status(400).json({ error: '預約之智能拼豆板總數不得超過同行人數上限。' });
+    }
     if (error.message && error.message.startsWith('PROMO_ERROR:')) {
       return res.status(400).json({ error: error.message.replace('PROMO_ERROR:', '') });
     }
@@ -661,6 +807,17 @@ export const cancelReservation = async (req, res) => {
         cancelled_by: isAdmin ? 'admin' : 'customer'
       }
     });
+
+    // Return promo code usage quota if order used promo codes
+    if (reservations[0].promo_code) {
+      const promoCodes = reservations[0].promo_code.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
+      for (const code of promoCodes) {
+        await prisma.promoCode.updateMany({
+          where: { code, used_count: { gt: 0 } },
+          data: { used_count: { decrement: 1 } }
+        });
+      }
+    }
 
     res.json({ message: 'Reservation cancelled successfully', count: updated.count });
   } catch (error) {
@@ -1381,16 +1538,6 @@ export const extendReservation = async (req, res) => {
         }
       }
 
-      const is_unlimited = baseReservation.is_unlimited;
-      const sessionDate = sessions[0].session_date;
-      const totalAmount = await calculateTotalAmount(tx, sessionDate, pax, existingReservations.length + session_ids.length, is_unlimited);
-
-      // Update total_amount for existing reservations
-      await tx.reservation.updateMany({
-        where: { booking_ref },
-        data: { total_amount: totalAmount }
-      });
-
       const newReservationsData = [];
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -1402,13 +1549,20 @@ export const extendReservation = async (req, res) => {
           assigned_seats: mySeats,
           is_force_split: forceSplit === true || forceSplit === 'true',
           is_walk_in,
-          is_unlimited,
-          total_amount: totalAmount,
+          is_unlimited: baseReservation.is_unlimited,
+          total_amount: baseReservation.total_amount,
           attendance: inheritedAttendance,
           checked_in_at: inheritedCheckedInAt,
           is_paid: inheritedIsPaid,
           paid_at: inheritedPaidAt,
-          is_amount_manual: inheritedIsAmountManual
+          is_amount_manual: inheritedIsAmountManual,
+          payment_method: baseReservation.payment_method,
+          checkout_unlimited_pax: baseReservation.checkout_unlimited_pax,
+          checkout_regular_hours: baseReservation.checkout_regular_hours,
+          checkout_details: baseReservation.checkout_details,
+          promo_code: baseReservation.promo_code,
+          discount_amount: baseReservation.discount_amount,
+          addons_amount: baseReservation.addons_amount
         });
       }
 
@@ -1420,6 +1574,9 @@ export const extendReservation = async (req, res) => {
       const newReservations = await tx.reservation.createMany({
         data: newReservationsData
       });
+
+      // Recalculate unified total without wiping equipment or discounts
+      const finalTotal = await recalculateReservationTotal(tx, booking_ref);
 
       // If keep_seat, we must trigger reshuffle NOW to push colliding reservations
       if (extendMode === 'keep_seat') {
@@ -1500,33 +1657,15 @@ export const updatePaymentStatus = async (req, res) => {
     let totalAmount = undefined;
 
     if (is_paid) {
-      // Recalculate amount
+      // Recalculate amount using unified engine
       await prisma.$transaction(async (tx) => {
-        const reservations = await tx.reservation.findMany({
-          where: { booking_ref },
-          include: { session: true }
-        });
-        
-        if (reservations.length > 0) {
-          const firstRes = reservations[0];
-          
-          if (!firstRes.is_amount_manual) {
-            const sessionDate = firstRes.session.session_date;
-            const pax = firstRes.pax;
-            const is_unlimited = firstRes.is_unlimited;
-            
-            totalAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
-          } else {
-            totalAmount = firstRes.total_amount;
-          }
-        }
+        totalAmount = await recalculateReservationTotal(tx, booking_ref);
 
         const updated = await tx.reservation.updateMany({
           where: { booking_ref },
           data: { 
             is_paid, 
-            paid_at: new Date(),
-            ...(totalAmount !== undefined && { total_amount: totalAmount }) 
+            paid_at: new Date()
           }
         });
 

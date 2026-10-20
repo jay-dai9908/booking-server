@@ -44,6 +44,15 @@ export default function AccountingPage() {
     }
   };
 
+  const formatPaymentMethod = (method) => {
+    switch (method) {
+      case 'cash': return '現金';
+      case 'line_pay': return 'LINE Pay';
+      case 'transfer': return '轉帳';
+      default: return method || '未註記';
+    }
+  };
+
   const handleExportCSV = () => {
     if (ledger.length === 0) {
       alert('沒有資料可匯出');
@@ -51,13 +60,16 @@ export default function AccountingPage() {
     }
     
     // Create CSV content
-    const headers = ['預約日期', '入帳時間', '訂單編號', '顧客姓名', '聯絡電話', '結帳金額'];
+    const headers = ['預約日期', '入帳時間', '訂單編號', '顧客姓名', '聯絡電話', '付款方式', '周邊加購', '優惠折抵', '結帳金額'];
     const rows = ledger.map(item => [
       format(new Date(item.session.session_date), 'yyyy-MM-dd'),
       item.paid_at ? format(new Date(item.paid_at), 'yyyy-MM-dd HH:mm:ss') : '',
       item.booking_ref,
-      item.user?.name || '',
+      `"${(item.user?.name || '').replace(/"/g, '""')}"`,
       item.user?.phone || '',
+      formatPaymentMethod(item.payment_method),
+      item.addons_amount || 0,
+      item.discount_amount || 0,
       item.total_amount || 0
     ]);
     
@@ -425,9 +437,17 @@ export default function AccountingPage() {
                           </td>
                           <td className="px-6 py-4">
                             {item.is_paid ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                已結帳
-                              </span>
+                              <div className="flex flex-col gap-1 items-start">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  已結帳 {item.payment_method ? `(${formatPaymentMethod(item.payment_method)})` : ''}
+                                </span>
+                                {((item.discount_amount > 0) || (item.addons_amount > 0)) && (
+                                  <span className="text-[10px] text-gray-500 font-medium">
+                                    {item.addons_amount > 0 && `+加購$${item.addons_amount} `}
+                                    {item.discount_amount > 0 && `-折抵$${item.discount_amount}`}
+                                  </span>
+                                )}
+                              </div>
                             ) : (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                                 待結帳
@@ -465,13 +485,15 @@ export default function AccountingPage() {
                       <th className="px-6 py-4 font-medium">預約日期</th>
                       <th className="px-6 py-4 font-medium">入帳時間</th>
                       <th className="px-6 py-4 font-medium">顧客</th>
+                      <th className="px-6 py-4 font-medium">付款方式</th>
+                      <th className="px-6 py-4 font-medium">加購 / 折扣</th>
                       <th className="px-6 py-4 font-medium">實收金額</th>
                       <th className="px-6 py-4 font-medium text-right">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {ledger.length === 0 ? (
-                      <tr><td colSpan="5" className="text-center py-16 text-gray-400">此期間無入帳紀錄</td></tr>
+                      <tr><td colSpan="7" className="text-center py-16 text-gray-400">此期間無入帳紀錄</td></tr>
                     ) : (
                       ledger.map((item) => (
                         <tr key={item.id} className="hover:bg-gray-50">
@@ -486,7 +508,25 @@ export default function AccountingPage() {
                             <div className="text-sm text-gray-500">{item.user?.phone}</div>
                           </td>
                           <td className="px-6 py-4">
-                            <span className="font-bold text-green-600 bg-green-50 px-2 py-1 rounded-lg">NT$ {item.total_amount || 0}</span>
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-100 text-gray-800 border border-gray-200">
+                              {formatPaymentMethod(item.payment_method)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-xs">
+                            <div className="space-y-0.5">
+                              {item.addons_amount > 0 ? (
+                                <div className="text-amber-700 font-medium">加購 +NT$ {item.addons_amount}</div>
+                              ) : null}
+                              {item.discount_amount > 0 ? (
+                                <div className="text-rose-600 font-medium">折抵 -NT$ {item.discount_amount} {item.promo_code ? `(${item.promo_code})` : ''}</div>
+                              ) : null}
+                              {(!item.addons_amount && !item.discount_amount) && (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">NT$ {item.total_amount || 0}</span>
                           </td>
                           <td className="px-6 py-4 text-right">
                             <button 

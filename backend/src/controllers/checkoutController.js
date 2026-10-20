@@ -115,7 +115,9 @@ export const evaluatePromoCode = async (txOrPrisma, {
   hourly_price = 150,
   user_id = null,
   is_pos = false,
-  skip_usage_check = false
+  skip_usage_check = false,
+  seating_amount,
+  equipment_amount
 }) => {
   const cleanCode = (code || '').trim().toUpperCase();
   if (!cleanCode) {
@@ -217,6 +219,14 @@ export const evaluatePromoCode = async (txOrPrisma, {
   }
 
   // 7. Calculate discount amount
+  const scope = promo.target_scope || 'all';
+  let targetAmount = Number(base_amount) || 0;
+  if (scope === 'seating' && seating_amount !== undefined) {
+    targetAmount = Number(seating_amount) || 0;
+  } else if (scope === 'equipment' && equipment_amount !== undefined) {
+    targetAmount = Number(equipment_amount) || 0;
+  }
+
   let discount_amount = 0;
   if (promo.discount_type === 'fixed_order') {
     discount_amount = promo.discount_value;
@@ -225,7 +235,7 @@ export const evaluatePromoCode = async (txOrPrisma, {
   } else if (promo.discount_type === 'percentage') {
     const val = promo.discount_value;
     const pctOff = val > 50 && val < 100 ? (100 - val) : val;
-    discount_amount = Math.round((Number(base_amount) || 0) * (pctOff / 100));
+    discount_amount = Math.round(targetAmount * (pctOff / 100));
   } else if (promo.discount_type === 'free_hours') {
     discount_amount = Math.round((Number(hourly_price) || 150) * promo.discount_value);
   }
@@ -235,6 +245,9 @@ export const evaluatePromoCode = async (txOrPrisma, {
     discount_amount = Math.min(discount_amount, promo.max_discount_amount);
   }
 
+  if (targetAmount > 0) {
+    discount_amount = Math.min(discount_amount, targetAmount);
+  }
   if (base_amount > 0) {
     discount_amount = Math.min(discount_amount, Number(base_amount));
   }

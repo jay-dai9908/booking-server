@@ -4,7 +4,8 @@ import { RefreshCw, Copy, Check, CalendarPlus } from 'lucide-react';
 import api from '../../api/axios';
 import { useNavigate } from 'react-router-dom';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
-import { formatBookingRef, getGoogleCalendarUrl } from '../../components/CustomerReservationDetailsModal';
+import { formatBookingRef } from '../../components/CustomerReservationDetailsModal';
+import { getGoogleCalendarUrl, downloadIcsFile } from '../../utils/calendarHelper';
 
 const GLOBAL_SETTINGS_CACHE_KEY = 'shiguang_booking_global_settings_cache';
 
@@ -285,32 +286,33 @@ function Booking() {
     setHasManuallyAdjustedRentalHours(false);
   }, [selectedDate]);
 
+  const fetchEquipmentAvailability = async () => {
+    if (selectedSessions.length === 0) {
+      setEquipmentConfigs([]);
+      return;
+    }
+    try {
+      const formattedDate = format(selectedDate, 'yyyy-MM-dd');
+      const sessionStarts = sortedSelectedSessions.map(s => s.start_time).join(',');
+      const res = await api.get(`/equipment/availability?date=${formattedDate}&sessions=${sessionStarts}`);
+      setEquipmentConfigs(res.data.equipments || (Array.isArray(res.data) ? res.data : []));
+      setAllowExceedPax(!!res.data.allow_exceed_pax);
+      setShowLiveStock(res.data.show_equipment_live_stock !== false);
+      setEquipmentDiscount({
+        enabled: res.data.equipment_discount_enabled !== false,
+        buy_hours: res.data.equipment_discount_buy_hours ?? 3,
+        free_hours: res.data.equipment_discount_free_hours ?? 1,
+        stackable: res.data.equipment_discount_stackable !== false,
+        tier2_enabled: !!res.data.equipment_discount2_enabled,
+        tier2_buy_hours: res.data.equipment_discount2_buy_hours ?? 8,
+        tier2_free_hours: res.data.equipment_discount2_free_hours ?? 4
+      });
+    } catch (err) {
+      console.error('Failed to fetch equipment availability:', err);
+    }
+  };
+
   useEffect(() => {
-    const fetchEquipmentAvailability = async () => {
-      if (selectedSessions.length === 0) {
-        setEquipmentConfigs([]);
-        return;
-      }
-      try {
-        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
-        const sessionStarts = sortedSelectedSessions.map(s => s.start_time).join(',');
-        const res = await api.get(`/equipment/availability?date=${formattedDate}&sessions=${sessionStarts}`);
-        setEquipmentConfigs(res.data.equipments || (Array.isArray(res.data) ? res.data : []));
-        setAllowExceedPax(!!res.data.allow_exceed_pax);
-        setShowLiveStock(res.data.show_equipment_live_stock !== false);
-        setEquipmentDiscount({
-          enabled: res.data.equipment_discount_enabled !== false,
-          buy_hours: res.data.equipment_discount_buy_hours ?? 3,
-          free_hours: res.data.equipment_discount_free_hours ?? 1,
-          stackable: res.data.equipment_discount_stackable !== false,
-          tier2_enabled: !!res.data.equipment_discount2_enabled,
-          tier2_buy_hours: res.data.equipment_discount2_buy_hours ?? 8,
-          tier2_free_hours: res.data.equipment_discount2_free_hours ?? 4
-        });
-      } catch (err) {
-        console.error('Failed to fetch equipment availability:', err);
-      }
-    };
     fetchEquipmentAvailability();
   }, [selectedDate, selectedSessions]);
 
@@ -364,7 +366,8 @@ function Booking() {
     setIsSyncing(true);
     await Promise.all([
       fetchSessions(selectedDate),
-      fetchDailySetting(selectedDate)
+      fetchDailySetting(selectedDate),
+      fetchEquipmentAvailability()
     ]);
     setTimeout(() => setIsSyncing(false), 500);
   };
@@ -531,6 +534,20 @@ function Booking() {
 
   const promoDiscountAmount = useMemo(() => {
     if (!appliedPromo) return 0;
+    // Dynamic threshold validation
+    if (appliedPromo.min_pax && pax < appliedPromo.min_pax) return 0;
+    if (appliedPromo.min_hours && selectedSessions.length < appliedPromo.min_hours) return 0;
+    if (appliedPromo.min_amount && subtotalBeforePromo < appliedPromo.min_amount) return 0;
+
+    const equipmentAmount = enableSmartBoard ? totalEquipmentFee : 0;
+    const seatingAmount = cappedSeatingFee;
+    let targetBase = subtotalBeforePromo;
+    if (appliedPromo.target_scope === 'seating') {
+      targetBase = seatingAmount;
+    } else if (appliedPromo.target_scope === 'equipment') {
+      targetBase = equipmentAmount;
+    }
+
     let amt = 0;
     if (appliedPromo.discount_type === 'fixed_order') {
       amt = appliedPromo.discount_value;
@@ -539,12 +556,32 @@ function Booking() {
     } else if (appliedPromo.discount_type === 'percentage') {
       const val = appliedPromo.discount_value;
       const pctOff = val > 50 && val < 100 ? (100 - val) : val;
-      amt = Math.round(subtotalBeforePromo * (pctOff / 100));
+      amt = Math.round(targetBase * (pctOff / 100));
     } else if (appliedPromo.discount_type === 'free_hours') {
       amt = Math.round(effectiveHourlyPrice * appliedPromo.discount_value);
     }
-    return Math.min(subtotalBeforePromo, Math.max(0, amt));
-  }, [appliedPromo, pax, subtotalBeforePromo, effectiveHourlyPrice]);
+
+    if (appliedPromo.max_discount_amount && appliedPromo.max_discount_amount > 0) {
+      amt = Math.min(amt, appliedPromo.max_discount_amount);
+    }
+
+    return Math.min(targetBase, Math.max(0, amt));
+  }, [appliedPromo, pax, selectedSessions.length, subtotalBeforePromo, cappedSeatingFee, totalEquipmentFee, enableSmartBoard, effectiveHourlyPrice]);
+
+  // Dynamic promo threshold feedback & auto-removal
+  useEffect(() => {
+    if (!appliedPromo) return;
+    if (appliedPromo.min_pax && pax < appliedPromo.min_pax) {
+      setPromoError(`此優惠券需滿 ${appliedPromo.min_pax} 人方可使用，已自動取消套用`);
+      setAppliedPromo(null);
+    } else if (appliedPromo.min_hours && selectedSessions.length < appliedPromo.min_hours) {
+      setPromoError(`此優惠券需滿 ${appliedPromo.min_hours} 小時方可使用，已自動取消套用`);
+      setAppliedPromo(null);
+    } else if (appliedPromo.min_amount && subtotalBeforePromo < appliedPromo.min_amount) {
+      setPromoError(`此優惠券消費需滿 NT$ ${appliedPromo.min_amount} 方可使用，已自動取消套用`);
+      setAppliedPromo(null);
+    }
+  }, [appliedPromo, pax, selectedSessions.length, subtotalBeforePromo]);
 
   const estimatedGrandTotal = Math.max(0, subtotalBeforePromo - promoDiscountAmount);
 
@@ -561,6 +598,8 @@ function Booking() {
         hours: selectedSessions.length,
         is_unlimited: isUnlimited || isCapped,
         base_amount: subtotalBeforePromo,
+        seating_amount: cappedSeatingFee,
+        equipment_amount: enableSmartBoard ? totalEquipmentFee : 0,
         hourly_price: effectiveHourlyPrice
       });
       if (res.data?.valid && res.data.promo) {
@@ -705,13 +744,15 @@ function Booking() {
         assigned_seats: assignedSeats,
         isUnlimited: splitBookingData.isUnlimited,
         equipments: splitBookingData.equipments,
-        total_amount: finalAmount
+        total_amount: finalAmount,
+        appliedPromo: splitBookingData.appliedPromo || appliedPromo
       });
 
       fetchSessions(selectedDate);
       setSelectedSessions([]);
       setEquipmentSelections({});
       setEnableSmartBoard(false);
+      setAppliedPromo(null);
       setShowSplitModal(false);
       setSplitBookingData(null);
     } catch (err) {
@@ -919,6 +960,16 @@ function Booking() {
           <div className="flex flex-col gap-4 mb-6">
             <div className="flex justify-between items-center gap-2">
               <h2 className="text-lg font-bold">2. 選擇時段 (可複選)</h2>
+              <button
+                type="button"
+                onClick={handleForceSync}
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors shadow-2xs"
+                title="重新整理時段、收費設定與最新智能板庫存"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#8B5B43]' : ''}`} />
+                <span>{isSyncing ? '同步中...' : '強制同步最新人數'}</span>
+              </button>
             </div>
             {sessions.length > 0 && allowUnlimited && (
               <div className="flex flex-col gap-2">
@@ -1547,14 +1598,14 @@ function Booking() {
                 <span className="text-3xl">⚠️</span>
               </div>
               <h3 className="text-xl font-bold text-wood-textMain text-center">
-                連續座位不足
+                相鄰名額不足提示
               </h3>
             </div>
             <div className="p-6">
               <p className="text-wood-textMuted text-center mb-6">
-                您選擇的時段已無法安排連續的相鄰座位，<br/>
-                <span className="font-bold text-wood-primaryHover">同行者將會被拆散入座。</span><br/><br/>
-                請問是否仍要確認預約？
+                您選擇的時段名額已無法安排相鄰連座，<br/>
+                <span className="font-bold text-wood-primaryHover">同行者將由現場人員安排分散入座體驗。</span><br/><br/>
+                請問是否仍要確認送出預約？
               </p>
               <div className="flex gap-3">
                 <button
@@ -1564,13 +1615,13 @@ function Booking() {
                   }}
                   className="flex-1 py-3 px-4 bg-wood-bg hover:bg-[#F0EBE1] text-wood-textMuted hover:text-wood-textMain rounded-xl font-medium transition-colors"
                 >
-                  取消預約
+                  返回重選
                 </button>
                 <button
                   onClick={confirmSplitBooking}
                   className="flex-1 py-3 px-4 bg-wood-primary hover:bg-wood-primaryHover text-white rounded-xl font-bold transition-colors shadow-warm"
                 >
-                  確認拆桌
+                  確認接受並預約
                 </button>
               </div>
             </div>
@@ -1721,16 +1772,7 @@ function Booking() {
       {/* Reservation Voucher / Confirmation Ticket Modal */}
       {ticketModalData && (() => {
         const shortRef = formatBookingRef(ticketModalData.booking_ref);
-        const [startT, endT] = ticketModalData.timeRange.split(' - ');
-        const gcalUrl = getGoogleCalendarUrl({
-          session_date: ticketModalData.date,
-          start_time: startT,
-          end_time: endT,
-          booking_ref: ticketModalData.booking_ref,
-          pax: ticketModalData.pax,
-          assigned_seats: ticketModalData.assigned_seats,
-          total_amount: ticketModalData.total_amount
-        });
+        const gcalUrl = getGoogleCalendarUrl(ticketModalData);
 
         return (
           <div className="fixed inset-0 z-[140] flex items-center justify-center p-4">
@@ -1799,23 +1841,32 @@ function Booking() {
 
               {/* Dual Action Buttons */}
               <div className="space-y-2.5">
-                {gcalUrl && (
-                  <a
-                    href={gcalUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => {
-                      if (typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)) {
-                        e.preventDefault();
-                        window.location.href = gcalUrl;
-                      }
-                    }}
-                    className="w-full py-3 px-4 rounded-xl font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors flex items-center justify-center gap-2"
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => downloadIcsFile(ticketModalData)}
+                    className="w-full py-2.5 px-3 rounded-xl font-bold text-xs bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors flex items-center justify-center gap-1.5"
                   >
-                    <CalendarPlus className="w-4 h-4 text-[#8B5B43]" />
-                    加入 Google 行事曆
-                  </a>
-                )}
+                    🍎 Apple / 通用日曆
+                  </button>
+                  {gcalUrl && (
+                    <a
+                      href={gcalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => {
+                        if (typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)) {
+                          e.preventDefault();
+                          window.location.href = gcalUrl;
+                        }
+                      }}
+                      className="w-full py-2.5 px-3 rounded-xl font-bold text-xs bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <CalendarPlus className="w-4 h-4 text-[#8B5B43]" />
+                      Google 行事曆
+                    </a>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => {

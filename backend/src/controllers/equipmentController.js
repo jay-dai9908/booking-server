@@ -1,5 +1,5 @@
 import prisma from '../prismaClient.js';
-import { calculateTotalAmount } from './reservationController.js';
+import { calculateTotalAmount, recalculateReservationTotal } from './reservationController.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 
 export const DEFAULT_EQUIPMENT_CONFIGS = [
@@ -191,10 +191,14 @@ export const getAvailableEquipment = async (req, res) => {
         for (const be of bookedEquipments) {
           if (be.equipment_id !== config.id) continue;
 
-          // Check if this booking covers reqSess
-          const sessionsSet = bookingSessionsMap[be.booking_ref];
-          const hasOverlap = (sessionsSet && (sessionsSet.has(reqSess) || Array.from(sessionsSet).some(s => s.startsWith(reqSess)))) ||
-                            (be.covered_sessions && be.covered_sessions.includes(reqSess));
+          // Check if this booking covers reqSess (prioritize covered_sessions)
+          let hasOverlap = false;
+          if (Array.isArray(be.covered_sessions) && be.covered_sessions.length > 0) {
+            hasOverlap = be.covered_sessions.includes(reqSess) || be.covered_sessions.some(s => s.startsWith(reqSess));
+          } else {
+            const sessionsSet = bookingSessionsMap[be.booking_ref];
+            hasOverlap = sessionsSet && (sessionsSet.has(reqSess) || Array.from(sessionsSet).some(s => s.startsWith(reqSess)));
+          }
 
           if (hasOverlap) {
             bookedInThisSession += be.quantity;
@@ -564,8 +568,15 @@ export const getEquipmentOccupancy = async (req, res) => {
       });
 
       bookedEquipments.forEach(be => {
-        const sessSet = bookingSessionsMap[be.booking_ref];
-        if (sessSet && sessSet.has(sess.start_time)) {
+        let isOccupied = false;
+        if (Array.isArray(be.covered_sessions) && be.covered_sessions.length > 0) {
+          isOccupied = be.covered_sessions.includes(sess.start_time) || be.covered_sessions.some(s => s.startsWith(sess.start_time));
+        } else {
+          const sessSet = bookingSessionsMap[be.booking_ref];
+          isOccupied = sessSet && sessSet.has(sess.start_time);
+        }
+
+        if (isOccupied) {
           occupancy[sess.id][be.equipment_id] = (occupancy[sess.id][be.equipment_id] || 0) + be.quantity;
           if (sessionSummary[sess.start_time]?.boards?.[be.equipment_id]) {
             sessionSummary[sess.start_time].boards[be.equipment_id].booked += be.quantity;
@@ -628,8 +639,8 @@ export const modifyBookingEquipment = async (req, res) => {
     const [startH, startM] = firstSession.start_time.split(':').map(Number);
     const [endH, endM] = lastSession.end_time.split(':').map(Number);
 
-    const bookingStartTime = new Date(`${sessionDateStr}T${firstSession.start_time}:00`);
-    const bookingEndTime = new Date(`${sessionDateStr}T${lastSession.end_time}:00`);
+    const bookingStartTime = new Date(`${sessionDateStr}T${firstSession.start_time}:00+08:00`);
+    const bookingEndTime = new Date(`${sessionDateStr}T${lastSession.end_time}:00+08:00`);
     const now = new Date();
 
     // Verification 2: Order expired check
@@ -727,6 +738,9 @@ export const modifyBookingEquipment = async (req, res) => {
       otherSessionMap[r.booking_ref].add(r.session.start_time);
     });
 
+    const sortedReservations = [...reservations].sort((a, b) => a.session.start_time.localeCompare(b.session.start_time));
+    const totalOrderHours = reservations.length;
+
     for (const eq of equipments) {
       const qty = parseInt(eq.quantity, 10) || 0;
       if (qty <= 0) continue;
@@ -734,20 +748,31 @@ export const modifyBookingEquipment = async (req, res) => {
 
       const config = configMap[eq.equipment_id];
       const totalStock = config.total_stock || 0;
+      const minHours = config.min_contiguous_hours || 2;
+      const rentalHours = totalOrderHours < minHours 
+        ? totalOrderHours 
+        : Math.max(minHours, Math.min(totalOrderHours, parseInt(eq.rental_hours, 10) || totalOrderHours));
+      const targetSessions = sortedReservations.slice(0, rentalHours).map(r => r.session.start_time);
 
-      for (const timeStr of sessionTimes) {
+      for (const timeStr of targetSessions) {
         let bookedByOthers = 0;
         for (const ob of otherBookings) {
           if (ob.equipment_id !== eq.equipment_id) continue;
-          const sSet = otherSessionMap[ob.booking_ref];
-          if (sSet && sSet.has(timeStr)) {
+          let coversThis = false;
+          if (Array.isArray(ob.covered_sessions) && ob.covered_sessions.length > 0) {
+            coversThis = ob.covered_sessions.includes(timeStr) || ob.covered_sessions.some(s => s.startsWith(timeStr));
+          } else {
+            const sSet = otherSessionMap[ob.booking_ref];
+            coversThis = sSet && sSet.has(timeStr);
+          }
+          if (coversThis) {
             bookedByOthers += ob.quantity;
           }
         }
 
         if (bookedByOthers + qty > totalStock) {
           return res.status(409).json({
-            error: `抱歉！「${config.name}」在庫存不足，請重新調整數量。`,
+            error: `抱歉！「${config.name}」在 ${timeStr} 庫存不足，請重新調整數量。`,
             code: 'EQUIPMENT_OUT_OF_STOCK'
           });
         }
@@ -755,8 +780,6 @@ export const modifyBookingEquipment = async (req, res) => {
     }
 
     // Execute Transaction: Update BookingEquipment and recalculate total_amount
-    const coveredSessionsStrings = reservations.map(r => `${r.session.start_time}-${r.session.end_time}`);
-    const totalOrderHours = reservations.length;
 
     const discountConfig = {
       enabled: globalSetting ? globalSetting.equipment_discount_enabled !== false : true,
@@ -789,6 +812,8 @@ export const modifyBookingEquipment = async (req, res) => {
 
       totalEquipmentFee += subtotalPrice;
 
+      const eqCoveredSessions = sortedReservations.slice(0, rentalHours).map(r => `${r.session.start_time}-${r.session.end_time}`);
+
       newEquipmentRecords.push({
         booking_ref,
         equipment_id: eq.equipment_id,
@@ -796,31 +821,18 @@ export const modifyBookingEquipment = async (req, res) => {
         quantity: qty,
         rental_hours: rentalHours,
         subtotal_price: subtotalPrice,
-        covered_sessions: coveredSessionsStrings
+        covered_sessions: eqCoveredSessions
       });
     }
 
-    // Calculate base seating price
-    const baseSeatingPrice = await calculateTotalAmount(
-      prisma,
-      firstSession.session_date,
-      firstRes.pax,
-      totalOrderHours,
-      firstRes.is_unlimited
-    );
-
-    const newGrandTotal = baseSeatingPrice + totalEquipmentFee;
-
-    await prisma.$transaction([
-      prisma.bookingEquipment.deleteMany({ where: { booking_ref } }),
-      ...(newEquipmentRecords.length > 0 ? [prisma.bookingEquipment.createMany({ data: newEquipmentRecords })] : []),
-      prisma.reservation.updateMany({
-        where: { booking_ref },
-        data: {
-          total_amount: newGrandTotal
-        }
-      })
-    ]);
+    // Unified recalculation preserving promo codes and addons
+    const newGrandTotal = await prisma.$transaction(async (tx) => {
+      await tx.bookingEquipment.deleteMany({ where: { booking_ref } });
+      if (newEquipmentRecords.length > 0) {
+        await tx.bookingEquipment.createMany({ data: newEquipmentRecords });
+      }
+      return await recalculateReservationTotal(tx, booking_ref);
+    });
 
     res.json({
       message: '智能拼豆板配置已更新',

@@ -50,13 +50,30 @@ export const getAccountingSummary = async (req, res) => {
           is_unlimited: r.is_unlimited || false,
           is_paid: r.is_paid || false,
           total_amount: r.total_amount,
-          paid_at: r.paid_at
+          paid_at: r.paid_at,
+          payment_method: r.payment_method,
+          promo_code: r.promo_code,
+          discount_amount: r.discount_amount || 0,
+          addons_amount: r.addons_amount || 0
         };
       }
       groups[ref].sessions.push(r.session);
     }
 
     const uniqueReservations = Object.values(groups);
+    const activeBookingRefs = Object.keys(groups);
+
+    // Fetch equipment bookings for these active booking refs
+    const bookingEquipments = await prisma.bookingEquipment.findMany({
+      where: { booking_ref: { in: activeBookingRefs } }
+    });
+    const eqAmountMap = {};
+    bookingEquipments.forEach(be => {
+      eqAmountMap[be.booking_ref] = (eqAmountMap[be.booking_ref] || 0) + (be.subtotal_price || 0);
+    });
+    for (const group of uniqueReservations) {
+      group.equipment_amount = eqAmountMap[group.booking_ref] || 0;
+    }
 
     let expectedRevenue = 0;
     let totalRevenue = 0;
@@ -70,13 +87,14 @@ export const getAccountingSummary = async (req, res) => {
     for (const group of uniqueReservations) {
       let amount = group.total_amount;
       if (amount == null) {
-        amount = await calculateTotalAmount(
+        const baseSeating = await calculateTotalAmount(
           prisma,
           group.session_date,
           group.pax,
           group.sessions.length,
           group.is_unlimited
         );
+        amount = Math.max(0, baseSeating + (group.equipment_amount || 0) + (group.addons_amount || 0) - (group.discount_amount || 0));
       }
       group.calculated_amount = amount;
 
@@ -118,7 +136,12 @@ export const getAccountingSummary = async (req, res) => {
         is_paid: g.is_paid,
         is_unlimited: g.is_unlimited,
         attendance: g.attendance,
-        amount: g.calculated_amount
+        amount: g.calculated_amount,
+        payment_method: g.payment_method || (g.is_paid ? 'cash' : ''),
+        discount_amount: g.discount_amount || 0,
+        addons_amount: g.addons_amount || 0,
+        equipment_amount: g.equipment_amount || 0,
+        promo_code: g.promo_code || null
       };
     });
 
@@ -154,6 +177,7 @@ export const getLedger = async (req, res) => {
 
     const ledgers = await prisma.reservation.findMany({
       where: {
+        status: { not: 'cancelled' },
         is_paid: true,
         session: {
           session_date: {
@@ -173,14 +197,29 @@ export const getLedger = async (req, res) => {
 
     const seenRefs = new Set();
     const uniqueLedgers = [];
+    const ledgerRefs = [];
     ledgers.forEach(r => {
       if (!seenRefs.has(r.booking_ref)) {
         seenRefs.add(r.booking_ref);
         uniqueLedgers.push(r);
+        ledgerRefs.push(r.booking_ref);
       }
     });
 
-    res.json(uniqueLedgers);
+    const eqRecords = await prisma.bookingEquipment.findMany({
+      where: { booking_ref: { in: ledgerRefs } }
+    });
+    const eqMap = {};
+    eqRecords.forEach(e => {
+      eqMap[e.booking_ref] = (eqMap[e.booking_ref] || 0) + (e.subtotal_price || 0);
+    });
+
+    const results = uniqueLedgers.map(r => ({
+      ...r,
+      equipment_amount: eqMap[r.booking_ref] || 0
+    }));
+
+    res.json(results);
   } catch (error) {
     console.error('Error fetching ledger:', error);
     res.status(500).json({ error: 'Failed to fetch ledger' });
@@ -199,6 +238,7 @@ export const getUnpaidFollowUp = async (req, res) => {
 
     const unpaid = await prisma.reservation.findMany({
       where: {
+        status: { not: 'cancelled' },
         is_paid: false,
         attendance: 'checked_in',
         session: {

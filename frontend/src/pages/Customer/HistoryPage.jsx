@@ -59,9 +59,8 @@ export default function HistoryPage() {
     const shortRef = formatBookingRef(r.booking_ref).toLowerCase();
     const fullRef = (r.booking_ref || '').toLowerCase();
     const dateStr = format(new Date(r.session_date), 'yyyy/MM/dd yyyy-MM-dd').toLowerCase();
-    const seatsStr = (r.assigned_seats || []).join(' ').toLowerCase();
     const nameStr = (r.user?.name || '').toLowerCase();
-    return shortRef.includes(term) || fullRef.includes(term) || dateStr.includes(term) || seatsStr.includes(term) || nameStr.includes(term);
+    return shortRef.includes(term) || fullRef.includes(term) || dateStr.includes(term) || nameStr.includes(term);
   });
 
   return (

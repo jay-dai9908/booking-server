@@ -1,47 +1,13 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { X, CheckCircle2, XCircle, Calendar, Users, Phone, Cpu, Copy, Check, CalendarPlus, AlertTriangle } from 'lucide-react';
+import { X, CheckCircle2, XCircle, Calendar, Users, Phone, Cpu, Copy, Check, CalendarPlus, AlertTriangle, Download } from 'lucide-react';
 import api from '../api/axios';
+import { getGoogleCalendarUrl, downloadIcsFile } from '../utils/calendarHelper';
 
 export const formatBookingRef = (ref) => {
   if (!ref) return '';
   if (ref.length <= 12) return ref;
   return `BK-${ref.slice(0, 4).toUpperCase()}-${ref.slice(-4).toUpperCase()}`;
-};
-
-export const getGoogleCalendarUrl = (res) => {
-  try {
-    const rawDate = res.session_date || res.session?.session_date;
-    if (!rawDate) return null;
-    const dateStr = format(new Date(rawDate), 'yyyy-MM-dd');
-    let startT = res.start_time || res.session?.start_time || '13:00';
-    let endT = res.end_time || res.session?.end_time || '14:00';
-    if (res.time_blocks && res.time_blocks.length > 0) {
-      startT = res.time_blocks[0].start_time;
-      endT = res.time_blocks[res.time_blocks.length - 1].end_time;
-    }
-    const [sH, sM] = startT.split(':').map(Number);
-    const [eH, eM] = endT.split(':').map(Number);
-    
-    const startObj = new Date(rawDate);
-    startObj.setHours(sH, sM, 0, 0);
-    const endObj = new Date(rawDate);
-    endObj.setHours(eH, eM, 0, 0);
-
-    const toGCalISO = (d) => d.toISOString().replace(/-|:|\.\d+/g, '');
-    const startUTC = toGCalISO(startObj);
-    const endUTC = toGCalISO(endObj);
-
-    const shortRef = formatBookingRef(res.booking_ref);
-    const text = encodeURIComponent('拾光製所 拼豆預約');
-    const details = encodeURIComponent(
-      `預約編號：${shortRef}\n人數：${res.pax}人\n預估總額：NT$ ${res.total_amount || 0}\n\n期待您的到來！預約現場保留 15 分鐘。`
-    );
-    const location = encodeURIComponent('拾光製所');
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startUTC}/${endUTC}&details=${details}&location=${location}&openExternalBrowser=1`;
-  } catch (e) {
-    return null;
-  }
 };
 
 export const getReservationStatusUI = (r) => {
@@ -245,33 +211,40 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                     ({reservation.cancelled_by === 'admin' ? '店家取消' : '自行取消'})
                   </span>
                 )}
-                {reservation.is_force_split && (
-                  <span className="inline-flex items-center px-2 py-1 bg-[#F4EFE6] text-[#A67C52] border border-[#D5CFC9] rounded-md text-xs font-bold tracking-wide">
-                    同意拆桌
-                  </span>
-                )}
               </div>
             </div>
           </div>
 
           {/* Action Buttons */}
           <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-            {reservation.status !== 'cancelled' && !isPast && gcalUrl ? (
-              <a
-                href={gcalUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => {
-                  if (typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)) {
-                    e.preventDefault();
-                    window.location.href = gcalUrl;
-                  }
-                }}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors"
-              >
-                <CalendarPlus className="w-4 h-4 text-[#8B5B43]" />
-                加入 Google 行事曆
-              </a>
+            {reservation.status !== 'cancelled' && !isPast ? (
+              <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => downloadIcsFile(reservation)}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors"
+                >
+                  <Download className="w-4 h-4 text-[#8B5B43]" />
+                  🍎 加入 Apple / 通用日曆 (.ics)
+                </button>
+                {gcalUrl && (
+                  <a
+                    href={gcalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      if (typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)) {
+                        e.preventDefault();
+                        window.location.href = gcalUrl;
+                      }
+                    }}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors"
+                  >
+                    <CalendarPlus className="w-4 h-4 text-[#8B5B43]" />
+                    📅 加入 Google 行事曆
+                  </a>
+                )}
+              </div>
             ) : <div />}
 
             {reservation.status !== 'cancelled' && (
@@ -303,7 +276,7 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
               確認要取消此筆預約嗎？
             </h3>
             <p className="text-xs sm:text-sm text-[#7A7067] leading-relaxed text-center mb-6">
-              取消後系統將立即釋出該時段的手作座位與智能拼豆板庫存。若您之後仍想前往，歡迎隨時重新預約。
+              取消後系統將立即釋出該時段的手作預約名額與智能拼豆板庫存。若您之後仍想前往，歡迎隨時重新預約。
             </p>
 
             {cancelError && (

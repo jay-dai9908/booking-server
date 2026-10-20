@@ -120,18 +120,38 @@ export const register = async (req, res) => {
 
     let finalUser;
 
-    if (existingUser && existingUser.line_user_id.startsWith('manual_')) {
-      finalUser = await prisma.user.update({
-        where: { id: existingUser.id },
-        data: { 
-          line_user_id: userPayload.line_user_id,
-          name, // 依據顧客自己填寫的名稱更新
-          line_display_name: userPayload.line_display_name || null,
-          line_picture_url: userPayload.line_picture_url || null,
-          line_status_msg: userPayload.line_status_msg || null,
-          last_login_at: new Date()
-        }
-      });
+    if (existingUser) {
+      if (existingUser.line_user_id.startsWith('manual_')) {
+        finalUser = await prisma.user.update({
+          where: { id: existingUser.id },
+          data: { 
+            line_user_id: userPayload.line_user_id,
+            name, // 依據顧客自己填寫的名稱更新
+            line_display_name: userPayload.line_display_name || null,
+            line_picture_url: userPayload.line_picture_url || null,
+            line_status_msg: userPayload.line_status_msg || null,
+            last_login_at: new Date()
+          }
+        });
+      } else if (existingUser.line_user_id === userPayload.line_user_id) {
+        // 同一 LINE 帳號更新基本資料
+        finalUser = await prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            name,
+            line_display_name: userPayload.line_display_name || null,
+            line_picture_url: userPayload.line_picture_url || null,
+            line_status_msg: userPayload.line_status_msg || null,
+            last_login_at: new Date()
+          }
+        });
+      } else {
+        // 此手機號碼已被其他真實 LINE 帳號註冊綁定
+        return res.status(409).json({ 
+          error: '此手機號碼已被其他 LINE 帳號綁定。如需變更綁定，請直接聯繫門市人員。',
+          code: 'PHONE_ALREADY_BOUND'
+        });
+      }
     } else {
       finalUser = await prisma.user.create({
         data: {

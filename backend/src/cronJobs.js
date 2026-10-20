@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import prisma from './prismaClient.js';
 
 export const startCronJobs = () => {
-  // Run every day at midnight (00:00)
+  // Run every day at midnight (00:00) Taipei time
   cron.schedule('0 0 * * *', async () => {
     console.log('[Cron Job] Running midnight attendance check...');
     try {
@@ -53,9 +53,9 @@ export const startCronJobs = () => {
     } catch (error) {
       console.error('[Cron Job] Error during midnight attendance check:', error);
     }
-  });
+  }, { timezone: 'Asia/Taipei' });
 
-  // Run every day at 23:59 to solidify today's price
+  // Run every day at 23:59 to solidify today's price (Taipei time)
   cron.schedule('59 23 * * *', async () => {
     console.log('[Cron Job] Solidifying daily settings for today...');
     try {
@@ -98,7 +98,7 @@ export const startCronJobs = () => {
     } catch (error) {
       console.error('[Cron Job] Error solidifying daily settings:', error);
     }
-  });
+  }, { timezone: 'Asia/Taipei' });
 
   console.log('[Cron Job] Scheduled midnight attendance check and price solidification.');
 };
