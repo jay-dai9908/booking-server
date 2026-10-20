@@ -645,30 +645,30 @@ export default function CheckoutModal({
   const sunmiDetected = isSunmiPosAvailable();
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-[120] animate-fade-in">
-      <div className="bg-slate-50 rounded-2xl max-w-5xl w-full max-h-[94vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
-        {/* Top Header */}
-        <div className="bg-[#3E332B] text-[#FAF7F2] px-4 sm:px-6 py-4 flex flex-wrap justify-between items-center gap-3 shrink-0 border-b border-[#2C241E]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/10 border border-[#E8DEC8]/20 flex items-center justify-center text-xl">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 z-[120] animate-fade-in">
+      <div className="bg-slate-50 rounded-none sm:rounded-2xl max-w-5xl w-full h-[100dvh] sm:h-auto sm:max-h-[94dvh] flex flex-col shadow-2xl border-0 sm:border border-slate-200 overflow-hidden">
+        {/* Top Header — Compact on POS/Mobile to maximize scrollable height */}
+        <div className="bg-[#3E332B] text-[#FAF7F2] px-3 sm:px-6 py-2 sm:py-3.5 flex items-center justify-between gap-2 shrink-0 border-b border-[#2C241E]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-white/10 border border-[#E8DEC8]/20 flex items-center justify-center text-base sm:text-xl shrink-0">
               💳
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-lg sm:text-xl font-extrabold tracking-tight">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-xl font-extrabold tracking-tight truncate">
                   櫃檯結帳與多人拆帳工作台
                 </h3>
                 {reservation.is_paid ? (
-                  <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                    ✅ 已完成結帳
+                  <span className="px-2 py-0.5 text-[10px] sm:text-xs font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                    ✅ 已結帳
                   </span>
                 ) : (
-                  <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30">
-                    ⏳ 待結帳收款
+                  <span className="px-2 py-0.5 text-[10px] sm:text-xs font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                    ⏳ 待結帳
                   </span>
                 )}
                 <span
-                  className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${
+                  className={`hidden sm:inline-block px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${
                     sunmiDetected
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30'
                       : 'bg-white/10 text-[#D5CFC9] border-white/15'
@@ -677,23 +677,23 @@ export default function CheckoutModal({
                   {sunmiDetected ? '🖨️ 商米 V2s 已連線' : '💻 桌面 / 收據預覽模式'}
                 </span>
               </div>
-              <p className="text-xs text-[#D5CFC9] mt-0.5">
-                單號 #{String(reservation.booking_ref).slice(0, 8).toUpperCase()} · 貴賓：
+              <p className="text-[11px] sm:text-xs text-[#D5CFC9] mt-0.5 truncate">
+                #{String(reservation.booking_ref).slice(0, 8).toUpperCase()} ·
                 <strong className="text-white ml-1">{reservation.user?.name || '現場客'}</strong>
                 {reservation.user?.phone ? ` (${reservation.user.phone})` : ''} · 座位：
-                <span className="text-amber-300 font-semibold ml-1">
+                <span className="text-amber-300 font-semibold ml-0.5">
                   {reservation.assigned_seats?.length > 0 ? reservation.assigned_seats.join(', ') : '未指定'}
                 </span>
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <a
               href="/admin/coupons"
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#8B5B43] hover:bg-[#7A4F3A] text-white border border-[#A6755C] transition flex items-center gap-1 shadow-xs"
+              className="hidden md:flex px-3 py-1.5 rounded-lg text-xs font-bold bg-[#8B5B43] hover:bg-[#7A4F3A] text-white border border-[#A6755C] transition items-center gap-1 shadow-xs"
               title="另開新分頁開啟卡券與加購品完整後台"
             >
               🎟️ 卡券管理中心 ↗
@@ -701,21 +701,22 @@ export default function CheckoutModal({
             <button
               type="button"
               onClick={() => setSubModal(subModal === 'promo_manager' ? 'none' : 'promo_manager')}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/15 transition"
+              className="hidden md:inline-block px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/15 transition"
             >
               快速加卡券 ({promoCodes.length})
             </button>
             <button
               type="button"
               onClick={() => setSubModal(subModal === 'addon_manager' ? 'none' : 'addon_manager')}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/15 transition"
+              className="hidden md:inline-block px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/15 transition"
             >
               快速加品項 ({addonPresets.length})
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-full bg-white/10 hover:bg-rose-500/80 text-white flex items-center justify-center text-lg font-bold transition"
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-rose-500/80 text-white flex items-center justify-center text-lg font-bold transition shrink-0"
+              aria-label="關閉結帳視窗"
             >
               ×
             </button>
@@ -725,7 +726,7 @@ export default function CheckoutModal({
         {/* Toast Alert */}
         {toastMsg && (
           <div
-            className={`px-4 py-2 text-xs sm:text-sm font-bold text-center shrink-0 ${
+            className={`px-4 py-1.5 text-xs sm:text-sm font-bold text-center shrink-0 ${
               toastMsg.type === 'error'
                 ? 'bg-rose-600 text-white'
                 : 'bg-emerald-600 text-white'
@@ -735,31 +736,68 @@ export default function CheckoutModal({
           </div>
         )}
 
-        {/* Daily Pricing Rate Banner */}
-        <div className="bg-[#FAF7F2] border-b border-[#E8DEC8] px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[#3E332B] shrink-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-bold">
-              📅 當日費率 ({pricingInfo.is_weekend ? '假日標準' : '平日標準'})：
-            </span>
-            <span className="bg-white px-2 py-0.5 rounded border border-[#E8DEC8] font-semibold">
-              一般計時：<strong>${pricingInfo.hourly_price}</strong> / 小時
-            </span>
-            <span className="bg-white px-2 py-0.5 rounded border border-[#E8DEC8] font-semibold">
-              加時半小時 (+0.5hr)：<strong>+${Math.round(pricingInfo.hourly_price * 0.5)}</strong>
-            </span>
-            {pricingInfo.allow_unlimited && (
-              <span className="bg-amber-100/80 text-amber-900 px-2 py-0.5 rounded border border-amber-300 font-bold">
-                ✨ 不限時封頂：<strong>${pricingInfo.unlimited_price}</strong> / 人
+        {/* Main Scrollable Content (min-h-0 ensures proper Flex scrolling on Android/Sunmi POS WebViews) */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2.5 sm:p-5 space-y-3.5 sm:space-y-5">
+          {/* Mobile / POS Quick Toolbar & Daily Pricing Rate Banner (scrolls with content so it never hogs screen height) */}
+          <div className="bg-[#FAF7F2] rounded-xl border border-[#E8DEC8] px-3 sm:px-4 py-2.5 space-y-2 text-xs text-[#3E332B]">
+            <div className="flex md:hidden flex-wrap items-center justify-between gap-1.5 pb-2 border-b border-[#E8DEC8]">
+              <span
+                className={`px-2 py-0.5 text-[10px] font-bold rounded-full border ${
+                  sunmiDetected
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                    : 'bg-white text-[#6D5D52] border-[#E8DEC8]'
+                }`}
+              >
+                {sunmiDetected ? '🖨️ 商米 V2s 已連線' : '💻 收據預覽模式'}
               </span>
-            )}
-          </div>
-          <div className="text-[11px] text-[#8C8279] font-medium">
-            💡 提示：若單人計時＋加時達封頂金額，系統將自動為該位顧客切換為封頂價
-          </div>
-        </div>
+              <div className="flex items-center gap-1.5">
+                <a
+                  href="/admin/coupons"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-1 rounded-lg text-[11px] font-bold bg-[#8B5B43] text-white"
+                >
+                  🎟️ 卡券中心
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setSubModal(subModal === 'promo_manager' ? 'none' : 'promo_manager')}
+                  className="px-2 py-1 rounded-lg text-[11px] font-bold bg-white text-[#3E332B] border border-[#E8DEC8]"
+                >
+                  ＋卡券 ({promoCodes.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubModal(subModal === 'addon_manager' ? 'none' : 'addon_manager')}
+                  className="px-2 py-1 rounded-lg text-[11px] font-bold bg-white text-[#3E332B] border border-[#E8DEC8]"
+                >
+                  ＋品項 ({addonPresets.length})
+                </button>
+              </div>
+            </div>
 
-        {/* Main Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
+                <span className="font-bold">
+                  📅 當日費率 ({pricingInfo.is_weekend ? '假日標準' : '平日標準'})：
+                </span>
+                <span className="bg-white px-2 py-0.5 rounded border border-[#E8DEC8] font-semibold">
+                  計時：<strong>${pricingInfo.hourly_price}</strong>/hr
+                </span>
+                <span className="bg-white px-2 py-0.5 rounded border border-[#E8DEC8] font-semibold">
+                  加時(+0.5hr)：<strong>+${Math.round(pricingInfo.hourly_price * 0.5)}</strong>
+                </span>
+                {pricingInfo.allow_unlimited && (
+                  <span className="bg-amber-100/80 text-amber-900 px-2 py-0.5 rounded border border-amber-300 font-bold">
+                    ✨ 封頂：<strong>${pricingInfo.unlimited_price}</strong>/人
+                  </span>
+                )}
+              </div>
+              <div className="hidden sm:block text-[11px] text-[#8C8279] font-medium">
+                💡 單人計時＋加時達封頂金額時自動切換封頂價
+              </div>
+            </div>
+          </div>
           {/* SECTION 1: 多人拆帳與個別時數 / 加時半小時 */}
           <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-[#E8DEC8]">
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
@@ -1298,18 +1336,40 @@ export default function CheckoutModal({
               </div>
             </div>
           </div>
+
+          {/* Mobile / POS Detailed Breakdown Card inside Scroll Area so Sticky Footer stays ultra-compact */}
+          <div className="md:hidden bg-white rounded-2xl p-3.5 border border-[#E8DEC8] shadow-xs text-xs text-[#6D5D52] space-y-1">
+            <div className="font-extrabold text-[#3E332B]">📋 整單費用與拆帳明細</div>
+            <div>
+              座位與加時：<strong className="text-[#3E332B]">${computed.subtotalSeating}</strong> · 設備：
+              <strong className="text-[#3E332B]">${computed.subtotalEquipment}</strong> · 加購：
+              <strong className="text-[#3E332B]">${computed.subtotalAddons}</strong> · 優惠折抵：
+              <strong className="text-rose-600">-${computed.totalDiscount}</strong>
+            </div>
+            <div>
+              各人拆帳合計：
+              <strong className="text-[#8B5B43]">
+                {computed.people.map((p, i) => `第${i + 1}位$${p.person_total}`).join(' + ')}
+              </strong>
+            </div>
+          </div>
         </div>
 
-        {/* Bottom Sticky Summary & POS Print Bar */}
-        <div className="bg-white border-t border-[#E8DEC8] px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 shrink-0">
-          <div className="flex flex-wrap items-baseline gap-4">
-            <div>
-              <span className="text-xs font-bold text-[#8C8279] block">整單應收總金額</span>
-              <span className="text-2xl sm:text-3xl font-black text-[#8B5B43]">
+        {/* Bottom Sticky Summary & POS Print Bar — Compact on POS/Mobile */}
+        <div className="bg-white border-t border-[#E8DEC8] px-3 sm:px-6 py-2 sm:py-3.5 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2 sm:gap-4 shrink-0">
+          <div className="flex items-center justify-between sm:justify-start sm:items-baseline gap-2 sm:gap-4">
+            <div className="flex items-baseline gap-2 sm:block">
+              <span className="text-xs font-bold text-[#8C8279] sm:block">整單應收總金額</span>
+              <span className="text-xl sm:text-3xl font-black text-[#8B5B43]">
                 NT$ {computed.grandTotal.toLocaleString()}
               </span>
             </div>
-            <div className="text-xs text-[#8C8279] space-y-0.5 border-l border-[#E8DEC8] pl-3">
+            {/* Compact 1-line summary on POS/mobile */}
+            <div className="md:hidden text-[11px] font-bold text-[#6D5D52] bg-[#FAF7F2] px-2 py-0.5 rounded-lg border border-[#E8DEC8]">
+              共 {computed.people.length} 人{computed.totalDiscount > 0 ? ` · 已折 $${computed.totalDiscount}` : ''}
+            </div>
+            {/* Full breakdown on Tablet/Desktop */}
+            <div className="hidden md:block text-xs text-[#8C8279] space-y-0.5 border-l border-[#E8DEC8] pl-3">
               <div>
                 座位與加時：<strong className="text-[#3E332B]">${computed.subtotalSeating}</strong> · 設備：
                 <strong className="text-[#3E332B]">${computed.subtotalEquipment}</strong> · 加購：
@@ -1325,20 +1385,20 @@ export default function CheckoutModal({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-1.5 sm:gap-2">
             <button
               type="button"
               onClick={handlePrintFullReceipt}
-              className="px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#FAF7F2] hover:bg-[#F2ECE4] text-[#3E332B] border border-[#E8DEC8] transition shadow-xs"
+              className="px-2 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-sm font-bold bg-[#FAF7F2] hover:bg-[#F2ECE4] text-[#3E332B] border border-[#E8DEC8] transition shadow-xs text-center truncate"
             >
-              🖨️ 預覽 / 印總明細單
+              🖨️ 預覽/印總單
             </button>
 
             <button
               type="button"
               disabled={isSubmitting}
               onClick={() => handleConfirmCheckout(false)}
-              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-white hover:bg-[#FAF7F2] text-[#3E332B] border border-[#E8DEC8] shadow-xs transition disabled:opacity-50"
+              className="px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-sm font-bold bg-white hover:bg-[#FAF7F2] text-[#3E332B] border border-[#E8DEC8] shadow-xs transition disabled:opacity-50 text-center truncate"
             >
               ✅ 僅確認結帳
             </button>
@@ -1347,9 +1407,9 @@ export default function CheckoutModal({
               type="button"
               disabled={isSubmitting}
               onClick={() => handleConfirmCheckout(true)}
-              className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold bg-[#8B5B43] hover:bg-[#7A4F3A] text-white shadow-md transition disabled:opacity-50 flex items-center gap-1.5"
+              className="px-2 sm:px-5 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-sm font-extrabold bg-[#8B5B43] hover:bg-[#7A4F3A] text-white shadow-md transition disabled:opacity-50 flex items-center justify-center gap-1 text-center truncate"
             >
-              <span>🖨️ 確認結帳並印單 (商米 V2s)</span>
+              <span className="truncate">🖨️ 結帳並印單</span>
             </button>
           </div>
         </div>
@@ -1357,9 +1417,9 @@ export default function CheckoutModal({
 
       {/* SUB-MODAL 1: 58mm Thermal Receipt Preview (for non-Sunmi desktop or verification) */}
       {subModal === 'receipt_preview' && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-[130]">
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="bg-slate-900 text-white px-4 py-3 flex justify-between items-center">
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-2 sm:p-4 z-[130]">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[92dvh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="bg-slate-900 text-white px-4 py-2.5 flex justify-between items-center shrink-0">
               <h4 className="font-bold text-sm">{previewTitle}</h4>
               <button
                 type="button"
@@ -1370,7 +1430,7 @@ export default function CheckoutModal({
               </button>
             </div>
 
-            <div className="p-4 overflow-y-auto bg-slate-100 flex-1 flex flex-col items-center">
+            <div className="p-3 sm:p-4 overflow-y-auto overscroll-contain bg-slate-100 flex-1 min-h-0 flex flex-col items-center">
               {/* 58mm Thermal Paper Simulation */}
               <div
                 id="sunmi-thermal-preview"
@@ -1446,11 +1506,11 @@ export default function CheckoutModal({
 
       {/* SUB-MODAL 2: Promo Code & POS Quick Coupon Manager */}
       {subModal === 'promo_manager' && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-[130]">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden border border-[#E8DEC8]">
-            <div className="bg-[#3E332B] text-white px-5 py-3.5 flex justify-between items-center">
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-2 sm:p-4 z-[130]">
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[92dvh] flex flex-col shadow-2xl overflow-hidden border border-[#E8DEC8]">
+            <div className="bg-[#3E332B] text-white px-4 sm:px-5 py-3 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
-                <h4 className="font-bold text-base">🎟️ 優惠券與櫃檯通用折扣管理</h4>
+                <h4 className="font-bold text-sm sm:text-base">🎟️ 優惠券與櫃檯通用折扣管理</h4>
                 <a
                   href="/admin/coupons"
                   target="_blank"
@@ -1469,7 +1529,7 @@ export default function CheckoutModal({
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-5 flex-1">
+            <div className="p-3.5 sm:p-5 overflow-y-auto overscroll-contain space-y-4 flex-1 min-h-0">
               <form
                 onSubmit={handleCreatePromo}
                 className="bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] space-y-3"
@@ -1620,10 +1680,10 @@ export default function CheckoutModal({
 
       {/* SUB-MODAL 3: Addon Presets Manager */}
       {subModal === 'addon_manager' && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-[130]">
-          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-[#E8DEC8]">
-            <div className="bg-[#3E332B] text-white px-5 py-3.5 flex justify-between items-center">
-              <h4 className="font-bold text-base">🛍️ 快速管理常用吊飾／周邊加購品項</h4>
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-2 sm:p-4 z-[130]">
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[92dvh] flex flex-col shadow-2xl overflow-hidden border border-[#E8DEC8]">
+            <div className="bg-[#3E332B] text-white px-4 sm:px-5 py-3 flex justify-between items-center shrink-0">
+              <h4 className="font-bold text-sm sm:text-base">🛍️ 快速管理常用吊飾／周邊加購品項</h4>
               <button
                 type="button"
                 onClick={() => setSubModal('none')}
@@ -1633,7 +1693,7 @@ export default function CheckoutModal({
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-4 flex-1">
+            <div className="p-3.5 sm:p-5 overflow-y-auto overscroll-contain space-y-4 flex-1 min-h-0">
               <form
                 onSubmit={handleCreateAddonPreset}
                 className="flex flex-wrap items-center gap-2 bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8]"
