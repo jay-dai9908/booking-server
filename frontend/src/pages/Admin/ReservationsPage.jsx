@@ -303,9 +303,22 @@ export default function ReservationsPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                          {statusUI.icon} {statusUI.text}
-                        </span>
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                            {statusUI.icon} {statusUI.text}
+                          </span>
+                          {r.status !== 'cancelled' && (
+                            r.is_paid ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                💰 已結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                💳 待結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
+                              </span>
+                            )
+                          )}
+                        </div>
                         {r.attendance === 'checked_in' && r.checked_in_at && (
                           <div className="mt-1 text-[11px] font-medium text-blue-600 flex items-center gap-0.5">
                             <span>🕒 報到 {format(new Date(r.checked_in_at), 'HH:mm')}</span>

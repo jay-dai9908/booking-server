@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
+import { evaluatePromoCode } from './checkoutController.js';
 
 // Helper function to group reservations by booking_ref
 const groupReservations = (reservations, equipmentsMap = {}) => {
@@ -26,7 +27,16 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
         is_force_split: r.is_force_split || false,
         is_unlimited: r.is_unlimited || false,
         is_paid: r.is_paid || false,
-        total_amount: r.total_amount || null,
+        paid_at: r.paid_at || null,
+        payment_method: r.payment_method || null,
+        total_amount: r.total_amount ?? null,
+        is_amount_manual: r.is_amount_manual || false,
+        checkout_unlimited_pax: r.checkout_unlimited_pax ?? null,
+        checkout_regular_hours: r.checkout_regular_hours ?? null,
+        checkout_details: r.checkout_details || null,
+        promo_code: r.promo_code || null,
+        discount_amount: r.discount_amount || 0,
+        addons_amount: r.addons_amount || 0,
         cancelled_at: r.cancelled_at || null,
         cancelled_by: r.cancelled_by || null
       };
@@ -47,8 +57,26 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
       if (r.is_paid) {
         groups[ref].is_paid = true;
       }
+      if (r.paid_at && !groups[ref].paid_at) {
+        groups[ref].paid_at = r.paid_at;
+      }
+      if (r.payment_method && !groups[ref].payment_method) {
+        groups[ref].payment_method = r.payment_method;
+      }
       if (r.total_amount != null && groups[ref].total_amount == null) {
         groups[ref].total_amount = r.total_amount;
+      }
+      if (r.checkout_details && !groups[ref].checkout_details) {
+        groups[ref].checkout_details = r.checkout_details;
+      }
+      if (r.promo_code && !groups[ref].promo_code) {
+        groups[ref].promo_code = r.promo_code;
+      }
+      if (r.discount_amount && !groups[ref].discount_amount) {
+        groups[ref].discount_amount = r.discount_amount;
+      }
+      if (r.addons_amount && !groups[ref].addons_amount) {
+        groups[ref].addons_amount = r.addons_amount;
       }
     }
     groups[ref].sessions.push(r.session);
@@ -98,7 +126,16 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
       is_force_split: group.is_force_split,
       is_unlimited: group.is_unlimited,
       is_paid: group.is_paid,
+      paid_at: group.paid_at,
+      payment_method: group.payment_method,
       total_amount: group.total_amount,
+      is_amount_manual: group.is_amount_manual,
+      checkout_unlimited_pax: group.checkout_unlimited_pax,
+      checkout_regular_hours: group.checkout_regular_hours,
+      checkout_details: group.checkout_details,
+      promo_code: group.promo_code,
+      discount_amount: group.discount_amount,
+      addons_amount: group.addons_amount,
       cancelled_at: group.cancelled_at,
       cancelled_by: group.cancelled_by,
       checked_in_at: group.checked_in_at || null,
@@ -107,11 +144,8 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
   });
 };
 
-
-// Helper function to calculate total amount based on pricing rules
-export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlimited) => {
-  // Try to find DailySetting override
-
+// Helper to resolve daily pricing rates
+export const getEffectiveDailyRates = async (tx, sessionDate) => {
   const dailySetting = await tx.dailySetting.findUnique({
     where: { date: sessionDate }
   });
@@ -120,16 +154,14 @@ export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, i
   let unlimited_price = dailySetting?.unlimited_price;
   const allow_unlimited = dailySetting?.allow_unlimited ?? true;
 
-  // If daily setting doesn't have prices, fallback to GlobalSetting
+  const dateObj = new Date(sessionDate);
+  const dayOfWeek = isNaN(dateObj.getTime()) ? 0 : dateObj.getUTCDay();
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
   if (hourly_price == null || unlimited_price == null) {
     const globalSetting = await tx.globalSetting.findUnique({
       where: { id: 1 }
     });
-    
-    // Determine if sessionDate is weekend (0 = Sunday, 6 = Saturday)
-    const dateObj = new Date(sessionDate);
-    const dayOfWeek = isNaN(dateObj.getTime()) ? 0 : dateObj.getUTCDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
     if (!globalSetting) {
       hourly_price = hourly_price ?? (isWeekend ? 180 : 150);
@@ -139,6 +171,13 @@ export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, i
       unlimited_price = unlimited_price ?? (isWeekend ? globalSetting.weekend_unlimited_price : globalSetting.weekday_unlimited_price);
     }
   }
+
+  return { hourly_price, unlimited_price, allow_unlimited, is_weekend: isWeekend };
+};
+
+// Helper function to calculate total amount based on pricing rules
+export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlimited) => {
+  const { hourly_price, unlimited_price, allow_unlimited } = await getEffectiveDailyRates(tx, sessionDate);
 
   const calculatedHourlyTotal = pax * hourly_price * sessionCount;
   const calculatedUnlimitedTotal = pax * unlimited_price;
@@ -277,8 +316,36 @@ export const createReservation = async (req, res) => {
       }
 
       const is_unlimited = req.body.isUnlimited === true;
+      const { hourly_price } = await getEffectiveDailyRates(tx, sessionDate);
       const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
-      const totalAmount = baseSeatingPrice + totalEquipmentFee;
+      let subtotalAmount = baseSeatingPrice + totalEquipmentFee;
+
+      // Promo code evaluation if provided by customer
+      let appliedPromoCode = null;
+      let appliedDiscountAmount = 0;
+      if (req.body.promo_code && String(req.body.promo_code).trim()) {
+        const promoEval = await evaluatePromoCode(tx, {
+          code: req.body.promo_code,
+          session_date: sessionDate,
+          pax: parseInt(pax, 10),
+          hours: session_ids.length,
+          is_unlimited,
+          base_amount: subtotalAmount,
+          hourly_price,
+          user_id: userId
+        });
+        if (!promoEval.valid) {
+          throw new Error(`PROMO_ERROR:${promoEval.error}`);
+        }
+        appliedPromoCode = promoEval.promo.code;
+        appliedDiscountAmount = promoEval.discount_amount;
+        await tx.promoCode.update({
+          where: { id: promoEval.promo.id },
+          data: { used_count: { increment: 1 } }
+        });
+      }
+
+      const totalAmount = Math.max(0, subtotalAmount - appliedDiscountAmount);
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -290,7 +357,9 @@ export const createReservation = async (req, res) => {
           assigned_seats: mySeats,
           is_force_split: forceSplit === true,
           is_unlimited: is_unlimited,
-          total_amount: totalAmount
+          total_amount: totalAmount,
+          promo_code: appliedPromoCode,
+          discount_amount: appliedDiscountAmount
         });
       }
 
@@ -321,7 +390,7 @@ export const createReservation = async (req, res) => {
         });
       }
 
-      return { booking_ref, count: newReservations.count, assigned_seats: mySeats, total_amount: totalAmount };
+      return { booking_ref, count: newReservations.count, assigned_seats: mySeats, total_amount: totalAmount, promo_code: appliedPromoCode, discount_amount: appliedDiscountAmount };
     });
 
     res.status(201).json({ message: 'Reservation successful', reservation: result });
@@ -329,6 +398,9 @@ export const createReservation = async (req, res) => {
 
   } catch (error) {
     console.error('Reservation error:', error);
+    if (error.message && error.message.startsWith('PROMO_ERROR:')) {
+      return res.status(400).json({ error: error.message.replace('PROMO_ERROR:', '') });
+    }
     if (error.message === 'SOME_SESSIONS_NOT_FOUND') {
       return res.status(404).json({ error: 'One or more sessions not found.' });
     }
@@ -393,7 +465,7 @@ export const getAdminReservations = async (req, res) => {
       include: {
         session: true,
         user: {
-          select: { name: true, phone: true }
+          select: { name: true, phone: true, line_display_name: true, line_picture_url: true }
         }
       },
       orderBy: {
@@ -458,7 +530,7 @@ export const getAdminReservationDetails = async (req, res) => {
       where: { booking_ref },
       include: {
         session: true,
-        user: { select: { name: true, phone: true } }
+        user: { select: { name: true, phone: true, line_display_name: true, line_picture_url: true } }
       },
       orderBy: { created_at: 'desc' }
     });
@@ -470,29 +542,36 @@ export const getAdminReservationDetails = async (req, res) => {
     const eqRecords = await prisma.bookingEquipment.findMany({ where: { booking_ref } });
     const eqTotal = eqRecords.reduce((sum, e) => sum + e.subtotal_price, 0);
 
-    // Auto-recalculate if unpaid and not manually overridden
-    if (!firstRes.is_paid && !firstRes.is_amount_manual) {
-      await prisma.$transaction(async (tx) => {
-        const sessionDate = firstRes.session.session_date;
+    let pricingInfo = null;
+    await prisma.$transaction(async (tx) => {
+      const sessionDate = firstRes.session.session_date;
+      pricingInfo = await getEffectiveDailyRates(tx, sessionDate);
+
+      // Auto-recalculate if unpaid and not manually overridden
+      if (!firstRes.is_paid && !firstRes.is_amount_manual) {
         const pax = firstRes.pax;
         const is_unlimited = firstRes.is_unlimited;
         const baseAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
-        const totalAmount = baseAmount + eqTotal;
+        const discountAmt = firstRes.discount_amount || 0;
+        const addonsAmt = firstRes.addons_amount || 0;
+        const totalAmount = Math.max(0, baseAmount + eqTotal + addonsAmt - discountAmt);
         
         if (totalAmount !== firstRes.total_amount) {
           await tx.reservation.updateMany({
             where: { booking_ref },
             data: { total_amount: totalAmount }
           });
-          // Update local objects for returning
           reservations.forEach(r => r.total_amount = totalAmount);
         }
-      });
-    }
+      }
+    });
 
     const equipmentsMap = { [booking_ref]: eqRecords };
     const grouped = groupReservations(reservations, equipmentsMap);
-    const result = grouped[0];
+    const result = {
+      ...grouped[0],
+      pricing_info: pricingInfo
+    };
 
     // If attendance was desynced across session segments in database, auto-heal them
     if (result && result.attendance) {

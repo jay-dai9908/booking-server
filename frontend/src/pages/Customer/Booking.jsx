@@ -111,6 +111,12 @@ function Booking() {
   const [enableSmartBoard, setEnableSmartBoard] = useState(false);
   const [allowExceedPax, setAllowExceedPax] = useState(false);
   const [showLiveStock, setShowLiveStock] = useState(true);
+
+  // Customer Promo Code state
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState(null);
+  const [promoError, setPromoError] = useState('');
+  const [isCheckingPromo, setIsCheckingPromo] = useState(false);
   const [equipmentDiscount, setEquipmentDiscount] = useState({
     enabled: true,
     buy_hours: 3,
@@ -521,7 +527,53 @@ function Booking() {
     ? Math.min(rawSeatingFee, pax * effectiveUnlimitedPrice)
     : rawSeatingFee;
   const seatingPassDiscount = Math.max(0, rawSeatingFee - cappedSeatingFee);
-  const estimatedGrandTotal = cappedSeatingFee + (enableSmartBoard ? totalEquipmentFee : 0);
+  const subtotalBeforePromo = cappedSeatingFee + (enableSmartBoard ? totalEquipmentFee : 0);
+
+  const promoDiscountAmount = useMemo(() => {
+    if (!appliedPromo) return 0;
+    let amt = 0;
+    if (appliedPromo.discount_type === 'fixed_order') {
+      amt = appliedPromo.discount_value;
+    } else if (appliedPromo.discount_type === 'fixed_per_pax') {
+      amt = appliedPromo.discount_value * pax;
+    } else if (appliedPromo.discount_type === 'percentage') {
+      const val = appliedPromo.discount_value;
+      const pctOff = val > 50 && val < 100 ? (100 - val) : val;
+      amt = Math.round(subtotalBeforePromo * (pctOff / 100));
+    } else if (appliedPromo.discount_type === 'free_hours') {
+      amt = Math.round(effectiveHourlyPrice * appliedPromo.discount_value);
+    }
+    return Math.min(subtotalBeforePromo, Math.max(0, amt));
+  }, [appliedPromo, pax, subtotalBeforePromo, effectiveHourlyPrice]);
+
+  const estimatedGrandTotal = Math.max(0, subtotalBeforePromo - promoDiscountAmount);
+
+  const handleApplyCustomerPromo = async () => {
+    const clean = promoCodeInput.trim().toUpperCase();
+    if (!clean) return;
+    setPromoError('');
+    setIsCheckingPromo(true);
+    try {
+      const res = await api.post('/checkout/promo-codes/validate', {
+        code: clean,
+        session_date: format(selectedDate, 'yyyy-MM-dd'),
+        pax,
+        hours: selectedSessions.length,
+        is_unlimited: isUnlimited || isCapped,
+        base_amount: subtotalBeforePromo,
+        hourly_price: effectiveHourlyPrice
+      });
+      if (res.data?.valid && res.data.promo) {
+        setAppliedPromo(res.data.promo);
+        setPromoCodeInput('');
+      }
+    } catch (err) {
+      setPromoError(err.response?.data?.error || '無效或不符合條件的折扣碼');
+      setAppliedPromo(null);
+    } finally {
+      setIsCheckingPromo(false);
+    }
+  };
 
   const handleBooking = () => {
     try {
@@ -581,7 +633,8 @@ function Booking() {
         session_ids: data.sortedSessions.map(s => s.id),
         pax: parseInt(data.pax),
         isUnlimited: data.isUnlimited,
-        equipments: data.equipments
+        equipments: data.equipments,
+        promo_code: appliedPromo?.code || null
       });
       
       const reservationData = res.data?.reservation || {};
@@ -610,7 +663,8 @@ function Booking() {
           session_ids: data.sortedSessions.map(s => s.id),
           pax: parseInt(data.pax),
           isUnlimited: data.isUnlimited,
-          equipments: data.equipments
+          equipments: data.equipments,
+          promo_code: appliedPromo?.code || null
         });
         setShowSplitModal(true);
       } else {
@@ -1389,6 +1443,50 @@ function Booking() {
                     <span className="font-bold text-[#8B5B43] text-sm">+ NT$ {totalEquipmentFee}</span>
                   </div>
                 )}
+
+                {/* Promo Code Input Row */}
+                <div className="border-t border-dashed border-[#E5DFD7] pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-[#4A3F35] flex items-center gap-1.5">
+                      <span>🎟️</span> 優惠券 / 折扣碼：
+                    </span>
+                    {appliedPromo ? (
+                      <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
+                        <span className="text-xs font-bold text-rose-700">
+                          已套用 {appliedPromo.name} ({appliedPromo.code})：-NT$ {promoDiscountAmount}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setAppliedPromo(null)}
+                          className="text-xs font-extrabold text-rose-500 hover:text-rose-800"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 flex-1 max-w-xs">
+                        <input
+                          type="text"
+                          placeholder="輸入活動折扣碼"
+                          value={promoCodeInput}
+                          onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                          className="px-3 py-1.5 text-xs font-bold uppercase bg-white border border-[#D5CFC9] rounded-lg flex-1 focus:outline-none focus:border-[#8B5B43]"
+                        />
+                        <button
+                          type="button"
+                          disabled={isCheckingPromo || !promoCodeInput.trim()}
+                          onClick={handleApplyCustomerPromo}
+                          className="px-3.5 py-1.5 bg-[#8B5B43] hover:bg-[#724a35] disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors shrink-0"
+                        >
+                          {isCheckingPromo ? '驗證中' : '套用'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {promoError && (
+                    <p className="text-xs text-red-600 font-bold mt-1 text-right">{promoError}</p>
+                  )}
+                </div>
 
                 <div className="border-t border-[#E8DEC8] pt-3 flex justify-between items-baseline">
                   <span className="font-bold text-sm sm:text-base text-[#3E332B]">預估應付總金額：</span>

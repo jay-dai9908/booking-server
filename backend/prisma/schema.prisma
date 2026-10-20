@@ -8,15 +8,39 @@ datasource db {
 }
 
 model User {
-  id           Int           @id @default(autoincrement())
-  line_user_id String        @unique
-  name         String?
-  phone        String?
-  created_at   DateTime      @default(now())
-  is_blacklisted Boolean   @default(false)
-  notes          String?
+  id                Int            @id @default(autoincrement())
+  line_user_id      String         @unique
+  name              String?
+  phone             String?
+  line_display_name String?
+  line_picture_url  String?
+  line_status_msg   String?
+  last_login_at     DateTime?
+  created_at        DateTime       @default(now())
+  is_blacklisted    Boolean        @default(false)
+  notes             String?
   
-  reservations Reservation[]
+  reservations      Reservation[]
+  login_logs        UserLoginLog[]
+}
+
+model UserLoginLog {
+  id           Int      @id @default(autoincrement())
+  user_id      Int
+  ip_address   String?
+  os           String?
+  device_model String?
+  browser      String?
+  line_version String?
+  screen_info  String?
+  language     String?
+  user_agent   String?
+  created_at   DateTime @default(now())
+
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at])
+  @@index([created_at])
 }
 
 model Session {
@@ -50,6 +74,13 @@ model Reservation {
   total_amount   Int?
   is_amount_manual Boolean @default(false)
   paid_at        DateTime?
+  payment_method String?
+  checkout_unlimited_pax Int?
+  checkout_regular_hours Float?
+  checkout_details Json?
+  promo_code     String?
+  discount_amount Int?    @default(0)
+  addons_amount  Int?     @default(0)
   cancelled_at   DateTime?
   cancelled_by   String?
   
@@ -136,6 +167,40 @@ model BookingEquipment {
   equipment               EquipmentConfig @relation(fields: [equipment_id], references: [id])
 
   @@index([booking_ref])
+}
+
+model PromoCode {
+  id                  Int       @id @default(autoincrement())
+  code                String    @unique
+  name                String
+  description         String?
+  discount_type       String    @default("fixed_order") // "fixed_order", "fixed_per_pax", "percentage", "free_hours"
+  discount_value      Int       @default(0)
+  max_discount_amount Int?
+  target_scope        String    @default("all") // "all", "seating", "equipment"
+  day_type_limit      String    @default("all") // "all", "weekday", "weekend"
+  mode_limit          String    @default("all") // "all", "hourly", "unlimited"
+  min_pax             Int       @default(1)
+  min_hours           Int       @default(1)
+  min_amount          Int       @default(0)
+  max_uses            Int?
+  max_uses_per_user   Int?
+  used_count          Int       @default(0)
+  is_pos_quick_select Boolean   @default(false)
+  is_active           Boolean   @default(true)
+  start_date          DateTime? @db.Date
+  end_date            DateTime? @db.Date
+  created_at          DateTime  @default(now())
+}
+
+model AddonItem {
+  id          Int      @id @default(autoincrement())
+  name        String
+  price       Int
+  category    String   @default("charm") // "charm", "service", "other"
+  is_active   Boolean  @default(true)
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now())
 }
 
 

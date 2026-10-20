@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import api from '../../api/axios';
+import { getBrowserClientInfo } from '../../utils/clientInfo';
 
 function Register({ setUserRole }) {
   const [name, setName] = useState('');
@@ -12,7 +13,7 @@ function Register({ setUserRole }) {
     setIsSubmitting(true);
     setError('');
     try {
-      await api.post('/auth/register', { name, phone });
+      await api.post('/auth/register', { name, phone, clientInfo: getBrowserClientInfo() });
       setUserRole('customer');
       window.location.href = '/booking';
     } catch (err) {

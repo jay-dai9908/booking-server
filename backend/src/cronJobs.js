@@ -38,6 +38,18 @@ export const startCronJobs = () => {
       } else {
         console.log('[Cron Job] No past sessions found.');
       }
+
+      // Clean up UserLoginLog records older than 60 days (2 months)
+      const sixtyDaysAgo = new Date();
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      const deletedLogs = await prisma.userLoginLog.deleteMany({
+        where: {
+          created_at: { lt: sixtyDaysAgo }
+        }
+      });
+      if (deletedLogs.count > 0) {
+        console.log(`[Cron Job] Cleaned up ${deletedLogs.count} user login logs older than 60 days.`);
+      }
     } catch (error) {
       console.error('[Cron Job] Error during midnight attendance check:', error);
     }

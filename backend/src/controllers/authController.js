@@ -1,9 +1,10 @@
 import axios from 'axios';
 import prisma from '../prismaClient.js';
 import { generateToken } from '../middlewares/authMiddleware.js';
+import { recordUserLoginLog } from '../utils/deviceParser.js';
 
 export const lineCallback = async (req, res) => {
-  const { code } = req.body;
+  const { code, clientInfo } = req.body;
   
   if (!code) {
     return res.status(400).json({ error: 'Authorization code is required' });
@@ -43,25 +44,47 @@ export const lineCallback = async (req, res) => {
     });
 
     const lineUserId = profileResponse.data.userId;
-    const displayName = profileResponse.data.displayName; // (We can use this later or store it, but for now we follow the MVP flow)
+    const displayName = profileResponse.data.displayName || null;
+    const pictureUrl = profileResponse.data.pictureUrl || null;
+    const statusMessage = profileResponse.data.statusMessage || null;
     
     // Check if user exists
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { line_user_id: lineUserId },
     });
 
     if (user) {
+      // Update LINE Profile info & last_login_at
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          line_display_name: displayName,
+          line_picture_url: pictureUrl,
+          line_status_msg: statusMessage,
+          last_login_at: new Date()
+        }
+      });
+
+      // Record login log (retained for 2 months)
+      await recordUserLoginLog(user.id, req, clientInfo, { throttleMinutes: 0 });
+
       // Existing User -> Issue formal JWT
       const token = generateToken({ id: user.id, role: 'customer' });
       res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 });
       return res.json({ 
         message: 'Login successful', 
-        user: { name: user.name, phone: user.phone },
+        user: { name: user.name, phone: user.phone, line_display_name: user.line_display_name, line_picture_url: user.line_picture_url },
         isNewUser: false 
       });
     } else {
-      // New User -> Issue temporary JWT, pass displayName as suggested name if wanted
-      const tempToken = generateToken({ line_user_id: lineUserId, isTemp: true });
+      // New User -> Issue temporary JWT, include LINE profile info
+      const tempToken = generateToken({
+        line_user_id: lineUserId,
+        line_display_name: displayName,
+        line_picture_url: pictureUrl,
+        line_status_msg: statusMessage,
+        isTemp: true
+      });
       res.cookie('token', tempToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 15 * 60 * 1000 }); // 15 mins
       return res.json({ 
         message: 'Registration required', 
@@ -79,7 +102,7 @@ export const lineCallback = async (req, res) => {
 };
 
 export const register = async (req, res) => {
-  const { name, phone } = req.body;
+  const { name, phone, clientInfo } = req.body;
   const userPayload = req.user; // from verifyToken middleware
   
   if (!userPayload || !userPayload.isTemp || !userPayload.line_user_id) {
@@ -102,7 +125,11 @@ export const register = async (req, res) => {
         where: { id: existingUser.id },
         data: { 
           line_user_id: userPayload.line_user_id,
-          name // 依據顧客自己填寫的名稱更新
+          name, // 依據顧客自己填寫的名稱更新
+          line_display_name: userPayload.line_display_name || null,
+          line_picture_url: userPayload.line_picture_url || null,
+          line_status_msg: userPayload.line_status_msg || null,
+          last_login_at: new Date()
         }
       });
     } else {
@@ -111,9 +138,16 @@ export const register = async (req, res) => {
           line_user_id: userPayload.line_user_id,
           name,
           phone,
+          line_display_name: userPayload.line_display_name || null,
+          line_picture_url: userPayload.line_picture_url || null,
+          line_status_msg: userPayload.line_status_msg || null,
+          last_login_at: new Date()
         },
       });
     }
+
+    // Record initial login log
+    await recordUserLoginLog(finalUser.id, req, clientInfo, { throttleMinutes: 0 });
 
     // Registration complete -> Issue formal JWT
     const token = generateToken({ id: finalUser.id, role: 'customer' });
@@ -212,12 +246,28 @@ export const me = async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { name: true, phone: true }
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        line_display_name: true,
+        line_picture_url: true
+      }
     });
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
+
+    // Record visit/login activity (throttled to 1 log per 30 mins to avoid spam on page reloads)
+    const clientInfo = {
+      screenWidth: req.query.sw,
+      screenHeight: req.query.sh,
+      pixelRatio: req.query.dpr,
+      language: req.query.lang,
+      networkType: req.query.net
+    };
+    recordUserLoginLog(user.id, req, clientInfo, { throttleMinutes: 30 }).catch(() => {});
 
     res.json({ role: 'customer', user });
   } catch (error) {

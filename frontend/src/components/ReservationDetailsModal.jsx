@@ -5,6 +5,7 @@ import { X, CheckCircle2, XCircle, Trash2, Pencil, Check, Cpu } from 'lucide-rea
 import api from '../api/axios';
 import ExtendTimeModal from './ExtendTimeModal';
 import EquipmentAddonModal from './EquipmentAddonModal';
+import CheckoutModal from './CheckoutModal';
 
 export const getReservationStatusUI = (r) => {
   if (r.status === 'cancelled') {
@@ -36,6 +37,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
   const [isEditingAmount, setIsEditingAmount] = React.useState(false);
   const [editAmountValue, setEditAmountValue] = React.useState('');
   const [showEquipmentModal, setShowEquipmentModal] = React.useState(false);
+  const [showCheckoutModal, setShowCheckoutModal] = React.useState(false);
 
   if (!reservation) return null;
 
@@ -286,7 +288,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                     {!isEditingAmount && (
                       reservation.is_paid ? (
                         <span className="inline-flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded-md border border-yellow-200">
-                          💰 已結清
+                          💰 已結清 {reservation.payment_method === 'line_pay' ? '(LINE Pay)' : reservation.payment_method === 'transfer' ? '(轉帳)' : '(現金)'}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200">
@@ -295,6 +297,20 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                       )
                     )}
                   </div>
+                  {(reservation.promo_code || reservation.discount_amount > 0 || reservation.addons_amount > 0) && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
+                      {reservation.addons_amount > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-pink-50 text-pink-700 border border-pink-200 font-bold">
+                          🛍️ 吊飾/加購 +${reservation.addons_amount}
+                        </span>
+                      )}
+                      {reservation.discount_amount > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-bold">
+                          🎟️ 優惠折抵 ({reservation.promo_code || '手動'}) -${reservation.discount_amount}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -393,16 +409,26 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                         清除報到標記
                       </button>
                       <button 
-                        onClick={() => handleUpdatePayment(!reservation.is_paid)}
-                        className={`px-4 py-2 border rounded-xl font-medium transition-colors flex items-center gap-2 ${
+                        type="button"
+                        onClick={() => setShowCheckoutModal(true)}
+                        className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 shadow-sm ${
                           reservation.is_paid 
-                            ? 'bg-yellow-100 border-yellow-300 text-yellow-800 hover:bg-yellow-200' 
-                            : 'bg-white border-yellow-300 text-yellow-600 hover:bg-yellow-50'
+                            ? 'bg-emerald-50 border border-emerald-300 text-emerald-800 hover:bg-emerald-100' 
+                            : 'bg-gradient-to-r from-indigo-600 to-emerald-600 text-white hover:from-indigo-700 hover:to-emerald-700'
                         }`}
                       >
-                        <span>💰</span>
-                        {reservation.is_paid ? '取消付費標記' : '標記為已付費'}
+                        <span>💳</span>
+                        {reservation.is_paid ? '結帳明細 / 補印收據' : '前往結帳 (拆帳 / POS印單)'}
                       </button>
+                      {reservation.is_paid && (
+                        <button 
+                          type="button"
+                          onClick={() => handleUpdatePayment(false)}
+                          className="px-3 py-2 bg-white border border-gray-200 text-gray-500 hover:bg-gray-50 rounded-xl text-xs font-medium transition-colors"
+                        >
+                          重置為未付
+                        </button>
+                      )}
                       <button 
                         type="button"
                         onClick={() => setShowEquipmentModal(true)}
@@ -462,6 +488,21 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
               } else if (onUpdate) {
                 onUpdate();
               }
+            }
+          }}
+        />
+      )}
+      {showCheckoutModal && (
+        <CheckoutModal
+          isOpen={showCheckoutModal}
+          onClose={() => setShowCheckoutModal(false)}
+          reservation={reservation}
+          onCheckoutSuccess={async () => {
+            try {
+              const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
+              if (onUpdate) onUpdate(res.data);
+            } catch (e) {
+              if (onUpdate) onUpdate();
             }
           }}
         />

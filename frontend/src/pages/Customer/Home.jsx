@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../api/axios';
+import { getBrowserClientInfo } from '../../utils/clientInfo';
 
 function Home({ userRole }) {
   const navigate = useNavigate();
@@ -26,7 +27,7 @@ function Home({ userRole }) {
       
       // 立即清除 URL 上的 code 避免 React StrictMode 觸發兩次
       window.history.replaceState({}, document.title, window.location.pathname);
-      api.post('/auth/line/callback', { code })
+      api.post('/auth/line/callback', { code, clientInfo: getBrowserClientInfo() })
         .then(res => {
           if (res.data.isNewUser) {
             window.location.href = '/register'; // Full reload to update App state
