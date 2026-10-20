@@ -4,7 +4,7 @@ import { Search } from 'lucide-react';
 import api from '../api/axios';
 import { getReservationStatusUI } from './ReservationDetailsModal';
 
-export default function DailyReservationsList({ date, onOpenDetails }) {
+export default function DailyReservationsList({ date, onOpenDetails, refreshTrigger = 0 }) {
   const [reservations, setReservations] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -24,7 +24,7 @@ export default function DailyReservationsList({ date, onOpenDetails }) {
       }
     }, 300);
     return () => clearTimeout(delayDebounceFn);
-  }, [date, page, searchQuery]);
+  }, [date, page, searchQuery, refreshTrigger]);
 
   const fetchReservations = async () => {
     setIsLoading(true);

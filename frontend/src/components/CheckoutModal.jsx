@@ -1105,9 +1105,9 @@ export default function CheckoutModal({
                     <button
                       type="button"
                       onClick={() => removeOrderAddon(idx)}
-                      className="text-[#C25E3E] hover:text-rose-700 font-black"
+                      className="text-[#C25E3E] hover:text-rose-700 font-black ml-1"
+                      title="移除此加購品"
                     >
-                      ×
                       ×
                     </button>
                   </span>

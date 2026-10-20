@@ -759,7 +759,7 @@ export default function EquipmentPage() {
                       {s.start_time} - {s.end_time}
                     </span>
                     <span className="text-xs text-gray-400 font-medium">
-                      座位預約率：{s.max_capacity - s.remaining_capacity} / {s.max_capacity} 人
+                      時段預約率：{s.booked_pax ?? (s.remaining_capacity !== undefined ? s.max_capacity - s.remaining_capacity : 0)} / {s.max_capacity} 人
                     </span>
                   </div>
 

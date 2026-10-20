@@ -146,9 +146,12 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
     memberReservations.reduce((acc, curr) => {
       const ref = curr.booking_ref;
       if (!acc[ref]) {
-        acc[ref] = { ...curr, session: { ...curr.session }, session_count: 1 };
+        acc[ref] = { ...curr, session: { ...curr.session }, session_count: 1, equipments: curr.equipments || [] };
       } else {
         acc[ref].session_count += 1;
+        if (!acc[ref].equipments || acc[ref].equipments.length === 0) {
+          acc[ref].equipments = curr.equipments || [];
+        }
         if (curr.session?.end_time > acc[ref].session?.end_time) acc[ref].session.end_time = curr.session.end_time;
         if (curr.session?.start_time < acc[ref].session?.start_time) acc[ref].session.start_time = curr.session.start_time;
         if (curr.attendance === 'checked_in') acc[ref].attendance = 'checked_in';

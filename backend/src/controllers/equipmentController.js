@@ -585,8 +585,19 @@ export const getEquipmentOccupancy = async (req, res) => {
       });
     });
 
+    const enrichedSessions = sessions.map(sess => {
+      const bookedPax = reservations
+        .filter(r => r.session_id === sess.id && r.status === 'confirmed')
+        .reduce((sum, r) => sum + r.pax, 0);
+      return {
+        ...sess,
+        booked_pax: bookedPax,
+        remaining_capacity: Math.max(0, sess.max_capacity - bookedPax)
+      };
+    });
+
     res.json({
-      sessions,
+      sessions: enrichedSessions,
       configs,
       occupancy,
       sessionSummary

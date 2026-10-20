@@ -260,7 +260,27 @@ export const getUserReservations = async (req, res) => {
         }
       }
     });
-    res.json(reservations);
+
+    const bookingRefs = Array.from(new Set(reservations.map(r => r.booking_ref)));
+    const bookingEquipments = await prisma.bookingEquipment.findMany({
+      where: { booking_ref: { in: bookingRefs } },
+      include: { equipment: true }
+    });
+
+    const eqMap = {};
+    bookingEquipments.forEach(be => {
+      if (!eqMap[be.booking_ref]) {
+        eqMap[be.booking_ref] = [];
+      }
+      eqMap[be.booking_ref].push(be);
+    });
+
+    const enrichedReservations = reservations.map(r => ({
+      ...r,
+      equipments: eqMap[r.booking_ref] || []
+    }));
+
+    res.json(enrichedReservations);
   } catch (error) {
     console.error('Error fetching user reservations:', error);
     res.status(500).json({ error: 'Failed to fetch user reservations' });

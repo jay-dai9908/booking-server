@@ -45,6 +45,22 @@ const ensureDatabaseSchema = async () => {
       ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "discount_amount" INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "addons_amount" INTEGER NOT NULL DEFAULT 0;
 
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "allow_equipment_exceed_pax" BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_equipment_live_stock" BOOLEAN NOT NULL DEFAULT true;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_enabled" BOOLEAN NOT NULL DEFAULT true;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_buy_hours" INTEGER NOT NULL DEFAULT 3;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_free_hours" INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_stackable" BOOLEAN NOT NULL DEFAULT true;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_enabled" BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_buy_hours" INTEGER NOT NULL DEFAULT 8;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_free_hours" INTEGER NOT NULL DEFAULT 4;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_price_cards" BOOLEAN NOT NULL DEFAULT true;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "price_notice_text" TEXT DEFAULT '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品';
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_announcement" BOOLEAN NOT NULL DEFAULT true;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "announcement_text" TEXT DEFAULT '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_line_button" BOOLEAN NOT NULL DEFAULT true;
+      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_button_url" TEXT DEFAULT 'https://lin.ee/vsZhRW5';
+
       CREATE TABLE IF NOT EXISTS "UserLoginLog" (
         "id" SERIAL NOT NULL,
         "user_id" INTEGER NOT NULL,

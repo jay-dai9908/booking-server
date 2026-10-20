@@ -112,9 +112,10 @@ export const buildFullReceiptCommands = (data) => {
     });
 
     // Sub-details for this person
-    const subParts = [`座位$${p.seating_fee}`];
-    if (p.equipment_fee > 0) subParts.push(`洞洞板$${p.equipment_fee}`);
+    const subParts = [`手作費$${p.seating_fee}`];
+    if (p.equipment_fee > 0) subParts.push(`智能板$${p.equipment_fee}`);
     if (p.addons_fee > 0) subParts.push(`加購$${p.addons_fee}`);
+    if (p.shared_addon_share > 0) subParts.push(`共同加購$${p.shared_addon_share}`);
     if (p.discount_fee > 0) subParts.push(`折抵-$${p.discount_fee}`);
 
     commands.push({
@@ -291,6 +292,15 @@ export const buildPersonSplitReceiptCommands = (person, index, data) => {
     commands.push({
       type: 'columns',
       cols: ['個人分攤折扣', `-NT$${person.discount_fee}`],
+      weights: [2, 1],
+      aligns: [0, 2]
+    });
+  }
+
+  if (person.shared_addon_share > 0) {
+    commands.push({
+      type: 'columns',
+      cols: ['整單共同加購分攤', `NT$${person.shared_addon_share}`],
       weights: [2, 1],
       aligns: [0, 2]
     });

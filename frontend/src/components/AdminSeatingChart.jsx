@@ -24,6 +24,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
   const [showForceAddModal, setShowForceAddModal] = useState(false);
   const [targetSwapSeat, setTargetSwapSeat] = useState(null); // string e.g., 'B1-1'
   const [occupancyData, setOccupancyData] = useState(null);
+  const [dailyListRefreshKey, setDailyListRefreshKey] = useState(0);
   
   const pollingRef = useRef(null);
 
@@ -217,6 +218,8 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
       setTargetSwapSeat(null);
       setShowSwapModal(false);
       fetchSeatingData();
+      fetchOccupancy();
+      setDailyListRefreshKey(prev => prev + 1);
     } catch (err) {
       alert(err.response?.data?.error || '換位失敗');
       setShowSwapModal(false);
@@ -415,7 +418,11 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
                               checked_in_at: new Date()
                             }
                           }));
-                          setTimeout(() => fetchSeatingData(false), 500);
+                          setTimeout(() => {
+                            fetchSeatingData(false);
+                            fetchOccupancy();
+                            setDailyListRefreshKey(prev => prev + 1);
+                          }, 500);
                         }}
                         className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
                       >
@@ -525,7 +532,7 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
         </div>
         
         {/* Daily Reservations List Section */}
-        <DailyReservationsList date={selectedDate} onOpenDetails={onOpenDetails} />
+        <DailyReservationsList date={selectedDate} onOpenDetails={onOpenDetails} refreshTrigger={dailyListRefreshKey} />
         
         </div>
       ) : (
@@ -582,7 +589,11 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
         onClose={() => setShowForceAddModal(false)} 
         selectedSessionId={selectedSessionId} 
         sessions={sessions}
-        onSuccess={() => fetchSeatingData()} 
+        onSuccess={() => {
+          fetchSeatingData();
+          fetchOccupancy();
+          setDailyListRefreshKey(prev => prev + 1);
+        }} 
       />
     </div>
   );

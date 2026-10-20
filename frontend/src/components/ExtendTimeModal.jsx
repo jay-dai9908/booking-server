@@ -27,8 +27,9 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
       const sessionDate = reservation.session_date || reservation.session?.session_date;
       // Find the end time of the current booking
       let endTime = reservation.end_time || reservation.session?.end_time;
-      if (reservation.blocks && reservation.blocks.length > 0) {
-        endTime = reservation.blocks[reservation.blocks.length - 1].end_time;
+      const blocks = reservation.time_blocks || reservation.blocks || reservation.sessions || [];
+      if (blocks.length > 0) {
+        endTime = blocks[blocks.length - 1].end_time || endTime;
       }
       
       const res = await api.get(`/sessions?date=${sessionDate}`);
