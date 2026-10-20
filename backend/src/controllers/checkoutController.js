@@ -15,8 +15,14 @@ export const ensureDefaultCheckoutConfigs = async () => {
             description: 'IG / FB / Threads 現場打卡或發限動即享整單折 $30',
             discount_type: 'fixed_order',
             discount_value: 30,
-            applicable_days: 'all',
-            applicable_mode: 'all',
+            max_discount_amount: null,
+            target_scope: 'all',
+            day_type_limit: 'all',
+            mode_limit: 'all',
+            channel: 'all',
+            min_pax: 1,
+            min_hours: 1,
+            min_amount: 0,
             is_pos_quick_select: true,
             is_active: true
           },
@@ -26,8 +32,14 @@ export const ensureDefaultCheckoutConfigs = async () => {
             description: '出示 Google 地圖五星評論畫面折抵 $50',
             discount_type: 'fixed_order',
             discount_value: 50,
-            applicable_days: 'all',
-            applicable_mode: 'all',
+            max_discount_amount: null,
+            target_scope: 'all',
+            day_type_limit: 'all',
+            mode_limit: 'all',
+            channel: 'all',
+            min_pax: 1,
+            min_hours: 1,
+            min_amount: 0,
             is_pos_quick_select: true,
             is_active: true
           },
@@ -37,8 +49,14 @@ export const ensureDefaultCheckoutConfigs = async () => {
             description: '每位打卡貴賓各折 $20（依人數計算）',
             discount_type: 'fixed_per_pax',
             discount_value: 20,
-            applicable_days: 'all',
-            applicable_mode: 'all',
+            max_discount_amount: null,
+            target_scope: 'all',
+            day_type_limit: 'all',
+            mode_limit: 'all',
+            channel: 'all',
+            min_pax: 1,
+            min_hours: 1,
+            min_amount: 0,
             is_pos_quick_select: true,
             is_active: true
           },
@@ -48,8 +66,14 @@ export const ensureDefaultCheckoutConfigs = async () => {
             description: '整單座位與設備費用享 9 折優惠',
             discount_type: 'percentage',
             discount_value: 10,
-            applicable_days: 'all',
-            applicable_mode: 'all',
+            max_discount_amount: null,
+            target_scope: 'all',
+            day_type_limit: 'all',
+            mode_limit: 'all',
+            channel: 'all',
+            min_pax: 1,
+            min_hours: 1,
+            min_amount: 0,
             is_pos_quick_select: true,
             is_active: true
           }
@@ -63,12 +87,12 @@ export const ensureDefaultCheckoutConfigs = async () => {
     if (addonCount === 0) {
       await prisma.addonItem.createMany({
         data: [
-          { name: '精緻鑰匙圈', price: 20, category: 'charm', sort_order: 1, is_active: true },
+          { name: '精緻鑰匙圈配件', price: 20, category: 'charm', sort_order: 1, is_active: true },
           { name: '造型磁鐵 / 胸針', price: 30, category: 'charm', sort_order: 2, is_active: true },
           { name: '質感龍蝦扣吊飾', price: 40, category: 'charm', sort_order: 3, is_active: true },
-          { name: '立體公仔吊飾組', price: 50, category: 'charm', sort_order: 4, is_active: true },
+          { name: '立體公仔配件組', price: 50, category: 'charm', sort_order: 4, is_active: true },
           { name: '豪華雙層配件組', price: 80, category: 'charm', sort_order: 5, is_active: true },
-          { name: '成品代燙 / 大圖加固', price: 50, category: 'service', sort_order: 6, is_active: true }
+          { name: '專人代燙 / 大圖加固', price: 50, category: 'service', sort_order: 6, is_active: true }
         ]
       });
       console.log('[Init] Seeded default AddonItem items.');
@@ -90,6 +114,7 @@ export const evaluatePromoCode = async (txOrPrisma, {
   base_amount = 0,
   hourly_price = 150,
   user_id = null,
+  is_pos = false,
   skip_usage_check = false
 }) => {
   const cleanCode = (code || '').trim().toUpperCase();
@@ -102,19 +127,42 @@ export const evaluatePromoCode = async (txOrPrisma, {
   });
 
   if (!promo || !promo.is_active) {
-    return { valid: false, error: '無效或已停用的折扣碼' };
+    return { valid: false, error: '無效或已停用的優惠券／折扣碼' };
   }
 
+  // 1. Channel check: online vs pos vs all
+  const channel = promo.channel || 'all';
+  if (channel === 'pos' && !is_pos) {
+    return { valid: false, error: '此優惠券僅供現場櫃檯結帳使用' };
+  }
+  if (channel === 'online' && is_pos) {
+    return { valid: false, error: '此折扣碼僅限線上預約時使用' };
+  }
+
+  // 2. Date validity check
   const now = new Date();
-  if (promo.valid_from && now < new Date(promo.valid_from)) {
-    return { valid: false, error: '此折扣碼活動尚未開始' };
+  const todayStr = now.toISOString().split('T')[0];
+  const targetDateStr = session_date ? new Date(session_date).toISOString().split('T')[0] : todayStr;
+
+  const startDate = promo.start_date || promo.valid_from;
+  const endDate = promo.end_date || promo.valid_until;
+
+  if (startDate) {
+    const sStr = new Date(startDate).toISOString().split('T')[0];
+    if (targetDateStr < sStr) {
+      return { valid: false, error: `此活動於 ${sStr} 開始，尚未生效` };
+    }
   }
-  if (promo.valid_until && now > new Date(promo.valid_until)) {
-    return { valid: false, error: '此折扣碼已過期' };
+  if (endDate) {
+    const eStr = new Date(endDate).toISOString().split('T')[0];
+    if (targetDateStr > eStr) {
+      return { valid: false, error: `此活動已於 ${eStr} 截止` };
+    }
   }
 
+  // 3. Usage limits
   if (!skip_usage_check && promo.max_uses != null && promo.used_count >= promo.max_uses) {
-    return { valid: false, error: '此折扣碼已達總使用次數上限' };
+    return { valid: false, error: '此優惠碼已達總使用次數上限' };
   }
 
   if (!skip_usage_check && user_id && promo.max_uses_per_user != null) {
@@ -132,53 +180,59 @@ export const evaluatePromoCode = async (txOrPrisma, {
     }
   }
 
-  // Day of week check (weekday vs weekend)
-  if (session_date && promo.applicable_days && promo.applicable_days !== 'all') {
+  // 4. Day of week check (weekday vs weekend)
+  const dayLimit = promo.day_type_limit || promo.applicable_days || 'all';
+  if (session_date && dayLimit !== 'all') {
     const d = new Date(session_date);
     const day = isNaN(d.getTime()) ? new Date().getDay() : d.getUTCDay();
     const isWeekend = day === 0 || day === 6;
-    if (promo.applicable_days === 'weekday' && isWeekend) {
-      return { valid: false, error: '此折扣碼僅限平日使用' };
+    if (dayLimit === 'weekday' && isWeekend) {
+      return { valid: false, error: '此優惠碼僅限平日使用' };
     }
-    if (promo.applicable_days === 'weekend' && !isWeekend) {
-      return { valid: false, error: '此折扣碼僅限假日（週末）使用' };
-    }
-  }
-
-  // Mode check (regular vs unlimited)
-  if (promo.applicable_mode && promo.applicable_mode !== 'all') {
-    if (promo.applicable_mode === 'regular' && is_unlimited) {
-      return { valid: false, error: '此折扣碼僅適用於一般計時方案' };
-    }
-    if (promo.applicable_mode === 'unlimited' && !is_unlimited) {
-      return { valid: false, error: '此折扣碼僅適用於不限時（封頂）方案' };
+    if (dayLimit === 'weekend' && !isWeekend) {
+      return { valid: false, error: '此優惠碼僅限假日（週六／週日）使用' };
     }
   }
 
-  // Minimum thresholds
+  // 5. Mode check (hourly vs unlimited)
+  const modeLimit = promo.mode_limit || promo.applicable_mode || 'all';
+  if (modeLimit !== 'all') {
+    if ((modeLimit === 'hourly' || modeLimit === 'regular') && is_unlimited) {
+      return { valid: false, error: '此優惠碼僅適用於一般計時方案' };
+    }
+    if (modeLimit === 'unlimited' && !is_unlimited) {
+      return { valid: false, error: '此優惠碼僅適用於不限時（封頂）方案' };
+    }
+  }
+
+  // 6. Minimum thresholds
   if (promo.min_pax > 1 && pax < promo.min_pax) {
-    return { valid: false, error: `此折扣碼需滿 ${promo.min_pax} 人以上方可使用` };
+    return { valid: false, error: `此優惠碼需滿 ${promo.min_pax} 人以上方可使用` };
   }
   if (promo.min_hours > 0 && hours < promo.min_hours) {
-    return { valid: false, error: `此折扣碼需預約滿 ${promo.min_hours} 小時以上方可使用` };
+    return { valid: false, error: `此優惠碼需預約滿 ${promo.min_hours} 小時以上方可使用` };
   }
   if (promo.min_amount > 0 && base_amount > 0 && base_amount < promo.min_amount) {
-    return { valid: false, error: `此折扣碼需消費滿 $${promo.min_amount} 方可使用` };
+    return { valid: false, error: `此優惠碼需消費滿 $${promo.min_amount} 方可使用` };
   }
 
-  // Calculate discount amount
+  // 7. Calculate discount amount
   let discount_amount = 0;
   if (promo.discount_type === 'fixed_order') {
     discount_amount = promo.discount_value;
   } else if (promo.discount_type === 'fixed_per_pax') {
     discount_amount = promo.discount_value * Math.max(1, Number(pax) || 1);
   } else if (promo.discount_type === 'percentage') {
-    // Support either "% off" (e.g. 10 = 折10% / 9折) or Taiwan fold notation (e.g. 85 = 85折 -> 15% off)
     const val = promo.discount_value;
     const pctOff = val > 50 && val < 100 ? (100 - val) : val;
     discount_amount = Math.round((Number(base_amount) || 0) * (pctOff / 100));
   } else if (promo.discount_type === 'free_hours') {
     discount_amount = Math.round((Number(hourly_price) || 150) * promo.discount_value);
+  }
+
+  // Apply maximum discount cap if configured
+  if (promo.max_discount_amount && promo.max_discount_amount > 0) {
+    discount_amount = Math.min(discount_amount, promo.max_discount_amount);
   }
 
   if (base_amount > 0) {
@@ -197,7 +251,8 @@ export const validatePromoCode = async (req, res) => {
   try {
     const result = await evaluatePromoCode(prisma, {
       ...req.body,
-      user_id: req.user?.id || req.body.user_id || null
+      user_id: req.user?.id || req.body.user_id || null,
+      is_pos: req.body.is_pos === true || req.user?.role === 'admin'
     });
 
     if (!result.valid) {
@@ -212,7 +267,10 @@ export const validatePromoCode = async (req, res) => {
         name: result.promo.name,
         description: result.promo.description,
         discount_type: result.promo.discount_type,
-        discount_value: result.promo.discount_value
+        discount_value: result.promo.discount_value,
+        max_discount_amount: result.promo.max_discount_amount,
+        target_scope: result.promo.target_scope,
+        channel: result.promo.channel
       },
       discount_amount: result.discount_amount
     });
@@ -225,8 +283,19 @@ export const validatePromoCode = async (req, res) => {
 // GET /api/checkout/promo-codes
 export const getPromoCodes = async (req, res) => {
   try {
-    const { pos_only } = req.query;
-    const where = pos_only === 'true' ? { is_active: true, is_pos_quick_select: true } : {};
+    const { pos_only, active_only, channel } = req.query;
+    const where = {};
+    if (pos_only === 'true') {
+      where.is_active = true;
+      where.is_pos_quick_select = true;
+    }
+    if (active_only === 'true') {
+      where.is_active = true;
+    }
+    if (channel && channel !== 'all') {
+      where.OR = [{ channel }, { channel: 'all' }];
+    }
+
     const codes = await prisma.promoCode.findMany({
       where,
       orderBy: [
@@ -250,28 +319,38 @@ export const createPromoCode = async (req, res) => {
       description,
       discount_type = 'fixed_order',
       discount_value = 0,
+      max_discount_amount = null,
+      target_scope = 'all',
+      day_type_limit,
+      applicable_days,
+      mode_limit,
+      applicable_mode,
+      channel = 'all',
       min_pax = 1,
-      min_hours = 0,
+      min_hours = 1,
       min_amount = 0,
-      applicable_days = 'all',
-      applicable_mode = 'all',
       max_uses = null,
       max_uses_per_user = null,
-      valid_from = null,
-      valid_until = null,
+      start_date,
+      valid_from,
+      end_date,
+      valid_until,
       is_pos_quick_select = false,
       is_active = true
     } = req.body;
 
     const cleanCode = (code || '').trim().toUpperCase();
     if (!cleanCode || !name) {
-      return res.status(400).json({ error: '請填寫優惠碼代號與名稱' });
+      return res.status(400).json({ error: '請填寫優惠碼代號與顯示名稱' });
     }
 
     const existing = await prisma.promoCode.findUnique({ where: { code: cleanCode } });
     if (existing) {
       return res.status(400).json({ error: `優惠碼代號 ${cleanCode} 已存在` });
     }
+
+    const startDateVal = start_date || valid_from;
+    const endDateVal = end_date || valid_until;
 
     const created = await prisma.promoCode.create({
       data: {
@@ -280,15 +359,18 @@ export const createPromoCode = async (req, res) => {
         description: description ? description.trim() : null,
         discount_type,
         discount_value: parseInt(discount_value, 10) || 0,
+        max_discount_amount: max_discount_amount !== null && max_discount_amount !== '' ? parseInt(max_discount_amount, 10) : null,
+        target_scope: target_scope || 'all',
+        day_type_limit: day_type_limit || applicable_days || 'all',
+        mode_limit: mode_limit || applicable_mode || 'all',
+        channel: channel || 'all',
         min_pax: parseInt(min_pax, 10) || 1,
-        min_hours: parseFloat(min_hours) || 0,
+        min_hours: parseInt(min_hours, 10) || 1,
         min_amount: parseInt(min_amount, 10) || 0,
-        applicable_days,
-        applicable_mode,
         max_uses: max_uses !== null && max_uses !== '' ? parseInt(max_uses, 10) : null,
         max_uses_per_user: max_uses_per_user !== null && max_uses_per_user !== '' ? parseInt(max_uses_per_user, 10) : null,
-        valid_from: valid_from ? new Date(valid_from) : null,
-        valid_until: valid_until ? new Date(valid_until) : null,
+        start_date: startDateVal ? new Date(startDateVal) : null,
+        end_date: endDateVal ? new Date(endDateVal) : null,
         is_pos_quick_select: Boolean(is_pos_quick_select),
         is_active: Boolean(is_active)
       }
@@ -311,14 +393,21 @@ export const updatePromoCode = async (req, res) => {
       description,
       discount_type,
       discount_value,
+      max_discount_amount,
+      target_scope,
+      day_type_limit,
+      applicable_days,
+      mode_limit,
+      applicable_mode,
+      channel,
       min_pax,
       min_hours,
       min_amount,
-      applicable_days,
-      applicable_mode,
       max_uses,
       max_uses_per_user,
+      start_date,
       valid_from,
+      end_date,
       valid_until,
       is_pos_quick_select,
       is_active
@@ -330,15 +419,25 @@ export const updatePromoCode = async (req, res) => {
     if (description !== undefined) data.description = description ? description.trim() : null;
     if (discount_type !== undefined) data.discount_type = discount_type;
     if (discount_value !== undefined) data.discount_value = parseInt(discount_value, 10) || 0;
+    if (max_discount_amount !== undefined) data.max_discount_amount = max_discount_amount !== null && max_discount_amount !== '' ? parseInt(max_discount_amount, 10) : null;
+    if (target_scope !== undefined) data.target_scope = target_scope;
+    if (day_type_limit !== undefined || applicable_days !== undefined) data.day_type_limit = day_type_limit || applicable_days;
+    if (mode_limit !== undefined || applicable_mode !== undefined) data.mode_limit = mode_limit || applicable_mode;
+    if (channel !== undefined) data.channel = channel;
     if (min_pax !== undefined) data.min_pax = parseInt(min_pax, 10) || 1;
-    if (min_hours !== undefined) data.min_hours = parseFloat(min_hours) || 0;
+    if (min_hours !== undefined) data.min_hours = parseInt(min_hours, 10) || 1;
     if (min_amount !== undefined) data.min_amount = parseInt(min_amount, 10) || 0;
-    if (applicable_days !== undefined) data.applicable_days = applicable_days;
-    if (applicable_mode !== undefined) data.applicable_mode = applicable_mode;
     if (max_uses !== undefined) data.max_uses = max_uses !== null && max_uses !== '' ? parseInt(max_uses, 10) : null;
     if (max_uses_per_user !== undefined) data.max_uses_per_user = max_uses_per_user !== null && max_uses_per_user !== '' ? parseInt(max_uses_per_user, 10) : null;
-    if (valid_from !== undefined) data.valid_from = valid_from ? new Date(valid_from) : null;
-    if (valid_until !== undefined) data.valid_until = valid_until ? new Date(valid_until) : null;
+    
+    if (start_date !== undefined || valid_from !== undefined) {
+      const v = start_date !== undefined ? start_date : valid_from;
+      data.start_date = v ? new Date(v) : null;
+    }
+    if (end_date !== undefined || valid_until !== undefined) {
+      const v = end_date !== undefined ? end_date : valid_until;
+      data.end_date = v ? new Date(v) : null;
+    }
     if (is_pos_quick_select !== undefined) data.is_pos_quick_select = Boolean(is_pos_quick_select);
     if (is_active !== undefined) data.is_active = Boolean(is_active);
 

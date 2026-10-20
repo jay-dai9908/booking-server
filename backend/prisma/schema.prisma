@@ -180,6 +180,7 @@ model PromoCode {
   target_scope        String    @default("all") // "all", "seating", "equipment"
   day_type_limit      String    @default("all") // "all", "weekday", "weekend"
   mode_limit          String    @default("all") // "all", "hourly", "unlimited"
+  channel             String    @default("all") // "all" 線上+櫃檯, "online" 僅線上預約, "pos" 僅限櫃檯
   min_pax             Int       @default(1)
   min_hours           Int       @default(1)
   min_amount          Int       @default(0)
@@ -191,6 +192,7 @@ model PromoCode {
   start_date          DateTime? @db.Date
   end_date            DateTime? @db.Date
   created_at          DateTime  @default(now())
+  updated_at          DateTime  @default(now()) @updatedAt
 }
 
 model AddonItem {

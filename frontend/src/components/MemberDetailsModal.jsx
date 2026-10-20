@@ -168,14 +168,14 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
         <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden relative z-10 animate-in zoom-in-95 duration-200 flex flex-col max-h-[92vh]">
           {/* Header */}
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/60 shrink-0">
-            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              <UserCog className="w-5 h-5 text-indigo-600" />
+          <div className="px-6 py-4 border-b border-[#E8DEC8] flex items-center justify-between bg-[#FAF7F2] shrink-0">
+            <h2 className="text-xl font-bold text-[#3E332B] flex items-center gap-2">
+              <UserCog className="w-5 h-5 text-[#8B5B43]" />
               會員詳細檔案與消費統計
             </h2>
             <button
               onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-200 transition-colors"
+              className="p-2 text-[#8C8279] hover:text-[#3E332B] rounded-full hover:bg-[#EBE5DF] transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -185,7 +185,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
             {/* Section 1: Member Profile, LINE Info & Blacklist/Notes */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left 7 Cols: Profile & LINE Info */}
-              <div className="lg:col-span-7 bg-white border border-gray-200 rounded-2xl p-5 shadow-2xs flex flex-col justify-between space-y-4">
+              <div className="lg:col-span-7 bg-white border border-[#E8DEC8] rounded-2xl p-5 shadow-2xs flex flex-col justify-between space-y-4">
                 <div className="flex items-start gap-4">
                   {/* LINE Avatar */}
                   {localMember.line_picture_url ? (
@@ -195,7 +195,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                       className="w-16 h-16 rounded-full object-cover border-2 border-[#06C755]/30 shadow-xs shrink-0"
                     />
                   ) : (
-                    <div className="w-16 h-16 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-2xl border border-indigo-100 shrink-0">
+                    <div className="w-16 h-16 rounded-full bg-[#FAF7F2] text-[#8B5B43] flex items-center justify-center font-bold text-2xl border border-[#E8DEC8] shrink-0">
                       {localMember.name ? localMember.name.slice(0, 1) : <User className="w-8 h-8" />}
                     </div>
                   )}
@@ -204,7 +204,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                     {!isEditingProfile ? (
                       <div>
                         <div className="flex items-center flex-wrap gap-2">
-                          <h3 className="text-xl font-bold text-gray-900">{localMember.name || '未設定姓名'}</h3>
+                          <h3 className="text-xl font-bold text-[#3E332B]">{localMember.name || '未設定姓名'}</h3>
                           <button
                             type="button"
                             onClick={() => {
@@ -212,14 +212,14 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                               setEditPhone(localMember.phone || '');
                               setIsEditingProfile(true);
                             }}
-                            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition-colors"
+                            className="inline-flex items-center gap-1 text-xs font-bold text-[#8B5B43] bg-[#FAF7F2] hover:bg-[#F2ECE4] border border-[#E8DEC8] px-2.5 py-1 rounded-lg transition-colors"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                             編輯姓名/電話
                           </button>
                         </div>
 
-                        <p className="text-sm font-mono font-semibold text-gray-600 mt-1">
+                        <p className="text-sm font-mono font-semibold text-[#6D5D52] mt-1">
                           📱 電話：{localMember.phone || '未提供'}
                         </p>
 
@@ -231,43 +231,43 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                               LINE 暱稱：{localMember.line_display_name}
                             </span>
                           ) : isManualOnly ? (
-                            <span className="inline-flex items-center text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 font-medium">
+                            <span className="inline-flex items-center text-xs px-2.5 py-1 rounded-full bg-[#FAF7F2] text-[#8C8279] border border-[#E8DEC8] font-medium">
                               櫃檯手動建檔（尚未綁定 LINE）
                             </span>
                           ) : (
-                            <span className="inline-flex items-center text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-500">
+                            <span className="inline-flex items-center text-xs px-2.5 py-1 rounded-full bg-[#FAF7F2] text-[#8C8279] border border-[#E8DEC8]">
                               已綁定 LINE（下次登入將自動同步暱稱與頭像）
                             </span>
                           )}
                         </div>
 
                         {localMember.line_status_msg && (
-                          <p className="text-xs text-gray-500 mt-1.5 italic bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
+                          <p className="text-xs text-[#8C8279] mt-1.5 italic bg-[#FAF7F2] px-3 py-1.5 rounded-lg border border-[#E8DEC8]">
                             💬 LINE 簽名：「{localMember.line_status_msg}」
                           </p>
                         )}
                       </div>
                     ) : (
-                      <form onSubmit={handleSaveProfile} className="space-y-3 bg-indigo-50/40 p-3.5 rounded-xl border border-indigo-100">
+                      <form onSubmit={handleSaveProfile} className="space-y-3 bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8]">
                         <div>
-                          <label className="block text-xs font-bold text-gray-700 mb-1">顧客姓名 *</label>
+                          <label className="block text-xs font-bold text-[#3E332B] mb-1">顧客姓名 *</label>
                           <input
                             type="text"
                             required
                             value={editName}
                             onChange={(e) => setEditName(e.target.value)}
-                            className="w-full px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-sm font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            className="w-full px-3 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
                             placeholder="輸入會員姓名"
                             autoFocus
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-700 mb-1">聯絡電話</label>
+                          <label className="block text-xs font-bold text-[#3E332B] mb-1">聯絡電話</label>
                           <input
                             type="tel"
                             value={editPhone}
                             onChange={(e) => setEditPhone(e.target.value)}
-                            className="w-full px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-sm font-mono text-gray-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            className="w-full px-3 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-sm font-mono text-[#3E332B] focus:border-[#8B5B43] outline-none"
                             placeholder="輸入手機號碼"
                           />
                         </div>
@@ -275,15 +275,15 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                           <button
                             type="submit"
                             disabled={isSavingProfile}
-                            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center gap-1 transition-colors disabled:opacity-50"
+                            className="px-3.5 py-1.5 bg-[#8B5B43] hover:bg-[#7A4F3A] text-white text-xs font-bold rounded-lg flex items-center gap-1 transition-colors disabled:opacity-50"
                           >
                             <Check className="w-3.5 h-3.5" />
-                            {isSavingProfile ? '儲存中...' : '儲存修改'}
+                            {isSavingProfile ? '儲存中...' : '儲存變更'}
                           </button>
                           <button
                             type="button"
                             onClick={() => setIsEditingProfile(false)}
-                            className="px-3 py-1.5 bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 text-xs font-medium rounded-lg transition-colors"
+                            className="px-3 py-1.5 text-xs text-[#8C8279] hover:text-[#3E332B] font-bold"
                           >
                             取消
                           </button>
@@ -331,12 +331,12 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
 
                 <div className="flex-1 flex flex-col">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-bold text-gray-700">📌 店家內部備註</span>
-                    {isSavingNotes && <span className="text-xs text-indigo-600 font-medium">自動儲存中...</span>}
+                    <span className="text-xs font-bold text-[#3E332B]">📌 店家內部備註</span>
+                    {isSavingNotes && <span className="text-xs text-[#8B5B43] font-bold">自動儲存中...</span>}
                   </div>
                   <textarea
                     key={localMember.id}
-                    className="w-full flex-1 min-h-[76px] p-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                    className="w-full flex-1 min-h-[76px] p-2.5 bg-white border border-[#E8DEC8] rounded-xl text-sm focus:border-[#8B5B43] outline-none resize-none text-[#3E332B]"
                     placeholder="填寫關於此顧客的備註事項（點擊空白處自動儲存）..."
                     defaultValue={localMember.notes || ''}
                     onBlur={(e) => {
@@ -352,67 +352,67 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
             {/* Section 2: Dual-Track Statistics Cards (不限時封頂人次 vs 一般計時時長) */}
             <div>
               <div className="flex items-center justify-between mb-2.5">
-                <h3 className="text-sm font-bold text-gray-700">
+                <h3 className="text-sm font-bold text-[#3E332B]">
                   📊 會員累計消費與時數統計（僅計入已報到／已結帳之有效訂單，含同行人數與拆帳明細）
                 </h3>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                 {/* Card 1: Unlimited Capped Pax Count */}
-                <div className="bg-purple-50/70 border border-purple-200 rounded-2xl p-4">
-                  <div className="flex items-center justify-between text-purple-700 mb-1">
+                <div className="bg-amber-50/80 border border-amber-300 rounded-2xl p-4 shadow-2xs">
+                  <div className="flex items-center justify-between text-amber-800 mb-1">
                     <span className="text-xs font-bold">✨ 不限時 (封頂) 累計</span>
-                    <Sparkles className="w-4 h-4" />
+                    <Sparkles className="w-4 h-4 text-amber-600" />
                   </div>
-                  <div className="text-2xl font-black text-purple-900">
-                    {stats.unlimited_pax_count} <span className="text-sm font-bold">人次</span>
+                  <div className="text-2xl font-black text-amber-950">
+                    {stats.unlimited_pax_count} <span className="text-sm font-bold text-amber-800">人次</span>
                   </div>
-                  <div className="text-[11px] text-purple-700/80 mt-1 font-medium">
+                  <div className="text-[11px] text-amber-800/90 mt-1 font-bold">
                     共 {stats.unlimited_orders_count} 筆不限時結帳（已乘算同行人數）
                   </div>
                 </div>
 
                 {/* Card 2: Regular Hourly Cumulative Hours */}
-                <div className="bg-blue-50/70 border border-blue-200 rounded-2xl p-4">
-                  <div className="flex items-center justify-between text-blue-700 mb-1">
+                <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 shadow-2xs">
+                  <div className="flex items-center justify-between text-[#8B5B43] mb-1">
                     <span className="text-xs font-bold">⏱️ 一般計時時長累計</span>
-                    <Clock className="w-4 h-4" />
+                    <Clock className="w-4 h-4 text-[#8B5B43]" />
                   </div>
-                  <div className="text-2xl font-black text-blue-900">
-                    {stats.regular_person_hours} <span className="text-sm font-bold">小時 (人時)</span>
+                  <div className="text-2xl font-black text-[#3E332B]">
+                    {stats.regular_person_hours} <span className="text-sm font-bold text-[#8C8279]">小時 (人時)</span>
                   </div>
-                  <div className="text-[11px] text-blue-700/80 mt-1 font-medium">
+                  <div className="text-[11px] text-[#8C8279] mt-1 font-bold">
                     純時段長 {stats.regular_pure_hours} 小時 ｜ 共 {stats.regular_orders_count} 筆計時
                   </div>
                 </div>
 
                 {/* Card 3: Total Spent */}
-                <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4">
-                  <div className="flex items-center justify-between text-amber-800 mb-1">
+                <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 shadow-2xs">
+                  <div className="flex items-center justify-between text-[#8B5B43] mb-1">
                     <span className="text-xs font-bold">💰 歷史累計結帳總額</span>
                   </div>
-                  <div className="text-2xl font-black text-amber-900">
+                  <div className="text-2xl font-black text-[#8B5B43]">
                     NT$ {(stats.total_spent || 0).toLocaleString()}
                   </div>
-                  <div className="text-[11px] text-amber-800/80 mt-1 font-medium">
+                  <div className="text-[11px] text-[#8C8279] mt-1 font-bold">
                     實際到訪完成 {stats.completed_visits_count} 次預約
                   </div>
                 </div>
 
                 {/* Card 4: Attendance Breakdown */}
-                <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex flex-col justify-between">
-                  <div className="text-xs font-bold text-gray-600 mb-1">📋 預約出席信用紀錄</div>
+                <div className="bg-white border border-[#E8DEC8] rounded-2xl p-4 flex flex-col justify-between shadow-2xs">
+                  <div className="text-xs font-bold text-[#8C8279] mb-1">📋 預約出席信用紀錄</div>
                   <div className="grid grid-cols-3 gap-1 text-center my-1">
-                    <div className="bg-white rounded-lg py-1.5 border border-gray-100">
-                      <div className="text-base font-black text-emerald-600">{stats.completed_visits_count}</div>
-                      <div className="text-[10px] text-gray-500">完訪</div>
+                    <div className="bg-[#FAF7F2] rounded-lg py-1.5 border border-[#E8DEC8]">
+                      <div className="text-base font-black text-emerald-700">{stats.completed_visits_count}</div>
+                      <div className="text-[10px] text-[#8C8279] font-bold">完訪</div>
                     </div>
-                    <div className="bg-white rounded-lg py-1.5 border border-gray-100">
-                      <div className="text-base font-black text-gray-600">{stats.cancelled_count}</div>
-                      <div className="text-[10px] text-gray-500">取消</div>
+                    <div className="bg-[#FAF7F2] rounded-lg py-1.5 border border-[#E8DEC8]">
+                      <div className="text-base font-black text-[#6D5D52]">{stats.cancelled_count}</div>
+                      <div className="text-[10px] text-[#8C8279] font-bold">取消</div>
                     </div>
-                    <div className="bg-white rounded-lg py-1.5 border border-red-100">
-                      <div className="text-base font-black text-red-600">{stats.no_show_count}</div>
-                      <div className="text-[10px] text-red-500 font-bold">爽約</div>
+                    <div className="bg-rose-50 rounded-lg py-1.5 border border-rose-200">
+                      <div className="text-base font-black text-rose-700">{stats.no_show_count}</div>
+                      <div className="text-[10px] text-rose-600 font-bold">爽約</div>
                     </div>
                   </div>
                 </div>
@@ -421,14 +421,14 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
 
             {/* Section 3: Tabs for Reservation History & 2-Month Login Logs */}
             <div>
-              <div className="flex items-center gap-2 border-b border-gray-200 mb-4">
+              <div className="flex items-center gap-2 border-b border-[#E8DEC8] mb-4">
                 <button
                   type="button"
                   onClick={() => setActiveTab('reservations')}
                   className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
                     activeTab === 'reservations'
-                      ? 'border-indigo-600 text-indigo-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-800'
+                      ? 'border-[#8B5B43] text-[#8B5B43]'
+                      : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
                   }`}
                 >
                   <Calendar className="w-4 h-4" />
@@ -439,8 +439,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                   onClick={() => setActiveTab('login_logs')}
                   className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
                     activeTab === 'login_logs'
-                      ? 'border-indigo-600 text-indigo-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-800'
+                      ? 'border-[#8B5B43] text-[#8B5B43]'
+                      : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
                   }`}
                 >
                   <Smartphone className="w-4 h-4" />
@@ -473,13 +473,13 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                           key={r.booking_ref}
                           onClick={() => setSelectedReservation({ ...r, user: localMember })}
                           className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:shadow-md transition-all ${
-                            isCancelled ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200 hover:border-indigo-200'
+                            isCancelled ? 'bg-gray-50 border-gray-100' : 'bg-white border-[#E8DEC8] hover:border-[#8B5B43]'
                           }`}
                         >
                           <div className="flex items-center gap-4">
                             <div
                               className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center shrink-0 ${
-                                isCancelled ? 'bg-gray-100 text-gray-400' : 'bg-gray-900 text-white'
+                                isCancelled ? 'bg-gray-100 text-gray-400' : 'bg-[#3E332B] text-[#FAF7F2]'
                               }`}
                             >
                               <span className="text-xs font-bold">
@@ -488,14 +488,14 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                             </div>
                             <div>
                               <div className="flex items-center flex-wrap gap-2">
-                                <span className={`font-bold ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                                <span className={`font-bold ${isCancelled ? 'text-gray-400 line-through' : 'text-[#3E332B]'}`}>
                                   {r.session.start_time} - {r.session.end_time}
                                 </span>
-                                <span className="text-xs bg-gray-100 text-gray-700 font-semibold px-2 py-0.5 rounded-full">
+                                <span className="text-xs bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8] font-bold px-2 py-0.5 rounded-full">
                                   {r.pax} 人 · {r.session_count} 小時
                                 </span>
                                 {r.is_unlimited && (
-                                  <span className="text-xs bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-full">
+                                  <span className="text-xs bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-full">
                                     ✨ 不限時封頂
                                   </span>
                                 )}
@@ -559,8 +559,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                                 {format(new Date(log.created_at), 'yyyy/MM/dd HH:mm:ss')}
                               </td>
                               <td className="px-4 py-3 font-mono">
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 text-gray-800 font-semibold">
-                                  <Globe className="w-3 h-3 text-indigo-500" />
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#FAF7F2] text-[#3E332B] border border-[#E8DEC8] font-semibold">
+                                  <Globe className="w-3 h-3 text-[#8B5B43]" />
                                   {log.ip_address || '未知'}
                                 </span>
                               </td>
@@ -574,7 +574,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                                 <span className={`px-2 py-0.5 rounded-full font-semibold ${
                                   log.browser?.includes('LINE')
                                     ? 'bg-[#06C755]/10 text-[#059941]'
-                                    : 'bg-blue-50 text-blue-700'
+                                    : 'bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]'
                                 }`}>
                                   {log.browser || '一般瀏覽器'}
                                 </span>

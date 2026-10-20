@@ -17,7 +17,7 @@ const router = express.Router();
 
 const checkoutStaffAuth = [
   verifyToken,
-  requireAnyPermission(['reservations', 'seating', 'weekly', 'accounting', 'equipment'])
+  requireAnyPermission(['reservations', 'seating', 'weekly', 'accounting', 'equipment', 'coupons'])
 ];
 
 // Customer + Admin promo code validation

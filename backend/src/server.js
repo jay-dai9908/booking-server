@@ -48,19 +48,25 @@ const ensureDatabaseSchema = async () => {
         "id" SERIAL NOT NULL,
         "user_id" INTEGER NOT NULL,
         "ip_address" TEXT,
-        "user_agent" TEXT,
-        "os_type" TEXT,
-        "os_version" TEXT,
+        "os" TEXT,
         "device_model" TEXT,
-        "browser_info" TEXT,
+        "browser" TEXT,
         "line_version" TEXT,
-        "screen_res" TEXT,
+        "screen_info" TEXT,
         "language" TEXT,
-        "login_source" TEXT NOT NULL DEFAULT 'line_oauth',
+        "user_agent" TEXT,
         "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT "UserLoginLog_pkey" PRIMARY KEY ("id"),
         CONSTRAINT "UserLoginLog_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
       );
+      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "os" TEXT;
+      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "device_model" TEXT;
+      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "browser" TEXT;
+      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "line_version" TEXT;
+      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "screen_info" TEXT;
+      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "language" TEXT;
+      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "ip_address" TEXT;
+      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "user_agent" TEXT;
       CREATE INDEX IF NOT EXISTS "UserLoginLog_user_id_created_at_idx" ON "UserLoginLog"("user_id", "created_at");
       CREATE INDEX IF NOT EXISTS "UserLoginLog_created_at_idx" ON "UserLoginLog"("created_at");
 
@@ -71,22 +77,33 @@ const ensureDatabaseSchema = async () => {
         "description" TEXT,
         "discount_type" TEXT NOT NULL DEFAULT 'fixed_order',
         "discount_value" INTEGER NOT NULL DEFAULT 0,
+        "max_discount_amount" INTEGER,
+        "target_scope" TEXT NOT NULL DEFAULT 'all',
+        "day_type_limit" TEXT NOT NULL DEFAULT 'all',
+        "mode_limit" TEXT NOT NULL DEFAULT 'all',
+        "channel" TEXT NOT NULL DEFAULT 'all',
         "min_pax" INTEGER NOT NULL DEFAULT 1,
-        "min_hours" DOUBLE PRECISION NOT NULL DEFAULT 0,
+        "min_hours" INTEGER NOT NULL DEFAULT 1,
         "min_amount" INTEGER NOT NULL DEFAULT 0,
-        "applicable_days" TEXT NOT NULL DEFAULT 'all',
-        "applicable_mode" TEXT NOT NULL DEFAULT 'all',
         "max_uses" INTEGER,
         "used_count" INTEGER NOT NULL DEFAULT 0,
         "max_uses_per_user" INTEGER,
-        "valid_from" TIMESTAMP(3),
-        "valid_until" TIMESTAMP(3),
+        "start_date" DATE,
+        "end_date" DATE,
         "is_pos_quick_select" BOOLEAN NOT NULL DEFAULT false,
         "is_active" BOOLEAN NOT NULL DEFAULT true,
         "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT "PromoCode_pkey" PRIMARY KEY ("id")
       );
+      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "max_discount_amount" INTEGER;
+      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "target_scope" TEXT NOT NULL DEFAULT 'all';
+      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "day_type_limit" TEXT NOT NULL DEFAULT 'all';
+      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "mode_limit" TEXT NOT NULL DEFAULT 'all';
+      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "channel" TEXT NOT NULL DEFAULT 'all';
+      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "start_date" DATE;
+      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "end_date" DATE;
+      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
       CREATE UNIQUE INDEX IF NOT EXISTS "PromoCode_code_key" ON "PromoCode"("code");
 
       CREATE TABLE IF NOT EXISTS "AddonItem" (

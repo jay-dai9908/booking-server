@@ -614,6 +614,9 @@ function Booking() {
         isUnlimited: effectiveIsUnlimited,
         equipments: activeEquipments,
         totalEquipmentFee,
+        subtotalBeforePromo,
+        appliedPromo,
+        promoDiscountAmount,
         estimatedGrandTotal,
         equipmentBreakdown: breakdownParts.length > 0 
           ? `${breakdownParts.join(' + ')}，共 ${totalBoards} 台 × ${rentalHours} 小時${discountSummary}`
@@ -650,13 +653,16 @@ function Booking() {
         assigned_seats: assignedSeats,
         isUnlimited: data.isUnlimited,
         equipments: data.equipments,
-        total_amount: finalAmount
+        total_amount: finalAmount,
+        appliedPromo: data.appliedPromo
       });
 
       fetchSessions(selectedDate); // Refresh capacities
       setSelectedSessions([]);
       setEquipmentSelections({});
       setEnableSmartBoard(false);
+      setAppliedPromo(null);
+      setPromoCodeInput('');
     } catch (err) {
       if (err.response?.status === 409 && err.response?.data?.error?.includes('拆散')) {
         setSplitBookingData({
@@ -1641,6 +1647,14 @@ function Booking() {
                     </div>
                   </div>
                 )}
+                {confirmModalData.appliedPromo && confirmModalData.promoDiscountAmount > 0 && (
+                  <div className="flex items-center justify-between text-[#3E332B] border-t border-dashed border-[#E5DFD7] pt-2">
+                    <span className="font-medium text-[#8C8279]">🎟️ 折扣優惠</span>
+                    <span className="font-bold text-rose-600">
+                      -NT$ {confirmModalData.promoDiscountAmount} ({confirmModalData.appliedPromo.name || confirmModalData.appliedPromo.code})
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-[#3E332B] border-t border-dashed border-[#E5DFD7] pt-2">
                   <span className="font-medium text-[#8C8279]">💰 預估總額</span>
                   <span className="font-bold text-[#8B5B43] text-lg">NT$ {confirmModalData.estimatedGrandTotal || estimatedGrandTotal}</span>
@@ -1771,6 +1785,12 @@ function Booking() {
                   <span className="text-[#8C8279]">👥 預約人數：</span>
                   <span className="font-bold text-[#2C241E]">{ticketModalData.pax} 人</span>
                 </div>
+                {ticketModalData.appliedPromo && (
+                  <div className="flex justify-between items-center text-xs text-rose-600">
+                    <span>🎟️ 套用優惠：</span>
+                    <span className="font-bold">{ticketModalData.appliedPromo.name || ticketModalData.appliedPromo.code}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-baseline border-t border-dashed border-[#E5DFD7] pt-2">
                   <span className="text-[#8C8279]">💰 預估結帳總額：</span>
                   <span className="font-bold text-base text-[#8B5B43]">NT$ {ticketModalData.total_amount}</span>

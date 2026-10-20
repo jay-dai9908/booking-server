@@ -335,12 +335,31 @@ export const sendCommandsToSunmiPrinter = (commands) => {
     try {
       const jsonPayload = JSON.stringify(commands);
 
-      // 註冊一次性全域回呼
-      window.onPOSPrintComplete = function (success, msg) {
+      // 註冊一次性全域回呼 (支援 Android 傳遞 JSON 字串、物件或布林值)
+      window.onPOSPrintComplete = function (resultArg, secondaryMsg) {
+        let isSuccess = false;
+        let message = '';
+        if (typeof resultArg === 'string') {
+          try {
+            const parsed = JSON.parse(resultArg);
+            isSuccess = Boolean(parsed.success);
+            message = parsed.error || (isSuccess ? '商米 V2s 列印完成' : '列印失敗');
+          } catch (e) {
+            isSuccess = resultArg === 'true';
+            message = secondaryMsg || (isSuccess ? '商米 V2s 列印完成' : resultArg);
+          }
+        } else if (typeof resultArg === 'object' && resultArg !== null) {
+          isSuccess = Boolean(resultArg.success);
+          message = resultArg.error || (isSuccess ? '商米 V2s 列印完成' : '列印失敗');
+        } else {
+          isSuccess = Boolean(resultArg);
+          message = secondaryMsg || (isSuccess ? '商米 V2s 列印完成' : '列印失敗');
+        }
+
         resolve({
           printedOnDevice: true,
-          success: Boolean(success),
-          message: msg || (success ? '商米 V2s 出紙成功' : '列印失敗')
+          success: isSuccess,
+          message
         });
       };
 

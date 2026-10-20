@@ -648,9 +648,9 @@ export default function CheckoutModal({
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-[120] animate-fade-in">
       <div className="bg-slate-50 rounded-2xl max-w-5xl w-full max-h-[94vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
         {/* Top Header */}
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white px-4 sm:px-6 py-4 flex flex-wrap justify-between items-center gap-3 shrink-0">
+        <div className="bg-[#3E332B] text-[#FAF7F2] px-4 sm:px-6 py-4 flex flex-wrap justify-between items-center gap-3 shrink-0 border-b border-[#2C241E]">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-xl">
+            <div className="w-10 h-10 rounded-xl bg-white/10 border border-[#E8DEC8]/20 flex items-center justify-center text-xl">
               💳
             </div>
             <div>
@@ -670,14 +670,14 @@ export default function CheckoutModal({
                 <span
                   className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${
                     sunmiDetected
-                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/30'
-                      : 'bg-white/10 text-slate-300 border-white/15'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30'
+                      : 'bg-white/10 text-[#D5CFC9] border-white/15'
                   }`}
                 >
                   {sunmiDetected ? '🖨️ 商米 V2s 已連線' : '💻 桌面 / 收據預覽模式'}
                 </span>
               </div>
-              <p className="text-xs text-slate-300 mt-0.5">
+              <p className="text-xs text-[#D5CFC9] mt-0.5">
                 單號 #{String(reservation.booking_ref).slice(0, 8).toUpperCase()} · 貴賓：
                 <strong className="text-white ml-1">{reservation.user?.name || '現場客'}</strong>
                 {reservation.user?.phone ? ` (${reservation.user.phone})` : ''} · 座位：
@@ -689,19 +689,28 @@ export default function CheckoutModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <a
+              href="/admin/coupons"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#8B5B43] hover:bg-[#7A4F3A] text-white border border-[#A6755C] transition flex items-center gap-1 shadow-xs"
+              title="另開新分頁開啟卡券與加購品完整後台"
+            >
+              🎟️ 卡券管理中心 ↗
+            </a>
             <button
               type="button"
               onClick={() => setSubModal(subModal === 'promo_manager' ? 'none' : 'promo_manager')}
               className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/15 transition"
             >
-              🎟️ 管理優惠券 ({promoCodes.length})
+              快速加卡券 ({promoCodes.length})
             </button>
             <button
               type="button"
               onClick={() => setSubModal(subModal === 'addon_manager' ? 'none' : 'addon_manager')}
               className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/15 transition"
             >
-              🛍️ 管理加購品 ({addonPresets.length})
+              快速加品項 ({addonPresets.length})
             </button>
             <button
               type="button"
@@ -727,15 +736,15 @@ export default function CheckoutModal({
         )}
 
         {/* Daily Pricing Rate Banner */}
-        <div className="bg-indigo-50/90 border-b border-indigo-100 px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-indigo-900 shrink-0">
+        <div className="bg-[#FAF7F2] border-b border-[#E8DEC8] px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[#3E332B] shrink-0">
           <div className="flex flex-wrap items-center gap-3">
             <span className="font-bold">
               📅 當日費率 ({pricingInfo.is_weekend ? '假日標準' : '平日標準'})：
             </span>
-            <span className="bg-white px-2 py-0.5 rounded border border-indigo-200 font-semibold">
+            <span className="bg-white px-2 py-0.5 rounded border border-[#E8DEC8] font-semibold">
               一般計時：<strong>${pricingInfo.hourly_price}</strong> / 小時
             </span>
-            <span className="bg-white px-2 py-0.5 rounded border border-indigo-200 font-semibold">
+            <span className="bg-white px-2 py-0.5 rounded border border-[#E8DEC8] font-semibold">
               加時半小時 (+0.5hr)：<strong>+${Math.round(pricingInfo.hourly_price * 0.5)}</strong>
             </span>
             {pricingInfo.allow_unlimited && (
@@ -744,7 +753,7 @@ export default function CheckoutModal({
               </span>
             )}
           </div>
-          <div className="text-[11px] text-indigo-700 font-medium">
+          <div className="text-[11px] text-[#8C8279] font-medium">
             💡 提示：若單人計時＋加時達封頂金額，系統將自動為該位顧客切換為封頂價
           </div>
         </div>
@@ -752,23 +761,23 @@ export default function CheckoutModal({
         {/* Main Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
           {/* SECTION 1: 多人拆帳與個別時數 / 加時半小時 */}
-          <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200">
+          <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-[#E8DEC8]">
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
               <div>
-                <h4 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                <h4 className="text-base font-extrabold text-[#3E332B] flex items-center gap-2">
                   <span>👥 1. 多人拆帳與個別遊玩時數設定</span>
-                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8]">
                     共 {computed.people.length} 位
                   </span>
                 </h4>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-[#8C8279] mt-0.5">
                   可針對同行每位顧客分別設定遊玩時數、未登錄之「加時半小時 (+0.5hr)」、不限時封頂、洞洞板分攤與個人收據列印
                 </p>
               </div>
               <button
                 type="button"
                 onClick={addPersonCard}
-                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition flex items-center gap-1"
+                className="px-3 py-1.5 bg-[#FAF7F2] hover:bg-[#F2ECE4] text-[#8B5B43] border border-[#E8DEC8] rounded-xl text-xs font-bold transition flex items-center gap-1"
               >
                 <span>＋</span> 新增同行拆帳人
               </button>
@@ -781,20 +790,20 @@ export default function CheckoutModal({
                   className={`rounded-xl p-3.5 border-2 transition ${
                     p.effective_unlimited
                       ? 'bg-amber-50/40 border-amber-300'
-                      : 'bg-slate-50/70 border-slate-200 hover:border-indigo-200'
+                      : 'bg-[#FAF7F2]/60 border-[#E8DEC8] hover:border-[#8B5B43]'
                   }`}
                 >
                   {/* Person Card Top Row */}
                   <div className="flex items-center justify-between gap-2 mb-2.5">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                      <span className="w-6 h-6 rounded-full bg-[#3E332B] text-white text-xs font-bold flex items-center justify-center shrink-0">
                         {idx + 1}
                       </span>
                       <input
                         type="text"
                         value={p.label}
                         onChange={e => updatePerson(idx, { label: e.target.value })}
-                        className="text-sm font-bold text-slate-800 bg-transparent border-b border-dashed border-slate-300 focus:border-indigo-500 focus:outline-none px-1 py-0.5 w-full"
+                        className="text-sm font-bold text-[#3E332B] bg-transparent border-b border-dashed border-[#D5CFC9] focus:border-[#8B5B43] focus:outline-none px-1 py-0.5 w-full"
                       />
                     </div>
 
@@ -802,7 +811,7 @@ export default function CheckoutModal({
                       <button
                         type="button"
                         onClick={() => handlePrintPersonReceipt(p, idx)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm transition"
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white hover:bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8] shadow-sm transition"
                         title="單獨列印此位顧客的分拆收據"
                       >
                         🖨️ 印分單
@@ -883,16 +892,16 @@ export default function CheckoutModal({
 
                   {/* Half-Hour Unregistered Extension Row (+0.5hr) */}
                   {!p.is_unlimited && (
-                    <div className="bg-white p-2 rounded-lg border border-slate-200 mb-2.5 flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                    <div className="bg-white p-2 rounded-lg border border-[#E8DEC8] mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-bold text-[#3E332B] flex items-center gap-1">
                         <span>⏱️ 現場未登錄加時：</span>
                         {p.extra_half_hours > 0 ? (
-                          <span className="text-indigo-600 font-extrabold">
+                          <span className="text-[#8B5B43] font-black">
                             +{p.extra_half_hours * 0.5} 小時 (+$
                             {Math.round(p.extra_half_hours * 0.5 * pricingInfo.hourly_price)})
                           </span>
                         ) : (
-                          <span className="text-slate-400 font-normal">無加時</span>
+                          <span className="text-[#8C8279] font-normal">無加時</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1">
@@ -903,8 +912,8 @@ export default function CheckoutModal({
                             onClick={() => updatePerson(idx, { extra_half_hours: halfCount })}
                             className={`px-2 py-1 rounded text-[11px] font-bold border transition ${
                               p.extra_half_hours === halfCount
-                                ? 'bg-indigo-600 text-white border-indigo-600'
-                                : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                                ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                                : 'bg-[#FAF7F2] hover:bg-[#F2ECE4] text-[#6D5D52] border-[#E8DEC8]'
                             }`}
                           >
                             {halfCount === 0 ? '0h' : `+${halfCount * 0.5}h`}
@@ -917,7 +926,7 @@ export default function CheckoutModal({
                   {/* Equipment Fee Share & Personal Addons */}
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs mb-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-slate-600 font-medium">💡 洞洞板分攤: $</span>
+                      <span className="text-[#6D5D52] font-bold">💡 洞洞板分攤: $</span>
                       <input
                         type="number"
                         min="0"
@@ -926,7 +935,7 @@ export default function CheckoutModal({
                         onChange={e =>
                           updatePerson(idx, { equipment_fee: Math.max(0, parseInt(e.target.value, 10) || 0) })
                         }
-                        className="w-16 px-1.5 py-0.5 text-xs font-bold border border-slate-300 rounded bg-white text-slate-800"
+                        className="w-16 px-1.5 py-0.5 text-xs font-bold border border-[#E8DEC8] rounded bg-white text-[#3E332B] focus:border-[#8B5B43] outline-none"
                       />
                     </div>
 
@@ -935,8 +944,8 @@ export default function CheckoutModal({
                       onClick={() => setAddonTarget(String(idx))}
                       className={`px-2 py-0.5 rounded text-[11px] font-bold border transition ${
                         addonTarget === String(idx)
-                          ? 'bg-pink-600 text-white border-pink-600'
-                          : 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-100'
+                          ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                          : 'bg-[#FAF7F2] text-[#8B5B43] border-[#E8DEC8] hover:bg-[#F2ECE4]'
                       }`}
                     >
                       {addonTarget === String(idx) ? '🎯 點下方加購品將歸入此人' : '＋ 點此指定個人加購'}
@@ -949,13 +958,13 @@ export default function CheckoutModal({
                       {p.addons.map((a, aIdx) => (
                         <span
                           key={aIdx}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-pink-100 text-pink-800 border border-pink-200"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#FAF0ED] text-[#C25E3E] border border-[#F2D6CD]"
                         >
                           {a.name} x{a.qty || 1} (${(a.price || 0) * (a.qty || 1)})
                           <button
                             type="button"
                             onClick={() => removePersonAddon(idx, aIdx)}
-                            className="text-pink-600 hover:text-rose-700 ml-0.5 font-extrabold"
+                            className="text-[#C25E3E] hover:text-rose-700 ml-0.5 font-extrabold"
                           >
                             ×
                           </button>
@@ -965,11 +974,11 @@ export default function CheckoutModal({
                   )}
 
                   {/* Person Subtotal Footer */}
-                  <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between">
-                    <div className="text-[11px] text-slate-500 space-x-1.5">
+                  <div className="pt-2 border-t border-[#E8DEC8] flex items-center justify-between">
+                    <div className="text-[11px] text-[#8C8279] space-x-1.5">
                       <span>座位 ${p.seating_fee}</span>
                       {p.is_auto_capped && !p.is_unlimited && (
-                        <span className="px-1.5 py-0.2 bg-amber-200 text-amber-900 rounded font-bold">
+                        <span className="px-1.5 py-0.2 bg-amber-100 text-amber-900 border border-amber-300 rounded font-bold">
                           已自動封頂✨
                         </span>
                       )}
@@ -981,8 +990,8 @@ export default function CheckoutModal({
                       )}
                     </div>
                     <div className="text-right">
-                      <span className="text-[11px] text-slate-500 mr-1">應付:</span>
-                      <span className="text-base font-black text-indigo-700">NT$ {p.person_total}</span>
+                      <span className="text-[11px] text-[#8C8279] mr-1">應付:</span>
+                      <span className="text-base font-black text-[#8B5B43]">NT$ {p.person_total}</span>
                     </div>
                   </div>
                 </div>
@@ -991,32 +1000,32 @@ export default function CheckoutModal({
           </div>
 
           {/* SECTION 2: 不同價位吊飾 / 周邊加購區 */}
-          <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200">
+          <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-[#E8DEC8]">
             <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
               <div>
-                <h4 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                <h4 className="text-base font-extrabold text-[#3E332B] flex items-center gap-2">
                   <span>🛍️ 2. 不同價位吊飾／周邊與代燙加購</span>
                   {computed.subtotalAddons > 0 && (
-                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-pink-100 text-pink-700">
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#FAF0ED] text-[#C25E3E] border border-[#F2D6CD]">
                       加購小計 +NT$ {computed.subtotalAddons}
                     </span>
                   )}
                 </h4>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-[#8C8279] mt-0.5">
                   可選擇將加購品計入「整單共同加購」或直接歸入指定顧客的拆帳明細中
                 </p>
               </div>
 
               {/* Target Selector */}
-              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-                <span className="text-xs font-bold text-slate-600 px-2">加購歸屬：</span>
+              <div className="flex items-center gap-1.5 bg-[#FAF7F2] p-1 rounded-xl border border-[#E8DEC8]">
+                <span className="text-xs font-bold text-[#6D5D52] px-2">加購歸屬：</span>
                 <button
                   type="button"
                   onClick={() => setAddonTarget('order')}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
                     addonTarget === 'order'
-                      ? 'bg-pink-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-white'
+                      ? 'bg-[#8B5B43] text-white shadow-xs'
+                      : 'text-[#6D5D52] hover:bg-white'
                   }`}
                 >
                   整單共同
@@ -1028,8 +1037,8 @@ export default function CheckoutModal({
                     onClick={() => setAddonTarget(String(idx))}
                     className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
                       addonTarget === String(idx)
-                        ? 'bg-pink-600 text-white shadow-sm'
-                        : 'text-slate-600 hover:bg-white'
+                        ? 'bg-[#8B5B43] text-white shadow-xs'
+                        : 'text-[#6D5D52] hover:bg-white'
                     }`}
                   >
                     第{idx + 1}位
@@ -1045,37 +1054,37 @@ export default function CheckoutModal({
                   key={item.id}
                   type="button"
                   onClick={() => handleSelectAddon(item)}
-                  className="p-2.5 rounded-xl border border-pink-200 bg-pink-50/50 hover:bg-pink-100/80 text-left transition flex flex-col justify-between group"
+                  className="p-2.5 rounded-xl border border-[#E8DEC8] bg-[#FAF7F2] hover:bg-[#F2ECE4] text-left transition flex flex-col justify-between group"
                 >
-                  <span className="text-xs font-bold text-slate-800 group-hover:text-pink-900 line-clamp-1">
+                  <span className="text-xs font-bold text-[#3E332B] group-hover:text-[#8B5B43] line-clamp-1">
                     {item.name}
                   </span>
-                  <span className="text-sm font-black text-pink-600 mt-1">+${item.price}</span>
+                  <span className="text-sm font-black text-[#8B5B43] mt-1">+${item.price}</span>
                 </button>
               ))}
             </div>
 
             {/* Custom Ad-hoc Addon Input */}
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-              <span className="text-xs font-bold text-slate-600">自訂加購：</span>
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#E8DEC8]">
+              <span className="text-xs font-bold text-[#6D5D52]">自訂加購：</span>
               <input
                 type="text"
                 placeholder="品項名稱 (例：特殊大鑰匙圈)"
                 value={customAddonName}
                 onChange={e => setCustomAddonName(e.target.value)}
-                className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg flex-1 min-w-[150px]"
+                className="px-3 py-1.5 text-xs border border-[#E8DEC8] rounded-lg flex-1 min-w-[150px] text-[#3E332B] focus:border-[#8B5B43] outline-none"
               />
               <input
                 type="number"
                 placeholder="金額 ($)"
                 value={customAddonPrice}
                 onChange={e => setCustomAddonPrice(e.target.value)}
-                className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg w-24 font-bold"
+                className="px-3 py-1.5 text-xs border border-[#E8DEC8] rounded-lg w-24 font-bold text-[#8B5B43] focus:border-[#8B5B43] outline-none"
               />
               <button
                 type="button"
                 onClick={handleAddCustomAddon}
-                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition"
+                className="px-3.5 py-1.5 bg-[#8B5B43] hover:bg-[#7A4F3A] text-white text-xs font-bold rounded-lg transition shadow-xs"
               >
                 ＋ 加入
               </button>
@@ -1083,12 +1092,12 @@ export default function CheckoutModal({
 
             {/* Order-level Addons List */}
             {orderAddons.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-slate-200 flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-slate-600">已選整單加購：</span>
+              <div className="mt-3 pt-3 border-t border-[#E8DEC8] flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-[#6D5D52]">已選整單加購：</span>
                 {orderAddons.map((item, idx) => (
                   <span
                     key={idx}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-pink-800 border border-pink-200"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#FAF0ED] text-[#C25E3E] border border-[#F2D6CD]"
                   >
                     <span>
                       {item.name} x{item.qty || 1} (${(item.price || 0) * (item.qty || 1)})
@@ -1096,8 +1105,9 @@ export default function CheckoutModal({
                     <button
                       type="button"
                       onClick={() => removeOrderAddon(idx)}
-                      className="text-pink-600 hover:text-rose-700 font-black"
+                      className="text-[#C25E3E] hover:text-rose-700 font-black"
                     >
+                      ×
                       ×
                     </button>
                   </span>
@@ -1202,33 +1212,33 @@ export default function CheckoutModal({
                   placeholder="輸入專屬折扣碼 (例: VIP2026)"
                   value={promoInput}
                   onChange={e => setPromoInput(e.target.value.toUpperCase())}
-                  className="px-3 py-1.5 text-xs font-bold uppercase border border-slate-300 rounded-lg flex-1"
+                  className="px-3 py-1.5 text-xs font-bold uppercase border border-[#E8DEC8] rounded-lg flex-1 text-[#3E332B] focus:border-[#8B5B43] outline-none"
                 />
                 <button
                   type="button"
                   onClick={handleApplyPromoInput}
-                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition"
+                  className="px-3.5 py-1.5 bg-[#8B5B43] hover:bg-[#7A4F3A] text-white text-xs font-bold rounded-lg transition shadow-xs"
                 >
                   驗證套用
                 </button>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-600 shrink-0">店員手動折讓 ($)：</span>
+                <span className="text-xs font-bold text-[#6D5D52] shrink-0">店員手動折讓 ($)：</span>
                 <input
                   type="number"
                   min="0"
                   step="10"
                   value={manualDiscount}
                   onChange={e => setManualDiscount(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                  className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg w-28"
+                  className="px-3 py-1.5 text-xs font-bold border border-[#E8DEC8] rounded-lg w-28 text-[#3E332B] focus:border-[#8B5B43] outline-none"
                 />
                 <input
                   type="text"
                   placeholder="結帳備註 (選填，會印在收據上)"
                   value={checkoutNote}
                   onChange={e => setCheckoutNote(e.target.value)}
-                  className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg flex-1"
+                  className="px-3 py-1.5 text-xs border border-[#E8DEC8] rounded-lg flex-1 text-[#3E332B] focus:border-[#8B5B43] outline-none"
                 />
               </div>
             </div>
@@ -1238,8 +1248,8 @@ export default function CheckoutModal({
           {/* SECTION 4: 付款方式與會員雙軌統計預覽 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Payment Method */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
-              <h4 className="text-sm font-extrabold text-slate-800 mb-2.5">💰 4. 選擇收款方式</h4>
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E8DEC8]">
+              <h4 className="text-sm font-extrabold text-[#3E332B] mb-2.5">💰 4. 選擇收款方式</h4>
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { key: 'cash', label: '💵 現金付款' },
@@ -1253,7 +1263,7 @@ export default function CheckoutModal({
                     className={`py-2.5 px-3 rounded-xl text-xs font-extrabold border-2 transition ${
                       paymentMethod === m.key
                         ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-sm'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                        : 'bg-[#FAF7F2] border-[#E8DEC8] text-[#6D5D52] hover:bg-[#F2ECE4]'
                     }`}
                   >
                     {m.label}
@@ -1263,25 +1273,25 @@ export default function CheckoutModal({
             </div>
 
             {/* Member Dual-Track Accumulation Preview */}
-            <div className="bg-gradient-to-br from-indigo-50 to-amber-50/60 rounded-2xl p-4 border border-indigo-200/80 flex flex-col justify-between">
+            <div className="bg-[#FAF7F2] rounded-2xl p-4 border border-[#E8DEC8] flex flex-col justify-between shadow-2xs">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-extrabold text-indigo-950">
+                <h4 className="text-sm font-extrabold text-[#3E332B]">
                   📊 會員雙軌累計預覽（結帳後自動寫入會員檔案）
                 </h4>
-                <span className="text-[11px] font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
+                <span className="text-[11px] font-bold text-[#8B5B43] bg-white px-2 py-0.5 rounded-full border border-[#E8DEC8]">
                   依拆帳結果精準統計
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2.5 mt-2">
-                <div className="bg-white/90 rounded-xl p-2.5 border border-amber-200">
+                <div className="bg-white rounded-xl p-2.5 border border-amber-300">
                   <div className="text-[11px] font-bold text-amber-800">✨ 不限時（封頂）累計</div>
-                  <div className="text-lg font-black text-amber-600 mt-0.5">
+                  <div className="text-lg font-black text-amber-700 mt-0.5">
                     +{computed.unlimitedPaxCount} <span className="text-xs font-bold">人次</span>
                   </div>
                 </div>
-                <div className="bg-white/90 rounded-xl p-2.5 border border-indigo-200">
-                  <div className="text-[11px] font-bold text-indigo-800">⏱️ 一般計時時長累計</div>
-                  <div className="text-lg font-black text-indigo-600 mt-0.5">
+                <div className="bg-white rounded-xl p-2.5 border border-[#E8DEC8]">
+                  <div className="text-[11px] font-bold text-[#8B5B43]">⏱️ 一般計時時長累計</div>
+                  <div className="text-lg font-black text-[#8B5B43] mt-0.5">
                     +{computed.regularHoursSum} <span className="text-xs font-bold">人時</span>
                   </div>
                 </div>
@@ -1291,24 +1301,24 @@ export default function CheckoutModal({
         </div>
 
         {/* Bottom Sticky Summary & POS Print Bar */}
-        <div className="bg-white border-t border-slate-200 px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 shrink-0">
+        <div className="bg-white border-t border-[#E8DEC8] px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 shrink-0">
           <div className="flex flex-wrap items-baseline gap-4">
             <div>
-              <span className="text-xs font-bold text-slate-500 block">整單應收總金額</span>
-              <span className="text-2xl sm:text-3xl font-black text-emerald-600">
+              <span className="text-xs font-bold text-[#8C8279] block">整單應收總金額</span>
+              <span className="text-2xl sm:text-3xl font-black text-[#8B5B43]">
                 NT$ {computed.grandTotal.toLocaleString()}
               </span>
             </div>
-            <div className="text-xs text-slate-500 space-y-0.5 border-l border-slate-200 pl-3">
+            <div className="text-xs text-[#8C8279] space-y-0.5 border-l border-[#E8DEC8] pl-3">
               <div>
-                座位與加時：<strong>${computed.subtotalSeating}</strong> · 設備：
-                <strong>${computed.subtotalEquipment}</strong> · 加購：
-                <strong>${computed.subtotalAddons}</strong>
+                座位與加時：<strong className="text-[#3E332B]">${computed.subtotalSeating}</strong> · 設備：
+                <strong className="text-[#3E332B]">${computed.subtotalEquipment}</strong> · 加購：
+                <strong className="text-[#3E332B]">${computed.subtotalAddons}</strong>
               </div>
               <div>
                 優惠折抵：<strong className="text-rose-600">-${computed.totalDiscount}</strong> ·
                 各人拆帳合計：
-                <strong className="text-indigo-700">
+                <strong className="text-[#8B5B43]">
                   {computed.people.map((p, i) => `第${i + 1}位$${p.person_total}`).join(' + ')}
                 </strong>
               </div>
@@ -1319,7 +1329,7 @@ export default function CheckoutModal({
             <button
               type="button"
               onClick={handlePrintFullReceipt}
-              className="px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition"
+              className="px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#FAF7F2] hover:bg-[#F2ECE4] text-[#3E332B] border border-[#E8DEC8] transition shadow-xs"
             >
               🖨️ 預覽 / 印總明細單
             </button>
@@ -1328,7 +1338,7 @@ export default function CheckoutModal({
               type="button"
               disabled={isSubmitting}
               onClick={() => handleConfirmCheckout(false)}
-              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition disabled:opacity-50"
+              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-white hover:bg-[#FAF7F2] text-[#3E332B] border border-[#E8DEC8] shadow-xs transition disabled:opacity-50"
             >
               ✅ 僅確認結帳
             </button>
@@ -1337,7 +1347,7 @@ export default function CheckoutModal({
               type="button"
               disabled={isSubmitting}
               onClick={() => handleConfirmCheckout(true)}
-              className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md transition disabled:opacity-50 flex items-center gap-1.5"
+              className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold bg-[#8B5B43] hover:bg-[#7A4F3A] text-white shadow-md transition disabled:opacity-50 flex items-center gap-1.5"
             >
               <span>🖨️ 確認結帳並印單 (商米 V2s)</span>
             </button>
@@ -1405,11 +1415,11 @@ export default function CheckoutModal({
               )}
             </div>
 
-            <div className="p-3 bg-white border-t border-slate-200 flex justify-between items-center gap-2">
+            <div className="p-3 bg-white border-t border-[#E8DEC8] flex justify-between items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowRawJson(!showRawJson)}
-                className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                className="px-3 py-1.5 text-xs font-bold text-[#6D5D52] bg-[#FAF7F2] hover:bg-[#F2ECE4] border border-[#E8DEC8] rounded-lg"
               >
                 {showRawJson ? '隱藏商米 JSON 指令' : '檢視商米 V2s JSON'}
               </button>
@@ -1417,14 +1427,14 @@ export default function CheckoutModal({
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="px-3.5 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg"
+                  className="px-3.5 py-1.5 text-xs font-bold bg-[#8B5B43] hover:bg-[#7A4F3A] text-white rounded-lg shadow-xs"
                 >
                   🖨️ 瀏覽器列印
                 </button>
                 <button
                   type="button"
                   onClick={() => setSubModal('none')}
-                  className="px-3.5 py-1.5 text-xs font-bold bg-slate-800 text-white rounded-lg"
+                  className="px-3.5 py-1.5 text-xs font-bold bg-[#3E332B] hover:bg-[#2C241E] text-white rounded-lg"
                 >
                   關閉
                 </button>
@@ -1437,13 +1447,23 @@ export default function CheckoutModal({
       {/* SUB-MODAL 2: Promo Code & POS Quick Coupon Manager */}
       {subModal === 'promo_manager' && (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-[130]">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="bg-slate-900 text-white px-5 py-3.5 flex justify-between items-center">
-              <h4 className="font-bold text-base">🎟️ 優惠券與櫃檯通用折扣管理</h4>
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden border border-[#E8DEC8]">
+            <div className="bg-[#3E332B] text-white px-5 py-3.5 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <h4 className="font-bold text-base">🎟️ 優惠券與櫃檯通用折扣管理</h4>
+                <a
+                  href="/admin/coupons"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] font-bold text-[#FAF7F2] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded border border-white/20 ml-2"
+                >
+                  開啟完整卡券後台 ↗
+                </a>
+              </div>
               <button
                 type="button"
                 onClick={() => setSubModal('none')}
-                className="text-slate-400 hover:text-white text-xl font-bold"
+                className="text-white/70 hover:text-white text-xl font-bold"
               >
                 ×
               </button>
@@ -1452,9 +1472,9 @@ export default function CheckoutModal({
             <div className="p-5 overflow-y-auto space-y-5 flex-1">
               <form
                 onSubmit={handleCreatePromo}
-                className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3"
+                className="bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] space-y-3"
               >
-                <div className="text-xs font-extrabold text-slate-700">＋ 新增折扣碼／櫃檯通用優惠券</div>
+                <div className="text-xs font-extrabold text-[#3E332B]">＋ 快速新增折扣碼／櫃檯通用優惠券</div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <input
                     type="text"
@@ -1462,7 +1482,7 @@ export default function CheckoutModal({
                     placeholder="代碼 (例: CHECKIN50)"
                     value={newPromo.code}
                     onChange={e => setNewPromo({ ...newPromo, code: e.target.value.toUpperCase() })}
-                    className="px-3 py-1.5 text-xs font-bold uppercase border border-slate-300 rounded-lg"
+                    className="px-3 py-1.5 text-xs font-bold uppercase border border-[#E8DEC8] rounded-lg bg-white text-[#3E332B] focus:border-[#8B5B43] outline-none"
                   />
                   <input
                     type="text"
@@ -1470,12 +1490,12 @@ export default function CheckoutModal({
                     placeholder="顯示名稱 (例: IG打卡折$50)"
                     value={newPromo.name}
                     onChange={e => setNewPromo({ ...newPromo, name: e.target.value })}
-                    className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg"
+                    className="px-3 py-1.5 text-xs border border-[#E8DEC8] rounded-lg bg-white text-[#3E332B] focus:border-[#8B5B43] outline-none"
                   />
                   <select
                     value={newPromo.discount_type}
                     onChange={e => setNewPromo({ ...newPromo, discount_type: e.target.value })}
-                    className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white"
+                    className="px-3 py-1.5 text-xs font-bold border border-[#E8DEC8] rounded-lg bg-white text-[#3E332B] focus:border-[#8B5B43] outline-none"
                   >
                     <option value="fixed_order">整單折抵固定金額 ($)</option>
                     <option value="fixed_per_pax">依人數每人折抵 ($)</option>
@@ -1486,31 +1506,31 @@ export default function CheckoutModal({
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   <div>
-                    <label className="text-[11px] text-slate-500 font-bold block">折抵數值</label>
+                    <label className="text-[11px] text-[#6D5D52] font-bold block">折抵數值</label>
                     <input
                       type="number"
                       required
                       value={newPromo.discount_value}
                       onChange={e => setNewPromo({ ...newPromo, discount_value: e.target.value })}
-                      className="w-full px-2.5 py-1 text-xs font-bold border border-slate-300 rounded-lg"
+                      className="w-full px-2.5 py-1 text-xs font-bold border border-[#E8DEC8] rounded-lg bg-white text-[#8B5B43] focus:border-[#8B5B43] outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-500 font-bold block">最低人數門檻</label>
+                    <label className="text-[11px] text-[#6D5D52] font-bold block">最低人數門檻</label>
                     <input
                       type="number"
                       min="1"
                       value={newPromo.min_pax}
                       onChange={e => setNewPromo({ ...newPromo, min_pax: e.target.value })}
-                      className="w-full px-2.5 py-1 text-xs border border-slate-300 rounded-lg"
+                      className="w-full px-2.5 py-1 text-xs border border-[#E8DEC8] rounded-lg bg-white text-[#3E332B] focus:border-[#8B5B43] outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-500 font-bold block">平假日限制</label>
+                    <label className="text-[11px] text-[#6D5D52] font-bold block">平假日限制</label>
                     <select
                       value={newPromo.applicable_days}
                       onChange={e => setNewPromo({ ...newPromo, applicable_days: e.target.value })}
-                      className="w-full px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-2.5 py-1 text-xs border border-[#E8DEC8] rounded-lg bg-white text-[#3E332B] focus:border-[#8B5B43] outline-none"
                     >
                       <option value="all">平假日皆適用</option>
                       <option value="weekday">僅限平日</option>
@@ -1518,14 +1538,14 @@ export default function CheckoutModal({
                     </select>
                   </div>
                   <div className="flex items-end">
-                    <label className="flex items-center gap-1.5 text-xs font-bold text-indigo-800 cursor-pointer pb-1">
+                    <label className="flex items-center gap-1.5 text-xs font-bold text-amber-900 cursor-pointer pb-1">
                       <input
                         type="checkbox"
                         checked={newPromo.is_pos_quick_select}
                         onChange={e =>
                           setNewPromo({ ...newPromo, is_pos_quick_select: e.target.checked })
                         }
-                        className="rounded text-indigo-600"
+                        className="rounded border-[#E8DEC8] text-[#8B5B43] focus:ring-[#8B5B43]"
                       />
                       顯示於結帳通用快捷鍵
                     </label>
@@ -1535,7 +1555,7 @@ export default function CheckoutModal({
                 <div className="flex justify-end">
                   <button
                     type="submit"
-                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg"
+                    className="px-4 py-1.5 bg-[#8B5B43] hover:bg-[#7A4F3A] text-white text-xs font-bold rounded-lg shadow-xs"
                   >
                     ＋ 儲存優惠券
                   </button>
@@ -1546,15 +1566,15 @@ export default function CheckoutModal({
                 {promoCodes.map(p => (
                   <div
                     key={p.id}
-                    className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-slate-200 bg-white text-xs"
+                    className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-[#E8DEC8] bg-white text-xs"
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                        <span className="font-black text-[#8B5B43] bg-[#FAF7F2] border border-[#E8DEC8] px-2 py-0.5 rounded">
                           {p.code}
                         </span>
-                        <span className="font-bold text-slate-800">{p.name}</span>
-                        <span className="text-slate-500">
+                        <span className="font-bold text-[#3E332B]">{p.name}</span>
+                        <span className="text-[#8C8279]">
                           (已使用 {p.used_count} 次{p.max_uses ? ` / 上限 ${p.max_uses}` : ''})
                         </span>
                       </div>
@@ -1565,8 +1585,8 @@ export default function CheckoutModal({
                         onClick={() => handleTogglePromoField(p, 'is_pos_quick_select')}
                         className={`px-2.5 py-1 rounded font-bold border ${
                           p.is_pos_quick_select
-                            ? 'bg-amber-50 text-amber-800 border-amber-300'
-                            : 'bg-slate-100 text-slate-500 border-slate-200'
+                            ? 'bg-amber-50 text-amber-900 border-amber-300'
+                            : 'bg-[#FAF7F2] text-[#8C8279] border-[#E8DEC8]'
                         }`}
                       >
                         {p.is_pos_quick_select ? '⚡ 櫃檯快捷: 開啟' : '櫃檯快捷: 關閉'}
@@ -1574,10 +1594,10 @@ export default function CheckoutModal({
                       <button
                         type="button"
                         onClick={() => handleTogglePromoField(p, 'is_active')}
-                        className={`px-2.5 py-1 rounded font-bold ${
+                        className={`px-2.5 py-1 rounded font-bold border ${
                           p.is_active
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-slate-200 text-slate-600'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-gray-100 text-gray-600 border-gray-200'
                         }`}
                       >
                         {p.is_active ? '啟用中' : '已停用'}
@@ -1601,13 +1621,13 @@ export default function CheckoutModal({
       {/* SUB-MODAL 3: Addon Presets Manager */}
       {subModal === 'addon_manager' && (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-[130]">
-          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="bg-slate-900 text-white px-5 py-3.5 flex justify-between items-center">
-              <h4 className="font-bold text-base">🛍️ 管理常用吊飾／周邊加購品項</h4>
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-[#E8DEC8]">
+            <div className="bg-[#3E332B] text-white px-5 py-3.5 flex justify-between items-center">
+              <h4 className="font-bold text-base">🛍️ 快速管理常用吊飾／周邊加購品項</h4>
               <button
                 type="button"
                 onClick={() => setSubModal('none')}
-                className="text-slate-400 hover:text-white text-xl font-bold"
+                className="text-white/70 hover:text-white text-xl font-bold"
               >
                 ×
               </button>
@@ -1616,7 +1636,7 @@ export default function CheckoutModal({
             <div className="p-5 overflow-y-auto space-y-4 flex-1">
               <form
                 onSubmit={handleCreateAddonPreset}
-                className="flex flex-wrap items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200"
+                className="flex flex-wrap items-center gap-2 bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8]"
               >
                 <input
                   type="text"
@@ -1624,7 +1644,7 @@ export default function CheckoutModal({
                   placeholder="品項名稱 (例: 夜光吊飾扣)"
                   value={newAddon.name}
                   onChange={e => setNewAddon({ ...newAddon, name: e.target.value })}
-                  className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg flex-1"
+                  className="px-3 py-1.5 text-xs border border-[#E8DEC8] rounded-lg flex-1 bg-white text-[#3E332B] focus:border-[#8B5B43] outline-none"
                 />
                 <input
                   type="number"
@@ -1632,11 +1652,11 @@ export default function CheckoutModal({
                   placeholder="單價 ($)"
                   value={newAddon.price}
                   onChange={e => setNewAddon({ ...newAddon, price: e.target.value })}
-                  className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg w-24"
+                  className="px-3 py-1.5 text-xs font-bold border border-[#E8DEC8] rounded-lg w-24 bg-white text-[#8B5B43] focus:border-[#8B5B43] outline-none"
                 />
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold rounded-lg"
+                  className="px-4 py-1.5 bg-[#8B5B43] hover:bg-[#7A4F3A] text-white text-xs font-bold rounded-lg shadow-xs"
                 >
                   ＋ 新增品項
                 </button>
@@ -1646,11 +1666,11 @@ export default function CheckoutModal({
                 {addonPresets.map(item => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white text-xs"
+                    className="flex items-center justify-between p-3 rounded-xl border border-[#E8DEC8] bg-white text-xs"
                   >
-                    <div className="font-bold text-slate-800">
+                    <div className="font-bold text-[#3E332B]">
                       {item.name}{' '}
-                      <span className="text-pink-600 font-black ml-1">NT$ {item.price}</span>
+                      <span className="text-[#8B5B43] font-black ml-1">NT$ {item.price}</span>
                     </div>
                     <button
                       type="button"

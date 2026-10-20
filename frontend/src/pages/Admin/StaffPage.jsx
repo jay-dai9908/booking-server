@@ -16,7 +16,8 @@ import {
   EyeOff, 
   X,
   AlertCircle,
-  Cpu
+  Cpu,
+  Ticket
 } from 'lucide-react';
 import api from '../../api/axios';
 
@@ -69,6 +70,13 @@ const AVAILABLE_PERMISSIONS = [
     desc: '調整智能拼豆板庫存、時租費率與前台狀態', 
     icon: Cpu,
     color: 'text-amber-800 bg-amber-50 border-amber-200' 
+  },
+  { 
+    id: 'coupons', 
+    label: '卡券與優惠管理', 
+    desc: '折扣碼設定、POS 櫃檯快捷優惠及常用加購品管理', 
+    icon: Ticket,
+    color: 'text-[#8B5B43] bg-[#FAF7F2] border-[#E8DEC8]' 
   },
 ];
 
