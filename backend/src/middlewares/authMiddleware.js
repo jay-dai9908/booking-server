@@ -29,8 +29,16 @@ export const requireAdmin = async (req, res, next) => {
   }
 };
 
+const isLegacyOrSuperAdmin = (user) => {
+  if (!user || user.role !== 'admin') return false;
+  if (user.isSuperAdmin) return true;
+  if (Array.isArray(user.permissions) && user.permissions.includes('all')) return true;
+  if (!user.id && user.isSuperAdmin === undefined && !user.permissions) return true;
+  return false;
+};
+
 export const requireSuperAdmin = async (req, res, next) => {
-  if (req.user && req.user.role === 'admin' && req.user.isSuperAdmin) {
+  if (isLegacyOrSuperAdmin(req.user)) {
     next();
   } else {
     return res.status(403).json({ error: 'Forbidden. Super admin access required.' });
@@ -40,7 +48,7 @@ export const requireSuperAdmin = async (req, res, next) => {
 export const requirePermission = (permission) => {
   return (req, res, next) => {
     if (req.user && req.user.role === 'admin') {
-      if (req.user.isSuperAdmin || (Array.isArray(req.user.permissions) && req.user.permissions.includes(permission))) {
+      if (isLegacyOrSuperAdmin(req.user) || (Array.isArray(req.user.permissions) && req.user.permissions.includes(permission))) {
         return next();
       }
       return res.status(403).json({ error: '無此功能存取權限' });
@@ -52,7 +60,7 @@ export const requirePermission = (permission) => {
 export const requireAnyPermission = (permissions) => {
   return (req, res, next) => {
     if (req.user && req.user.role === 'admin') {
-      if (req.user.isSuperAdmin) return next();
+      if (isLegacyOrSuperAdmin(req.user)) return next();
       if (Array.isArray(req.user.permissions)) {
         const hasAny = permissions.some(p => req.user.permissions.includes(p));
         if (hasAny) return next();

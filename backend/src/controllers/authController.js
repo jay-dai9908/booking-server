@@ -252,11 +252,12 @@ export const logout = (req, res) => {
 export const me = async (req, res) => {
   try {
     if (req.user.role === 'admin') {
+      const isSuper = !!(req.user.isSuperAdmin || (!req.user.id && req.user.isSuperAdmin === undefined && !req.user.permissions));
       return res.json({
         role: 'admin',
-        isSuperAdmin: !!req.user.isSuperAdmin,
-        name: req.user.name || '管理員',
-        permissions: req.user.permissions || []
+        isSuperAdmin: isSuper,
+        name: req.user.name || '最高管理員',
+        permissions: isSuper ? ['all'] : (req.user.permissions || [])
       });
     }
     

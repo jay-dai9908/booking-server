@@ -29,115 +29,136 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Auto-ensure schema columns & tables exist so deployments without manual `prisma db push` never fail
+// IMPORTANT: PostgreSQL prepared statements via prisma.$executeRawUnsafe only allow ONE command per call!
 const ensureDatabaseSchema = async () => {
-  try {
-    await prisma.$executeRawUnsafe(`
-      ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "line_display_name" TEXT;
-      ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "line_picture_url" TEXT;
-      ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "line_status_msg" TEXT;
-      ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "last_login_at" TIMESTAMP(3);
+  const statements = [
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "line_display_name" TEXT`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "line_picture_url" TEXT`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "line_status_msg" TEXT`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "last_login_at" TIMESTAMP(3)`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "is_blacklisted" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "notes" TEXT`,
 
-      ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "payment_method" TEXT;
-      ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "checkout_unlimited_pax" INTEGER;
-      ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "checkout_regular_hours" DOUBLE PRECISION;
-      ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "checkout_details" JSONB;
-      ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "promo_code" TEXT;
-      ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "discount_amount" INTEGER NOT NULL DEFAULT 0;
-      ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "addons_amount" INTEGER NOT NULL DEFAULT 0;
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "payment_method" TEXT`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "checkout_unlimited_pax" INTEGER`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "checkout_regular_hours" DOUBLE PRECISION`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "checkout_details" JSONB`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "promo_code" TEXT`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "discount_amount" INTEGER DEFAULT 0`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "addons_amount" INTEGER DEFAULT 0`,
 
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "allow_equipment_exceed_pax" BOOLEAN NOT NULL DEFAULT false;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_equipment_live_stock" BOOLEAN NOT NULL DEFAULT true;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_enabled" BOOLEAN NOT NULL DEFAULT true;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_buy_hours" INTEGER NOT NULL DEFAULT 3;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_free_hours" INTEGER NOT NULL DEFAULT 1;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_stackable" BOOLEAN NOT NULL DEFAULT true;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_enabled" BOOLEAN NOT NULL DEFAULT false;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_buy_hours" INTEGER NOT NULL DEFAULT 8;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_free_hours" INTEGER NOT NULL DEFAULT 4;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_price_cards" BOOLEAN NOT NULL DEFAULT true;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "price_notice_text" TEXT DEFAULT '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品';
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_announcement" BOOLEAN NOT NULL DEFAULT true;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "announcement_text" TEXT DEFAULT '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_line_button" BOOLEAN NOT NULL DEFAULT true;
-      ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_button_url" TEXT DEFAULT 'https://lin.ee/vsZhRW5';
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "allow_equipment_exceed_pax" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_equipment_live_stock" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_enabled" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_buy_hours" INTEGER NOT NULL DEFAULT 3`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_free_hours" INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount_stackable" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_enabled" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_buy_hours" INTEGER NOT NULL DEFAULT 8`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "equipment_discount2_free_hours" INTEGER NOT NULL DEFAULT 4`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_price_cards" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "price_notice_text" TEXT DEFAULT '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品'`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_announcement" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "announcement_text" TEXT DEFAULT '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠'`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_line_button" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_button_url" TEXT DEFAULT 'https://lin.ee/vsZhRW5'`,
 
-      CREATE TABLE IF NOT EXISTS "UserLoginLog" (
-        "id" SERIAL NOT NULL,
-        "user_id" INTEGER NOT NULL,
-        "ip_address" TEXT,
-        "os" TEXT,
-        "device_model" TEXT,
-        "browser" TEXT,
-        "line_version" TEXT,
-        "screen_info" TEXT,
-        "language" TEXT,
-        "user_agent" TEXT,
-        "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT "UserLoginLog_pkey" PRIMARY KEY ("id"),
-        CONSTRAINT "UserLoginLog_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
-      );
-      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "os" TEXT;
-      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "device_model" TEXT;
-      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "browser" TEXT;
-      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "line_version" TEXT;
-      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "screen_info" TEXT;
-      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "language" TEXT;
-      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "ip_address" TEXT;
-      ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "user_agent" TEXT;
-      CREATE INDEX IF NOT EXISTS "UserLoginLog_user_id_created_at_idx" ON "UserLoginLog"("user_id", "created_at");
-      CREATE INDEX IF NOT EXISTS "UserLoginLog_created_at_idx" ON "UserLoginLog"("created_at");
+    `CREATE TABLE IF NOT EXISTS "UserLoginLog" (
+      "id" SERIAL NOT NULL,
+      "user_id" INTEGER NOT NULL,
+      "ip_address" TEXT,
+      "os" TEXT,
+      "device_model" TEXT,
+      "browser" TEXT,
+      "line_version" TEXT,
+      "screen_info" TEXT,
+      "language" TEXT,
+      "user_agent" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "UserLoginLog_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "UserLoginLog_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`,
+    `ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "os" TEXT`,
+    `ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "device_model" TEXT`,
+    `ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "browser" TEXT`,
+    `ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "line_version" TEXT`,
+    `ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "screen_info" TEXT`,
+    `ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "language" TEXT`,
+    `ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "ip_address" TEXT`,
+    `ALTER TABLE "UserLoginLog" ADD COLUMN IF NOT EXISTS "user_agent" TEXT`,
+    `CREATE INDEX IF NOT EXISTS "UserLoginLog_user_id_created_at_idx" ON "UserLoginLog"("user_id", "created_at")`,
+    `CREATE INDEX IF NOT EXISTS "UserLoginLog_created_at_idx" ON "UserLoginLog"("created_at")`,
 
-      CREATE TABLE IF NOT EXISTS "PromoCode" (
-        "id" SERIAL NOT NULL,
-        "code" TEXT NOT NULL,
-        "name" TEXT NOT NULL,
-        "description" TEXT,
-        "discount_type" TEXT NOT NULL DEFAULT 'fixed_order',
-        "discount_value" INTEGER NOT NULL DEFAULT 0,
-        "max_discount_amount" INTEGER,
-        "target_scope" TEXT NOT NULL DEFAULT 'all',
-        "day_type_limit" TEXT NOT NULL DEFAULT 'all',
-        "mode_limit" TEXT NOT NULL DEFAULT 'all',
-        "channel" TEXT NOT NULL DEFAULT 'all',
-        "min_pax" INTEGER NOT NULL DEFAULT 1,
-        "min_hours" INTEGER NOT NULL DEFAULT 1,
-        "min_amount" INTEGER NOT NULL DEFAULT 0,
-        "max_uses" INTEGER,
-        "used_count" INTEGER NOT NULL DEFAULT 0,
-        "max_uses_per_user" INTEGER,
-        "start_date" DATE,
-        "end_date" DATE,
-        "is_pos_quick_select" BOOLEAN NOT NULL DEFAULT false,
-        "is_active" BOOLEAN NOT NULL DEFAULT true,
-        "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT "PromoCode_pkey" PRIMARY KEY ("id")
-      );
-      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "max_discount_amount" INTEGER;
-      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "target_scope" TEXT NOT NULL DEFAULT 'all';
-      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "day_type_limit" TEXT NOT NULL DEFAULT 'all';
-      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "mode_limit" TEXT NOT NULL DEFAULT 'all';
-      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "channel" TEXT NOT NULL DEFAULT 'all';
-      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "start_date" DATE;
-      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "end_date" DATE;
-      ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
-      CREATE UNIQUE INDEX IF NOT EXISTS "PromoCode_code_key" ON "PromoCode"("code");
+    `CREATE TABLE IF NOT EXISTS "PromoCode" (
+      "id" SERIAL NOT NULL,
+      "code" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "description" TEXT,
+      "discount_type" TEXT NOT NULL DEFAULT 'fixed_order',
+      "discount_value" INTEGER NOT NULL DEFAULT 0,
+      "max_discount_amount" INTEGER,
+      "target_scope" TEXT NOT NULL DEFAULT 'all',
+      "day_type_limit" TEXT NOT NULL DEFAULT 'all',
+      "mode_limit" TEXT NOT NULL DEFAULT 'all',
+      "channel" TEXT NOT NULL DEFAULT 'all',
+      "min_pax" INTEGER NOT NULL DEFAULT 1,
+      "min_hours" INTEGER NOT NULL DEFAULT 1,
+      "min_amount" INTEGER NOT NULL DEFAULT 0,
+      "max_uses" INTEGER,
+      "used_count" INTEGER NOT NULL DEFAULT 0,
+      "max_uses_per_user" INTEGER,
+      "start_date" DATE,
+      "end_date" DATE,
+      "is_pos_quick_select" BOOLEAN NOT NULL DEFAULT false,
+      "is_active" BOOLEAN NOT NULL DEFAULT true,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "PromoCode_pkey" PRIMARY KEY ("id")
+    )`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "max_discount_amount" INTEGER`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "target_scope" TEXT NOT NULL DEFAULT 'all'`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "day_type_limit" TEXT NOT NULL DEFAULT 'all'`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "mode_limit" TEXT NOT NULL DEFAULT 'all'`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "channel" TEXT NOT NULL DEFAULT 'all'`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "min_pax" INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "min_hours" INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "min_amount" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "max_uses" INTEGER`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "used_count" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "max_uses_per_user" INTEGER`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "is_pos_quick_select" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "is_active" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "start_date" DATE`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "end_date" DATE`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "PromoCode_code_key" ON "PromoCode"("code")`,
 
-      CREATE TABLE IF NOT EXISTS "AddonItem" (
-        "id" SERIAL NOT NULL,
-        "name" TEXT NOT NULL,
-        "price" INTEGER NOT NULL,
-        "category" TEXT NOT NULL DEFAULT 'charm',
-        "is_active" BOOLEAN NOT NULL DEFAULT true,
-        "sort_order" INTEGER NOT NULL DEFAULT 0,
-        "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT "AddonItem_pkey" PRIMARY KEY ("id")
-      );
-    `);
-  } catch (err) {
-    console.error('[Schema Check] Warning during ensureDatabaseSchema:', err.message);
+    `CREATE TABLE IF NOT EXISTS "AddonItem" (
+      "id" SERIAL NOT NULL,
+      "name" TEXT NOT NULL,
+      "price" INTEGER NOT NULL,
+      "category" TEXT NOT NULL DEFAULT 'charm',
+      "is_active" BOOLEAN NOT NULL DEFAULT true,
+      "sort_order" INTEGER NOT NULL DEFAULT 0,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "AddonItem_pkey" PRIMARY KEY ("id")
+    )`,
+    `ALTER TABLE "AddonItem" ADD COLUMN IF NOT EXISTS "category" TEXT NOT NULL DEFAULT 'charm'`,
+    `ALTER TABLE "AddonItem" ADD COLUMN IF NOT EXISTS "is_active" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "AddonItem" ADD COLUMN IF NOT EXISTS "sort_order" INTEGER NOT NULL DEFAULT 0`,
+
+    `DELETE FROM "BannedIP" WHERE "reason" IN ('Too many login attempts', 'Too many reservation queries')`,
+    `UPDATE "GlobalSetting" SET "is_lockdown_mode" = false WHERE "id" = 1`
+  ];
+
+  for (const sql of statements) {
+    try {
+      await prisma.$executeRawUnsafe(sql);
+    } catch (err) {
+      console.error('[Schema Check] Warning on statement:', err.message);
+    }
   }
+  console.log('[Schema Check] Database schema verified successfully.');
 };
 
 // Initialize database schema, default configs, and cron jobs
