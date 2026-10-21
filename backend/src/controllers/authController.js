@@ -321,7 +321,8 @@ export const me = async (req, res) => {
       screenHeight: req.query.sh,
       pixelRatio: req.query.dpr,
       language: req.query.lang,
-      networkType: req.query.net
+      networkType: req.query.net,
+      publicIp: req.query.ip
     };
     recordUserLoginLog(user.id, req, clientInfo, { throttleMinutes: 30 }).catch(() => {});
 

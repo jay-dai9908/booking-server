@@ -1,7 +1,7 @@
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import api from './api/axios';
-import { getBrowserClientInfo } from './utils/clientInfo';
+import { getBrowserClientInfoAsync } from './utils/clientInfo';
 
 // Customer Pages (Eagerly loaded for instant LINE WebView startup)
 import Home from './pages/Customer/Home';
@@ -31,7 +31,7 @@ function App() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const info = getBrowserClientInfo();
+        const info = await getBrowserClientInfoAsync();
         const searchParams = new URLSearchParams(window.location.search);
         const hasOAuthCode = searchParams.has('code');
         const isEntryHome = window.location.pathname === '/' && !hasOAuthCode;
@@ -60,6 +60,7 @@ function App() {
             dpr: info.pixelRatio,
             lang: info.language,
             net: info.networkType,
+            ip: info.publicIp,
             entry_home: isEntryHome ? '1' : '0',
             fresh_session: freshSession
           }

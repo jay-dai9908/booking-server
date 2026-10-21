@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../api/axios';
-import { getBrowserClientInfo } from '../../utils/clientInfo';
+import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
 
 function Home({ userRole }) {
   const navigate = useNavigate();
@@ -27,7 +27,8 @@ function Home({ userRole }) {
       
       // 立即清除 URL 上的 code 避免 React StrictMode 觸發兩次
       window.history.replaceState({}, document.title, window.location.pathname);
-      api.post('/auth/line/callback', { code, clientInfo: getBrowserClientInfo() })
+      getBrowserClientInfoAsync()
+        .then(clientInfo => api.post('/auth/line/callback', { code, clientInfo }))
         .then(res => {
           try {
             sessionStorage.setItem('shiguang_line_fresh_login', '1');

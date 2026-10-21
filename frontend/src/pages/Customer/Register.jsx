@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import api from '../../api/axios';
-import { getBrowserClientInfo } from '../../utils/clientInfo';
+import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
 
 function Register({ setUserRole }) {
   const [name, setName] = useState('');
@@ -13,7 +13,8 @@ function Register({ setUserRole }) {
     setIsSubmitting(true);
     setError('');
     try {
-      await api.post('/auth/register', { name, phone, clientInfo: getBrowserClientInfo() });
+      const clientInfo = await getBrowserClientInfoAsync();
+      await api.post('/auth/register', { name, phone, clientInfo });
       try {
         sessionStorage.setItem('shiguang_line_fresh_login', '1');
       } catch (e) {}

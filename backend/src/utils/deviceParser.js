@@ -1,21 +1,53 @@
 import prisma from '../prismaClient.js';
 
-/**
- * Extract clean client IP address from Express request
- */
-export const getClientIp = (req) => {
-  const cfIp = req.headers['cf-connecting-ip'];
-  const realIp = req.headers['x-real-ip'];
-  const forwardedFor = req.headers['x-forwarded-for'];
-
-  let ip = cfIp || realIp || (forwardedFor ? forwardedFor.split(',')[0].trim() : null) || req.ip || req.socket?.remoteAddress || '';
+const normalizeIp = (raw) => {
+  if (!raw || typeof raw !== 'string') return '';
+  let ip = raw.trim();
   if (ip.startsWith('::ffff:')) {
     ip = ip.slice(7);
   }
   if (ip === '::1') {
     ip = '127.0.0.1';
   }
-  return ip || '未知 IP';
+  return ip;
+};
+
+const isLoopbackIp = (ip) => {
+  if (!ip) return true;
+  return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' || ip.startsWith('127.');
+};
+
+/**
+ * Extract clean client IP address from Express request (with client-reported public IP fallback when behind unconfigured local Nginx proxy)
+ */
+export const getClientIp = (req, clientInfo = {}) => {
+  const candidates = [
+    req.headers['cf-connecting-ip'],
+    req.headers['true-client-ip'],
+    req.headers['x-real-ip'],
+    req.headers['x-client-ip'],
+    req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0] : '',
+    clientInfo?.publicIp,
+    req.query?.ip,
+    req.ip,
+    req.socket?.remoteAddress
+  ];
+
+  // First prefer any non-loopback IP (real public/WAN IP)
+  for (const c of candidates) {
+    const cleaned = normalizeIp(c);
+    if (cleaned && !isLoopbackIp(cleaned)) {
+      return cleaned;
+    }
+  }
+
+  // Fallback to whatever loopback IP was present if running on localhost without internet
+  for (const c of candidates) {
+    const cleaned = normalizeIp(c);
+    if (cleaned) return cleaned;
+  }
+
+  return '未知 IP';
 };
 
 /**
@@ -23,7 +55,7 @@ export const getClientIp = (req) => {
  */
 export const parseDeviceDetails = (req, clientInfo = {}) => {
   const ua = req.headers['user-agent'] || '';
-  const ip_address = getClientIp(req);
+  const ip_address = getClientIp(req, clientInfo);
 
   // 1. Parse OS
   let os = '未知系統';
@@ -184,12 +216,14 @@ export const recordUserLoginLog = async (userId, req, clientInfo = {}, options =
       });
 
       if (recentLog) {
-        // If recent log lacks screen_info and we now have it, update it
-        if (!recentLog.screen_info && details.screen_info) {
+        const needsScreenUpdate = !recentLog.screen_info && details.screen_info;
+        const needsIpUpdate = isLoopbackIp(recentLog.ip_address) && !isLoopbackIp(details.ip_address);
+        if (needsScreenUpdate || needsIpUpdate) {
           await prisma.userLoginLog.update({
             where: { id: recentLog.id },
             data: {
-              screen_info: details.screen_info,
+              ip_address: needsIpUpdate ? details.ip_address : recentLog.ip_address,
+              screen_info: details.screen_info || recentLog.screen_info,
               device_model: details.device_model !== '未知裝置' ? details.device_model : recentLog.device_model,
               language: details.language || recentLog.language
             }
