@@ -232,13 +232,7 @@ function Preview() {
 
         {!enablePreviewPage ? (
           /* Preview Disabled / Maintenance Notice Card */
-          <section className="bg-wood-card p-8 sm:p-10 rounded-2xl shadow-warm border border-wood-border text-center space-y-4 my-6">
-            <div className="w-16 h-16 rounded-full bg-[#FAF7F2] border border-[#E8DEC8] text-[#8B5B43] flex items-center justify-center mx-auto text-3xl shadow-xs">
-              🔔
-            </div>
-            <h2 className="text-lg sm:text-xl font-extrabold text-wood-textMain">
-              空位預覽功能暫不開放
-            </h2>
+          <section className="bg-wood-card p-6 sm:p-8 rounded-2xl shadow-warm border border-wood-border text-center my-6">
             <p className="text-sm sm:text-base text-[#6D5D52] leading-relaxed whitespace-pre-wrap max-w-lg mx-auto bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] font-medium">
               {previewDisabledText || '系統維護中，請點擊下方按鈕使用 LINE 進行預約'}
             </p>
