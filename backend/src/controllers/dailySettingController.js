@@ -142,21 +142,53 @@ export const updateGlobalSetting = async (req, res) => {
     show_announcement,
     announcement_text,
     show_line_button,
-    line_button_url
+    line_button_url,
+    require_line_login_every_time,
+    enable_preview_page,
+    preview_disabled_text,
+    allow_equipment_exceed_pax,
+    show_equipment_live_stock,
+    equipment_discount_enabled,
+    equipment_discount_buy_hours,
+    equipment_discount_free_hours,
+    equipment_discount_stackable,
+    equipment_discount2_enabled,
+    equipment_discount2_buy_hours,
+    equipment_discount2_free_hours
   } = req.body;
 
   try {
     const dataToUpdate = {};
-    if (weekday_hourly_price !== undefined) dataToUpdate.weekday_hourly_price = parseInt(weekday_hourly_price);
-    if (weekday_unlimited_price !== undefined) dataToUpdate.weekday_unlimited_price = parseInt(weekday_unlimited_price);
-    if (weekend_hourly_price !== undefined) dataToUpdate.weekend_hourly_price = parseInt(weekend_hourly_price);
-    if (weekend_unlimited_price !== undefined) dataToUpdate.weekend_unlimited_price = parseInt(weekend_unlimited_price);
+    if (weekday_hourly_price !== undefined && weekday_hourly_price !== null && weekday_hourly_price !== '') {
+      dataToUpdate.weekday_hourly_price = parseInt(weekday_hourly_price, 10);
+    }
+    if (weekday_unlimited_price !== undefined && weekday_unlimited_price !== null && weekday_unlimited_price !== '') {
+      dataToUpdate.weekday_unlimited_price = parseInt(weekday_unlimited_price, 10);
+    }
+    if (weekend_hourly_price !== undefined && weekend_hourly_price !== null && weekend_hourly_price !== '') {
+      dataToUpdate.weekend_hourly_price = parseInt(weekend_hourly_price, 10);
+    }
+    if (weekend_unlimited_price !== undefined && weekend_unlimited_price !== null && weekend_unlimited_price !== '') {
+      dataToUpdate.weekend_unlimited_price = parseInt(weekend_unlimited_price, 10);
+    }
     if (show_price_cards !== undefined) dataToUpdate.show_price_cards = Boolean(show_price_cards);
     if (price_notice_text !== undefined) dataToUpdate.price_notice_text = price_notice_text;
     if (show_announcement !== undefined) dataToUpdate.show_announcement = Boolean(show_announcement);
     if (announcement_text !== undefined) dataToUpdate.announcement_text = announcement_text;
     if (show_line_button !== undefined) dataToUpdate.show_line_button = Boolean(show_line_button);
     if (line_button_url !== undefined) dataToUpdate.line_button_url = line_button_url;
+    if (require_line_login_every_time !== undefined) dataToUpdate.require_line_login_every_time = Boolean(require_line_login_every_time);
+    if (enable_preview_page !== undefined) dataToUpdate.enable_preview_page = Boolean(enable_preview_page);
+    if (preview_disabled_text !== undefined) dataToUpdate.preview_disabled_text = preview_disabled_text;
+    if (allow_equipment_exceed_pax !== undefined) dataToUpdate.allow_equipment_exceed_pax = Boolean(allow_equipment_exceed_pax);
+    if (show_equipment_live_stock !== undefined) dataToUpdate.show_equipment_live_stock = Boolean(show_equipment_live_stock);
+    if (equipment_discount_enabled !== undefined) dataToUpdate.equipment_discount_enabled = Boolean(equipment_discount_enabled);
+    if (equipment_discount_buy_hours !== undefined) dataToUpdate.equipment_discount_buy_hours = Math.max(1, parseInt(equipment_discount_buy_hours, 10) || 3);
+    if (equipment_discount_free_hours !== undefined) dataToUpdate.equipment_discount_free_hours = Math.max(1, parseInt(equipment_discount_free_hours, 10) || 1);
+    if (equipment_discount_stackable !== undefined) dataToUpdate.equipment_discount_stackable = Boolean(equipment_discount_stackable);
+    if (equipment_discount2_enabled !== undefined) dataToUpdate.equipment_discount2_enabled = Boolean(equipment_discount2_enabled);
+    if (equipment_discount2_buy_hours !== undefined) dataToUpdate.equipment_discount2_buy_hours = Math.max(1, parseInt(equipment_discount2_buy_hours, 10) || 8);
+    if (equipment_discount2_free_hours !== undefined) dataToUpdate.equipment_discount2_free_hours = Math.max(1, parseInt(equipment_discount2_free_hours, 10) || 4);
 
     const setting = await prisma.globalSetting.upsert({
       where: { id: 1 },
@@ -172,7 +204,10 @@ export const updateGlobalSetting = async (req, res) => {
         show_announcement: dataToUpdate.show_announcement ?? true,
         announcement_text: dataToUpdate.announcement_text ?? "✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠",
         show_line_button: dataToUpdate.show_line_button ?? true,
-        line_button_url: dataToUpdate.line_button_url ?? "https://lin.ee/vsZhRW5"
+        line_button_url: dataToUpdate.line_button_url ?? "https://lin.ee/vsZhRW5",
+        require_line_login_every_time: dataToUpdate.require_line_login_every_time ?? false,
+        enable_preview_page: dataToUpdate.enable_preview_page ?? true,
+        preview_disabled_text: dataToUpdate.preview_disabled_text ?? "系統維護中，請點擊下方按鈕使用 LINE 進行預約"
       }
     });
 

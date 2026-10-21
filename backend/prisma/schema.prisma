@@ -118,6 +118,9 @@ model GlobalSetting {
   announcement_text           String?  @default("✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠")
   show_line_button            Boolean  @default(true)
   line_button_url             String?  @default("https://lin.ee/vsZhRW5")
+  require_line_login_every_time Boolean @default(false)
+  enable_preview_page         Boolean  @default(true)
+  preview_disabled_text       String?  @default("系統維護中，請點擊下方按鈕使用 LINE 進行預約")
 }
 
 model BannedIP {

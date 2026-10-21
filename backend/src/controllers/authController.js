@@ -68,13 +68,22 @@ export const lineCallback = async (req, res) => {
       // Record login log (retained for 2 months)
       await recordUserLoginLog(user.id, req, clientInfo, { throttleMinutes: 0 });
 
+      const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } }).catch(() => null);
+      const requireEveryTime = !!globalSetting?.require_line_login_every_time;
+
       // Existing User -> Issue formal JWT
       const token = generateToken({ id: user.id, role: 'customer' });
-      res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 });
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: requireEveryTime ? 2 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
+      });
       return res.json({ 
         message: 'Login successful', 
         user: { name: user.name, phone: user.phone, line_display_name: user.line_display_name, line_picture_url: user.line_picture_url },
-        isNewUser: false 
+        isNewUser: false,
+        requireLineLoginEveryTime: requireEveryTime
       });
     } else {
       // New User -> Issue temporary JWT, include LINE profile info
@@ -169,11 +178,23 @@ export const register = async (req, res) => {
     // Record initial login log
     await recordUserLoginLog(finalUser.id, req, clientInfo, { throttleMinutes: 0 });
 
+    const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } }).catch(() => null);
+    const requireEveryTime = !!globalSetting?.require_line_login_every_time;
+
     // Registration complete -> Issue formal JWT
     const token = generateToken({ id: finalUser.id, role: 'customer' });
-    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: requireEveryTime ? 2 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
+    });
     
-    res.json({ message: 'Registration successful', user: { name: finalUser.name, phone: finalUser.phone } });
+    res.json({
+      message: 'Registration successful',
+      user: { name: finalUser.name, phone: finalUser.phone },
+      requireLineLoginEveryTime: requireEveryTime
+    });
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({ error: 'Failed to register user.' });
@@ -260,9 +281,23 @@ export const me = async (req, res) => {
         permissions: isSuper ? ['all'] : (req.user.permissions || [])
       });
     }
+
+    const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } }).catch(() => null);
+    const requireEveryTime = !!globalSetting?.require_line_login_every_time;
+
+    // If admin enabled "顧客每次使用皆須從 LINE 登入", require fresh LINE OAuth session on every new visit or entry at `/`
+    if (requireEveryTime && !req.user.isTemp) {
+      if (req.query.entry_home === '1' || req.query.fresh_session !== '1') {
+        res.clearCookie('token');
+        return res.status(401).json({
+          error: 'Require fresh LINE login on every visit',
+          requireLineLoginEveryTime: true
+        });
+      }
+    }
     
     if (req.user.isTemp) {
-      return res.json({ role: 'temp_customer' });
+      return res.json({ role: 'temp_customer', requireLineLoginEveryTime: requireEveryTime });
     }
 
     const user = await prisma.user.findUnique({
@@ -290,7 +325,7 @@ export const me = async (req, res) => {
     };
     recordUserLoginLog(user.id, req, clientInfo, { throttleMinutes: 30 }).catch(() => {});
 
-    res.json({ role: 'customer', user });
+    res.json({ role: 'customer', user, requireLineLoginEveryTime: requireEveryTime });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch profile' });
   }

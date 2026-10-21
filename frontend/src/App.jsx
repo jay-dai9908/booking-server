@@ -22,6 +22,7 @@ const AccountingPage = lazy(() => import('./pages/Admin/AccountingPage'));
 const StaffPage = lazy(() => import('./pages/Admin/StaffPage'));
 const EquipmentPage = lazy(() => import('./pages/Admin/EquipmentPage'));
 const CouponsPage = lazy(() => import('./pages/Admin/CouponsPage'));
+const SettingsPage = lazy(() => import('./pages/Admin/SettingsPage'));
 
 function App() {
   const [userRole, setUserRole] = useState(null); // 'customer', 'temp_customer', 'admin', or null
@@ -31,17 +32,43 @@ function App() {
     const checkAuth = async () => {
       try {
         const info = getBrowserClientInfo();
+        const searchParams = new URLSearchParams(window.location.search);
+        const hasOAuthCode = searchParams.has('code');
+        const isEntryHome = window.location.pathname === '/' && !hasOAuthCode;
+        const isRegisterPage = window.location.pathname === '/register';
+
+        let freshSession = '0';
+        try {
+          if (isEntryHome) {
+            // Opening entry `/` without an OAuth callback code is a new visit entry
+            sessionStorage.removeItem('shiguang_line_fresh_login');
+          } else {
+            freshSession = sessionStorage.getItem('shiguang_line_fresh_login') === '1' ? '1' : '0';
+            // Consume the one-time fresh login ticket once on `/booking` or `/history`
+            // so closing and reopening the webview/browser will never reuse old login state
+            // when `require_line_login_every_time` is enabled
+            if (freshSession === '1' && !hasOAuthCode && !isRegisterPage) {
+              sessionStorage.removeItem('shiguang_line_fresh_login');
+            }
+          }
+        } catch (e) {}
+
         const response = await api.get('/auth/me', {
           params: {
             sw: info.screenWidth,
             sh: info.screenHeight,
             dpr: info.pixelRatio,
             lang: info.language,
-            net: info.networkType
+            net: info.networkType,
+            entry_home: isEntryHome ? '1' : '0',
+            fresh_session: freshSession
           }
         });
         setUserRole(response.data.role);
       } catch (error) {
+        try {
+          sessionStorage.removeItem('shiguang_line_fresh_login');
+        } catch (e) {}
         setUserRole(null);
       } finally {
         setLoading(false);
@@ -95,6 +122,7 @@ function App() {
           <Route path="coupons" element={<CouponsPage />} />
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="staff" element={<StaffPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
 
         {/* Catch old dashboard link */}

@@ -24,6 +24,8 @@ function Preview() {
   const [announcementText, setAnnouncementText] = useState('✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠');
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [lineButtonUrl, setLineButtonUrl] = useState('https://lin.ee/vsZhRW5');
+  const [enablePreviewPage, setEnablePreviewPage] = useState(true);
+  const [previewDisabledText, setPreviewDisabledText] = useState('系統維護中，請點擊下方按鈕使用 LINE 進行預約');
 
   // Load cached settings immediately
   useEffect(() => {
@@ -43,6 +45,12 @@ function Preview() {
           setShowAnnouncement(parsed.showAnnouncement !== false);
           setAnnouncementText(parsed.announcementText ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠');
           setLineButtonUrl(parsed.lineButtonUrl || 'https://lin.ee/vsZhRW5');
+          if (parsed.enablePreviewPage !== undefined) {
+            setEnablePreviewPage(parsed.enablePreviewPage !== false);
+          }
+          if (parsed.previewDisabledText) {
+            setPreviewDisabledText(parsed.previewDisabledText);
+          }
         }
       }
     } catch (e) {
@@ -51,7 +59,7 @@ function Preview() {
 
     const fetchGlobal = async () => {
       try {
-        const res = await api.get('/global-settings');
+        const res = await api.get('/daily-settings/global');
         if (res.data) {
           const pricing = {
             weekday_hourly: Number(res.data.weekday_hourly_price) || 150,
@@ -64,6 +72,8 @@ function Preview() {
           const announceVisible = res.data.show_announcement !== false;
           const announce = res.data.announcement_text ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
           const lineUrl = res.data.line_button_url || 'https://lin.ee/vsZhRW5';
+          const previewEnabled = res.data.enable_preview_page !== false;
+          const disabledMsg = res.data.preview_disabled_text || '系統維護中，請點擊下方按鈕使用 LINE 進行預約';
 
           setGlobalPricing(pricing);
           setShowPriceCards(cardsVisible);
@@ -71,6 +81,25 @@ function Preview() {
           setShowAnnouncement(announceVisible);
           setAnnouncementText(announce);
           setLineButtonUrl(lineUrl);
+          setEnablePreviewPage(previewEnabled);
+          setPreviewDisabledText(disabledMsg);
+
+          try {
+            localStorage.setItem(
+              GLOBAL_SETTINGS_CACHE_KEY,
+              JSON.stringify({
+                ...pricing,
+                showPriceCards: cardsVisible,
+                priceNoticeText: notice,
+                showAnnouncement: announceVisible,
+                announcementText: announce,
+                showLineButton: res.data.show_line_button !== false,
+                lineButtonUrl: lineUrl,
+                enablePreviewPage: previewEnabled,
+                previewDisabledText: disabledMsg
+              })
+            );
+          } catch (e) {}
         }
       } catch (err) {
         console.error('Failed to fetch global settings in preview:', err);
@@ -201,108 +230,125 @@ function Preview() {
           </section>
         )}
 
-        {/* Date Selector */}
-        <section className="bg-wood-card p-6 rounded-2xl shadow-warm border border-wood-border">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold">1. 查看預約日期</h2>
-            <div className="flex items-center gap-2">
-              <button 
-                type="button"
-                onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} 
-                className="p-2 text-wood-textMuted hover:text-wood-primary hover:bg-wood-bg/50 rounded-full transition-all"
-              >
-                &lt;
-              </button>
-              <span className="font-bold tracking-wide">{format(currentMonth, 'yyyy年 MM月')}</span>
-              <button 
-                type="button"
-                onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} 
-                className="p-2 text-wood-textMuted hover:text-wood-primary hover:bg-wood-bg/50 rounded-full transition-all"
-              >
-                &gt;
-              </button>
+        {!enablePreviewPage ? (
+          /* Preview Disabled / Maintenance Notice Card */
+          <section className="bg-wood-card p-8 sm:p-10 rounded-2xl shadow-warm border border-wood-border text-center space-y-4 my-6">
+            <div className="w-16 h-16 rounded-full bg-[#FAF7F2] border border-[#E8DEC8] text-[#8B5B43] flex items-center justify-center mx-auto text-3xl shadow-xs">
+              🔔
             </div>
-          </div>
-
-          <div className="grid grid-cols-7 gap-2 text-center mb-4">
-            {['日', '一', '二', '三', '四', '五', '六'].map(dayName => (
-              <div key={dayName} className="text-xs font-bold text-wood-textMuted py-1">{dayName}</div>
-            ))}
-          </div>
-          
-          <div className="grid grid-cols-7 gap-2">
-            {calendarDays.map((date, i) => {
-              const isSelected = isSameDay(date, selectedDate);
-              const isCurrentMonth = isSameMonth(date, currentMonth);
-              const isPast = isBefore(startOfDay(date), startOfDay(new Date()));
-              const dateKey = format(date, 'yyyy-MM-dd');
-              const hasOpenSessions = monthOpenDatesSet.has(dateKey);
-              
-              return (
-                <button
-                  key={i}
-                  disabled={isPast}
-                  onClick={() => setSelectedDate(date)}
-                  className={`aspect-square rounded-2xl text-sm font-medium transition-all duration-200 flex flex-col items-center justify-center relative ${
-                    !isCurrentMonth ? 'text-wood-border bg-transparent opacity-40' : 
-                    isPast ? 'text-wood-border cursor-not-allowed opacity-50' :
-                    isSelected ? 'bg-wood-primary text-white shadow-md transform scale-105 font-bold' :
-                    'text-wood-textMain hover:bg-[#F0EBE1] hover:text-wood-primary'
-                  }`}
-                >
-                  <span>{format(date, 'd')}</span>
-                  {hasOpenSessions && !isPast && (
-                    <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-white' : 'bg-emerald-500'}`} />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Time Selector */}
-        <section className="bg-wood-card p-6 rounded-2xl shadow-warm border border-wood-border">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold">2. 目前開放時段狀況 (預覽)</h2>
-          </div>
-          
-          {loading ? (
-            <div className="text-center text-wood-textMuted py-8">載入時段資料中...</div>
-          ) : sessions.length === 0 ? (
-            <div className="text-center text-wood-textMuted py-8">此日期目前無開放時段</div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {sessions.map(session => {
-                const isPast = isSessionPast(session);
-                const isFull = session.remaining_capacity === 0;
-                
-                return (
-                  <div
-                    key={session.id}
-                    className={`h-full py-3.5 px-3 rounded-xl border flex flex-col justify-center items-center transition-all duration-200 ${
-                      isPast
-                        ? 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'
-                        : isFull 
-                        ? 'bg-wood-bg/50 border-wood-border text-wood-border opacity-70' 
-                        : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
-                    }`}
+            <h2 className="text-lg sm:text-xl font-extrabold text-wood-textMain">
+              空位預覽功能暫不開放
+            </h2>
+            <p className="text-sm sm:text-base text-[#6D5D52] leading-relaxed whitespace-pre-wrap max-w-lg mx-auto bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] font-medium">
+              {previewDisabledText || '系統維護中，請點擊下方按鈕使用 LINE 進行預約'}
+            </p>
+          </section>
+        ) : (
+          <>
+            {/* Date Selector */}
+            <section className="bg-wood-card p-6 rounded-2xl shadow-warm border border-wood-border">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-lg font-bold">1. 查看預約日期</h2>
+                <div className="flex items-center gap-2">
+                  <button 
+                    type="button"
+                    onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} 
+                    className="p-2 text-wood-textMuted hover:text-wood-primary hover:bg-wood-bg/50 rounded-full transition-all"
                   >
-                    <span className="font-bold mb-1 text-[15px] sm:text-base whitespace-nowrap">
-                      {session.start_time} - {session.end_time}
-                    </span>
-                    <span className={`text-xs font-medium ${
-                      isPast ? 'text-gray-400' :
-                      isFull ? 'text-red-400/80 font-bold' : 
-                      'text-emerald-600 font-semibold'
-                    }`}>
-                      {isPast ? '已逾時' : isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人`}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+                    &lt;
+                  </button>
+                  <span className="font-bold tracking-wide">{format(currentMonth, 'yyyy年 MM月')}</span>
+                  <button 
+                    type="button"
+                    onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} 
+                    className="p-2 text-wood-textMuted hover:text-wood-primary hover:bg-wood-bg/50 rounded-full transition-all"
+                  >
+                    &gt;
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-7 gap-2 text-center mb-4">
+                {['日', '一', '二', '三', '四', '五', '六'].map(dayName => (
+                  <div key={dayName} className="text-xs font-bold text-wood-textMuted py-1">{dayName}</div>
+                ))}
+              </div>
+              
+              <div className="grid grid-cols-7 gap-2">
+                {calendarDays.map((date, i) => {
+                  const isSelected = isSameDay(date, selectedDate);
+                  const isCurrentMonth = isSameMonth(date, currentMonth);
+                  const isPast = isBefore(startOfDay(date), startOfDay(new Date()));
+                  const dateKey = format(date, 'yyyy-MM-dd');
+                  const hasOpenSessions = monthOpenDatesSet.has(dateKey);
+                  
+                  return (
+                    <button
+                      key={i}
+                      disabled={isPast}
+                      onClick={() => setSelectedDate(date)}
+                      className={`aspect-square rounded-2xl text-sm font-medium transition-all duration-200 flex flex-col items-center justify-center relative ${
+                        !isCurrentMonth ? 'text-wood-border bg-transparent opacity-40' : 
+                        isPast ? 'text-wood-border cursor-not-allowed opacity-50' :
+                        isSelected ? 'bg-wood-primary text-white shadow-md transform scale-105 font-bold' :
+                        'text-wood-textMain hover:bg-[#F0EBE1] hover:text-wood-primary'
+                      }`}
+                    >
+                      <span>{format(date, 'd')}</span>
+                      {hasOpenSessions && !isPast && (
+                        <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? 'bg-white' : 'bg-emerald-500'}`} />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* Time Selector */}
+            <section className="bg-wood-card p-6 rounded-2xl shadow-warm border border-wood-border">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-lg font-bold">2. 目前開放時段狀況 (預覽)</h2>
+              </div>
+              
+              {loading ? (
+                <div className="text-center text-wood-textMuted py-8">載入時段資料中...</div>
+              ) : sessions.length === 0 ? (
+                <div className="text-center text-wood-textMuted py-8">此日期目前無開放時段</div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {sessions.map(session => {
+                    const isPast = isSessionPast(session);
+                    const isFull = session.remaining_capacity === 0;
+                    
+                    return (
+                      <div
+                        key={session.id}
+                        className={`h-full py-3.5 px-3 rounded-xl border flex flex-col justify-center items-center transition-all duration-200 ${
+                          isPast
+                            ? 'bg-gray-100/60 border-gray-200 text-gray-400 opacity-60'
+                            : isFull 
+                            ? 'bg-wood-bg/50 border-wood-border text-wood-border opacity-70' 
+                            : 'bg-wood-card border-wood-border text-wood-textMain hover:border-wood-primary hover:text-wood-primary hover:bg-[#F9F6F0]'
+                        }`}
+                      >
+                        <span className="font-bold mb-1 text-[15px] sm:text-base whitespace-nowrap">
+                          {session.start_time} - {session.end_time}
+                        </span>
+                        <span className={`text-xs font-medium ${
+                          isPast ? 'text-gray-400' :
+                          isFull ? 'text-red-400/80 font-bold' : 
+                          'text-emerald-600 font-semibold'
+                        }`}>
+                          {isPast ? '已逾時' : isFull ? '已額滿' : `剩餘 ${session.remaining_capacity} 人`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </main>
 
       {/* Sticky Redirect Footer */}

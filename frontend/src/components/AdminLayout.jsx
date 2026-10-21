@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   User,
   Cpu,
-  Ticket
+  Ticket,
+  Settings
 } from 'lucide-react';
 import api from '../api/axios';
 
@@ -57,6 +58,7 @@ export default function AdminLayout() {
     { to: '/admin/weekly', perm: 'weekly', icon: <CalendarDays className="w-5 h-5" />, label: '周營業狀況' },
     { to: '/admin/seating', perm: 'seating', icon: <Grid className="w-5 h-5" />, label: '帶位圖管理' },
     { to: '/admin/accounting', perm: 'accounting', icon: <Banknote className="w-5 h-5" />, label: '帳務管理' },
+    { to: '/admin/settings', perm: 'settings', fallbackPerm: 'sessions', icon: <Settings className="w-5 h-5" />, label: '系統全域設定' },
     { to: '/admin/staff', perm: 'staff', superAdminOnly: true, icon: <ShieldCheck className="w-5 h-5" />, label: '人員權限管理' },
   ];
 

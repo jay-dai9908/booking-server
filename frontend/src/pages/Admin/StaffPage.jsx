@@ -17,7 +17,8 @@ import {
   X,
   AlertCircle,
   Cpu,
-  Ticket
+  Ticket,
+  Settings
 } from 'lucide-react';
 import api from '../../api/axios';
 
@@ -77,6 +78,13 @@ const AVAILABLE_PERMISSIONS = [
     desc: '折扣碼設定、POS 櫃檯快捷優惠及常用加購品管理', 
     icon: Ticket,
     color: 'text-[#8B5B43] bg-[#FAF7F2] border-[#E8DEC8]' 
+  },
+  { 
+    id: 'settings', 
+    label: '系統全域設定', 
+    desc: '管理 LINE 強制登入開關、空位預覽網頁維護開關與顧客首頁顯示設定', 
+    icon: Settings,
+    color: 'text-slate-700 bg-slate-50 border-slate-200' 
   },
 ];
 

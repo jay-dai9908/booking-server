@@ -859,149 +859,27 @@ export default function SessionsPage() {
         </div>
       </div>
 
-      {/* Customer Booking Page Display Settings */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mt-8">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-gray-100">
+      {/* Shortcut Banner to Dedicated System Settings Page */}
+      <div className="bg-[#FAF7F2] p-5 sm:p-6 rounded-2xl shadow-xs border border-[#E8DEC8] mt-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 rounded-xl bg-white border border-[#E8DEC8] text-[#8B5B43] shrink-0">
+            <Sliders className="w-5 h-5" />
+          </div>
           <div>
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Sliders className="w-5 h-5 text-amber-700" />
-              顧客預約首頁區塊顯示設定
+            <h2 className="text-base font-bold text-[#3E332B]">
+              顧客端首頁顯示、LINE 每次登入驗證與空位預覽開關已整合至「系統全域設定」
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">可自訂顧客端最上方頁面各區塊的顯示或隱藏（價格表卡片、系統公告、官方 LINE 按鈕）</p>
-          </div>
-          <button 
-            type="button"
-            onClick={handleUpdateDisplaySettings}
-            disabled={isSavingDisplay}
-            className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-semibold rounded-xl text-xs sm:text-sm shadow-sm transition-all flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
-          >
-            {isSavingDisplay ? (
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              '儲存首頁顯示設定'
-            )}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Switch 1: Announcement */}
-          <div className="bg-gray-50/70 p-5 rounded-2xl border border-gray-200/80 flex flex-col justify-between space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-                  <Bell className="w-4 h-4 text-amber-600" />
-                  頂部系統公告欄
-                </span>
-                <p className="text-xs text-gray-500 mt-1">
-                  顧客頁面最上方的橫幅公告（前綴顯示為「🔔 系統公告：」）
-                </p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
-                <input 
-                  type="checkbox" 
-                  checked={showAnnouncement} 
-                  onChange={e => setShowAnnouncement(e.target.checked)} 
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-              </label>
-            </div>
-            {showAnnouncement && (
-              <div className="pt-3 border-t border-gray-200/60">
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">公告文字內容</label>
-                <textarea 
-                  rows="3"
-                  value={announcementText}
-                  onChange={e => setAnnouncementText(e.target.value)}
-                  placeholder="留空將顯示系統預設公告"
-                  className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none leading-relaxed"
-                />
-              </div>
-            )}
-            <div className="text-[11px] text-gray-400 bg-white/70 p-2 rounded-lg border border-gray-100">
-              {showAnnouncement ? '🟢 目前狀態：顧客端將顯示頂部系統公告欄' : '⚪ 目前狀態：顧客端將隱藏公告欄'}
-            </div>
-          </div>
-
-          {/* Switch 2: Price Cards */}
-          <div className="bg-gray-50/70 p-5 rounded-2xl border border-gray-200/80 flex flex-col justify-between space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4 text-blue-600" />
-                  首頁入場價格表雙卡片
-                </span>
-                <p className="text-xs text-gray-500 mt-1">
-                  控制顧客預約頁平日/假日收費說明雙卡片（關閉後版面更簡潔俐落）
-                </p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
-                <input 
-                  type="checkbox" 
-                  checked={showPriceCards} 
-                  onChange={e => setShowPriceCards(e.target.checked)} 
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-              </label>
-            </div>
-            {showPriceCards && (
-              <div className="pt-3 border-t border-gray-200/60">
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">價格卡下方備註提醒文字</label>
-                <textarea 
-                  rows="3"
-                  value={priceNoticeText}
-                  onChange={e => setPriceNoticeText(e.target.value)}
-                  placeholder="留空將顯示系統預設備註提醒"
-                  className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none leading-relaxed"
-                />
-                <span className="text-[10px] text-gray-400 mt-1 block">顯示於價格卡下方的「💡」小字提醒</span>
-              </div>
-            )}
-            <div className="text-[11px] text-gray-400 bg-white/70 p-2 rounded-lg border border-gray-100">
-              {showPriceCards ? '🟢 目前狀態：顧客端將顯示平假日價格說明卡' : '⚪ 目前狀態：顧客端將隱藏價格卡，版面直接由預約日期開始'}
-            </div>
-          </div>
-
-          {/* Switch 3: LINE Button */}
-          <div className="bg-gray-50/70 p-5 rounded-2xl border border-gray-200/80 flex flex-col justify-between space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-                  <MessageSquare className="w-4 h-4 text-emerald-600" />
-                  頂部「官方 LINE」按鈕
-                </span>
-                <p className="text-xs text-gray-500 mt-1">
-                  控制顧客頁面頂部導航列中的「💬 官方 LINE」連結按鈕
-                </p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
-                <input 
-                  type="checkbox" 
-                  checked={showLineButton} 
-                  onChange={e => setShowLineButton(e.target.checked)} 
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-              </label>
-            </div>
-            {showLineButton && (
-              <div className="pt-3 border-t border-gray-200/60">
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">官方 LINE 連結網址</label>
-                <input 
-                  type="url"
-                  value={lineButtonUrl}
-                  onChange={e => setLineButtonUrl(e.target.value)}
-                  placeholder="https://lin.ee/..."
-                  className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none"
-                />
-              </div>
-            )}
-            <div className="text-[11px] text-gray-400 bg-white/70 p-2 rounded-lg border border-gray-100">
-              {showLineButton ? '🟢 目前狀態：顧客端將在頂部顯示官方 LINE 按鈕' : '⚪ 目前狀態：顧客端將隱藏官方 LINE 按鈕'}
-            </div>
+            <p className="text-xs text-[#6D5D52] mt-0.5 leading-relaxed">
+              欲調整頂部公告欄、入場價格說明卡、官方 LINE 按鈕、空位預覽頁 (`/preview`) 維護開關或「每次使用皆須從 LINE 登入」，請前往系統全域設定頁面。
+            </p>
           </div>
         </div>
+        <a
+          href="/admin/settings"
+          className="px-5 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-all text-center shrink-0"
+        >
+          ⚙️ 前往系統全域設定 →
+        </a>
       </div>
     </div>
   );

@@ -29,6 +29,9 @@ function Home({ userRole }) {
       window.history.replaceState({}, document.title, window.location.pathname);
       api.post('/auth/line/callback', { code, clientInfo: getBrowserClientInfo() })
         .then(res => {
+          try {
+            sessionStorage.setItem('shiguang_line_fresh_login', '1');
+          } catch (e) {}
           if (res.data.isNewUser) {
             window.location.href = '/register'; // Full reload to update App state
           } else {

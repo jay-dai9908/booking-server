@@ -10,6 +10,7 @@ import reservationRoutes from './routes/reservations.js';
 import { checkBannedIP } from './middlewares/rateLimiter.js';
 import userRoutes from './routes/users.js';
 import dailySettingsRoutes from './routes/dailySettings.js';
+import { getGlobalSetting } from './controllers/dailySettingController.js';
 import accountingRoutes from './routes/accounting.js';
 import staffRoutes from './routes/staff.js';
 import equipmentRoutes from './routes/equipment.js';
@@ -62,6 +63,9 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "announcement_text" TEXT DEFAULT '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠'`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_line_button" BOOLEAN NOT NULL DEFAULT true`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_button_url" TEXT DEFAULT 'https://lin.ee/vsZhRW5'`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "require_line_login_every_time" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "enable_preview_page" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "preview_disabled_text" TEXT DEFAULT '系統維護中，請點擊下方按鈕使用 LINE 進行預約'`,
 
     `CREATE TABLE IF NOT EXISTS "UserLoginLog" (
       "id" SERIAL NOT NULL,
@@ -189,6 +193,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/daily-settings', dailySettingsRoutes);
+app.get('/api/global-settings', getGlobalSetting);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/equipment', equipmentRoutes);

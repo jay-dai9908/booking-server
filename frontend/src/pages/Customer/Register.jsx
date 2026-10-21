@@ -14,6 +14,9 @@ function Register({ setUserRole }) {
     setError('');
     try {
       await api.post('/auth/register', { name, phone, clientInfo: getBrowserClientInfo() });
+      try {
+        sessionStorage.setItem('shiguang_line_fresh_login', '1');
+      } catch (e) {}
       setUserRole('customer');
       window.location.href = '/booking';
     } catch (err) {
