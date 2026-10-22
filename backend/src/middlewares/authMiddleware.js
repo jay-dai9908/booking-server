@@ -8,16 +8,18 @@ export const generateToken = (payload) => {
 };
 
 export const verifyToken = (req, res, next) => {
-  const token = req.cookies.token;
+  const authHeader = req.headers?.authorization || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const token = req.cookies?.token || bearerToken;
   if (!token) {
-    return res.status(401).json({ error: 'Unauthorized. No token provided.' });
+    return res.status(401).json({ error: '登入時效已過或尚未登入，請重新使用 LINE 登入' });
   }
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded; // { id, role, isTemp, ... }
     next();
   } catch (error) {
-    return res.status(401).json({ error: 'Invalid or expired token.' });
+    return res.status(401).json({ error: '登入憑證已過期，請重新使用 LINE 登入' });
   }
 };
 

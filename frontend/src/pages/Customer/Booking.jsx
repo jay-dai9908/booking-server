@@ -712,6 +712,13 @@ function Booking() {
           promo_code: appliedPromo?.code || null
         });
         setShowSplitModal(true);
+      } else if (err.response?.status === 401) {
+        setAlertModalData({
+          type: 'error',
+          title: '請重新登入',
+          message: '登入憑證已過期或尚未完成登入，請重新點擊 LINE 登入後再進行預約',
+          redirectHome: true
+        });
       } else {
         setAlertModalData({ type: 'error', title: '預約失敗', message: err.response?.data?.error || '可能人數已滿或時段已被預約' });
         fetchSessions(selectedDate);
@@ -1736,8 +1743,13 @@ function Booking() {
         <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-[4px]" onClick={() => {
             const isSuccess = alertModalData.type === 'success';
+            const shouldRedirectHome = alertModalData.redirectHome;
             setAlertModalData(null);
-            if (isSuccess) navigate('/history');
+            if (shouldRedirectHome) {
+              window.location.href = '/';
+            } else if (isSuccess) {
+              navigate('/history');
+            }
           }} />
           <div className="bg-white rounded-[24px] shadow-[0_16px_32px_rgba(139,91,67,0.12)] w-full max-w-sm overflow-hidden relative z-10 animate-zoom-in text-center p-8">
             <div className={`mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-4 ${alertModalData.type === 'success' ? 'bg-[#A5B69C]/20 text-[#A5B69C]' : 'bg-[#FDF3F1] text-[#B35D4F]'}`}>
@@ -1758,12 +1770,17 @@ function Booking() {
             <button 
               onClick={() => {
                 const isSuccess = alertModalData.type === 'success';
+                const shouldRedirectHome = alertModalData.redirectHome;
                 setAlertModalData(null);
-                if (isSuccess) navigate('/history');
+                if (shouldRedirectHome) {
+                  window.location.href = '/';
+                } else if (isSuccess) {
+                  navigate('/history');
+                }
               }}
               className="w-full py-3 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-[12px] shadow-sm transition-colors"
             >
-              {alertModalData.type === 'success' ? '查看預約紀錄' : '好的'}
+              {alertModalData.type === 'success' ? '查看預約紀錄' : alertModalData.redirectHome ? '重新登入 LINE' : '好的'}
             </button>
           </div>
         </div>

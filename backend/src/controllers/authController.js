@@ -77,10 +77,11 @@ export const lineCallback = async (req, res) => {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: requireEveryTime ? 2 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
+        maxAge: requireEveryTime ? 4 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
       });
       return res.json({ 
-        message: 'Login successful', 
+        message: 'Login successful',
+        token,
         user: { name: user.name, phone: user.phone, line_display_name: user.line_display_name, line_picture_url: user.line_picture_url },
         isNewUser: false,
         requireLineLoginEveryTime: requireEveryTime
@@ -94,9 +95,10 @@ export const lineCallback = async (req, res) => {
         line_status_msg: statusMessage,
         isTemp: true
       });
-      res.cookie('token', tempToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 15 * 60 * 1000 }); // 15 mins
+      res.cookie('token', tempToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 60 * 1000 }); // 30 mins
       return res.json({ 
-        message: 'Registration required', 
+        message: 'Registration required',
+        token: tempToken,
         isNewUser: true,
         suggestedName: displayName
       });
@@ -187,11 +189,12 @@ export const register = async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: requireEveryTime ? 2 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
+      maxAge: requireEveryTime ? 4 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
     });
     
     res.json({
       message: 'Registration successful',
+      token,
       user: { name: finalUser.name, phone: finalUser.phone },
       requireLineLoginEveryTime: requireEveryTime
     });
@@ -285,9 +288,10 @@ export const me = async (req, res) => {
     const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } }).catch(() => null);
     const requireEveryTime = !!globalSetting?.require_line_login_every_time;
 
-    // If admin enabled "顧客每次使用皆須從 LINE 登入", require fresh LINE OAuth session on every new visit or entry at `/`
+    // If admin enabled "顧客每次使用皆須從 LINE 登入", only clear old cookie when customer enters at `/` (entry_home === '1')
+    // Never clear the cookie when already inside `/booking` or `/history`!
     if (requireEveryTime && !req.user.isTemp) {
-      if (req.query.entry_home === '1' || req.query.fresh_session !== '1') {
+      if (req.query.entry_home === '1') {
         res.clearCookie('token');
         return res.status(401).json({
           error: 'Require fresh LINE login on every visit',

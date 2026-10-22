@@ -32,6 +32,9 @@ function Home({ userRole }) {
         .then(res => {
           try {
             sessionStorage.setItem('shiguang_line_fresh_login', '1');
+            if (res.data?.token) {
+              sessionStorage.setItem('shiguang_auth_token', res.data.token);
+            }
           } catch (e) {}
           if (res.data.isNewUser) {
             window.location.href = '/register'; // Full reload to update App state

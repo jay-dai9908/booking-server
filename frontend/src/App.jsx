@@ -35,7 +35,6 @@ function App() {
         const searchParams = new URLSearchParams(window.location.search);
         const hasOAuthCode = searchParams.has('code');
         const isEntryHome = window.location.pathname === '/' && !hasOAuthCode;
-        const isRegisterPage = window.location.pathname === '/register';
 
         let freshSession = '0';
         try {
@@ -44,12 +43,6 @@ function App() {
             sessionStorage.removeItem('shiguang_line_fresh_login');
           } else {
             freshSession = sessionStorage.getItem('shiguang_line_fresh_login') === '1' ? '1' : '0';
-            // Consume the one-time fresh login ticket once on `/booking` or `/history`
-            // so closing and reopening the webview/browser will never reuse old login state
-            // when `require_line_login_every_time` is enabled
-            if (freshSession === '1' && !hasOAuthCode && !isRegisterPage) {
-              sessionStorage.removeItem('shiguang_line_fresh_login');
-            }
           }
         } catch (e) {}
 
@@ -69,6 +62,7 @@ function App() {
       } catch (error) {
         try {
           sessionStorage.removeItem('shiguang_line_fresh_login');
+          sessionStorage.removeItem('shiguang_auth_token');
         } catch (e) {}
         setUserRole(null);
       } finally {
