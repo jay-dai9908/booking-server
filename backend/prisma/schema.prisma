@@ -121,6 +121,9 @@ model GlobalSetting {
   require_line_login_every_time Boolean @default(false)
   enable_preview_page         Boolean  @default(true)
   preview_disabled_text       String?  @default("系統維護中，請點擊下方按鈕使用 LINE 進行預約")
+  line_messaging_token        String?
+  line_auto_notify_booking    Boolean  @default(false)
+  line_auto_notify_cancel     Boolean  @default(false)
 }
 
 model BannedIP {

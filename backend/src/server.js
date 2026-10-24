@@ -66,6 +66,9 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "require_line_login_every_time" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "enable_preview_page" BOOLEAN NOT NULL DEFAULT true`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "preview_disabled_text" TEXT DEFAULT '系統維護中，請點擊下方按鈕使用 LINE 進行預約'`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_messaging_token" TEXT`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_auto_notify_booking" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_auto_notify_cancel" BOOLEAN NOT NULL DEFAULT false`,
 
     `CREATE TABLE IF NOT EXISTS "UserLoginLog" (
       "id" SERIAL NOT NULL,

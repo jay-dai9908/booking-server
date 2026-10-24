@@ -1,4 +1,5 @@
 import prisma from '../prismaClient.js';
+import { sendLinePushMessage, buildBrandFlexMessage } from '../utils/lineMessaging.js';
 
 /**
  * Compute dual-track member statistics from a user's raw reservation rows.
@@ -402,3 +403,90 @@ export const updateUser = async (req, res) => {
     res.status(500).json({ error: 'Failed to update user' });
   }
 };
+
+/**
+ * Send a direct LINE message to a specific user
+ */
+export const sendLineMessageToUser = async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  const { message_type, title, content, booking_info } = req.body;
+
+  if (isNaN(userId)) {
+    return res.status(400).json({ error: '無效的會員 ID' });
+  }
+
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: '請輸入訊息內容' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        line_user_id: true,
+        line_display_name: true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: '找不到該會員資料' });
+    }
+
+    if (!user.line_user_id || user.line_user_id.startsWith('manual_')) {
+      return res.status(400).json({ error: '此會員為櫃檯手動建檔，尚未綁定真實 LINE 帳號，無法發送 LINE 訊息' });
+    }
+
+    let linePayload;
+    if (message_type === 'flex') {
+      const infoRows = [];
+      if (booking_info) {
+        if (booking_info.booking_ref) {
+          infoRows.push({
+            label: '相關預約',
+            value: `#${String(booking_info.booking_ref).slice(0, 8).toUpperCase()}`
+          });
+        }
+        if (booking_info.session_date) {
+          infoRows.push({
+            label: '預約日期',
+            value: booking_info.session_date
+          });
+        }
+        if (booking_info.time_range) {
+          infoRows.push({
+            label: '預約時段',
+            value: booking_info.time_range
+          });
+        }
+      }
+
+      const frontendUrl = process.env.FRONTEND_URL || 'https://shiguangstudio.com';
+      linePayload = buildBrandFlexMessage({
+        title: title || '拾光製所 會員專屬通知',
+        subtitle: `發送對象：${user.name || user.line_display_name || '顧客'}`,
+        bodyText: content.trim(),
+        infoRows,
+        buttonLabel: '開啟拾光製所預約系統',
+        buttonUrl: `${frontendUrl}/history`,
+        tagText: '門市通知'
+      });
+    } else {
+      linePayload = {
+        type: 'text',
+        text: content.trim()
+      };
+    }
+
+    await sendLinePushMessage(user.line_user_id, [linePayload]);
+
+    res.json({ message: 'LINE 訊息已成功發送至顧客手機！' });
+  } catch (error) {
+    console.error('sendLineMessageToUser error:', error);
+    const statusCode = error.status || 500;
+    res.status(statusCode).json({ error: error.message || '發送 LINE 訊息失敗' });
+  }
+};
+

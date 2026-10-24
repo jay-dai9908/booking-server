@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Search, XCircle, Sparkles, Clock, AlertTriangle, User } from 'lucide-react';
+import { Search, XCircle, Sparkles, Clock, AlertTriangle, User, MessageCircle } from 'lucide-react';
 import api from '../../api/axios';
 import MemberDetailsModal from '../../components/MemberDetailsModal';
+import SendLineMessageModal from '../../components/SendLineMessageModal';
 
 export default function MembersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [users, setUsers] = useState([]);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
   const [selectedMember, setSelectedMember] = useState(null);
+  const [lineMessageTargetUser, setLineMessageTargetUser] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   
   // Pagination
@@ -111,6 +113,7 @@ export default function MembersPage() {
                     <th className="px-6 py-4 font-semibold">💰 累計消費 / 到訪</th>
                     <th className="px-6 py-4 font-semibold">最後登入 / 註冊</th>
                     <th className="px-6 py-4 font-semibold">狀態</th>
+                    <th className="px-6 py-4 font-semibold text-right">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -246,6 +249,23 @@ export default function MembersPage() {
                             </span>
                           )}
                         </td>
+
+                        {/* Actions */}
+                        <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                          {!u.line_user_id?.startsWith('manual_') ? (
+                            <button
+                              type="button"
+                              onClick={() => setLineMessageTargetUser(u)}
+                              className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg bg-[#06C755] hover:bg-[#05b34c] text-white shadow-2xs transition active:scale-95"
+                              title="發送 LINE 訊息給此會員"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                              發訊
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-gray-400 font-medium">未綁定LINE</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -291,6 +311,12 @@ export default function MembersPage() {
           setUsers(prev => prev.map(u => u.id === updatedUser.id ? { ...u, ...updatedUser } : u));
           setSelectedMember(prev => prev && prev.id === updatedUser.id ? { ...prev, ...updatedUser } : prev);
         }}
+      />
+
+      <SendLineMessageModal
+        isOpen={Boolean(lineMessageTargetUser)}
+        onClose={() => setLineMessageTargetUser(null)}
+        user={lineMessageTargetUser}
       />
 
       <style dangerouslySetInnerHTML={{__html: `

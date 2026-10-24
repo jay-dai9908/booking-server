@@ -12,7 +12,9 @@ import {
   ExternalLink,
   RotateCcw,
   Sliders,
-  Lock
+  Lock,
+  MessageCircle,
+  Key
 } from 'lucide-react';
 import api from '../../api/axios';
 
@@ -55,6 +57,13 @@ export default function SettingsPage() {
   const [equipmentDiscount2BuyHours, setEquipmentDiscount2BuyHours] = useState(8);
   const [equipmentDiscount2FreeHours, setEquipmentDiscount2FreeHours] = useState(4);
 
+  // 5. LINE Messaging API & Push Notifications
+  const [hasLineMessagingToken, setHasLineMessagingToken] = useState(false);
+  const [lineMessagingTokenMasked, setLineMessagingTokenMasked] = useState('');
+  const [lineMessagingTokenInput, setLineMessagingTokenInput] = useState('');
+  const [lineAutoNotifyBooking, setLineAutoNotifyBooking] = useState(false);
+  const [lineAutoNotifyCancel, setLineAutoNotifyCancel] = useState(false);
+
   useEffect(() => {
     fetchGlobalSettings();
   }, []);
@@ -93,6 +102,12 @@ export default function SettingsPage() {
       setEquipmentDiscount2Enabled(!!d.equipment_discount2_enabled);
       setEquipmentDiscount2BuyHours(d.equipment_discount2_buy_hours ?? 8);
       setEquipmentDiscount2FreeHours(d.equipment_discount2_free_hours ?? 4);
+
+      setHasLineMessagingToken(!!d.has_line_messaging_token);
+      setLineMessagingTokenMasked(d.line_messaging_token_masked || '');
+      setLineAutoNotifyBooking(!!d.line_auto_notify_booking);
+      setLineAutoNotifyCancel(!!d.line_auto_notify_cancel);
+      setLineMessagingTokenInput('');
     } catch (err) {
       console.error('Failed to fetch global settings:', err);
     } finally {
@@ -125,14 +140,27 @@ export default function SettingsPage() {
         equipment_discount2_enabled: equipmentDiscount2Enabled,
         equipment_discount2_buy_hours: Math.max(1, parseInt(equipmentDiscount2BuyHours, 10) || 8),
         equipment_discount2_free_hours: Math.max(1, parseInt(equipmentDiscount2FreeHours, 10) || 4),
+        line_auto_notify_booking: lineAutoNotifyBooking,
+        line_auto_notify_cancel: lineAutoNotifyCancel,
         ...overridePatch
       };
+
+      if (lineMessagingTokenInput.trim() && !lineMessagingTokenInput.includes('****')) {
+        payload.line_messaging_token = lineMessagingTokenInput.trim();
+      }
 
       await api.put('/daily-settings/global', payload);
       try {
         localStorage.removeItem('shiguang_booking_global_settings_cache');
       } catch (e) {}
       showToast('系統設定已成功儲存並立即生效！');
+
+      if (payload.line_messaging_token) {
+        setHasLineMessagingToken(true);
+        const t = payload.line_messaging_token;
+        setLineMessagingTokenMasked(t.length > 10 ? `${t.slice(0, 6)}****${t.slice(-4)}` : '****');
+        setLineMessagingTokenInput('');
+      }
     } catch (err) {
       console.error('Failed to save global settings:', err);
       alert(err.response?.data?.error || '儲存系統設定失敗');
@@ -642,6 +670,140 @@ export default function SettingsPage() {
           >
             儲存智能板全域規則
           </button>
+        </div>
+      </div>
+
+      {/* SECTION 5: LINE 官方帳號推播 (Messaging API) 與自動通知 */}
+      <div className="bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
+          <div>
+            <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-[#06C755]" />
+              5. 💬 LINE 官方帳號推播 (Messaging API) 設定
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              串接 LINE 官方帳號 Messaging API，啟用預約成功/取消自動推播憑證，以及後台向顧客發送提醒與自訂訊息
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
+                hasLineMessagingToken
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-amber-50 text-amber-700 border-amber-200'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  hasLineMessagingToken ? 'bg-[#06C755]' : 'bg-amber-500'
+                }`}
+              />
+              {hasLineMessagingToken ? '已設定 Token' : '未設定 Token'}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          {/* Channel Access Token Input */}
+          <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <label className="text-sm font-bold text-[#3E332B] flex items-center gap-2">
+                <Key className="w-4 h-4 text-[#8B5B43]" />
+                Messaging API Channel Access Token (long-lived)
+              </label>
+              {hasLineMessagingToken && lineMessagingTokenMasked && (
+                <span className="text-xs text-[#6D5D52] font-mono bg-white px-2.5 py-1 rounded-md border border-[#E8DEC8]">
+                  目前儲存：{lineMessagingTokenMasked}
+                </span>
+              )}
+            </div>
+            <div>
+              <input
+                type="password"
+                value={lineMessagingTokenInput}
+                onChange={e => setLineMessagingTokenInput(e.target.value)}
+                placeholder={
+                  hasLineMessagingToken
+                    ? `已設定長效 Token（${lineMessagingTokenMasked}）。若需更換請直接在此貼上新 Token`
+                    : '請貼上 LINE Messaging API Channel access token (long-lived)'
+                }
+                className="w-full px-4 py-2.5 bg-white border border-[#E8DEC8] rounded-xl text-sm font-mono text-[#3E332B] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5B43]/30"
+              />
+            </div>
+            <p className="text-[11px] text-[#6D5D52] leading-relaxed">
+              💡 <strong>如何取得 Token？</strong> 請前往{' '}
+              <a
+                href="https://developers.line.biz/console/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#8B5B43] font-bold underline hover:text-[#724a35]"
+              >
+                LINE Developers Console
+              </a>{' '}
+              ➔ 進入您的 <strong>Messaging API Channel</strong> ➔ 點選 <strong>Messaging API</strong> 分頁 ➔ 拉至最下方 <strong>Channel access token (long-lived)</strong> 點擊 <strong>Issue</strong> 產生長效 Token。<br />
+              ⚠️ 請確保「LINE Login Channel」與「Messaging API Channel」位於同一個 <strong>Provider</strong> 底下，且 LINE Login 已綁定 Linked OA，推播即可 100% 精準送達。
+            </p>
+          </div>
+
+          {/* Automated Notification Toggles */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Toggle 1: Auto Booking Confirmation */}
+            <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className="text-sm font-bold text-[#3E332B] flex items-center gap-1.5">
+                  <span>🎟️ 預約成立時自動發送 LINE 電子憑證通知給顧客</span>
+                </div>
+                <p className="text-xs text-[#6D5D52] leading-relaxed">
+                  線上預約成立時，官方帳號自動發送《拾光製所》大地暖木色預約憑證 Flex 卡片（<strong>絕不透露任何座位號碼</strong>）。
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                <input
+                  type="checkbox"
+                  checked={lineAutoNotifyBooking}
+                  onChange={e =>
+                    handleQuickToggle('line_auto_notify_booking', e.target.checked, setLineAutoNotifyBooking)
+                  }
+                  className="sr-only peer"
+                />
+                <div className="w-12 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#06C755]"></div>
+              </label>
+            </div>
+
+            {/* Toggle 2: Auto Booking Cancellation */}
+            <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className="text-sm font-bold text-[#3E332B] flex items-center gap-1.5">
+                  <span>❌ 預約取消時自動發送 LINE 取消通知給顧客</span>
+                </div>
+                <p className="text-xs text-[#6D5D52] leading-relaxed">
+                  顧客自行或管理員於後台取消預約時，自動推播預約已取消之 Flex 暖心關懷通知給顧客。
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                <input
+                  type="checkbox"
+                  checked={lineAutoNotifyCancel}
+                  onChange={e =>
+                    handleQuickToggle('line_auto_notify_cancel', e.target.checked, setLineAutoNotifyCancel)
+                  }
+                  className="sr-only peer"
+                />
+                <div className="w-12 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#06C755]"></div>
+              </label>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={() => handleSaveAll()}
+              disabled={saving}
+              className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-all disabled:opacity-50"
+            >
+              {saving ? '儲存中...' : '💾 儲存 LINE 官方帳號推播設定'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

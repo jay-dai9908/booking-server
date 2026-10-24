@@ -4,6 +4,10 @@ import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 import { evaluatePromoCode } from './checkoutController.js';
+import {
+  sendBookingConfirmationNotification,
+  sendBookingCancellationNotification
+} from '../utils/lineMessaging.js';
 
 // Helper function to group reservations by booking_ref
 const groupReservations = (reservations, equipmentsMap = {}) => {
@@ -529,6 +533,55 @@ export const createReservation = async (req, res) => {
 
     res.status(201).json({ message: 'Reservation successful', reservation: result });
 
+    // Auto LINE confirmation notification (asynchronously dispatched, never blocks response)
+    (async () => {
+      try {
+        const globalSetting = await prisma.globalSetting.findUnique({
+          where: { id: 1 },
+          select: { line_auto_notify_booking: true }
+        });
+        if (globalSetting?.line_auto_notify_booking) {
+          const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, name: true, line_user_id: true }
+          });
+          if (user?.line_user_id && !user.line_user_id.startsWith('manual_')) {
+            const firstSession = sessions[0];
+            const sortedTimes = sessions.map(s => s.start_time).sort();
+            const timeRange = sortedTimes.length > 1
+              ? `${sortedTimes[0]} - ${sessions.find(s => s.start_time === sortedTimes[sortedTimes.length - 1])?.end_time || ''}`
+              : `${firstSession?.start_time} - ${firstSession?.end_time}`;
+
+            let equipmentSummary = '';
+            if (equipments && equipments.length > 0) {
+              const eqConfigs = await prisma.equipmentConfig.findMany({
+                where: { id: { in: equipments.map(e => e.equipment_id) } },
+                select: { id: true, name: true }
+              });
+              const eqMap = Object.fromEntries(eqConfigs.map(c => [c.id, c.name]));
+              equipmentSummary = equipments
+                .map(e => `${eqMap[e.equipment_id] || e.name || e.equipment_id}×${e.quantity}`)
+                .join(' + ');
+            }
+
+            await sendBookingConfirmationNotification(
+              {
+                booking_ref: result.booking_ref,
+                session_date: firstSession?.session_date,
+                time_range: timeRange,
+                pax,
+                equipment_summary: equipmentSummary,
+                total_amount: result.total_amount
+              },
+              user
+            );
+          }
+        }
+      } catch (notifyErr) {
+        console.warn('[createReservation] Auto LINE booking notification failed:', notifyErr.message);
+      }
+    })();
+
 
   } catch (error) {
     console.error('Reservation error:', error);
@@ -611,7 +664,7 @@ export const getAdminReservations = async (req, res) => {
       include: {
         session: true,
         user: {
-          select: { name: true, phone: true, line_display_name: true, line_picture_url: true }
+          select: { id: true, name: true, phone: true, line_user_id: true, line_display_name: true, line_picture_url: true }
         }
       },
       orderBy: {
@@ -676,7 +729,7 @@ export const getAdminReservationDetails = async (req, res) => {
       where: { booking_ref },
       include: {
         session: true,
-        user: { select: { name: true, phone: true, line_display_name: true, line_picture_url: true } }
+        user: { select: { id: true, name: true, phone: true, line_user_id: true, line_display_name: true, line_picture_url: true } }
       },
       orderBy: { created_at: 'desc' }
     });
@@ -820,6 +873,48 @@ export const cancelReservation = async (req, res) => {
     }
 
     res.json({ message: 'Reservation cancelled successfully', count: updated.count });
+
+    // Auto LINE cancellation notification (asynchronously dispatched, never blocks response)
+    (async () => {
+      try {
+        const globalSetting = await prisma.globalSetting.findUnique({
+          where: { id: 1 },
+          select: { line_auto_notify_cancel: true }
+        });
+        if (globalSetting?.line_auto_notify_cancel) {
+          const firstRes = reservations[0];
+          const user = await prisma.user.findUnique({
+            where: { id: firstRes.user_id },
+            select: { id: true, name: true, line_user_id: true }
+          });
+          if (user?.line_user_id && !user.line_user_id.startsWith('manual_')) {
+            const resSessions = await prisma.session.findMany({
+              where: { id: { in: reservations.map(r => r.session_id) } },
+              orderBy: { start_time: 'asc' }
+            });
+            const firstSession = resSessions[0];
+            const lastSession = resSessions[resSessions.length - 1];
+            const timeRange = firstSession && lastSession
+              ? (firstSession.id === lastSession.id
+                  ? `${firstSession.start_time} - ${firstSession.end_time}`
+                  : `${firstSession.start_time} - ${lastSession.end_time}`)
+              : '';
+
+            await sendBookingCancellationNotification(
+              {
+                booking_ref,
+                session_date: firstSession?.session_date || firstRes.session_date,
+                time_range: timeRange
+              },
+              user,
+              isAdmin ? 'admin' : 'customer'
+            );
+          }
+        }
+      } catch (notifyErr) {
+        console.warn('[cancelReservation] Auto LINE cancellation notification failed:', notifyErr.message);
+      }
+    })();
   } catch (error) {
     console.error('Error cancelling reservation:', error);
     res.status(500).json({ error: 'Failed to cancel reservation' });

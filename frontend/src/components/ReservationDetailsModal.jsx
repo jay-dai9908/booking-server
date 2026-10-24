@@ -1,11 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { X, CheckCircle2, XCircle, Trash2, Pencil, Check, Cpu } from 'lucide-react';
+import { X, CheckCircle2, XCircle, Trash2, Pencil, Check, Cpu, MessageCircle } from 'lucide-react';
 import api from '../api/axios';
 import ExtendTimeModal from './ExtendTimeModal';
 import EquipmentAddonModal from './EquipmentAddonModal';
 import CheckoutModal from './CheckoutModal';
+import SendLineMessageModal from './SendLineMessageModal';
 
 export const getReservationStatusUI = (r) => {
   if (r.status === 'cancelled') {
@@ -38,6 +39,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
   const [editAmountValue, setEditAmountValue] = React.useState('');
   const [showEquipmentModal, setShowEquipmentModal] = React.useState(false);
   const [showCheckoutModal, setShowCheckoutModal] = React.useState(false);
+  const [showLineModal, setShowLineModal] = React.useState(false);
 
   if (!reservation) return null;
 
@@ -137,7 +139,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                 <p className="text-sm text-gray-800 font-mono">{reservation.booking_ref}</p>
               </div>
               <div>
-                <div className="flex items-center gap-3 mb-1">
+                <div className="flex items-center gap-2 mb-1">
                   <h3 className="text-sm font-medium text-gray-500">顧客姓名</h3>
                   {!readOnly && reservation.user_id && (
                     <button 
@@ -148,6 +150,17 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                       className="text-xs text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md font-medium transition-colors"
                     >
                       會員資料
+                    </button>
+                  )}
+                  {!readOnly && reservation.user && !reservation.user.line_user_id?.startsWith('manual_') && (
+                    <button
+                      type="button"
+                      onClick={() => setShowLineModal(true)}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-white bg-[#06C755] hover:bg-[#05b34c] px-2 py-0.5 rounded-md transition-all shadow-xs"
+                      title="發送 LINE 提醒至顧客手機"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                      發送 LINE 提醒
                     </button>
                   )}
                 </div>
@@ -505,6 +518,14 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
               if (onUpdate) onUpdate();
             }
           }}
+        />
+      )}
+      {showLineModal && (
+        <SendLineMessageModal
+          isOpen={showLineModal}
+          onClose={() => setShowLineModal(false)}
+          user={reservation.user}
+          reservation={reservation}
         />
       )}
     </div>

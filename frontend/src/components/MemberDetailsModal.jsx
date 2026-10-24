@@ -11,10 +11,12 @@ import {
   Calendar,
   Globe,
   Monitor,
-  User
+  User,
+  MessageCircle
 } from 'lucide-react';
 import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
+import SendLineMessageModal from './SendLineMessageModal';
 
 export default function MemberDetailsModal({ member, onClose, onMemberUpdated }) {
   const [memberReservations, setMemberReservations] = useState([]);
@@ -29,6 +31,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [showLineModal, setShowLineModal] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // Local copy of member for optimistic & refreshed updates
@@ -220,6 +223,17 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                             <Pencil className="w-3.5 h-3.5" />
                             編輯姓名/電話
                           </button>
+                          {!localMember.line_user_id?.startsWith('manual_') && (
+                            <button
+                              type="button"
+                              onClick={() => setShowLineModal(true)}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-white bg-[#06C755] hover:bg-[#05b34c] px-3 py-1 rounded-lg transition-all shadow-xs"
+                              title="發送 LINE 官方帳號訊息至顧客手機"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                              發送 LINE 訊息
+                            </button>
+                          )}
                         </div>
 
                         <p className="text-sm font-mono font-semibold text-[#6D5D52] mt-1">
@@ -615,6 +629,13 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
           fetchMemberReservations();
           refreshMemberDetails();
         }} 
+      />
+
+      {/* Send LINE Message Modal */}
+      <SendLineMessageModal
+        isOpen={showLineModal}
+        onClose={() => setShowLineModal(false)}
+        user={localMember}
       />
     </>
   );

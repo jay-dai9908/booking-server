@@ -124,7 +124,29 @@ export const getGlobalSetting = async (req, res) => {
         }
       });
     }
-    res.json(setting);
+
+    // Never expose plain text LINE messaging token to frontend
+    const rawToken = setting.line_messaging_token || process.env.LINE_MESSAGING_ACCESS_TOKEN || '';
+    const has_line_messaging_token = Boolean(rawToken);
+    let line_messaging_token_masked = '';
+    if (rawToken) {
+      if (rawToken.length > 10) {
+        line_messaging_token_masked = `${rawToken.slice(0, 6)}****${rawToken.slice(-4)}`;
+      } else {
+        line_messaging_token_masked = '****';
+      }
+    }
+
+    const safeSetting = {
+      ...setting,
+      has_line_messaging_token,
+      line_messaging_token_masked,
+      line_auto_notify_booking: setting.line_auto_notify_booking ?? false,
+      line_auto_notify_cancel: setting.line_auto_notify_cancel ?? false
+    };
+    delete safeSetting.line_messaging_token;
+
+    res.json(safeSetting);
   } catch (error) {
     console.error('Error fetching global setting:', error);
     res.status(500).json({ error: 'Failed to fetch global setting' });
@@ -154,7 +176,10 @@ export const updateGlobalSetting = async (req, res) => {
     equipment_discount_stackable,
     equipment_discount2_enabled,
     equipment_discount2_buy_hours,
-    equipment_discount2_free_hours
+    equipment_discount2_free_hours,
+    line_messaging_token,
+    line_auto_notify_booking,
+    line_auto_notify_cancel
   } = req.body;
 
   try {
@@ -189,6 +214,16 @@ export const updateGlobalSetting = async (req, res) => {
     if (equipment_discount2_enabled !== undefined) dataToUpdate.equipment_discount2_enabled = Boolean(equipment_discount2_enabled);
     if (equipment_discount2_buy_hours !== undefined) dataToUpdate.equipment_discount2_buy_hours = Math.max(1, parseInt(equipment_discount2_buy_hours, 10) || 8);
     if (equipment_discount2_free_hours !== undefined) dataToUpdate.equipment_discount2_free_hours = Math.max(1, parseInt(equipment_discount2_free_hours, 10) || 4);
+
+    if (line_messaging_token !== undefined) {
+      if (line_messaging_token === '' || line_messaging_token === null) {
+        dataToUpdate.line_messaging_token = null;
+      } else if (typeof line_messaging_token === 'string' && !line_messaging_token.includes('****')) {
+        dataToUpdate.line_messaging_token = line_messaging_token.trim();
+      }
+    }
+    if (line_auto_notify_booking !== undefined) dataToUpdate.line_auto_notify_booking = Boolean(line_auto_notify_booking);
+    if (line_auto_notify_cancel !== undefined) dataToUpdate.line_auto_notify_cancel = Boolean(line_auto_notify_cancel);
 
     const setting = await prisma.globalSetting.upsert({
       where: { id: 1 },
