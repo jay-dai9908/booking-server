@@ -148,6 +148,33 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
   });
 };
 
+/**
+ * Format session objects into a merged, continuous timeRange string
+ * e.g. "10:00 - 12:00" or "10:00 - 11:00, 14:00 - 15:00"
+ */
+export const formatSessionsToTimeRange = (sessions = []) => {
+  if (!Array.isArray(sessions) || sessions.length === 0) return '';
+  const sorted = [...sessions].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+  const blocks = [];
+  let currentBlock = null;
+
+  for (const s of sorted) {
+    if (!currentBlock) {
+      currentBlock = { start_time: s.start_time, end_time: s.end_time };
+    } else {
+      if (s.start_time === currentBlock.end_time) {
+        currentBlock.end_time = s.end_time;
+      } else {
+        blocks.push(currentBlock);
+        currentBlock = { start_time: s.start_time, end_time: s.end_time };
+      }
+    }
+  }
+  if (currentBlock) blocks.push(currentBlock);
+
+  return blocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ');
+};
+
 // Helper to resolve daily pricing rates
 export const getEffectiveDailyRates = async (tx, sessionDate) => {
   const dailySetting = await tx.dailySetting.findUnique({
@@ -528,7 +555,17 @@ export const createReservation = async (req, res) => {
         });
       }
 
-      return { booking_ref, count: newReservations.count, assigned_seats: mySeats, total_amount: totalAmount, promo_code: appliedPromoCode, discount_amount: appliedDiscountAmount };
+      const sortedRequestedSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+      return { 
+        booking_ref, 
+        count: newReservations.count, 
+        assigned_seats: mySeats, 
+        total_amount: totalAmount, 
+        promo_code: appliedPromoCode, 
+        discount_amount: appliedDiscountAmount,
+        requested_sessions: sortedRequestedSessions
+      };
     });
 
     res.status(201).json({ message: 'Reservation successful', reservation: result });
@@ -546,14 +583,13 @@ export const createReservation = async (req, res) => {
             select: { id: true, name: true, line_user_id: true }
           });
           if (user?.line_user_id && !user.line_user_id.startsWith('manual_')) {
-            const firstSession = sessions[0];
-            const sortedTimes = sessions.map(s => s.start_time).sort();
-            const timeRange = sortedTimes.length > 1
-              ? `${sortedTimes[0]} - ${sessions.find(s => s.start_time === sortedTimes[sortedTimes.length - 1])?.end_time || ''}`
-              : `${firstSession?.start_time} - ${firstSession?.end_time}`;
+            const reqSessions = result.requested_sessions || [];
+            const firstSession = reqSessions[0];
+            const timeRange = formatSessionsToTimeRange(reqSessions);
 
+            const equipments = req.body.equipments;
             let equipmentSummary = '';
-            if (equipments && equipments.length > 0) {
+            if (Array.isArray(equipments) && equipments.length > 0) {
               const eqConfigs = await prisma.equipmentConfig.findMany({
                 where: { id: { in: equipments.map(e => e.equipment_id) } },
                 select: { id: true, name: true }
@@ -893,12 +929,7 @@ export const cancelReservation = async (req, res) => {
               orderBy: { start_time: 'asc' }
             });
             const firstSession = resSessions[0];
-            const lastSession = resSessions[resSessions.length - 1];
-            const timeRange = firstSession && lastSession
-              ? (firstSession.id === lastSession.id
-                  ? `${firstSession.start_time} - ${firstSession.end_time}`
-                  : `${firstSession.start_time} - ${lastSession.end_time}`)
-              : '';
+            const timeRange = formatSessionsToTimeRange(resSessions);
 
             await sendBookingCancellationNotification(
               {
@@ -981,8 +1012,25 @@ export const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRef
   let displacedCount = collidingRefs.size;
 
   if (displacedCount > 0) {
-    // Unpin colliding reservations in memory
-    for (const r of currentReservations) {
+    let allDayReservations = currentReservations;
+    const sampleSession = await prisma.session.findFirst({
+      where: { id: { in: sessionIds } },
+      select: { session_date: true }
+    });
+
+    if (sampleSession) {
+      const allSessionsOfDay = await prisma.session.findMany({
+        where: { session_date: sampleSession.session_date },
+        select: { id: true }
+      });
+      const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
+      allDayReservations = await prisma.reservation.findMany({
+        where: { session_id: { in: allSessionIdsOfDay }, status: 'confirmed' }
+      });
+    }
+
+    // Unpin colliding reservations in memory across allDayReservations
+    for (const r of allDayReservations) {
       if (collidingRefs.has(r.booking_ref)) {
         r.is_seat_locked = false;
         r.assigned_seats = []; // Strip to force reshuffle
@@ -990,7 +1038,7 @@ export const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRef
     }
 
     // Run allocation algorithm (pure reshuffle)
-    const allocResult = allocateSeats(currentReservations, null, false);
+    const allocResult = allocateSeats(allDayReservations, null, false);
 
     if (allocResult.updates && allocResult.updates.length > 0) {
       const sessionUpdates = [];
@@ -1010,7 +1058,7 @@ export const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRef
       const sessionUpdates = [];
       
       let maxWait = 0;
-      for (const res of currentReservations) {
+      for (const res of allDayReservations) {
         if (res.assigned_seats) {
           for (const seat of res.assigned_seats) {
             if (seat.startsWith('WAIT-')) {
@@ -1022,7 +1070,7 @@ export const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRef
       }
       let waitCounter = maxWait + 1;
       for (const ref of collidingRefs) {
-        const r = currentReservations.find(res => res.booking_ref === ref);
+        const r = allDayReservations.find(res => res.booking_ref === ref);
         const waitSeats = [];
         const paxCount = r ? r.pax : 1;
         for (let i = 0; i < paxCount; i++) {
@@ -1770,19 +1818,25 @@ export const updatePaymentStatus = async (req, res) => {
       });
       res.json({ message: 'Payment status updated successfully', total_amount: totalAmount });
     } else {
-      const updated = await prisma.reservation.updateMany({
-        where: { booking_ref },
-        data: { 
-          is_paid,
-          paid_at: null
+      await prisma.$transaction(async (tx) => {
+        const updated = await tx.reservation.updateMany({
+          where: { booking_ref },
+          data: { 
+            is_paid: false,
+            paid_at: null,
+            payment_method: null,
+            is_amount_manual: false
+          }
+        });
+        
+        if (updated.count === 0) {
+          throw new Error('NOT_FOUND');
         }
+
+        totalAmount = await recalculateReservationTotal(tx, booking_ref);
       });
       
-      if (updated.count === 0) {
-        return res.status(404).json({ error: 'Reservation not found' });
-      }
-      
-      res.json({ message: 'Payment status updated successfully', count: updated.count });
+      res.json({ message: 'Payment status updated successfully', is_paid: false, total_amount: totalAmount });
     }
   } catch (error) {
     console.error('Error updating payment status:', error);

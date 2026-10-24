@@ -89,6 +89,7 @@ const groupReservations = (reservations) => {
         session_ids: [],
         assigned_seats: r.assigned_seats || [],
         is_pinned: false,
+        has_checked_in_or_locked: false,
         original_sessions: []
       });
     }
@@ -99,6 +100,11 @@ const groupReservations = (reservations) => {
       block.session_ids.push(r.session_id);
     }
     
+    // 若訂單已報到或被手動鎖定，標記保護
+    if (r.attendance === 'checked_in' || r.is_seat_locked === true) {
+      block.has_checked_in_or_locked = true;
+    }
+
     // 如果該訂單在任何一個 session 中被釘死 (已報到/大於等於3人/手動鎖定)，或是跨越多個時段 (Super Anchor)，整個 block 就必須釘死
     if (r.attendance !== null || r.pax >= 3 || r.is_seat_locked === true || block.session_ids.length > 1) {
       block.is_pinned = true;
@@ -108,8 +114,7 @@ const groupReservations = (reservations) => {
     block.original_sessions.push({ session_id: r.session_id, assigned_seats: r.assigned_seats || [] });
   }
 
-  // 安全檢查：如果這個 block 在不同時段的座位不一致，代表它是舊系統留下的髒資料 (或是被手動錯誤修改)
-  // 這種情況下，我們必須強制將它「解鎖 (Unpin)」，讓演算法重新為它尋找一組全程一致的座位！
+  // 安全檢查：如果這個 block 在不同時段的座位不一致
   for (const block of blocksMap.values()) {
     let inconsistent = false;
     const baseSeats = block.assigned_seats;
@@ -120,7 +125,10 @@ const groupReservations = (reservations) => {
       }
     }
     if (inconsistent) {
-      block.is_pinned = false; // 強制拔除釘死狀態，丟入洗牌佇列
+      // 若訂單已報到 (attendance === 'checked_in') 或已被管理員手動鎖定 (is_seat_locked === true)，絕對不可解除釘死！
+      if (!block.has_checked_in_or_locked) {
+        block.is_pinned = false; // 強制拔除釘死狀態，丟入洗牌佇列
+      }
     }
   }
 
@@ -134,10 +142,21 @@ const getIntersectionAvailableSeats = (blocks, targetSessionIds, excludeRef = nu
   for (const block of blocks) {
     if (excludeRef && block.booking_ref === excludeRef) continue;
     
-    // 檢查這個 block 是否與目標時段有交集
-    const intersects = block.session_ids.some(sid => targetSessionIds.includes(sid));
-    if (intersects && block.assigned_seats) {
-      block.assigned_seats.forEach(seat => occupiedSeats.add(seat));
+    // 遍歷與目標時段有交集的各時段，加入該時段實際佔用的座位
+    const intersectingSessions = block.original_sessions && block.original_sessions.length > 0
+      ? block.original_sessions.filter(os => targetSessionIds.includes(os.session_id))
+      : [];
+
+    if (intersectingSessions.length > 0) {
+      for (const os of intersectingSessions) {
+        if (Array.isArray(os.assigned_seats)) {
+          os.assigned_seats.forEach(seat => occupiedSeats.add(seat));
+        }
+      }
+    } else if (block.session_ids.some(sid => targetSessionIds.includes(sid))) {
+      if (Array.isArray(block.assigned_seats)) {
+        block.assigned_seats.forEach(seat => occupiedSeats.add(seat));
+      }
     }
   }
 

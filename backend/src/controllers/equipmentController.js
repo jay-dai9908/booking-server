@@ -724,16 +724,6 @@ export const modifyBookingEquipment = async (req, res) => {
     }
 
     // Check stock availability for each requested item
-    const sessionTimes = reservations.map(r => r.session.start_time);
-    const otherBookings = await prisma.bookingEquipment.findMany({
-      where: {
-        booking_ref: { not: booking_ref }
-      },
-      include: {
-        equipment: true
-      }
-    });
-
     const otherReservations = await prisma.reservation.findMany({
       where: {
         status: { not: 'cancelled' },
@@ -746,8 +736,22 @@ export const modifyBookingEquipment = async (req, res) => {
     const otherSessionMap = {};
     otherReservations.forEach(r => {
       if (!otherSessionMap[r.booking_ref]) otherSessionMap[r.booking_ref] = new Set();
-      otherSessionMap[r.booking_ref].add(r.session.start_time);
+      if (r.session?.start_time) {
+        otherSessionMap[r.booking_ref].add(r.session.start_time);
+      }
     });
+
+    const validOtherBookingRefs = Object.keys(otherSessionMap);
+    const otherBookings = validOtherBookingRefs.length > 0
+      ? await prisma.bookingEquipment.findMany({
+          where: {
+            booking_ref: { in: validOtherBookingRefs }
+          },
+          include: {
+            equipment: true
+          }
+        })
+      : [];
 
     const sortedReservations = [...reservations].sort((a, b) => a.session.start_time.localeCompare(b.session.start_time));
     const totalOrderHours = reservations.length;

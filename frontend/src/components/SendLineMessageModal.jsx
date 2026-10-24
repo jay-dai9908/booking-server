@@ -15,6 +15,13 @@ import {
 import api from '../api/axios';
 import { format } from 'date-fns';
 
+export const formatBookingRef = (ref) => {
+  if (!ref) return '';
+  const str = String(ref);
+  if (str.length <= 12) return str;
+  return `BK-${str.slice(0, 4).toUpperCase()}-${str.slice(-4).toUpperCase()}`;
+};
+
 export default function SendLineMessageModal({
   isOpen,
   onClose,
@@ -33,9 +40,15 @@ export default function SendLineMessageModal({
   const dateStr = rawDate ? format(new Date(rawDate), 'yyyy/MM/dd') : '今日';
   const timeRange =
     reservation?.time_range ||
-    (reservation?.session ? `${reservation.session.start_time} - ${reservation.session.end_time}` : '');
+    (Array.isArray(reservation?.time_blocks) && reservation.time_blocks.length > 0
+      ? reservation.time_blocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ')
+      : reservation?.start_time && reservation?.end_time
+      ? `${reservation.start_time} - ${reservation.end_time}`
+      : reservation?.session
+      ? `${reservation.session.start_time} - ${reservation.session.end_time}`
+      : '');
   const shortRef = reservation?.booking_ref
-    ? `#${String(reservation.booking_ref).slice(0, 8).toUpperCase()}`
+    ? formatBookingRef(reservation.booking_ref)
     : '';
 
   const userName = user?.name || user?.line_display_name || '顧客';

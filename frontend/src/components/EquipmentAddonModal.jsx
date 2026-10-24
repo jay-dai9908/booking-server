@@ -52,7 +52,24 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
       if (reservation.sessions && reservation.sessions.length > 0) {
         sessionStarts = reservation.sessions.map(s => s.start_time).join(',');
       } else if (reservation.time_blocks && reservation.time_blocks.length > 0) {
-        sessionStarts = reservation.time_blocks.map(b => b.start_time).join(',');
+        const expandedStarts = [];
+        reservation.time_blocks.forEach(b => {
+          if (!b.start_time || !b.end_time) return;
+          const [startH] = b.start_time.split(':').map(Number);
+          const [endH] = b.end_time.split(':').map(Number);
+          for (let h = startH; h < endH; h++) {
+            expandedStarts.push(`${String(h).padStart(2, '0')}:00`);
+          }
+        });
+        sessionStarts = expandedStarts.join(',');
+      } else if (reservation.start_time && reservation.end_time) {
+        const [startH] = reservation.start_time.split(':').map(Number);
+        const [endH] = reservation.end_time.split(':').map(Number);
+        const expandedStarts = [];
+        for (let h = startH; h < endH; h++) {
+          expandedStarts.push(`${String(h).padStart(2, '0')}:00`);
+        }
+        sessionStarts = expandedStarts.join(',');
       } else {
         sessionStarts = reservation.start_time || reservation.session?.start_time || '';
       }

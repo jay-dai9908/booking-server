@@ -260,6 +260,16 @@ export const buildBrandFlexMessage = ({
 };
 
 /**
+ * Format booking reference to consistent BK-XXXX-XXXX display
+ */
+export const formatBookingRef = (ref) => {
+  if (!ref) return '';
+  const str = String(ref);
+  if (str.length <= 12) return str;
+  return `BK-${str.slice(0, 4).toUpperCase()}-${str.slice(-4).toUpperCase()}`;
+};
+
+/**
  * Format date string safely as YYYY/MM/DD
  */
 const formatDateStr = (dateVal) => {
@@ -278,15 +288,13 @@ const formatDateStr = (dateVal) => {
 export const sendBookingConfirmationNotification = async (reservation, user) => {
   if (!user?.line_user_id || user.line_user_id.startsWith('manual_')) return;
 
-  const shortRef = reservation.booking_ref
-    ? String(reservation.booking_ref).slice(0, 8).toUpperCase()
-    : '';
+  const shortRef = formatBookingRef(reservation.booking_ref);
 
   const frontendUrl = process.env.FRONTEND_URL || 'https://shiguangstudio.com';
   const historyUrl = `${frontendUrl}/history`;
 
   const infoRows = [
-    { label: '預約單號', value: `#${shortRef}` },
+    { label: '預約單號', value: shortRef },
     { label: '預約日期', value: formatDateStr(reservation.session_date) },
     { label: '預約時段', value: reservation.time_range || '已排定時段' },
     { label: '預約人數', value: `${reservation.pax} 位` }
@@ -323,15 +331,13 @@ export const sendBookingConfirmationNotification = async (reservation, user) => 
 export const sendBookingCancellationNotification = async (reservation, user, cancelledBy = 'admin') => {
   if (!user?.line_user_id || user.line_user_id.startsWith('manual_')) return;
 
-  const shortRef = reservation.booking_ref
-    ? String(reservation.booking_ref).slice(0, 8).toUpperCase()
-    : '';
+  const shortRef = formatBookingRef(reservation.booking_ref);
 
   const frontendUrl = process.env.FRONTEND_URL || 'https://shiguangstudio.com';
   const bookingUrl = `${frontendUrl}/booking`;
 
   const infoRows = [
-    { label: '預約單號', value: `#${shortRef}` },
+    { label: '預約單號', value: shortRef },
     { label: '預約日期', value: formatDateStr(reservation.session_date) },
     { label: '預約時段', value: reservation.time_range || '原時段' },
     { label: '取消來源', value: cancelledBy === 'admin' ? '門市人員取消' : '顧客自行取消' }

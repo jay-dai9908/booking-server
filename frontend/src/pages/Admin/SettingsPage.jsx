@@ -145,7 +145,7 @@ export default function SettingsPage() {
         ...overridePatch
       };
 
-      if (lineMessagingTokenInput.trim() && !lineMessagingTokenInput.includes('****')) {
+      if (lineMessagingTokenInput.trim() && !lineMessagingTokenInput.includes('•') && !lineMessagingTokenInput.includes('****')) {
         payload.line_messaging_token = lineMessagingTokenInput.trim();
       }
 
@@ -158,7 +158,7 @@ export default function SettingsPage() {
       if (payload.line_messaging_token) {
         setHasLineMessagingToken(true);
         const t = payload.line_messaging_token;
-        setLineMessagingTokenMasked(t.length > 10 ? `${t.slice(0, 6)}****${t.slice(-4)}` : '****');
+        setLineMessagingTokenMasked(`••••••••${t.slice(-4)}`);
         setLineMessagingTokenInput('');
       }
     } catch (err) {

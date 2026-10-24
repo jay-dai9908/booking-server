@@ -130,11 +130,7 @@ export const getGlobalSetting = async (req, res) => {
     const has_line_messaging_token = Boolean(rawToken);
     let line_messaging_token_masked = '';
     if (rawToken) {
-      if (rawToken.length > 10) {
-        line_messaging_token_masked = `${rawToken.slice(0, 6)}****${rawToken.slice(-4)}`;
-      } else {
-        line_messaging_token_masked = '****';
-      }
+      line_messaging_token_masked = `••••••••${rawToken.slice(-4)}`;
     }
 
     const safeSetting = {
@@ -218,7 +214,7 @@ export const updateGlobalSetting = async (req, res) => {
     if (line_messaging_token !== undefined) {
       if (line_messaging_token === '' || line_messaging_token === null) {
         dataToUpdate.line_messaging_token = null;
-      } else if (typeof line_messaging_token === 'string' && !line_messaging_token.includes('****')) {
+      } else if (typeof line_messaging_token === 'string' && !line_messaging_token.includes('•') && !line_messaging_token.includes('****')) {
         dataToUpdate.line_messaging_token = line_messaging_token.trim();
       }
     }

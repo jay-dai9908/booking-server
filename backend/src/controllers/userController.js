@@ -1,5 +1,5 @@
 import prisma from '../prismaClient.js';
-import { sendLinePushMessage, buildBrandFlexMessage } from '../utils/lineMessaging.js';
+import { sendLinePushMessage, buildBrandFlexMessage, formatBookingRef } from '../utils/lineMessaging.js';
 
 /**
  * Compute dual-track member statistics from a user's raw reservation rows.
@@ -446,7 +446,7 @@ export const sendLineMessageToUser = async (req, res) => {
         if (booking_info.booking_ref) {
           infoRows.push({
             label: '相關預約',
-            value: `#${String(booking_info.booking_ref).slice(0, 8).toUpperCase()}`
+            value: formatBookingRef(booking_info.booking_ref)
           });
         }
         if (booking_info.session_date) {

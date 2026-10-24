@@ -234,6 +234,14 @@ export default function CheckoutModal({
     const paxCount = Math.max(1, rawPeople.length);
     let promoDiscountTotal = 0;
     const evaluatedPromos = appliedPromos.map(promo => {
+      const scope = promo.target_scope || 'all';
+      let targetBase = baseForDiscount;
+      if (scope === 'seating') {
+        targetBase = subtotalSeating;
+      } else if (scope === 'equipment') {
+        targetBase = subtotalEquipment;
+      }
+
       let amt = 0;
       if (promo.discount_type === 'fixed_order') {
         amt = promo.discount_value;
@@ -242,12 +250,21 @@ export default function CheckoutModal({
       } else if (promo.discount_type === 'percentage') {
         const val = promo.discount_value;
         const pctOff = val > 50 && val < 100 ? 100 - val : val;
-        amt = Math.round(baseForDiscount * (pctOff / 100));
+        amt = Math.round(targetBase * (pctOff / 100));
       } else if (promo.discount_type === 'free_hours') {
         amt = Math.round(hourlyRate * promo.discount_value);
       } else {
         amt = promo.discount_value || 0;
       }
+
+      if (promo.max_discount_amount && promo.max_discount_amount > 0) {
+        amt = Math.min(amt, promo.max_discount_amount);
+      }
+
+      if (targetBase > 0) {
+        amt = Math.min(amt, targetBase);
+      }
+
       promoDiscountTotal += amt;
       return { ...promo, calculated_discount: amt };
     });
