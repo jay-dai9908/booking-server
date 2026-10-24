@@ -71,10 +71,21 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
     session_date: reservation.session_date || reservation.session?.session_date
   });
 
-  const sessionDateTime = new Date(reservation.session_date || reservation.session?.session_date);
-  const [startHour, startMin] = (reservation.start_time || reservation.session?.start_time || '00:00').split(':').map(Number);
-  sessionDateTime.setHours(startHour, startMin, 0, 0);
-  const isPast = new Date() >= sessionDateTime;
+  const now = new Date();
+  const sessionCount = reservation.session_count || (reservation.sessions ? reservation.sessions.length : (reservation.time_blocks ? reservation.time_blocks.length : 1));
+
+  const [endH, endM] = (reservation.end_time || reservation.session?.end_time || '00:00').split(':').map(Number);
+  const bookingEndTime = new Date(reservation.session_date || reservation.session?.session_date);
+  bookingEndTime.setHours(endH, endM, 0, 0);
+
+  const [startH, startM] = (reservation.start_time || reservation.session?.start_time || '00:00').split(':').map(Number);
+  const bookingStartTime = new Date(reservation.session_date || reservation.session?.session_date);
+  bookingStartTime.setHours(startH, startM, 0, 0);
+
+  const isPast = now >= bookingStartTime;
+  const isExpired = now >= bookingEndTime;
+  const effectiveStart = new Date(Math.max(now.getTime(), bookingStartTime.getTime()));
+  const remainingMinutes = (bookingEndTime.getTime() - effectiveStart.getTime()) / (60 * 1000);
 
   const shortRef = formatBookingRef(reservation.booking_ref);
   const gcalUrl = getGoogleCalendarUrl(reservation);
@@ -165,13 +176,32 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                 <h3 className="text-sm font-medium text-[#7A7067] flex items-center gap-1.5">
                   <Cpu className="w-4 h-4" /> 智能拼豆板設備
                 </h3>
-                {reservation.status !== 'cancelled' && !isPast && onOpenEquipmentAddon && (
-                  <button
-                    onClick={onOpenEquipmentAddon}
-                    className="text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] hover:bg-[#EBE5DF] px-3 py-1 rounded-full transition-colors"
-                  >
-                    {reservation.equipments && reservation.equipments.length > 0 ? '✏️ 追加/修改' : '➕ 補預約智能板'}
-                  </button>
+                {reservation.status !== 'cancelled' && !isExpired && onOpenEquipmentAddon && (
+                  remainingMinutes < 120 ? (
+                    <span
+                      className="text-xs font-medium text-gray-400 bg-gray-100 px-2.5 py-1 rounded-full border border-gray-200 cursor-not-allowed"
+                      title="距離離場已不足 2 小時，線上已關閉補約，如需借用請洽店員"
+                    >
+                      ⏰ 剩餘時數不足 2hr
+                    </span>
+                  ) : sessionCount < 2 ? (
+                    <button
+                      type="button"
+                      onClick={() => alert('⚠️ 租用智能拼豆板需至少連續 2 小時（目前您的訂單僅 1 小時）。現場如有需要可洽門市人員為您協助。')}
+                      className="text-xs font-medium text-[#8C8279] bg-[#FAF7F2] border border-[#D5CFC9] hover:bg-[#F4EFE6] px-2.5 py-1 rounded-full transition-colors"
+                      title="租用智能板需預約滿 2 小時"
+                    >
+                      ➕ 補預約智能板 (需滿2hr)
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={onOpenEquipmentAddon}
+                      className="text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] hover:bg-[#EBE5DF] px-3 py-1 rounded-full transition-colors"
+                    >
+                      {reservation.equipments && reservation.equipments.length > 0 ? '✏️ 追加/修改' : '➕ 補預約智能板'}
+                    </button>
+                  )
                 )}
               </div>
               {reservation.equipments && reservation.equipments.length > 0 ? (
@@ -216,13 +246,13 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
           </div>
 
           {/* Action Buttons */}
-          <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-            {reservation.status !== 'cancelled' && !isPast ? (
-              <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+          <div className="mt-6 flex flex-col gap-2.5">
+            {reservation.status !== 'cancelled' && !isPast && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
                 <button
                   type="button"
                   onClick={() => downloadIcsFile(reservation)}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors shadow-2xs"
                 >
                   <Download className="w-4 h-4 text-[#8B5B43]" />
                   🍎 加入 Apple / 通用日曆 (.ics)
@@ -238,20 +268,21 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                         window.location.href = gcalUrl;
                       }
                     }}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors"
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full font-bold text-xs sm:text-sm bg-[#FAF7F2] border border-[#D5CFC9] text-[#6D5D52] hover:bg-[#F4EFE6] hover:text-[#8B5B43] transition-colors shadow-2xs"
                   >
                     <CalendarPlus className="w-4 h-4 text-[#8B5B43]" />
                     📅 加入 Google 行事曆
                   </a>
                 )}
               </div>
-            ) : <div />}
+            )}
 
             {reservation.status !== 'cancelled' && (
               <button 
+                type="button"
                 onClick={() => setShowCancelConfirm(true)}
                 disabled={isPast}
-                className={`w-full sm:w-auto px-6 py-2.5 rounded-full font-bold text-xs sm:text-sm transition-colors ${
+                className={`w-full py-2.5 rounded-full font-bold text-xs sm:text-sm transition-colors ${
                   isPast 
                     ? 'bg-[#F0EBE6] text-[#A8A19A] cursor-not-allowed border border-transparent' 
                     : 'border border-[#8B5B43] text-[#8B5B43] hover:bg-[#F9F7F3] bg-transparent'

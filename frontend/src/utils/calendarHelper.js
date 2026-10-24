@@ -8,9 +8,34 @@ export const safeExtractBookingTimes = (booking = {}) => {
   let firstStart = '10:00';
   let lastEnd = '12:00';
 
+  // Normalize HH:mm to 2-digit hour
+  const normTime = (t) => {
+    if (!t) return '00:00';
+    const [h, m] = t.split(':');
+    return `${String(parseInt(h, 10)).padStart(2, '0')}:${String(parseInt(m || '0', 10)).padStart(2, '0')}`;
+  };
+
   const rawSessions = booking.sessions || booking.selectedSessions || [];
 
-  if (Array.isArray(rawSessions) && rawSessions.length > 0) {
+  if (Array.isArray(booking.time_blocks) && booking.time_blocks.length > 0) {
+    const starts = [];
+    const ends = [];
+    booking.time_blocks.forEach(b => {
+      if (b && b.start_time) starts.push(b.start_time);
+      if (b && b.end_time) ends.push(b.end_time);
+    });
+    if (starts.length > 0) {
+      starts.sort();
+      firstStart = starts[0];
+    }
+    if (ends.length > 0) {
+      ends.sort();
+      lastEnd = ends[ends.length - 1];
+    }
+  } else if (booking.start_time || booking.session?.start_time) {
+    firstStart = booking.start_time || booking.session?.start_time;
+    lastEnd = booking.end_time || booking.session?.end_time || firstStart;
+  } else if (Array.isArray(rawSessions) && rawSessions.length > 0) {
     const starts = [];
     const ends = [];
 
@@ -51,17 +76,24 @@ export const safeExtractBookingTimes = (booking = {}) => {
     }
   }
 
-  // Normalize HH:mm to 2-digit hour
-  const normTime = (t) => {
-    if (!t) return '00:00';
-    const [h, m] = t.split(':');
-    return `${String(parseInt(h, 10)).padStart(2, '0')}:${String(parseInt(m || '0', 10)).padStart(2, '0')}`;
-  };
+  const normalizedStart = normTime(firstStart);
+  const normalizedEnd = normTime(lastEnd);
+  const displayTimeRange = `${normalizedStart} - ${normalizedEnd}`;
+
+  let detailedTimeRange = displayTimeRange;
+  if (Array.isArray(booking.time_blocks) && booking.time_blocks.length > 1) {
+    detailedTimeRange = booking.time_blocks
+      .map(b => `${normTime(b.start_time)} - ${normTime(b.end_time)}`)
+      .join('、');
+  } else if (booking.timeRange) {
+    detailedTimeRange = booking.timeRange;
+  }
 
   return {
-    startTime: normTime(firstStart),
-    endTime: normTime(lastEnd),
-    displayTimeRange: `${normTime(firstStart)} - ${normTime(lastEnd)}`
+    startTime: normalizedStart,
+    endTime: normalizedEnd,
+    displayTimeRange,
+    detailedTimeRange
   };
 };
 
@@ -91,7 +123,7 @@ export const safeExtractDate = (booking = {}) => {
 
 export const getGoogleCalendarUrl = (booking = {}) => {
   const dateStr = safeExtractDate(booking).replace(/-/g, ''); // YYYYMMDD
-  const { startTime, endTime } = safeExtractBookingTimes(booking);
+  const { startTime, endTime, displayTimeRange, detailedTimeRange } = safeExtractBookingTimes(booking);
 
   const startClean = startTime.replace(':', '') + '00';
   const endClean = endTime.replace(':', '') + '00';
@@ -106,7 +138,7 @@ export const getGoogleCalendarUrl = (booking = {}) => {
     `【拾光製所 手作預約確認】`,
     bookingRef ? `預約編號：${bookingRef}` : '',
     `體驗人數：${pax} 人`,
-    `預約時段：${startTime} - ${endTime}`,
+    `預約時段：${detailedTimeRange || displayTimeRange}`,
     `門市地點：${location}`,
     ``,
     `★ 注意事項：`,
@@ -130,7 +162,7 @@ export const getGoogleCalendarUrl = (booking = {}) => {
 
 export const generateIcsContent = (booking = {}) => {
   const dateStr = safeExtractDate(booking).replace(/-/g, '');
-  const { startTime, endTime } = safeExtractBookingTimes(booking);
+  const { startTime, endTime, displayTimeRange, detailedTimeRange } = safeExtractBookingTimes(booking);
 
   const startClean = startTime.replace(':', '') + '00';
   const endClean = endTime.replace(':', '') + '00';
@@ -150,7 +182,7 @@ export const generateIcsContent = (booking = {}) => {
     `【拾光製所 手作預約確認】`,
     bookingRef ? `預約編號：${bookingRef}` : '',
     `體驗人數：${pax} 人`,
-    `預約時段：${startTime} - ${endTime}`,
+    `預約時段：${detailedTimeRange || displayTimeRange}`,
     `門市地點：${location}`,
     `注意事項：費用含傳統拼豆板與豆子無限使用，現場保留 15 分鐘，離場前請預留 10 分鐘熨燙。`
   ].filter(Boolean);
