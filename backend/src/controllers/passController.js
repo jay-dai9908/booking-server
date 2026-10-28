@@ -1,5 +1,37 @@
 import prisma from '../prismaClient.js';
-import { format, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
+
+// Native date utilities replacing external date-fns dependency
+const formatDateYMD = (d = new Date()) => {
+  const date = new Date(d);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const formatDateTime = (d = new Date()) => {
+  const date = new Date(d);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+};
+
+const getWeekRange = (d = new Date()) => {
+  const date = new Date(d);
+  const day = date.getDay(); // 0 is Sunday, 1 is Monday
+  const diffToMonday = date.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(date);
+  monday.setDate(diffToMonday);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return { start: monday, end: sunday };
+};
 
 /**
  * Helper to check day of week restriction
@@ -26,9 +58,8 @@ const checkUsageLimits = (usageLogs, maxPerDay, maxDaysPerWeek, maxHoursPerWeek,
   }
 
   const now = new Date();
-  const todayStr = format(now, 'yyyy-MM-dd');
-  const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-  const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+  const todayStr = formatDateYMD(now);
+  const { start: weekStart, end: weekEnd } = getWeekRange(now);
 
   let todayUsedHours = 0;
   const weekDaysUsed = new Set();
@@ -37,14 +68,14 @@ const checkUsageLimits = (usageLogs, maxPerDay, maxDaysPerWeek, maxHoursPerWeek,
   for (const log of usageLogs) {
     if (!log.date) continue;
     const logDate = new Date(log.date);
-    const logDateStr = format(logDate, 'yyyy-MM-dd');
+    const logDateStr = formatDateYMD(logDate);
     const amt = parseInt(log.deducted, 10) || 0;
 
     if (logDateStr === todayStr) {
       todayUsedHours += amt;
     }
 
-    if (isWithinInterval(logDate, { start: weekStart, end: weekEnd })) {
+    if (logDate >= weekStart && logDate <= weekEnd) {
       weekDaysUsed.add(logDateStr);
       weekUsedHours += amt;
     }
@@ -293,7 +324,7 @@ export const redeemUserPass = async (req, res) => {
     }
 
     const newLog = {
-      date: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+      date: formatDateTime(new Date()),
       deducted: deduct_amount,
       staff: staff_name || '門市人員',
       note: note || ''

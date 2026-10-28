@@ -332,15 +332,49 @@ const ensureDatabaseSchema = async () => {
   console.log('[Schema Check] Database schema verified successfully.');
 };
 
-// Initialize database schema, default configs, and cron jobs
+// Initialize database schema, default configs, and cron jobs safely
 (async () => {
-  await ensureDatabaseSchema();
-  await ensureDefaultEquipmentConfigs();
-  await ensureDefaultCheckoutConfigs();
-  await ensureDefaultPaymentMethods();
-  await ensureDefaultProducts();
-  await ensureDefaultPassPlans();
-  startCronJobs();
+  try {
+    await ensureDatabaseSchema();
+  } catch (err) {
+    console.error('[Startup] ensureDatabaseSchema notice:', err?.message || err);
+  }
+  try {
+    await ensureDefaultEquipmentConfigs();
+  } catch (err) {
+    console.error('[Startup] ensureDefaultEquipmentConfigs notice:', err?.message || err);
+  }
+  try {
+    await ensureDefaultCheckoutConfigs();
+  } catch (err) {
+    console.error('[Startup] ensureDefaultCheckoutConfigs notice:', err?.message || err);
+  }
+  try {
+    if (prisma?.paymentMethodConfig) {
+      await ensureDefaultPaymentMethods();
+    }
+  } catch (err) {
+    console.error('[Startup] ensureDefaultPaymentMethods notice:', err?.message || err);
+  }
+  try {
+    if (prisma?.product) {
+      await ensureDefaultProducts();
+    }
+  } catch (err) {
+    console.error('[Startup] ensureDefaultProducts notice:', err?.message || err);
+  }
+  try {
+    if (prisma?.passPlan) {
+      await ensureDefaultPassPlans();
+    }
+  } catch (err) {
+    console.error('[Startup] ensureDefaultPassPlans notice:', err?.message || err);
+  }
+  try {
+    startCronJobs();
+  } catch (err) {
+    console.error('[Startup] startCronJobs notice:', err?.message || err);
+  }
 })();
 
 app.set('trust proxy', 1);

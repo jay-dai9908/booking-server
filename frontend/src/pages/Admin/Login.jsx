@@ -29,7 +29,15 @@ function AdminLogin({ setUserRole }) {
       setUserRole('admin');
       window.location.href = '/admin/sessions';
     } catch (err) {
-      setError(err.response?.data?.error || '密碼錯誤，請重新輸入');
+      const status = err.response?.status;
+      const serverMsg = err.response?.data?.error;
+      if (serverMsg) {
+        setError(serverMsg);
+      } else if (!err.response || status >= 500) {
+        setError(`伺服器連線異常或後端啟動中 (HTTP ${status || '斷線'})，請確認後端 PM2 狀態`);
+      } else {
+        setError('密碼錯誤，請重新輸入');
+      }
       setIsLoading(false);
     }
   };
