@@ -54,6 +54,7 @@ export default function ShopAdminPage() {
   const [importingPool, setImportingPool] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [shopSettings, setShopSettings] = useState({
+    show_shop_button: true,
     shop_deposit_deadline_days: 2,
     shop_default_arrival_note: '',
     shop_enable_shipping: false,
@@ -939,6 +940,26 @@ export default function ShopAdminPage() {
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="sm:col-span-2 bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8] flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-xs text-[#3E332B] block">
+                      前台預約頁面頂部顯示「🛍️ 商品預購」按鈕
+                    </span>
+                    <span className="text-[11px] text-[#8C8279] block mt-0.5">
+                      關閉時，顧客預約頁頂部將不顯示商品預購入口按鈕（節省手機版頂部空間，避免按鈕重疊擠壓）
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={shopSettings.show_shop_button !== false}
+                      onChange={e => setShopSettings(prev => ({ ...prev, show_shop_button: e.target.checked }))}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#8B5B43]"></div>
+                  </label>
+                </div>
+
                 <div>
                   <label className="block font-bold text-[#6D5D52] mb-1">
                     訂金付款期限（天數，預設 2 天）：

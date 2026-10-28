@@ -14,7 +14,8 @@ import {
   Sliders,
   Lock,
   MessageCircle,
-  Key
+  Key,
+  ShoppingBag
 } from 'lucide-react';
 import api from '../../api/axios';
 
@@ -39,6 +40,7 @@ export default function SettingsPage() {
   const [showPriceCards, setShowPriceCards] = useState(true);
   const [priceNoticeText, setPriceNoticeText] = useState(DEFAULT_PRICE_NOTICE_TEXT);
   const [showLineButton, setShowLineButton] = useState(true);
+  const [showShopButton, setShowShopButton] = useState(true);
   const [lineButtonUrl, setLineButtonUrl] = useState(DEFAULT_LINE_URL);
 
   // 3. Global Store Default Prices
@@ -88,6 +90,7 @@ export default function SettingsPage() {
       setShowPriceCards(d.show_price_cards !== false);
       setPriceNoticeText(d.price_notice_text ?? DEFAULT_PRICE_NOTICE_TEXT);
       setShowLineButton(d.show_line_button !== false);
+      setShowShopButton(d.show_shop_button !== false && d.shop_enabled !== false);
       setLineButtonUrl(d.line_button_url || DEFAULT_LINE_URL);
 
       setWeekdayHourly(d.weekday_hourly_price ?? 100);
@@ -129,6 +132,7 @@ export default function SettingsPage() {
         show_price_cards: showPriceCards,
         price_notice_text: priceNoticeText,
         show_line_button: showLineButton,
+        show_shop_button: showShopButton,
         line_button_url: lineButtonUrl,
         weekday_hourly_price: parseInt(weekdayHourly, 10) || 100,
         weekday_unlimited_price: parseInt(weekdayUnlimited, 10) || 550,
@@ -369,7 +373,7 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
           {/* Switch 1: Announcement */}
           <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4">
             <div className="flex items-start justify-between gap-3">
@@ -482,6 +486,33 @@ export default function SettingsPage() {
             </div>
             <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showLineButton ? '🟢 目前狀態：顧客端頂部顯示官方 LINE 按鈕' : '⚪ 目前狀態：顧客端頂部隱藏官方 LINE 按鈕'}
+            </div>
+          </div>
+
+          {/* Switch 4: Shop Preorder Button */}
+          <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
+                  <ShoppingBag className="w-4 h-4 text-[#8B5B43]" />
+                  前台「🛍️ 商品預購」入口按鈕
+                </span>
+                <p className="text-xs text-[#6D5D52] mt-1">
+                  控制顧客預約頁面頂部的「🛍️ 商品預購」按鈕顯示。關閉時預約頁頂部隱藏此按鈕，避免擠壓手機排版或未開放預購時被誤點
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
+                <input
+                  type="checkbox"
+                  checked={showShopButton}
+                  onChange={e => handleQuickToggle('show_shop_button', e.target.checked, setShowShopButton)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#8B5B43]"></div>
+              </label>
+            </div>
+            <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
+              {showShopButton ? '🟢 目前狀態：顧客預約頁頂部顯示「🛍️ 商品預購」按鈕' : '⚪ 目前狀態：顧客預約頁頂部隱藏此按鈕'}
             </div>
           </div>
         </div>

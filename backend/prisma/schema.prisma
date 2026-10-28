@@ -127,6 +127,7 @@ model GlobalSetting {
   line_auto_notify_booking    Boolean  @default(false)
   line_auto_notify_cancel     Boolean  @default(false)
   shop_enabled                Boolean  @default(true)
+  show_shop_button            Boolean  @default(true)
   shop_deposit_deadline_days  Int      @default(2)
   shop_default_arrival_note   String?  @default("預計 11/10 ~ 11/15 到貨，商品抵達門市後將發送 LINE 訊息通知取貨")
   shop_enable_shipping        Boolean  @default(false)

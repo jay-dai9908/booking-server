@@ -138,7 +138,9 @@ export const getGlobalSetting = async (req, res) => {
       has_line_messaging_token,
       line_messaging_token_masked,
       line_auto_notify_booking: setting.line_auto_notify_booking ?? false,
-      line_auto_notify_cancel: setting.line_auto_notify_cancel ?? false
+      line_auto_notify_cancel: setting.line_auto_notify_cancel ?? false,
+      shop_enabled: setting.shop_enabled ?? true,
+      show_shop_button: setting.show_shop_button ?? setting.shop_enabled ?? true
     };
     delete safeSetting.line_messaging_token;
 
@@ -175,7 +177,9 @@ export const updateGlobalSetting = async (req, res) => {
     equipment_discount2_free_hours,
     line_messaging_token,
     line_auto_notify_booking,
-    line_auto_notify_cancel
+    line_auto_notify_cancel,
+    show_shop_button,
+    shop_enabled
   } = req.body;
 
   try {
@@ -220,6 +224,8 @@ export const updateGlobalSetting = async (req, res) => {
     }
     if (line_auto_notify_booking !== undefined) dataToUpdate.line_auto_notify_booking = Boolean(line_auto_notify_booking);
     if (line_auto_notify_cancel !== undefined) dataToUpdate.line_auto_notify_cancel = Boolean(line_auto_notify_cancel);
+    if (show_shop_button !== undefined) dataToUpdate.show_shop_button = Boolean(show_shop_button);
+    if (shop_enabled !== undefined) dataToUpdate.shop_enabled = Boolean(shop_enabled);
 
     const setting = await prisma.globalSetting.upsert({
       where: { id: 1 },

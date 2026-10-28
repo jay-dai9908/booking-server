@@ -27,6 +27,7 @@ const getInitialGlobalSettings = () => {
           showAnnouncement: parsed.showAnnouncement !== false,
           announcementText: parsed.announcementText ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠',
           showLineButton: parsed.showLineButton !== false,
+          showShopButton: parsed.showShopButton !== false,
           lineButtonUrl: parsed.lineButtonUrl || 'https://lin.ee/vsZhRW5',
           isLoaded: true
         };
@@ -48,6 +49,7 @@ const getInitialGlobalSettings = () => {
     showAnnouncement: true,
     announcementText: '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠',
     showLineButton: true,
+    showShopButton: true,
     lineButtonUrl: 'https://lin.ee/vsZhRW5',
     isLoaded: false
   };
@@ -80,6 +82,7 @@ function Booking() {
   const [announcementText, setAnnouncementText] = useState(initialSettings.announcementText);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [showLineButton, setShowLineButton] = useState(initialSettings.showLineButton);
+  const [showShopButton, setShowShopButton] = useState(initialSettings.showShopButton);
   const [lineButtonUrl, setLineButtonUrl] = useState(initialSettings.lineButtonUrl);
   const [isGlobalLoaded, setIsGlobalLoaded] = useState(initialSettings.isLoaded);
   const [dailyPricing, setDailyPricing] = useState({
@@ -209,6 +212,7 @@ function Booking() {
           const announceVisible = res.data.show_announcement !== false;
           const announce = res.data.announcement_text ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
           const lineVisible = res.data.show_line_button !== false;
+          const shopVisible = res.data.show_shop_button !== false && res.data.shop_enabled !== false;
           const lineUrl = res.data.line_button_url || 'https://lin.ee/vsZhRW5';
 
           setGlobalPricing(pricing);
@@ -217,6 +221,7 @@ function Booking() {
           setShowAnnouncement(announceVisible);
           setAnnouncementText(announce);
           setShowLineButton(lineVisible);
+          setShowShopButton(shopVisible);
           setLineButtonUrl(lineUrl);
           setIsGlobalLoaded(true);
 
@@ -231,6 +236,7 @@ function Booking() {
               showAnnouncement: announceVisible,
               announcementText: announce,
               showLineButton: lineVisible,
+              showShopButton: shopVisible,
               lineButtonUrl: lineUrl
             }));
           } catch (e) {
@@ -824,7 +830,7 @@ function Booking() {
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 flex-wrap justify-end">
             {userInfo?.name && (
               <span className="hidden md:inline-flex items-center gap-1 text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] border border-[#E8DEC8] px-2.5 py-1 rounded-full">
                 👤 {userInfo.name}
@@ -840,12 +846,14 @@ function Booking() {
                 💬 官方 LINE
               </a>
             )}
-            <button 
-              onClick={() => navigate('/shop')}
-              className="whitespace-nowrap text-xs font-semibold text-[#8B5B43] bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 sm:px-3.5 py-1.5 rounded-full transition-all duration-200 ease-in-out shrink-0 shadow-2xs flex items-center gap-1"
-            >
-              🛍️ 商品預購
-            </button>
+            {showShopButton && (
+              <button 
+                onClick={() => navigate('/shop')}
+                className="whitespace-nowrap text-xs font-semibold text-[#8B5B43] bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 sm:px-3 py-1.5 rounded-full transition-all duration-200 ease-in-out shrink-0 shadow-2xs flex items-center gap-1"
+              >
+                🛍️ 商品預購
+              </button>
+            )}
             <button 
               onClick={() => navigate('/history')}
               className="whitespace-nowrap text-xs font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-2.5 sm:px-3.5 py-1.5 rounded-full transition-all duration-200 ease-in-out shrink-0 shadow-2xs"

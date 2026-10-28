@@ -737,6 +737,7 @@ export const getAdminPaymentMethods = async (req, res) => {
       payment_methods: methods,
       settings: {
         shop_enabled: globalSetting?.shop_enabled ?? true,
+        show_shop_button: globalSetting?.show_shop_button ?? globalSetting?.shop_enabled ?? true,
         shop_deposit_deadline_days: globalSetting?.shop_deposit_deadline_days ?? 2,
         shop_default_arrival_note: globalSetting?.shop_default_arrival_note || '',
         shop_enable_shipping: !!globalSetting?.shop_enable_shipping,
@@ -784,6 +785,7 @@ export const updateAdminPaymentMethod = async (req, res) => {
 export const updateShopGlobalSettings = async (req, res) => {
   const {
     shop_enabled,
+    show_shop_button,
     shop_deposit_deadline_days,
     shop_default_arrival_note,
     shop_enable_shipping,
@@ -794,6 +796,7 @@ export const updateShopGlobalSettings = async (req, res) => {
   try {
     const dataToUpdate = {};
     if (shop_enabled !== undefined) dataToUpdate.shop_enabled = Boolean(shop_enabled);
+    if (show_shop_button !== undefined) dataToUpdate.show_shop_button = Boolean(show_shop_button);
     if (shop_deposit_deadline_days !== undefined) {
       dataToUpdate.shop_deposit_deadline_days = Math.max(1, parseInt(shop_deposit_deadline_days, 10) || 2);
     }

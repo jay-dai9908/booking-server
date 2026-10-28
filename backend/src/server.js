@@ -161,6 +161,7 @@ const ensureDatabaseSchema = async () => {
     `UPDATE "GlobalSetting" SET "is_lockdown_mode" = false WHERE "id" = 1`,
 
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_enabled" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_shop_button" BOOLEAN NOT NULL DEFAULT true`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_deposit_deadline_days" INTEGER NOT NULL DEFAULT 2`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_default_arrival_note" TEXT DEFAULT '預計 11/10 ~ 11/15 到貨，商品抵達門市後將發送 LINE 訊息通知取貨'`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_enable_shipping" BOOLEAN NOT NULL DEFAULT false`,
