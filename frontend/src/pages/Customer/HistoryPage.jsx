@@ -149,25 +149,19 @@ export default function HistoryPage() {
     <div className="min-h-screen bg-[#F7F4F0] flex flex-col text-[#3E332B] pb-16">
       {/* Header */}
       <header className="sticky top-0 z-30 bg-[#F7F4F0]/95 backdrop-blur-md border-b border-[#EBE5DF]">
-        <div className="flex items-center justify-between px-4 h-16 max-w-3xl mx-auto w-full relative">
-          <div className="flex items-center gap-2 z-10">
-            <button 
-              onClick={() => navigate('/booking')} 
-              className="flex items-center text-[#8C8279] hover:text-[#3E332B] font-bold text-xs transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4 mr-0.5" />手作預約
-            </button>
-            <span className="text-[#D5CFC9]">|</span>
-            <button 
-              onClick={() => navigate('/shop')} 
-              className="flex items-center text-[#8B5B43] hover:text-[#7A4F3A] font-bold text-xs transition-colors"
-            >
-              🛍️ 預購商城
-            </button>
-          </div>
-          <h1 className="text-base sm:text-lg font-bold text-[#3E332B] absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="flex items-center justify-between px-4 h-14 sm:h-16 max-w-3xl mx-auto w-full relative">
+          <button 
+            onClick={() => navigate('/booking')} 
+            className="flex items-center text-[#8C8279] hover:text-[#3E332B] font-bold text-xs sm:text-sm transition-colors z-10 shrink-0 py-1"
+          >
+            <ChevronLeft className="w-4 h-4 mr-0.5" />
+            <span>手作預約</span>
+          </button>
+
+          <h1 className="text-base sm:text-lg font-bold text-[#3E332B] absolute inset-0 flex items-center justify-center pointer-events-none px-16 text-center truncate">
             我的紀錄與到店條碼
           </h1>
+
           <button
             onClick={() => {
               if (mainTab === 'reservations') fetchReservations();
