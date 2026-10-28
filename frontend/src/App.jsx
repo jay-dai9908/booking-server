@@ -9,12 +9,14 @@ import Register from './pages/Customer/Register';
 import Booking from './pages/Customer/Booking';
 import Preview from './pages/Customer/Preview';
 import HistoryPage from './pages/Customer/HistoryPage';
+import ShopPage from './pages/Customer/ShopPage';
 
 // Admin Pages (Lazy-loaded via Code Splitting to reduce customer bundle size by >40%)
 const AdminLogin = lazy(() => import('./pages/Admin/Login'));
 const AdminLayout = lazy(() => import('./components/AdminLayout'));
 const SessionsPage = lazy(() => import('./pages/Admin/SessionsPage'));
 const ReservationsPage = lazy(() => import('./pages/Admin/ReservationsPage'));
+const ShopAdminPage = lazy(() => import('./pages/Admin/ShopAdminPage'));
 const MembersPage = lazy(() => import('./pages/Admin/MembersPage'));
 const WeeklyPage = lazy(() => import('./pages/Admin/WeeklyPage'));
 const SeatingPage = lazy(() => import('./pages/Admin/SeatingPage'));
@@ -95,6 +97,10 @@ function App() {
           path="/history" 
           element={userRole === 'customer' ? <HistoryPage /> : <Navigate to="/" />} 
         />
+        <Route 
+          path="/shop" 
+          element={userRole === 'customer' ? <ShopPage /> : <Navigate to="/" />} 
+        />
 
         {/* Admin Login */}
         <Route 
@@ -110,6 +116,7 @@ function App() {
           <Route index element={<Navigate to="sessions" replace />} />
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="reservations" element={<ReservationsPage />} />
+          <Route path="shop" element={<ShopAdminPage />} />
           <Route path="members" element={<MembersPage />} />
           <Route path="weekly" element={<WeeklyPage />} />
           <Route path="seating" element={<SeatingPage />} />

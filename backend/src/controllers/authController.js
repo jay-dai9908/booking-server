@@ -288,10 +288,9 @@ export const me = async (req, res) => {
     const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } }).catch(() => null);
     const requireEveryTime = !!globalSetting?.require_line_login_every_time;
 
-    // If admin enabled "顧客每次使用皆須從 LINE 登入", only clear old cookie when customer enters at `/` (entry_home === '1')
-    // Never clear the cookie when already inside `/booking` or `/history`!
+    // If admin enabled "顧客每次使用皆須從 LINE 登入", only allow when current browser session has fresh login
     if (requireEveryTime && !req.user.isTemp) {
-      if (req.query.entry_home === '1') {
+      if (req.query.fresh_session !== '1') {
         res.clearCookie('token');
         return res.status(401).json({
           error: 'Require fresh LINE login on every visit',

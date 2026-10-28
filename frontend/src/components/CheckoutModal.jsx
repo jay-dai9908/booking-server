@@ -441,7 +441,9 @@ export default function CheckoutModal({
           code: promo.code,
           name: promo.name,
           discount_type: promo.discount_type,
-          discount_value: promo.discount_value
+          discount_value: promo.discount_value,
+          target_scope: promo.target_scope || 'all',
+          max_discount_amount: promo.max_discount_amount || null
         }
       ];
     });
@@ -465,6 +467,8 @@ export default function CheckoutModal({
         hours: Math.max(...computed.people.map(p => p.total_hours), 1),
         is_unlimited: computed.unlimitedPaxCount > 0,
         base_amount: computed.subtotalSeating + computed.subtotalEquipment,
+        seating_amount: computed.subtotalSeating,
+        equipment_amount: computed.subtotalEquipment,
         hourly_price: pricingInfo.hourly_price,
         user_id: reservation.user_id
       });

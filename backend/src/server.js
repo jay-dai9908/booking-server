@@ -15,8 +15,11 @@ import accountingRoutes from './routes/accounting.js';
 import staffRoutes from './routes/staff.js';
 import equipmentRoutes from './routes/equipment.js';
 import checkoutRoutes from './routes/checkout.js';
+import shopRoutes from './routes/shop.js';
+import passRoutes from './routes/passes.js';
 import { ensureDefaultEquipmentConfigs } from './controllers/equipmentController.js';
 import { ensureDefaultCheckoutConfigs } from './controllers/checkoutController.js';
+import { ensureDefaultPaymentMethods, ensureDefaultProducts, ensureDefaultPassPlans } from './utils/shopDefaults.js';
 import { startCronJobs } from './cronJobs.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -155,7 +158,168 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "AddonItem" ADD COLUMN IF NOT EXISTS "sort_order" INTEGER NOT NULL DEFAULT 0`,
 
     `DELETE FROM "BannedIP" WHERE "reason" IN ('Too many login attempts', 'Too many reservation queries')`,
-    `UPDATE "GlobalSetting" SET "is_lockdown_mode" = false WHERE "id" = 1`
+    `UPDATE "GlobalSetting" SET "is_lockdown_mode" = false WHERE "id" = 1`,
+
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_enabled" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_deposit_deadline_days" INTEGER NOT NULL DEFAULT 2`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_default_arrival_note" TEXT DEFAULT '預計 11/10 ~ 11/15 到貨，商品抵達門市後將發送 LINE 訊息通知取貨'`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_enable_shipping" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_shipping_fee" INTEGER NOT NULL DEFAULT 60`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "official_line_url" TEXT DEFAULT 'https://lin.ee/vsZhRW5'`,
+
+    `CREATE TABLE IF NOT EXISTS "PaymentMethodConfig" (
+      "id" SERIAL NOT NULL,
+      "code" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "method_type" TEXT NOT NULL,
+      "is_enabled" BOOLEAN NOT NULL DEFAULT true,
+      "display_instructions" TEXT,
+      "bank_accounts_json" JSONB,
+      "require_last5" BOOLEAN NOT NULL DEFAULT true,
+      "show_line_verify_btn" BOOLEAN NOT NULL DEFAULT true,
+      "sort_order" INTEGER NOT NULL DEFAULT 0,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "PaymentMethodConfig_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "PaymentMethodConfig_code_key" ON "PaymentMethodConfig"("code")`,
+
+    `CREATE TABLE IF NOT EXISTS "OneTimeAccountPool" (
+      "id" SERIAL NOT NULL,
+      "payment_method_code" TEXT NOT NULL DEFAULT 'ctbc_pool',
+      "bank_code" TEXT NOT NULL DEFAULT '822',
+      "bank_name" TEXT NOT NULL DEFAULT '中國信託（社群收款專屬帳號）',
+      "account_number" TEXT NOT NULL,
+      "payment_url" TEXT,
+      "note" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'AVAILABLE',
+      "assigned_order_ref" TEXT,
+      "assigned_user_id" INTEGER,
+      "assigned_at" TIMESTAMP(3),
+      "verified_at" TIMESTAMP(3),
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "OneTimeAccountPool_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "OneTimeAccountPool_account_number_key" ON "OneTimeAccountPool"("account_number")`,
+
+    `CREATE TABLE IF NOT EXISTS "Product" (
+      "id" SERIAL NOT NULL,
+      "code" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "category" TEXT NOT NULL DEFAULT 'bundle',
+      "description" TEXT,
+      "image_url" TEXT,
+      "price" INTEGER NOT NULL,
+      "is_preorder" BOOLEAN NOT NULL DEFAULT true,
+      "deposit_amount" INTEGER NOT NULL DEFAULT 600,
+      "estimated_arrival_text" TEXT,
+      "allow_wish_input" BOOLEAN NOT NULL DEFAULT false,
+      "wish_input_placeholder" TEXT DEFAULT '可輸入喜歡的顏色、款式或 IP 角色（例如：吉伊卡哇、馬卡龍粉、雙針筆優先）',
+      "bonus_pass_plan_code" TEXT,
+      "tier_pricing" JSONB,
+      "visibility_status" TEXT NOT NULL DEFAULT 'ACTIVE',
+      "sort_order" INTEGER NOT NULL DEFAULT 0,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "Product_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Product_code_key" ON "Product"("code")`,
+
+    `CREATE TABLE IF NOT EXISTS "ProductOrder" (
+      "id" SERIAL NOT NULL,
+      "order_ref" TEXT NOT NULL,
+      "user_id" INTEGER NOT NULL,
+      "total_amount" INTEGER NOT NULL,
+      "shipping_fee" INTEGER NOT NULL DEFAULT 0,
+      "deposit_required" INTEGER NOT NULL,
+      "paid_amount" INTEGER NOT NULL DEFAULT 0,
+      "balance_amount" INTEGER NOT NULL,
+      "payment_method_code" TEXT NOT NULL,
+      "selected_bank_info" TEXT,
+      "assigned_pool_account" TEXT,
+      "assigned_pool_url" TEXT,
+      "remittance_last5" TEXT,
+      "remittance_reported_at" TIMESTAMP(3),
+      "payment_deadline" TIMESTAMP(3),
+      "payment_status" TEXT NOT NULL DEFAULT 'pending_payment',
+      "order_status" TEXT NOT NULL DEFAULT 'preorder_placed',
+      "delivery_method" TEXT NOT NULL DEFAULT 'store_pickup',
+      "shipping_info_json" JSONB,
+      "estimated_arrival" TEXT,
+      "wish_note" TEXT,
+      "wish_reply" TEXT,
+      "customer_note" TEXT,
+      "admin_note" TEXT,
+      "arrived_notified_at" TIMESTAMP(3),
+      "picked_up_at" TIMESTAMP(3),
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ProductOrder_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "ProductOrder_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "ProductOrder_order_ref_key" ON "ProductOrder"("order_ref")`,
+
+    `CREATE TABLE IF NOT EXISTS "ProductOrderItem" (
+      "id" SERIAL NOT NULL,
+      "order_id" INTEGER NOT NULL,
+      "product_id" INTEGER,
+      "product_code_snapshot" TEXT NOT NULL,
+      "product_name_snapshot" TEXT NOT NULL,
+      "price_snapshot" INTEGER NOT NULL,
+      "quantity" INTEGER NOT NULL,
+      "subtotal" INTEGER NOT NULL,
+      "customization_note" TEXT,
+      CONSTRAINT "ProductOrderItem_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "ProductOrderItem_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "ProductOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "ProductOrderItem_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "PassPlan" (
+      "id" SERIAL NOT NULL,
+      "code" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "pass_type" TEXT NOT NULL,
+      "price" INTEGER NOT NULL DEFAULT 0,
+      "is_purchasable_online" BOOLEAN NOT NULL DEFAULT false,
+      "total_quota" INTEGER,
+      "valid_days" INTEGER,
+      "day_restriction" TEXT NOT NULL DEFAULT 'ALL',
+      "max_hours_per_day" INTEGER,
+      "max_days_per_week" INTEGER,
+      "max_hours_per_week" INTEGER,
+      "discount_percent" INTEGER,
+      "description" TEXT,
+      "is_active" BOOLEAN NOT NULL DEFAULT true,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "PassPlan_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "PassPlan_code_key" ON "PassPlan"("code")`,
+
+    `CREATE TABLE IF NOT EXISTS "UserPass" (
+      "id" SERIAL NOT NULL,
+      "pass_code" TEXT NOT NULL,
+      "user_id" INTEGER NOT NULL,
+      "plan_id" INTEGER NOT NULL,
+      "plan_name_snapshot" TEXT NOT NULL,
+      "pass_type" TEXT NOT NULL,
+      "remaining_quota" INTEGER,
+      "total_quota" INTEGER,
+      "day_restriction" TEXT NOT NULL DEFAULT 'ALL',
+      "max_hours_per_day" INTEGER,
+      "max_days_per_week" INTEGER,
+      "max_hours_per_week" INTEGER,
+      "usage_logs_json" JSONB,
+      "payment_status" TEXT NOT NULL DEFAULT 'active',
+      "order_ref" TEXT,
+      "expires_at" TIMESTAMP(3),
+      "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "UserPass_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "UserPass_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+      CONSTRAINT "UserPass_plan_id_fkey" FOREIGN KEY ("plan_id") REFERENCES "PassPlan"("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "UserPass_pass_code_key" ON "UserPass"("pass_code")`
   ];
 
   for (const sql of statements) {
@@ -173,6 +337,9 @@ const ensureDatabaseSchema = async () => {
   await ensureDatabaseSchema();
   await ensureDefaultEquipmentConfigs();
   await ensureDefaultCheckoutConfigs();
+  await ensureDefaultPaymentMethods();
+  await ensureDefaultProducts();
+  await ensureDefaultPassPlans();
   startCronJobs();
 })();
 
@@ -201,6 +368,8 @@ app.use('/api/accounting', accountingRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/equipment', equipmentRoutes);
 app.use('/api/checkout', checkoutRoutes);
+app.use('/api/shop', shopRoutes);
+app.use('/api/passes', passRoutes);
 
 // Basic error handler
 app.use((err, req, res, next) => {

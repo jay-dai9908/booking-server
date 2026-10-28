@@ -1,7 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Search, XCircle, Sparkles, Clock, AlertTriangle, User, MessageCircle } from 'lucide-react';
+import { 
+  Search, 
+  XCircle, 
+  Sparkles, 
+  Clock, 
+  AlertTriangle, 
+  User, 
+  MessageCircle,
+  QrCode,
+  Ticket,
+  CheckCircle2,
+  X
+} from 'lucide-react';
 import api from '../../api/axios';
 import MemberDetailsModal from '../../components/MemberDetailsModal';
 import SendLineMessageModal from '../../components/SendLineMessageModal';
@@ -18,6 +30,12 @@ export default function MembersPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+
+  // Quick Barcode Scan & Redeem State
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanCodeInput, setScanCodeInput] = useState('');
+  const [scanResult, setScanResult] = useState(null);
+  const [isRedeemingCode, setIsRedeemingCode] = useState(false);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -68,6 +86,35 @@ export default function MembersPage() {
     }
   };
 
+  const handleQuickRedeem = async (e) => {
+    if (e) e.preventDefault();
+    const code = scanCodeInput.trim();
+    if (!code) return;
+    setIsRedeemingCode(true);
+    setScanResult(null);
+    try {
+      const res = await api.post('/passes/admin/redeem', {
+        pass_code: code,
+        deduct_amount: 1,
+        note: '櫃檯快速條碼核銷'
+      });
+      setScanResult({
+        success: true,
+        message: '卡券核銷成功！已成功現場扣抵 1 次',
+        data: res.data
+      });
+      setScanCodeInput('');
+      fetchUsers();
+    } catch (err) {
+      setScanResult({
+        success: false,
+        message: err.response?.data?.error || '核銷失敗，請檢查條碼是否正確或卡券已用罄'
+      });
+    } finally {
+      setIsRedeemingCode(false);
+    }
+  };
+
   return (
     <>
       <div className="p-4 md:p-8 space-y-6 animate-fade-in">
@@ -79,6 +126,18 @@ export default function MembersPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setShowScanModal(true);
+                setScanCodeInput('');
+                setScanResult(null);
+              }}
+              className="px-4 py-2.5 bg-[#8B5B43] hover:bg-[#724834] text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-xs transition-colors shrink-0"
+            >
+              <QrCode className="w-4 h-4" />
+              <span>條碼快速核銷</span>
+            </button>
             <div className="relative w-full md:w-72">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-gray-400" />
@@ -318,6 +377,95 @@ export default function MembersPage() {
         onClose={() => setLineMessageTargetUser(null)}
         user={lineMessageTargetUser}
       />
+
+      {/* Quick Barcode Scan & Redeem Modal */}
+      {showScanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#E8DEC8] space-y-5">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-[#8B5B43]/10 text-[#8B5B43] rounded-xl">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-[#3E332B]">條碼快速核銷卡券</h3>
+                  <p className="text-xs text-gray-500">掃描槍或手動輸入顧客卡券條碼</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowScanModal(false)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickRedeem} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-[#3E332B] mb-1.5">
+                  卡券條碼 / 代碼 (Pass Code) *
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  required
+                  value={scanCodeInput}
+                  onChange={(e) => setScanCodeInput(e.target.value)}
+                  placeholder="點此使用掃描槍刷條碼，或手動輸入"
+                  className="w-full px-4 py-3 bg-[#FAF7F2] border-2 border-[#E8DEC8] rounded-xl text-base font-mono font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none shadow-inner"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  💡 支援門市 USB/藍牙條碼掃描槍，刷碼後會自動帶入並可按 Enter 送出
+                </p>
+              </div>
+
+              {/* Result banner */}
+              {scanResult && (
+                <div
+                  className={`p-4 rounded-xl border text-xs font-bold flex items-start gap-2.5 ${
+                    scanResult.success
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                  }`}
+                >
+                  {scanResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1">
+                    <div>{scanResult.message}</div>
+                    {scanResult.data?.user && (
+                      <div className="text-emerald-900 font-normal">
+                        持有人：<span className="font-bold">{scanResult.data.user.name || '會員'}</span> ｜ 
+                        剩餘額度：<span className="font-bold">{scanResult.data.remaining_quota != null ? `${scanResult.data.remaining_quota} 次` : '暢遊無限制'}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowScanModal(false)}
+                  className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-bold rounded-xl hover:bg-gray-50"
+                >
+                  關閉
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRedeemingCode || !scanCodeInput.trim()}
+                  className="px-5 py-2 bg-[#8B5B43] hover:bg-[#724834] text-white text-sm font-bold rounded-xl shadow-xs transition-colors disabled:opacity-40"
+                >
+                  {isRedeemingCode ? '核銷中...' : '確認核銷 1 次'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         .animate-in { animation: animateIn 0.4s ease-out forwards; }

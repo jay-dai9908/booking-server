@@ -293,7 +293,8 @@ function Booking() {
     }
     try {
       const formattedDate = format(selectedDate, 'yyyy-MM-dd');
-      const sessionStarts = sortedSelectedSessions.map(s => s.start_time).join(',');
+      const targetSessions = sortedSelectedSessions.slice(0, rentalHours || sortedSelectedSessions.length);
+      const sessionStarts = targetSessions.map(s => s.start_time).join(',');
       const res = await api.get(`/equipment/availability?date=${formattedDate}&sessions=${sessionStarts}`);
       setEquipmentConfigs(res.data.equipments || (Array.isArray(res.data) ? res.data : []));
       setAllowExceedPax(!!res.data.allow_exceed_pax);
@@ -314,7 +315,7 @@ function Booking() {
 
   useEffect(() => {
     fetchEquipmentAvailability();
-  }, [selectedDate, selectedSessions]);
+  }, [selectedDate, selectedSessions, rentalHours]);
 
   // Adjust rentalHours when maxContiguous changes (defaults to full duration unless manually adjusted)
   useEffect(() => {
@@ -709,7 +710,11 @@ function Booking() {
           pax: parseInt(data.pax),
           isUnlimited: data.isUnlimited,
           equipments: data.equipments,
-          promo_code: appliedPromo?.code || null
+          promo_code: appliedPromo?.code || null,
+          date: data.date,
+          timeRange: data.timeRange,
+          sortedSessions: data.sortedSessions,
+          appliedPromo: data.appliedPromo || appliedPromo
         });
         setShowSplitModal(true);
       } else if (err.response?.status === 401) {
@@ -745,12 +750,16 @@ function Booking() {
 
       setTicketModalData({
         booking_ref: newRef,
-        date: format(selectedDate, 'yyyy-MM-dd'),
-        timeRange: timeRange,
+        date: splitBookingData.date || format(selectedDate, 'yyyy-MM-dd'),
+        timeRange: splitBookingData.timeRange || timeRange,
+        sessions: splitBookingData.sortedSessions || sortedSelectedSessions,
         pax: splitBookingData.pax,
         assigned_seats: assignedSeats,
         isUnlimited: splitBookingData.isUnlimited,
-        equipments: splitBookingData.equipments,
+        equipments: (splitBookingData.equipments || []).map(eq => ({
+          ...eq,
+          name: eq.name || equipmentConfigs.find(c => c.id === eq.equipment_id)?.name || '智能拼豆板'
+        })),
         total_amount: finalAmount,
         appliedPromo: splitBookingData.appliedPromo || appliedPromo
       });
@@ -832,10 +841,16 @@ function Booking() {
               </a>
             )}
             <button 
+              onClick={() => navigate('/shop')}
+              className="whitespace-nowrap text-xs font-semibold text-[#8B5B43] bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 sm:px-3.5 py-1.5 rounded-full transition-all duration-200 ease-in-out shrink-0 shadow-2xs flex items-center gap-1"
+            >
+              🛍️ 套裝預購
+            </button>
+            <button 
               onClick={() => navigate('/history')}
               className="whitespace-nowrap text-xs font-semibold text-[#4A3F35] bg-[#EDE6DD] hover:bg-[#DECFC1] px-2.5 sm:px-3.5 py-1.5 rounded-full transition-all duration-200 ease-in-out shrink-0 shadow-2xs"
             >
-              預約紀錄
+              我的紀錄與條碼
             </button>
             <button 
               onClick={() => { api.post('/auth/logout').then(() => window.location.href = '/') }}

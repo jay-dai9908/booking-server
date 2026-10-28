@@ -22,6 +22,8 @@ model User {
   
   reservations      Reservation[]
   login_logs        UserLoginLog[]
+  product_orders    ProductOrder[]
+  user_passes       UserPass[]
 }
 
 model UserLoginLog {
@@ -124,6 +126,12 @@ model GlobalSetting {
   line_messaging_token        String?
   line_auto_notify_booking    Boolean  @default(false)
   line_auto_notify_cancel     Boolean  @default(false)
+  shop_enabled                Boolean  @default(true)
+  shop_deposit_deadline_days  Int      @default(2)
+  shop_default_arrival_note   String?  @default("預計 11/10 ~ 11/15 到貨，商品抵達門市後將發送 LINE 訊息通知取貨")
+  shop_enable_shipping        Boolean  @default(false)
+  shop_shipping_fee           Int      @default(60)
+  official_line_url           String?  @default("https://lin.ee/vsZhRW5")
 }
 
 model BannedIP {
@@ -209,6 +217,155 @@ model AddonItem {
   is_active   Boolean  @default(true)
   sort_order  Int      @default(0)
   created_at  DateTime @default(now())
+}
+
+model PaymentMethodConfig {
+  id                   Int      @id @default(autoincrement())
+  code                 String   @unique
+  name                 String
+  method_type          String   // "POOL_ACCOUNT", "MULTI_BANK", "EWALLET", "ONSITE"
+  is_enabled           Boolean  @default(true)
+  display_instructions String?
+  bank_accounts_json   Json?
+  require_last5        Boolean  @default(true)
+  show_line_verify_btn Boolean  @default(true)
+  sort_order           Int      @default(0)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @default(now()) @updatedAt
+}
+
+model OneTimeAccountPool {
+  id                  Int       @id @default(autoincrement())
+  payment_method_code String    @default("ctbc_pool")
+  bank_code           String    @default("822")
+  bank_name           String    @default("中國信託（社群收款專屬帳號）")
+  account_number      String    @unique
+  payment_url         String?
+  note                String?
+  status              String    @default("AVAILABLE") // "AVAILABLE", "ASSIGNED", "USED", "VOID"
+  assigned_order_ref  String?
+  assigned_user_id    Int?
+  assigned_at         DateTime?
+  verified_at         DateTime?
+  created_at          DateTime  @default(now())
+}
+
+model Product {
+  id                     Int       @id @default(autoincrement())
+  code                   String    @unique
+  name                   String
+  category               String    @default("bundle") // "bundle", "beads", "tools", "boards", "cloth"
+  description            String?
+  image_url              String?
+  price                  Int
+  is_preorder            Boolean   @default(true)
+  deposit_amount         Int       @default(600)
+  estimated_arrival_text String?
+  allow_wish_input       Boolean   @default(false)
+  wish_input_placeholder String?   @default("可輸入喜歡的顏色、款式或 IP 角色（例如：吉伊卡哇、馬卡龍粉、雙針筆優先）")
+  bonus_pass_plan_code   String?
+  tier_pricing           Json?
+  visibility_status      String    @default("ACTIVE") // "ACTIVE", "SOLD_OUT", "HIDDEN"
+  sort_order             Int       @default(0)
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @default(now()) @updatedAt
+
+  items                  ProductOrderItem[]
+}
+
+model ProductOrder {
+  id                     Int       @id @default(autoincrement())
+  order_ref              String    @unique // PO-YYYYMMDD-XXXX
+  user_id                Int
+  total_amount           Int
+  shipping_fee           Int       @default(0)
+  deposit_required       Int
+  paid_amount            Int       @default(0)
+  balance_amount         Int
+  payment_method_code    String
+  selected_bank_info     String?
+  assigned_pool_account  String?
+  assigned_pool_url      String?
+  remittance_last5       String?
+  remittance_reported_at DateTime?
+  payment_deadline       DateTime?
+  payment_status         String    @default("pending_payment") // "pending_payment", "reported_pending_verify", "deposit_verified", "fully_paid", "refunded"
+  order_status           String    @default("preorder_placed") // "preorder_placed", "preparing", "arrived", "picked_up", "cancelled"
+  delivery_method        String    @default("store_pickup") // "store_pickup", "shipping"
+  shipping_info_json     Json?
+  estimated_arrival      String?
+  wish_note              String?
+  wish_reply             String?
+  customer_note          String?
+  admin_note             String?
+  arrived_notified_at    DateTime?
+  picked_up_at           DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @default(now()) @updatedAt
+
+  items                  ProductOrderItem[]
+  user                   User      @relation(fields: [user_id], references: [id])
+}
+
+model ProductOrderItem {
+  id                     Int          @id @default(autoincrement())
+  order_id               Int
+  product_id             Int?
+  product_code_snapshot  String
+  product_name_snapshot  String
+  price_snapshot         Int
+  quantity               Int
+  subtotal               Int
+  customization_note     String?
+
+  order                  ProductOrder @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product                Product?     @relation(fields: [product_id], references: [id])
+}
+
+model PassPlan {
+  id                     Int       @id @default(autoincrement())
+  code                   String    @unique
+  name                   String
+  pass_type              String    // "PUNCH_CARD", "DISCOUNT_VOUCHER", "MONTHLY_PASS", "TIME_PASS"
+  price                  Int       @default(0)
+  is_purchasable_online  Boolean   @default(false)
+  total_quota            Int?
+  valid_days             Int?
+  day_restriction        String    @default("ALL") // "ALL", "WEEKDAY_ONLY", "WEEKEND_ONLY"
+  max_hours_per_day      Int?
+  max_days_per_week      Int?
+  max_hours_per_week     Int?
+  discount_percent       Int?
+  description            String?
+  is_active              Boolean   @default(true)
+  created_at             DateTime  @default(now())
+
+  user_passes            UserPass[]
+}
+
+model UserPass {
+  id                     Int       @id @default(autoincrement())
+  pass_code              String    @unique // PASS-88392014
+  user_id                Int
+  plan_id                Int
+  plan_name_snapshot     String
+  pass_type              String
+  remaining_quota        Int?
+  total_quota            Int?
+  day_restriction        String    @default("ALL")
+  max_hours_per_day      Int?
+  max_days_per_week      Int?
+  max_hours_per_week     Int?
+  usage_logs_json        Json?
+  payment_status         String    @default("active") // "active", "pending_payment"
+  order_ref              String?
+  expires_at             DateTime?
+  status                 String    @default("ACTIVE") // "ACTIVE", "EXHAUSTED", "EXPIRED", "REVOKED"
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @default(now()) @updatedAt
+
+  user                   User      @relation(fields: [user_id], references: [id])
+  plan                   PassPlan  @relation(fields: [plan_id], references: [id])
 }
 
 

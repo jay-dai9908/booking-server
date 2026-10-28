@@ -320,11 +320,26 @@ export const updateEquipmentConfig = async (req, res) => {
       if (futureBookedEquipments.length > 0) {
         // Group by date and session to find if any exceeds newStock
         const sessionOccupancy = {};
+        const processedRefSlots = new Set();
+
         futureReservations.forEach(r => {
           const dateStr = r.session.session_date.toISOString().split('T')[0];
           const timeSlot = `${dateStr} ${r.session.start_time}`;
+          const refSlotKey = `${timeSlot}_${r.booking_ref}`;
+          if (processedRefSlots.has(refSlotKey)) return;
+
           const eq = futureBookedEquipments.find(b => b.booking_ref === r.booking_ref);
           if (eq) {
+            const sessionRangeStr = `${r.session.start_time}-${r.session.end_time}`;
+            if (Array.isArray(eq.covered_sessions) && eq.covered_sessions.length > 0) {
+              const isCovered = eq.covered_sessions.some(
+                cs => cs === sessionRangeStr || cs.startsWith(r.session.start_time)
+              );
+              if (!isCovered) return;
+            }
+
+            processedRefSlots.add(refSlotKey);
+
             if (!sessionOccupancy[timeSlot]) {
               sessionOccupancy[timeSlot] = {
                 date: dateStr,

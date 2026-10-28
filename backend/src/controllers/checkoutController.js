@@ -583,16 +583,31 @@ export const submitReservationCheckout = async (req, res) => {
       const prevPromoCode = firstRes.promo_code || '';
       const newPromoCode = promo_code ? String(promo_code).trim().toUpperCase() : null;
 
-      // Increment used_count for newly applied promo codes
-      if (newPromoCode && newPromoCode !== prevPromoCode) {
-        const codesList = newPromoCode.split(',').map(s => s.trim()).filter(Boolean);
-        const prevCodesList = prevPromoCode.split(',').map(s => s.trim()).filter(Boolean);
+      // Sync used_count for applied/removed promo codes
+      if (newPromoCode !== prevPromoCode) {
+        const codesList = newPromoCode ? newPromoCode.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const prevCodesList = prevPromoCode ? prevPromoCode.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+        // Increment newly applied codes
         for (const c of codesList) {
           if (!prevCodesList.includes(c)) {
             await tx.promoCode.updateMany({
               where: { code: c },
               data: { used_count: { increment: 1 } }
             });
+          }
+        }
+
+        // Decrement removed codes (not lower than 0)
+        for (const c of prevCodesList) {
+          if (!codesList.includes(c)) {
+            const promo = await tx.promoCode.findUnique({ where: { code: c } });
+            if (promo && promo.used_count > 0) {
+              await tx.promoCode.update({
+                where: { code: c },
+                data: { used_count: Math.max(0, promo.used_count - 1) }
+              });
+            }
           }
         }
       }

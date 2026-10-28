@@ -351,14 +351,81 @@ export const sendBookingCancellationNotification = async (reservation, user, can
     { label: '取消來源', value: cancelledBy === 'admin' ? '門市人員取消' : '顧客自行取消' }
   ];
 
+  return sendLinePushMessage(user.line_user_id, [flexMessage]);
+};
+
+/**
+ * Send preorder deposit verified notification
+ */
+export const sendProductOrderDepositVerifiedNotification = async (order, user) => {
+  if (!user?.line_user_id || user.line_user_id.startsWith('manual_')) return;
+
+  const frontendUrl = process.env.FRONTEND_URL || 'https://shiguangstudio.com';
+  const historyUrl = `${frontendUrl}/history`;
+
+  const itemsSummary = (order.items || [])
+    .map(i => `${i.product_name_snapshot} x${i.quantity}`)
+    .join('、') || '預購商品';
+
+  const infoRows = [
+    { label: '預購單號', value: order.order_ref },
+    { label: '預購品項', value: itemsSummary },
+    { label: '已收訂金', value: `NT$ ${(order.paid_amount || 0).toLocaleString()}`, color: '#2E7D32' },
+    { label: '取貨待付尾款', value: `NT$ ${(order.balance_amount || 0).toLocaleString()}`, color: '#8B5B43' }
+  ];
+
+  if (order.estimated_arrival) {
+    infoRows.push({ label: '預計到貨', value: order.estimated_arrival });
+  }
+
   const flexMessage = buildBrandFlexMessage({
-    title: '預約已取消通知',
-    subtitle: '您的預約時段已成功取消釋出',
-    bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您原定於【拾光製所】的預約體驗已取消。若需重新預約其他時段，歡迎隨時點擊下方按鈕線上挑選！`,
+    title: '預購訂金收款成功',
+    subtitle: '您的訂金已成功對帳完成！',
+    bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您於【拾光製所】的預購訂單訂金款項已對帳完成！商品抵達門市時我們將第一時間透過 LINE 通知您前來取貨。`,
     infoRows,
-    buttonLabel: '前往重新線上預約',
-    buttonUrl: bookingUrl,
-    tagText: '⚠️ 預約取消'
+    buttonLabel: '查看我的預購訂單',
+    buttonUrl: historyUrl,
+    tagText: '🎉 款項對帳完成'
+  });
+
+  return sendLinePushMessage(user.line_user_id, [flexMessage]);
+};
+
+/**
+ * Send product arrival notification
+ */
+export const sendProductArrivalNotification = async (order, user) => {
+  if (!user?.line_user_id || user.line_user_id.startsWith('manual_')) return;
+
+  const frontendUrl = process.env.FRONTEND_URL || 'https://shiguangstudio.com';
+  const historyUrl = `${frontendUrl}/history`;
+
+  const itemsSummary = (order.items || [])
+    .map(i => `${i.product_name_snapshot} x${i.quantity}`)
+    .join('、') || '預購商品';
+
+  const infoRows = [
+    { label: '預購單號', value: order.order_ref },
+    { label: '到貨品項', value: itemsSummary },
+    { label: '取貨地點', value: '拾光製所 門市櫃檯' }
+  ];
+
+  if (order.balance_amount > 0) {
+    infoRows.push({
+      label: '取貨待付尾款',
+      value: `NT$ ${order.balance_amount.toLocaleString()}`,
+      color: '#8B5B43'
+    });
+  }
+
+  const flexMessage = buildBrandFlexMessage({
+    title: '商品已到貨取件通知',
+    subtitle: '您預購的商品已送達門市囉！',
+    bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您預購的拼豆商品已備妥抵達門市！歡迎於營業時間內攜帶手機前來門市櫃檯出示單號領取作品與套裝。`,
+    infoRows,
+    buttonLabel: '查看預購單號與取貨詳情',
+    buttonUrl: historyUrl,
+    tagText: '🎁 到貨取件通知'
   });
 
   return sendLinePushMessage(user.line_user_id, [flexMessage]);

@@ -56,6 +56,7 @@ export default function SettingsPage() {
   const [equipmentDiscount2Enabled, setEquipmentDiscount2Enabled] = useState(false);
   const [equipmentDiscount2BuyHours, setEquipmentDiscount2BuyHours] = useState(8);
   const [equipmentDiscount2FreeHours, setEquipmentDiscount2FreeHours] = useState(4);
+  const [equipmentDiscountStackable, setEquipmentDiscountStackable] = useState(true);
 
   // 5. LINE Messaging API & Push Notifications
   const [hasLineMessagingToken, setHasLineMessagingToken] = useState(false);
@@ -102,6 +103,7 @@ export default function SettingsPage() {
       setEquipmentDiscount2Enabled(!!d.equipment_discount2_enabled);
       setEquipmentDiscount2BuyHours(d.equipment_discount2_buy_hours ?? 8);
       setEquipmentDiscount2FreeHours(d.equipment_discount2_free_hours ?? 4);
+      setEquipmentDiscountStackable(d.equipment_discount_stackable !== false);
 
       setHasLineMessagingToken(!!d.has_line_messaging_token);
       setLineMessagingTokenMasked(d.line_messaging_token_masked || '');
@@ -140,6 +142,7 @@ export default function SettingsPage() {
         equipment_discount2_enabled: equipmentDiscount2Enabled,
         equipment_discount2_buy_hours: Math.max(1, parseInt(equipmentDiscount2BuyHours, 10) || 8),
         equipment_discount2_free_hours: Math.max(1, parseInt(equipmentDiscount2FreeHours, 10) || 4),
+        equipment_discount_stackable: equipmentDiscountStackable,
         line_auto_notify_booking: lineAutoNotifyBooking,
         line_auto_notify_cancel: lineAutoNotifyCancel,
         ...overridePatch
@@ -656,6 +659,18 @@ export default function SettingsPage() {
                       className="w-11 px-1.5 py-0.5 text-center border border-[#E8DEC8] rounded"
                     />
                     <span>hr</span>
+                  </div>
+
+                  <div className="sm:col-span-2 bg-white p-2.5 rounded-lg border border-[#E8DEC8] flex items-center justify-between text-xs font-bold text-[#3E332B]">
+                    <span>允許買送優惠連續累贈（如租 8 小時套用 2 次買 3 送 1）</span>
+                    <input
+                      type="checkbox"
+                      checked={equipmentDiscountStackable}
+                      onChange={e =>
+                        handleQuickToggle('equipment_discount_stackable', e.target.checked, setEquipmentDiscountStackable)
+                      }
+                      className="w-4 h-4 accent-[#8B5B43]"
+                    />
                   </div>
                 </div>
               )}

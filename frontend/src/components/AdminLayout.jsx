@@ -14,7 +14,8 @@ import {
   User,
   Cpu,
   Ticket,
-  Settings
+  Settings,
+  ShoppingBag
 } from 'lucide-react';
 import api from '../api/axios';
 
@@ -52,6 +53,7 @@ export default function AdminLayout() {
   const allNavLinks = [
     { to: '/admin/sessions', perm: 'sessions', icon: <CalendarRange className="w-5 h-5" />, label: '營業時段設定' },
     { to: '/admin/reservations', perm: 'reservations', icon: <Users className="w-5 h-5" />, label: '預約訂單總覽' },
+    { to: '/admin/shop', perm: 'shop', fallbackPerm: 'reservations', icon: <ShoppingBag className="w-5 h-5" />, label: '商品預購與對帳' },
     { to: '/admin/equipment', perm: 'equipment', fallbackPerm: 'sessions', icon: <Cpu className="w-5 h-5" />, label: '智能板庫存管理' },
     { to: '/admin/coupons', perm: 'coupons', fallbackPerm: 'accounting', icon: <Ticket className="w-5 h-5" />, label: '卡券與優惠管理' },
     { to: '/admin/members', perm: 'members', icon: <UserCog className="w-5 h-5" />, label: '會員管理' },

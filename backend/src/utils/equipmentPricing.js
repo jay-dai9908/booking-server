@@ -44,6 +44,30 @@ export const calculateEquipmentChargeableHours = (
     return hours;
   }
 
+  const isStackable = typeof discountConfig === 'object' && discountConfig !== null
+    ? discountConfig.stackable !== false
+    : legacyStackable !== false;
+
+  // Non-stackable mode: A discount package can be applied at most once per rental
+  if (!isStackable) {
+    let best = hours;
+    if (t1Enabled) {
+      if (hours >= t1Buy && hours < t1Buy + t1Free) {
+        best = Math.min(best, t1Buy);
+      } else if (hours >= t1Buy + t1Free) {
+        best = Math.min(best, hours - t1Free);
+      }
+    }
+    if (t2Enabled) {
+      if (hours >= t2Buy && hours < t2Buy + t2Free) {
+        best = Math.min(best, t2Buy);
+      } else if (hours >= t2Buy + t2Free) {
+        best = Math.min(best, hours - t2Free);
+      }
+    }
+    return Math.max(0, best);
+  }
+
   // Dynamic Programming table: cost[h] = minimum chargeable hours to cover h hours
   // Each tier package of (buy + free) hours charges 'buy' hours.
   // Within [buy, buy + free], a customer can cap at 'buy' hours (package ceiling optimization).

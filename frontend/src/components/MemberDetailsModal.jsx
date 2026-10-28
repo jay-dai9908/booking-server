@@ -12,7 +12,13 @@ import {
   Globe,
   Monitor,
   User,
-  MessageCircle
+  MessageCircle,
+  Ticket,
+  Plus,
+  Copy,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
@@ -25,7 +31,26 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState(null);
-  const [activeTab, setActiveTab] = useState('reservations'); // 'reservations' | 'login_logs'
+  const [activeTab, setActiveTab] = useState('reservations'); // 'reservations' | 'login_logs' | 'passes'
+
+  // Pass Management State
+  const [userPasses, setUserPasses] = useState([]);
+  const [isPassesLoading, setIsPassesLoading] = useState(false);
+  const [plansList, setPlansList] = useState([]);
+  const [showGrantModal, setShowGrantModal] = useState(false);
+  const [grantForm, setGrantForm] = useState({
+    plan_id: '',
+    custom_quota: '',
+    valid_days: '90',
+    day_restriction: 'ALL',
+    max_hours_per_day: '',
+    max_days_per_week: '',
+    note: ''
+  });
+  const [isGranting, setIsGranting] = useState(false);
+  const [redeemingPassId, setRedeemingPassId] = useState(null);
+  const [expandedLogPassId, setExpandedLogPassId] = useState(null);
+  const [copiedCode, setCopiedCode] = useState(null);
 
   // Inline editing state for name & phone
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -47,6 +72,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
       refreshMemberDetails(member.id);
       fetchMemberReservations(member.id);
       fetchMemberLoginLogs(member.id);
+      fetchUserPasses(member.id);
+      fetchPassPlans();
     }
   }, [member?.id]);
 
@@ -90,6 +117,90 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
     } finally {
       setIsLogsLoading(false);
     }
+  };
+
+  const fetchUserPasses = async (userId) => {
+    const targetId = userId || localMember?.id;
+    if (!targetId) return;
+    setIsPassesLoading(true);
+    try {
+      const res = await api.get(`/passes/admin/user/${targetId}`);
+      setUserPasses(res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch member passes:', err);
+    } finally {
+      setIsPassesLoading(false);
+    }
+  };
+
+  const fetchPassPlans = async () => {
+    try {
+      const res = await api.get('/passes/plans');
+      setPlansList(res.data || []);
+      if (res.data?.length > 0) {
+        const first = res.data[0];
+        setGrantForm(prev => ({
+          ...prev,
+          plan_id: String(first.id),
+          custom_quota: first.total_quota != null ? String(first.total_quota) : '',
+          valid_days: first.valid_days != null ? String(first.valid_days) : '90',
+          day_restriction: first.day_restriction || 'ALL'
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch pass plans:', err);
+    }
+  };
+
+  const handleGrantPass = async (e) => {
+    e.preventDefault();
+    if (!localMember?.id) return;
+    setIsGranting(true);
+    try {
+      await api.post('/passes/admin/grant', {
+        user_id: localMember.id,
+        plan_id: grantForm.plan_id ? parseInt(grantForm.plan_id, 10) : undefined,
+        custom_quota: grantForm.custom_quota ? parseInt(grantForm.custom_quota, 10) : null,
+        valid_days: grantForm.valid_days ? parseInt(grantForm.valid_days, 10) : null,
+        day_restriction: grantForm.day_restriction || 'ALL',
+        max_hours_per_day: grantForm.max_hours_per_day ? parseInt(grantForm.max_hours_per_day, 10) : null,
+        max_days_per_week: grantForm.max_days_per_week ? parseInt(grantForm.max_days_per_week, 10) : null,
+        note: grantForm.note?.trim() || ''
+      });
+      alert('已成功發放卡券！');
+      setShowGrantModal(false);
+      fetchUserPasses(localMember.id);
+    } catch (err) {
+      alert(err.response?.data?.error || '發放失敗');
+    } finally {
+      setIsGranting(false);
+    }
+  };
+
+  const handleRedeemPass = async (pass) => {
+    if (!window.confirm(`確定要現場核銷此卡券「${pass.plan?.name || pass.pass_code}」1 次嗎？`)) {
+      return;
+    }
+    setRedeemingPassId(pass.id);
+    try {
+      const res = await api.post('/passes/admin/redeem', {
+        user_pass_id: pass.id,
+        deduct_amount: 1,
+        note: '後台會員詳情手動核銷'
+      });
+      alert(`核銷成功！${res.data?.remaining_quota !== null ? `剩餘次數：${res.data.remaining_quota} 次` : ''}`);
+      fetchUserPasses(localMember.id);
+    } catch (err) {
+      alert(err.response?.data?.error || '核銷失敗');
+    } finally {
+      setRedeemingPassId(null);
+    }
+  };
+
+  const handleCopyCode = (code) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
   };
 
   const handleUpdateMember = async (id, data) => {
@@ -463,6 +574,18 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                   <Smartphone className="w-4 h-4" />
                   近 2 個月登入與裝置紀錄 ({loginLogs.length})
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('passes')}
+                  className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                    activeTab === 'passes'
+                      ? 'border-[#8B5B43] text-[#8B5B43]'
+                      : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
+                  }`}
+                >
+                  <Ticket className="w-4 h-4" />
+                  卡券與集次卡 ({userPasses.length})
+                </button>
               </div>
 
               {/* Tab 1: Reservations */}
@@ -542,6 +665,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                 )
               )}
 
+
+
               {/* Tab 2: 2-Month Login & Device Logs */}
               {activeTab === 'login_logs' && (
                 isLogsLoading ? (
@@ -611,10 +736,361 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                   </div>
                 )
               )}
+
+              {/* Tab 3: Member Passes & Punch Cards */}
+              {activeTab === 'passes' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8]">
+                    <div>
+                      <h4 className="text-sm font-bold text-[#3E332B] flex items-center gap-2">
+                        <Ticket className="w-4 h-4 text-[#8B5B43]" />
+                        名下卡券與集次卡清單
+                      </h4>
+                      <p className="text-xs text-[#8C8279] mt-0.5">
+                        支援燙布/熨燙計次卡、折扣券、包月暢遊卡現場扣抵核銷與發放
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowGrantModal(true)}
+                      className="px-3.5 py-2 bg-[#8B5B43] hover:bg-[#724834] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      發放卡券給此會員
+                    </button>
+                  </div>
+
+                  {isPassesLoading ? (
+                    <div className="py-8 flex justify-center">
+                      <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-800 rounded-full animate-spin" />
+                    </div>
+                  ) : userPasses.length === 0 ? (
+                    <div className="text-center py-12 text-[#8C8279] bg-[#FAF7F2] rounded-2xl border border-dashed border-[#E8DEC8] space-y-3">
+                      <Ticket className="w-10 h-10 mx-auto text-[#8C8279]/50" />
+                      <p className="text-sm font-bold">此會員名下尚無任何卡券或集次卡</p>
+                      <button
+                        type="button"
+                        onClick={() => setShowGrantModal(true)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#8B5B43] text-white text-xs font-bold rounded-xl shadow-xs hover:bg-[#724834]"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        立即手動發放卡券
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {userPasses.map((p) => {
+                        const isExpanded = expandedLogPassId === p.id;
+                        const logs = Array.isArray(p.usage_logs_json) ? p.usage_logs_json : [];
+                        const isExpired = p.expires_at && new Date() > new Date(p.expires_at);
+                        const isExhausted = p.remaining_quota !== null && p.remaining_quota <= 0;
+                        const isActive = p.status === 'ACTIVE' && !isExpired && !isExhausted;
+
+                        return (
+                          <div
+                            key={p.id}
+                            className={`p-4 rounded-2xl border transition-all ${
+                              isActive
+                                ? 'bg-white border-[#E8DEC8] hover:border-[#8B5B43] shadow-2xs'
+                                : 'bg-[#FAF7F2]/60 border-gray-200 opacity-80'
+                            }`}
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="space-y-1.5 min-w-0">
+                                <div className="flex items-center flex-wrap gap-2">
+                                  <span className="text-base font-bold text-[#3E332B]">
+                                    {p.plan?.name || '專屬集次/暢遊卡'}
+                                  </span>
+                                  {isActive ? (
+                                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+                                      有效中
+                                    </span>
+                                  ) : isExpired ? (
+                                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-bold">
+                                      已逾期
+                                    </span>
+                                  ) : isExhausted ? (
+                                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200 font-bold">
+                                      已用罄
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600 border border-zinc-200 font-bold">
+                                      {p.status}
+                                    </span>
+                                  )}
+                                  {p.day_restriction === 'WEEKDAY_ONLY' && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-bold">
+                                      僅限平日
+                                    </span>
+                                  )}
+                                  {p.day_restriction === 'WEEKEND_ONLY' && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 font-bold">
+                                      僅限假日
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2 text-xs text-[#6D5D52]">
+                                  <span className="font-mono bg-[#FAF7F2] px-2 py-0.5 rounded border border-[#E8DEC8] font-bold">
+                                    卡號: {p.pass_code}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyCode(p.pass_code)}
+                                    className="p-1 text-gray-400 hover:text-[#8B5B43] transition-colors"
+                                    title="複製卡號"
+                                  >
+                                    {copiedCode === p.pass_code ? (
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    ) : (
+                                      <Copy className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                  <span className="text-gray-300">|</span>
+                                  <span>
+                                    效期：{p.expires_at ? format(new Date(p.expires_at), 'yyyy/MM/dd') : '永久有效'}
+                                  </span>
+                                </div>
+
+                                {p.notes && (
+                                  <p className="text-xs text-[#8C8279] italic">
+                                    備註：{p.notes}
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                                <div className="text-right">
+                                  <div className="text-xs text-[#8C8279] font-medium">剩餘額度</div>
+                                  <div className="text-lg font-black text-[#8B5B43]">
+                                    {p.remaining_quota !== null ? (
+                                      <span>{p.remaining_quota} <span className="text-xs font-normal text-gray-500">/ {p.initial_quota || p.remaining_quota} 次</span></span>
+                                    ) : (
+                                      <span className="text-emerald-700 text-sm">暢遊無限制</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRedeemPass(p)}
+                                  disabled={!isActive || redeemingPassId === p.id}
+                                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-xs flex items-center gap-1.5"
+                                >
+                                  {redeemingPassId === p.id ? '核銷中...' : '現場扣抵 1 次'}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedLogPassId(isExpanded ? null : p.id)}
+                                  className="p-2 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+                                  title="核銷明細紀錄"
+                                >
+                                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Collapsible usage logs */}
+                            {isExpanded && (
+                              <div className="mt-3 pt-3 border-t border-[#E8DEC8]/60">
+                                <div className="text-xs font-bold text-[#6D5D52] mb-2 flex items-center justify-between">
+                                  <span>📜 使用與核銷歷史明細 ({logs.length} 筆)</span>
+                                </div>
+                                {logs.length === 0 ? (
+                                  <p className="text-xs text-gray-400 py-1">尚無任何核銷使用紀錄</p>
+                                ) : (
+                                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                                    {logs.map((log, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="text-xs bg-[#FAF7F2] p-2 rounded-lg border border-[#E8DEC8] flex items-center justify-between font-mono"
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-gray-500">{log.date}</span>
+                                          <span className="font-bold text-gray-800">
+                                            扣抵 {log.deducted || 1} 次
+                                          </span>
+                                          {log.note && (
+                                            <span className="text-gray-600">({log.note})</span>
+                                          )}
+                                        </div>
+                                        <span className="text-gray-400 text-[11px]">經辦：{log.staff || '門市'}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Grant Pass Modal */}
+      {showGrantModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-[#E8DEC8] space-y-5">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-4">
+              <div>
+                <h3 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
+                  <Ticket className="w-5 h-5 text-[#8B5B43]" />
+                  發放卡券 / 集次卡
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  發放對象：{localMember.name} ({localMember.phone || '無電話'})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGrantModal(false)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleGrantPass} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">選擇方案 *</label>
+                <select
+                  value={grantForm.plan_id}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    const found = plansList.find(p => String(p.id) === selectedId);
+                    setGrantForm(prev => ({
+                      ...prev,
+                      plan_id: selectedId,
+                      custom_quota: found?.total_quota != null ? String(found.total_quota) : '',
+                      valid_days: found?.valid_days != null ? String(found.valid_days) : '90',
+                      day_restriction: found?.day_restriction || 'ALL'
+                    }));
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                >
+                  <option value="">-- 自訂卡券 (無方案綁定) --</option>
+                  {plansList.map(plan => (
+                    <option key={plan.id} value={plan.id}>
+                      {plan.name} (NT$ {plan.price || 0} / {plan.total_quota != null ? `${plan.total_quota}次` : '無限次'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    總次數 / 額度
+                    <span className="text-[10px] text-gray-400 font-normal ml-1">(留空為暢遊無限制)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={grantForm.custom_quota}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, custom_quota: e.target.value }))}
+                    placeholder="例: 5"
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    有效天數
+                    <span className="text-[10px] text-gray-400 font-normal ml-1">(自今日起算)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={grantForm.valid_days}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, valid_days: e.target.value }))}
+                    placeholder="例: 90"
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">適用平假日限制</label>
+                <select
+                  value={grantForm.day_restriction}
+                  onChange={(e) => setGrantForm(prev => ({ ...prev, day_restriction: e.target.value }))}
+                  className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                >
+                  <option value="ALL">全時段通用 (平日與假日皆可)</option>
+                  <option value="WEEKDAY_ONLY">僅限週一至週五 (平日限定)</option>
+                  <option value="WEEKEND_ONLY">僅限週六週日 (假日限定)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    每日時數上限
+                    <span className="text-[10px] text-gray-400 font-normal ml-1">(可留空)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={grantForm.max_hours_per_day}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, max_hours_per_day: e.target.value }))}
+                    placeholder="不限時數"
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    每週到店天數
+                    <span className="text-[10px] text-gray-400 font-normal ml-1">(可留空)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="7"
+                    value={grantForm.max_days_per_week}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, max_days_per_week: e.target.value }))}
+                    placeholder="不限天數"
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">管理員備註說明</label>
+                <input
+                  type="text"
+                  value={grantForm.note}
+                  onChange={(e) => setGrantForm(prev => ({ ...prev, note: e.target.value }))}
+                  placeholder="例: 會員生日贈禮、現場購買5次燙布卡"
+                  className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setShowGrantModal(false)}
+                  className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-bold rounded-xl hover:bg-gray-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={isGranting}
+                  className="px-5 py-2 bg-[#8B5B43] hover:bg-[#724834] text-white text-sm font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50"
+                >
+                  {isGranting ? '發放中...' : '確認發放卡券'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Reservation Details Modal (Stacked on top) */}
       <ReservationDetailsModal 

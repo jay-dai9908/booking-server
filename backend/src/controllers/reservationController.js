@@ -777,32 +777,23 @@ export const getAdminReservationDetails = async (req, res) => {
     const eqRecords = await prisma.bookingEquipment.findMany({ where: { booking_ref } });
     const eqTotal = eqRecords.reduce((sum, e) => sum + e.subtotal_price, 0);
 
-    let pricingInfo = null;
-    await prisma.$transaction(async (tx) => {
-      const sessionDate = firstRes.session.session_date;
-      pricingInfo = await getEffectiveDailyRates(tx, sessionDate);
+    // Recalculate reservation total with centralized logic (equipment, addons, promo discount)
+    await recalculateReservationTotal(prisma, booking_ref);
 
-      // Auto-recalculate if unpaid and not manually overridden
-      if (!firstRes.is_paid && !firstRes.is_amount_manual) {
-        const pax = firstRes.pax;
-        const is_unlimited = firstRes.is_unlimited;
-        const baseAmount = await calculateTotalAmount(tx, sessionDate, pax, reservations.length, is_unlimited);
-        const discountAmt = firstRes.discount_amount || 0;
-        const addonsAmt = firstRes.addons_amount || 0;
-        const totalAmount = Math.max(0, baseAmount + eqTotal + addonsAmt - discountAmt);
-        
-        if (totalAmount !== firstRes.total_amount) {
-          await tx.reservation.updateMany({
-            where: { booking_ref },
-            data: { total_amount: totalAmount }
-          });
-          reservations.forEach(r => r.total_amount = totalAmount);
-        }
-      }
+    const refreshedReservations = await prisma.reservation.findMany({
+      where: { booking_ref },
+      include: {
+        session: true,
+        user: { select: { id: true, name: true, phone: true, line_user_id: true, line_display_name: true, line_picture_url: true } }
+      },
+      orderBy: { created_at: 'desc' }
     });
 
+    const sessionDate = refreshedReservations[0].session.session_date;
+    const pricingInfo = await getEffectiveDailyRates(prisma, sessionDate);
+
     const equipmentsMap = { [booking_ref]: eqRecords };
-    const grouped = groupReservations(reservations, equipmentsMap);
+    const grouped = groupReservations(refreshedReservations, equipmentsMap);
     const result = {
       ...grouped[0],
       pricing_info: pricingInfo
@@ -810,7 +801,7 @@ export const getAdminReservationDetails = async (req, res) => {
 
     // If attendance was desynced across session segments in database, auto-heal them
     if (result && result.attendance) {
-      const needsSync = reservations.some(r => r.attendance !== result.attendance || (result.checked_in_at && !r.checked_in_at));
+      const needsSync = refreshedReservations.some(r => r.attendance !== result.attendance || (result.checked_in_at && !r.checked_in_at));
       if (needsSync) {
         prisma.reservation.updateMany({
           where: { booking_ref },
@@ -1470,7 +1461,7 @@ export const adminCreateReservation = async (req, res) => {
         };
 
         const totalHours = session_ids.length;
-        const coveredSessionsStrings = requestedSessions.map(s => `${s.start_time}-${s.end_time}`);
+        const sortedRequestedSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
 
         for (const eq of equipments) {
           const qty = parseInt(eq.quantity, 10) || 0;
@@ -1491,6 +1482,10 @@ export const adminCreateReservation = async (req, res) => {
             : (config.hourly_rate * chargeableHours);
           const subtotal = singlePrice * qty;
           totalEquipmentFee += subtotal;
+
+          const coveredSessionsStrings = sortedRequestedSessions
+            .slice(0, rentalHours)
+            .map(s => `${s.start_time}-${s.end_time}`);
 
           newEquipmentRecords.push({
             booking_ref,

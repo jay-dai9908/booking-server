@@ -14,6 +14,11 @@ api.interceptors.request.use((config) => {
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const freshLogin = sessionStorage.getItem('shiguang_line_fresh_login');
+    if (freshLogin === '1' && config.url && config.url.includes('/auth/me')) {
+      config.params = config.params || {};
+      config.params.fresh_session = '1';
+    }
   } catch (e) {}
   return config;
 });
