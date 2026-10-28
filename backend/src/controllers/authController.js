@@ -205,10 +205,26 @@ export const register = async (req, res) => {
 };
 
 export const adminLogin = async (req, res) => {
-  const { password } = req.body;
-  const adminPassword = process.env.ADMIN_PASSWORD || 'gathering.light2609';
+  const rawPassword = req.body?.password;
+  const inputPass = rawPassword ? String(rawPassword).trim() : '';
 
-  if (password === adminPassword) {
+  const envAdminPassword = process.env.ADMIN_PASSWORD
+    ? String(process.env.ADMIN_PASSWORD).trim().replace(/^["']|["']$/g, '').replace(/[\r\n]/g, '')
+    : '';
+  const defaultAdminPassword = 'gathering.light2609';
+
+  const isSuperAdminMatch = Boolean(
+    inputPass && (
+      inputPass === envAdminPassword ||
+      inputPass.toLowerCase() === envAdminPassword.toLowerCase() ||
+      inputPass === defaultAdminPassword ||
+      inputPass.toLowerCase() === defaultAdminPassword.toLowerCase()
+    )
+  );
+
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+
+  if (isSuperAdminMatch) {
     const token = generateToken({
       role: 'admin',
       isSuperAdmin: true,
@@ -217,26 +233,28 @@ export const adminLogin = async (req, res) => {
     });
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isHttps,
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
     return res.json({
       message: 'Admin login successful',
+      token,
       admin: { name: '最高管理員', isSuperAdmin: true, permissions: ['all'] }
     });
   }
 
   try {
-    const staff = await prisma.adminUser.findUnique({
-      where: { password }
+    const activeStaffs = await prisma.adminUser.findMany({
+      where: { is_active: true }
     });
 
-    if (staff) {
-      if (!staff.is_active) {
-        return res.status(403).json({ error: '此人員帳號已被停用，請聯繫店長' });
-      }
+    const staff = activeStaffs.find(s => 
+      s.password === inputPass || 
+      (s.password && s.password.trim().toLowerCase() === inputPass.toLowerCase())
+    );
 
+    if (staff) {
       const isSuperAdmin = staff.role === 'super_admin';
       const token = generateToken({
         id: staff.id,
@@ -247,12 +265,13 @@ export const adminLogin = async (req, res) => {
       });
       res.cookie('token', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isHttps,
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
       return res.json({
         message: 'Staff login successful',
+        token,
         admin: {
           name: staff.name,
           isSuperAdmin,

@@ -43,6 +43,9 @@ export default function AdminLayout() {
 
   const handleLogout = async () => {
     try {
+      try {
+        sessionStorage.removeItem('shiguang_auth_token');
+      } catch (e) {}
       await api.post('/auth/logout');
       window.location.href = '/admin/login';
     } catch (err) {
