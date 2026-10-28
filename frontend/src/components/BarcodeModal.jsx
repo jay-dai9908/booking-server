@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, QrCode, BarChart3, Copy, Check, Sparkles, ShieldCheck } from 'lucide-react';
-import { generateCode128Svg, generateQrSvg } from '../utils/barcodeHelper';
+import { X, Copy, Check, ShieldCheck, ScanLine } from 'lucide-react';
+import { generateCode128Svg } from '../utils/barcodeHelper';
 
 export default function BarcodeModal({
   isOpen,
@@ -11,7 +11,6 @@ export default function BarcodeModal({
   details = []
 }) {
   const [copied, setCopied] = useState(false);
-  const [viewMode, setViewMode] = useState('both'); // 'both' | 'barcode' | 'qr'
 
   if (!isOpen || !code) return null;
 
@@ -21,8 +20,7 @@ export default function BarcodeModal({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const barcodeSvg = generateCode128Svg(code, 68);
-  const qrSvg = generateQrSvg(code, 180);
+  const barcodeSvg = generateCode128Svg(code, 80);
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-fade-in">
@@ -31,7 +29,7 @@ export default function BarcodeModal({
         <div className="bg-[#3E332B] text-white px-5 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-[#8B5B43] flex items-center justify-center text-white">
-              <Sparkles className="w-4 h-4" />
+              <ScanLine className="w-4 h-4" />
             </div>
             <div>
               <h3 className="font-extrabold text-base tracking-tight">{title}</h3>
@@ -50,60 +48,17 @@ export default function BarcodeModal({
         {/* High contrast barcode card */}
         <div className="p-6 bg-linear-to-b from-white to-[#FAF7F2] flex flex-col items-center">
           <div className="w-full bg-white p-5 rounded-2xl border-2 border-[#1A1512] shadow-md flex flex-col items-center text-center">
-            {/* View Mode Switcher */}
-            <div className="flex items-center gap-1.5 p-1 bg-[#F5F0EB] rounded-xl mb-4 text-xs font-bold text-[#6D5D52]">
-              <button
-                type="button"
-                onClick={() => setViewMode('both')}
-                className={`px-2.5 py-1 rounded-lg transition ${
-                  viewMode === 'both' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
-                }`}
-              >
-                全部顯示
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('barcode')}
-                className={`px-2.5 py-1 rounded-lg transition ${
-                  viewMode === 'barcode' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
-                }`}
-              >
-                一維條碼
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('qr')}
-                className={`px-2.5 py-1 rounded-lg transition ${
-                  viewMode === 'qr' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
-                }`}
-              >
-                QR Code
-              </button>
+            {/* Standard Code-128B Barcode */}
+            <div className="w-full max-w-[360px] px-2 py-3 bg-white rounded-xl">
+              <div
+                dangerouslySetInnerHTML={{ __html: barcodeSvg }}
+                className="w-full flex justify-center"
+              />
             </div>
 
-            {/* Barcode display */}
-            {(viewMode === 'both' || viewMode === 'barcode') && (
-              <div className="w-full max-w-[320px] px-2 py-2 bg-white rounded-lg">
-                <div
-                  dangerouslySetInnerHTML={{ __html: barcodeSvg }}
-                  className="w-full flex justify-center"
-                />
-              </div>
-            )}
-
-            {/* QR Code display */}
-            {(viewMode === 'both' || viewMode === 'qr') && (
-              <div className="my-2 p-2 bg-white rounded-xl border border-slate-200">
-                <div
-                  dangerouslySetInnerHTML={{ __html: qrSvg }}
-                  className="w-36 h-36 flex justify-center items-center"
-                />
-              </div>
-            )}
-
             {/* Code Text with Copy */}
-            <div className="mt-2 flex items-center gap-2">
-              <span className="font-mono font-black text-lg tracking-widest text-[#1A1512]">
+            <div className="mt-3 flex items-center gap-2">
+              <span className="font-mono font-black text-lg sm:text-xl tracking-widest text-[#1A1512]">
                 {code}
               </span>
               <button
@@ -114,6 +69,9 @@ export default function BarcodeModal({
               >
                 {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
               </button>
+            </div>
+            <div className="text-[11px] text-[#8C8279] mt-0.5 font-medium">
+              標準 Code-128B 條碼 · 支援門市雷射與光學掃描槍
             </div>
           </div>
 

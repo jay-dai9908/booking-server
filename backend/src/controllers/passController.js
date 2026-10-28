@@ -175,7 +175,66 @@ export const redeemUserPass = async (req, res) => {
     }
 
     if (!userPass) {
-      return res.status(404).json({ error: '找不到該張卡券或條碼無效' });
+      // Dual-use scanner check: if pass_code matches a reservation booking_ref or short BK-XXXX-XXXX
+      if (pass_code) {
+        const rawCode = String(pass_code).trim();
+        let reservation = await prisma.reservation.findFirst({
+          where: {
+            booking_ref: rawCode,
+            status: { not: 'cancelled' }
+          },
+          include: { user: true, session: true }
+        });
+
+        // Match BK-XXXX-XXXX short code if needed
+        if (!reservation && rawCode.startsWith('BK-')) {
+          const parts = rawCode.replace('BK-', '').split('-');
+          if (parts.length === 2) {
+            reservation = await prisma.reservation.findFirst({
+              where: {
+                booking_ref: {
+                  startsWith: parts[0],
+                  endsWith: parts[1]
+                },
+                status: { not: 'cancelled' }
+              },
+              include: { user: true, session: true }
+            });
+          }
+        }
+
+        if (reservation) {
+          const alreadyCheckedIn = reservation.attendance === 'checked_in';
+
+          await prisma.reservation.updateMany({
+            where: { booking_ref: reservation.booking_ref },
+            data: {
+              attendance: 'checked_in',
+              checked_in_at: new Date()
+            }
+          });
+
+          return res.json({
+            message: alreadyCheckedIn
+              ? `✅ 顧客 ${reservation.user?.name || ''} 原已於稍早報到，再次確認報到成功！`
+              : `✅ 預約報到核銷成功！顧客 ${reservation.user?.name || ''} 已完成現場報到。`,
+            reservation_checked_in: true,
+            reservation: {
+              booking_ref: reservation.booking_ref,
+              user_name: reservation.user?.name,
+              session_date: reservation.session?.session_date,
+              time: `${reservation.session?.start_time} - ${reservation.session?.end_time}`,
+              pax: reservation.pax
+            },
+            pass: {
+              user: reservation.user,
+              remaining_quota: null
+            }
+          });
+        }
+      }
+
+      return res.status(404).json({ error: '找不到該張卡券或預約單號，請確認條碼是否正確' });
     }
 
     if (userPass.status !== 'ACTIVE') {

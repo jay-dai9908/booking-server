@@ -188,7 +188,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
         deduct_amount: 1,
         note: '後台會員詳情手動核銷'
       });
-      alert(`核銷成功！${res.data?.remaining_quota !== null ? `剩餘次數：${res.data.remaining_quota} 次` : ''}`);
+      const remQuota = res.data?.pass?.remaining_quota ?? res.data?.remaining_quota;
+      alert(`核銷成功！${remQuota !== null && remQuota !== undefined ? `剩餘次數：${remQuota} 次` : ''}`);
       fetchUserPasses(localMember.id);
     } catch (err) {
       alert(err.response?.data?.error || '核銷失敗');
@@ -864,7 +865,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                                   <div className="text-xs text-[#8C8279] font-medium">剩餘額度</div>
                                   <div className="text-lg font-black text-[#8B5B43]">
                                     {p.remaining_quota !== null ? (
-                                      <span>{p.remaining_quota} <span className="text-xs font-normal text-gray-500">/ {p.initial_quota || p.remaining_quota} 次</span></span>
+                                      <span>{p.remaining_quota} <span className="text-xs font-normal text-gray-500">/ {p.total_quota ?? p.remaining_quota} 次</span></span>
                                     ) : (
                                       <span className="text-emerald-700 text-sm">暢遊無限制</span>
                                     )}

@@ -1,5 +1,6 @@
 /**
- * Pure JavaScript Code-128B Barcode & QR Code SVG Generator
+ * Pure JavaScript Code-128B Barcode SVG Generator
+ * Strictly standard ISO/IEC 15417 Code 128 specifications.
  * Completely offline, zero external network requests or dependencies.
  */
 
@@ -22,9 +23,9 @@ const START_B = 104;
 const STOP = 106;
 
 /**
- * Generate SVG Path or Rects for Code-128B
+ * Generate standard Code-128B Barcode SVG with widened quiet zones for maximum scanner compatibility
  */
-export const generateCode128Svg = (text, height = 70) => {
+export const generateCode128Svg = (text, height = 80) => {
   if (!text) return '';
   const clean = String(text).trim();
 
@@ -54,8 +55,8 @@ export const generateCode128Svg = (text, height = 70) => {
     totalModules += parseInt(patternStr[i], 10);
   }
 
-  // Quiet zones (10 modules on each side)
-  const quietZone = 10;
+  // Quiet zones (15 modules on each side for reliable physical laser and camera scanning)
+  const quietZone = 15;
   const fullWidth = totalModules + quietZone * 2;
 
   let currentX = quietZone;
@@ -65,7 +66,7 @@ export const generateCode128Svg = (text, height = 70) => {
     const width = parseInt(patternStr[i], 10);
     const isBar = i % 2 === 0;
     if (isBar) {
-      rects.push(`<rect x="${currentX}" y="0" width="${width}" height="${height}" fill="#1A1512" />`);
+      rects.push(`<rect x="${currentX}" y="0" width="${width}" height="${height}" fill="#000000" />`);
     }
     currentX += width;
   }

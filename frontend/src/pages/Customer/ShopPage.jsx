@@ -56,9 +56,16 @@ export default function ShopPage() {
       setProducts(prods);
       setPaymentConfig(payRes.data);
 
-      // Default select first available payment method
+      // Default select first available payment method (if CTBC pool empty, select another)
       if (payRes.data?.payment_methods?.length > 0) {
-        setSelectedPaymentCode(payRes.data.payment_methods[0].code);
+        const methods = payRes.data.payment_methods;
+        const poolCount = payRes.data.ctbc_pool_available_count ?? 0;
+        const defaultMethod = methods.find(m => m.code === 'ctbc_pool' && poolCount > 0) ||
+                              methods.find(m => m.code !== 'ctbc_pool') ||
+                              methods[0];
+        if (defaultMethod) {
+          setSelectedPaymentCode(defaultMethod.code);
+        }
       }
     } catch (err) {
       console.error('Failed to load shop data:', err);
@@ -352,6 +359,38 @@ export default function ShopPage() {
 
   return (
     <div className="min-h-screen bg-[#FAF7F2] text-[#3E332B] pb-24">
+      {/* Sticky Top Header Navigation */}
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-[#E8DEC8] px-4 py-3 shadow-2xs">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-[#FAF7F2] border border-[#E8DEC8] flex items-center justify-center p-1 shrink-0">
+              <img src="/logo.png" alt="拾光製所" className="w-full h-full object-contain" />
+            </div>
+            <div>
+              <span className="font-black text-sm text-[#3E332B] block leading-tight">拾光製所</span>
+              <span className="text-[10px] text-[#8C8279] block">商品預購商城</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => navigate('/booking')}
+              className="px-3 py-1.5 bg-[#FAF7F2] hover:bg-[#F2ECE4] border border-[#E8DEC8] text-[#8B5B43] rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+            >
+              <span>🎨 手作預約</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/history')}
+              className="px-3.5 py-1.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+            >
+              <span>📋 我的紀錄與條碼</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
       {/* Top Banner Hero */}
       <div className="bg-linear-to-b from-[#3E332B] to-[#2B231D] text-white py-10 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto space-y-3 text-center sm:text-left">
@@ -700,31 +739,57 @@ export default function ShopPage() {
             <div className="space-y-3">
               <label className="block text-xs font-bold text-[#6D5D52]">選擇付款方式：</label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                {paymentConfig?.payment_methods?.map(method => (
-                  <button
-                    key={method.code}
-                    type="button"
-                    onClick={() => {
-                      setSelectedPaymentCode(method.code);
-                      if (method.bank_accounts_json?.length > 0) {
-                        const b = method.bank_accounts_json[0];
-                        setSelectedBankInfo(`${b.bank_name} (${b.bank_code}) ${b.account}`);
-                      } else {
-                        setSelectedBankInfo('');
-                      }
-                    }}
-                    className={`p-3 rounded-xl border text-left transition ${
-                      selectedPaymentCode === method.code
-                        ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
-                        : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8] hover:bg-[#F2ECE4]'
-                    }`}
-                  >
-                    <strong className="block font-bold mb-0.5">{method.name}</strong>
-                    <span className="text-[11px] opacity-80 line-clamp-1">
-                      {method.code === 'ctbc_pool' ? '系統自動配發一次性專屬帳號' : '依說明完成匯款或支付'}
-                    </span>
-                  </button>
-                ))}
+                {paymentConfig?.payment_methods?.map(method => {
+                  const isCtbc = method.code === 'ctbc_pool';
+                  const isPoolEmpty = isCtbc && paymentConfig?.ctbc_pool_available_count === 0;
+
+                  return (
+                    <button
+                      key={method.code}
+                      type="button"
+                      disabled={isPoolEmpty}
+                      onClick={() => {
+                        if (isPoolEmpty) return;
+                        setSelectedPaymentCode(method.code);
+                        if (method.bank_accounts_json?.length > 0) {
+                          const b = method.bank_accounts_json[0];
+                          setSelectedBankInfo(`${b.bank_name} (${b.bank_code}) ${b.account}`);
+                        } else {
+                          setSelectedBankInfo('');
+                        }
+                      }}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        isPoolEmpty
+                          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
+                          : selectedPaymentCode === method.code
+                            ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
+                            : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8] hover:bg-[#F2ECE4]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-0.5">
+                        <strong className="block font-bold">{method.name}</strong>
+                        {isCtbc && (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            isPoolEmpty
+                              ? 'bg-rose-100 text-rose-700'
+                              : selectedPaymentCode === method.code
+                                ? 'bg-white/20 text-white'
+                                : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {isPoolEmpty ? '目前已發畢' : `剩餘 ${paymentConfig.ctbc_pool_available_count} 組`}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] opacity-80 line-clamp-1">
+                        {isPoolEmpty
+                          ? '一次性帳號已全數配發完畢，請選一般匯款'
+                          : method.code === 'ctbc_pool'
+                            ? '系統自動配發一次性專屬帳號'
+                            : '依說明完成匯款或支付'}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Dynamic Instructions of Selected Payment */}

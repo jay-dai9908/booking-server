@@ -844,7 +844,7 @@ function Booking() {
               onClick={() => navigate('/shop')}
               className="whitespace-nowrap text-xs font-semibold text-[#8B5B43] bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 sm:px-3.5 py-1.5 rounded-full transition-all duration-200 ease-in-out shrink-0 shadow-2xs flex items-center gap-1"
             >
-              🛍️ 套裝預購
+              🛍️ 商品預購
             </button>
             <button 
               onClick={() => navigate('/history')}

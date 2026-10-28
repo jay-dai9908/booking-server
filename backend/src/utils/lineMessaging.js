@@ -351,6 +351,16 @@ export const sendBookingCancellationNotification = async (reservation, user, can
     { label: '取消來源', value: cancelledBy === 'admin' ? '門市人員取消' : '顧客自行取消' }
   ];
 
+  const flexMessage = buildBrandFlexMessage({
+    title: '預約已取消通知',
+    subtitle: '您的預約時段已成功取消釋出',
+    bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您原定於【拾光製所】的預約體驗已取消。若需重新預約其他時段，歡迎隨時點擊下方按鈕線上挑選！`,
+    infoRows,
+    buttonLabel: '前往重新線上預約',
+    buttonUrl: bookingUrl,
+    tagText: '⚠️ 預約取消'
+  });
+
   return sendLinePushMessage(user.line_user_id, [flexMessage]);
 };
 

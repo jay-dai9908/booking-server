@@ -33,12 +33,17 @@ export const getPublicPaymentMethods = async (req, res) => {
       orderBy: [{ sort_order: 'asc' }, { id: 'asc' }]
     });
 
+    const ctbcPoolAvailableCount = await prisma.oneTimeAccountPool.count({
+      where: { payment_method_code: 'ctbc_pool', status: 'AVAILABLE', is_enabled: true }
+    });
+
     const globalSetting = await prisma.globalSetting.findUnique({
       where: { id: 1 }
     });
 
     res.json({
       payment_methods: methods,
+      ctbc_pool_available_count: ctbcPoolAvailableCount,
       deposit_deadline_days: globalSetting?.shop_deposit_deadline_days ?? 2,
       official_line_url: globalSetting?.official_line_url || 'https://lin.ee/vsZhRW5',
       enable_shipping: !!globalSetting?.shop_enable_shipping,
@@ -176,24 +181,27 @@ export const createProductOrder = async (req, res) => {
         const availablePoolAccount = await tx.oneTimeAccountPool.findFirst({
           where: {
             payment_method_code: 'ctbc_pool',
-            status: 'AVAILABLE'
+            status: 'AVAILABLE',
+            is_enabled: true
           },
           orderBy: { id: 'asc' }
         });
 
-        if (availablePoolAccount) {
-          await tx.oneTimeAccountPool.update({
-            where: { id: availablePoolAccount.id },
-            data: {
-              status: 'ASSIGNED',
-              assigned_order_ref: orderRef,
-              assigned_user_id: userId,
-              assigned_at: new Date()
-            }
-          });
-          assignedPoolAccount = availablePoolAccount.account_number;
-          assignedPoolUrl = availablePoolAccount.payment_url || null;
+        if (!availablePoolAccount) {
+          throw new Error('目前「中信社群收款專屬一次性帳號」已全數配發完畢，請改選「一般銀行匯款」或「街口支付」完成下單！');
         }
+
+        await tx.oneTimeAccountPool.update({
+          where: { id: availablePoolAccount.id },
+          data: {
+            status: 'ASSIGNED',
+            assigned_order_ref: orderRef,
+            assigned_user_id: userId,
+            assigned_at: new Date()
+          }
+        });
+        assignedPoolAccount = availablePoolAccount.account_number;
+        assignedPoolUrl = availablePoolAccount.payment_url || null;
       }
 
       const cleanLast5 = remittance_last5 ? String(remittance_last5).trim() : null;
@@ -240,7 +248,8 @@ export const createProductOrder = async (req, res) => {
     });
   } catch (error) {
     console.error('createProductOrder error:', error);
-    res.status(500).json({ error: error.message || '建立預購訂單失敗' });
+    const statusCode = error.message?.includes('配發完畢') ? 400 : 500;
+    res.status(statusCode).json({ error: error.message || '建立預購訂單失敗' });
   }
 };
 
@@ -491,6 +500,24 @@ export const updateAdminOrder = async (req, res) => {
       dataToUpdate.picked_up_at = new Date();
     }
 
+    // If order transitioned to cancelled, release any assigned pool account back to AVAILABLE
+    if (order_status === 'cancelled' && order.order_status !== 'cancelled') {
+      if (order.assigned_pool_account) {
+        await prisma.oneTimeAccountPool.updateMany({
+          where: {
+            account_number: order.assigned_pool_account,
+            status: 'ASSIGNED'
+          },
+          data: {
+            status: 'AVAILABLE',
+            assigned_order_ref: null,
+            assigned_user_id: null,
+            assigned_at: null
+          }
+        });
+      }
+    }
+
     const updated = await prisma.productOrder.update({
       where: { id: order.id },
       data: dataToUpdate,
@@ -505,22 +532,35 @@ export const updateAdminOrder = async (req, res) => {
           if (prod?.bonus_pass_plan_code) {
             const plan = await prisma.passPlan.findUnique({ where: { code: prod.bonus_pass_plan_code } });
             if (plan) {
-              const passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
-              await prisma.userPass.create({
-                data: {
-                  pass_code: passCode,
-                  user_id: order.user_id,
-                  plan_id: plan.id,
-                  plan_name_snapshot: plan.name,
-                  pass_type: plan.pass_type,
-                  remaining_quota: plan.total_quota,
-                  total_quota: plan.total_quota,
-                  day_restriction: plan.day_restriction,
-                  payment_status: 'active',
+              // Check if already granted for this order to prevent duplicate grants
+              const existingPass = await prisma.userPass.findFirst({
+                where: {
                   order_ref: order.order_ref,
-                  status: 'ACTIVE'
+                  plan_id: plan.id
                 }
               });
+
+              if (!existingPass) {
+                const qty = item.quantity || 1;
+                const totalQuota = plan.total_quota != null ? plan.total_quota * qty : null;
+                const passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
+
+                await prisma.userPass.create({
+                  data: {
+                    pass_code: passCode,
+                    user_id: order.user_id,
+                    plan_id: plan.id,
+                    plan_name_snapshot: plan.name,
+                    pass_type: plan.pass_type,
+                    remaining_quota: totalQuota,
+                    total_quota: totalQuota,
+                    day_restriction: plan.day_restriction,
+                    payment_status: 'active',
+                    order_ref: order.order_ref,
+                    status: 'ACTIVE'
+                  }
+                });
+              }
             }
           }
         }

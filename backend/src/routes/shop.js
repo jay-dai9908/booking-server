@@ -19,9 +19,10 @@ import {
   createAdminProduct,
   updateAdminProduct
 } from '../controllers/shopController.js';
-import { verifyToken, requireAdmin } from '../middlewares/authMiddleware.js';
+import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
+const checkShopPermission = requireAnyPermission(['shop', 'reservations']);
 
 // Public routes
 router.get('/products', getPublicProducts);
@@ -33,24 +34,24 @@ router.patch('/orders/:id/remittance', verifyToken, updateRemittanceLast5);
 router.get('/my-orders', verifyToken, getMyProductOrders);
 
 // Admin routes
-router.get('/admin/orders', verifyToken, requireAdmin, getAdminProductOrders);
-router.patch('/admin/orders/:id/verify-payment', verifyToken, requireAdmin, verifyOrderPayment);
-router.patch('/admin/orders/:id', verifyToken, requireAdmin, updateAdminOrder);
-router.post('/admin/orders/notify-arrival', verifyToken, requireAdmin, notifyOrderArrival);
+router.get('/admin/orders', verifyToken, checkShopPermission, getAdminProductOrders);
+router.patch('/admin/orders/:id/verify-payment', verifyToken, checkShopPermission, verifyOrderPayment);
+router.patch('/admin/orders/:id', verifyToken, checkShopPermission, updateAdminOrder);
+router.post('/admin/orders/notify-arrival', verifyToken, checkShopPermission, notifyOrderArrival);
 
 // Account Pool management
-router.get('/admin/account-pool', verifyToken, requireAdmin, getAdminAccountPool);
-router.post('/admin/account-pool/batch', verifyToken, requireAdmin, batchImportAccountPool);
-router.patch('/admin/account-pool/:id', verifyToken, requireAdmin, updateAccountPoolItem);
+router.get('/admin/account-pool', verifyToken, checkShopPermission, getAdminAccountPool);
+router.post('/admin/account-pool/batch', verifyToken, checkShopPermission, batchImportAccountPool);
+router.patch('/admin/account-pool/:id', verifyToken, checkShopPermission, updateAccountPoolItem);
 
 // Payment Methods & Shop Settings
-router.get('/admin/payment-methods', verifyToken, requireAdmin, getAdminPaymentMethods);
-router.put('/admin/payment-methods/:id', verifyToken, requireAdmin, updateAdminPaymentMethod);
-router.post('/admin/settings', verifyToken, requireAdmin, updateShopGlobalSettings);
+router.get('/admin/payment-methods', verifyToken, checkShopPermission, getAdminPaymentMethods);
+router.put('/admin/payment-methods/:id', verifyToken, checkShopPermission, updateAdminPaymentMethod);
+router.post('/admin/settings', verifyToken, checkShopPermission, updateShopGlobalSettings);
 
 // Products management
-router.get('/admin/products', verifyToken, requireAdmin, getAdminProducts);
-router.post('/admin/products', verifyToken, requireAdmin, createAdminProduct);
-router.put('/admin/products/:id', verifyToken, requireAdmin, updateAdminProduct);
+router.get('/admin/products', verifyToken, checkShopPermission, getAdminProducts);
+router.post('/admin/products', verifyToken, checkShopPermission, createAdminProduct);
+router.put('/admin/products/:id', verifyToken, checkShopPermission, updateAdminProduct);
 
 export default router;

@@ -100,7 +100,7 @@ export default function MembersPage() {
       });
       setScanResult({
         success: true,
-        message: '卡券核銷成功！已成功現場扣抵 1 次',
+        message: res.data?.message || '核銷成功！',
         data: res.data
       });
       setScanCodeInput('');
@@ -436,10 +436,16 @@ export default function MembersPage() {
                   )}
                   <div className="space-y-1">
                     <div>{scanResult.message}</div>
-                    {scanResult.data?.user && (
+                    {scanResult.data?.reservation_checked_in && scanResult.data?.reservation && (
                       <div className="text-emerald-900 font-normal">
-                        持有人：<span className="font-bold">{scanResult.data.user.name || '會員'}</span> ｜ 
-                        剩餘額度：<span className="font-bold">{scanResult.data.remaining_quota != null ? `${scanResult.data.remaining_quota} 次` : '暢遊無限制'}</span>
+                        預約單號：<span className="font-mono font-bold">{scanResult.data.reservation.booking_ref.slice(0, 8)}...</span> ｜ 
+                        時段：<span className="font-bold">{scanResult.data.reservation.time} ({scanResult.data.reservation.pax}位)</span>
+                      </div>
+                    )}
+                    {!scanResult.data?.reservation_checked_in && scanResult.data?.pass && (
+                      <div className="text-emerald-900 font-normal">
+                        持有人：<span className="font-bold">{scanResult.data.pass?.user?.name || '會員'}</span> ｜ 
+                        剩餘額度：<span className="font-bold">{scanResult.data.pass?.remaining_quota != null ? `${scanResult.data.pass.remaining_quota} 次` : '暢遊無限制'}</span>
                       </div>
                     )}
                   </div>

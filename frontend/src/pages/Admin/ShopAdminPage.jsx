@@ -162,6 +162,22 @@ export default function ShopAdminPage() {
     }
   };
 
+  const handleCancelOrder = async (order) => {
+    if (!window.confirm(`確定要取消訂單 #${order.order_ref} 嗎？\n若該訂單佔用中信專屬一次性帳號，系統將會立即釋放回帳號池供其他客人使用。`)) {
+      return;
+    }
+    try {
+      await api.patch(`/shop/admin/orders/${order.id}`, {
+        order_status: 'cancelled'
+      });
+      alert('訂單已取消，相關資源已釋放');
+      fetchAdminOrders();
+      fetchAccountPool();
+    } catch (err) {
+      alert('取消訂單失敗：' + (err.response?.data?.error || err.message));
+    }
+  };
+
   // Payments & Account Pool handlers
   const fetchAccountPool = async () => {
     try {
@@ -222,6 +238,50 @@ export default function ShopAdminPage() {
       fetchPaymentSettings();
     } catch (err) {
       alert('切換付款方式失敗');
+    }
+  };
+
+  const [editingPaymentMethods, setEditingPaymentMethods] = useState({});
+  const [savingPaymentId, setSavingPaymentId] = useState(null);
+
+  const handleUpdatePaymentMethodField = (methodId, field, value) => {
+    setEditingPaymentMethods(prev => ({
+      ...prev,
+      [methodId]: {
+        ...(prev[methodId] || {}),
+        [field]: value
+      }
+    }));
+  };
+
+  const handleSavePaymentMethodConfig = async (method) => {
+    const editData = editingPaymentMethods[method.id] || {};
+    const displayInstructions = editData.display_instructions !== undefined
+      ? editData.display_instructions
+      : method.display_instructions;
+
+    let bankAccounts = method.bank_accounts_json;
+    if (editData.bank_account_number !== undefined || editData.bank_name !== undefined || editData.bank_code !== undefined || editData.bank_account_name !== undefined) {
+      bankAccounts = [{
+        bank_name: editData.bank_name !== undefined ? editData.bank_name : (method.bank_accounts_json?.[0]?.bank_name || ''),
+        bank_code: editData.bank_code !== undefined ? editData.bank_code : (method.bank_accounts_json?.[0]?.bank_code || ''),
+        account: editData.bank_account_number !== undefined ? editData.bank_account_number : (method.bank_accounts_json?.[0]?.account || ''),
+        account_name: editData.bank_account_name !== undefined ? editData.bank_account_name : (method.bank_accounts_json?.[0]?.account_name || '')
+      }];
+    }
+
+    setSavingPaymentId(method.id);
+    try {
+      await api.put(`/shop/admin/payment-methods/${method.id}`, {
+        display_instructions: displayInstructions,
+        bank_accounts_json: bankAccounts
+      });
+      alert(`「${method.name}」設定已成功儲存！`);
+      fetchPaymentSettings();
+    } catch (err) {
+      alert('儲存付款方式失敗：' + (err.response?.data?.error || err.message));
+    } finally {
+      setSavingPaymentId(null);
     }
   };
 
@@ -346,6 +406,7 @@ export default function ShopAdminPage() {
                 <option value="preparing">備貨中</option>
                 <option value="arrived">商品已到貨</option>
                 <option value="picked_up">已取貨完成</option>
+                <option value="cancelled">已取消</option>
               </select>
 
               <button
@@ -518,14 +579,18 @@ export default function ShopAdminPage() {
                           <td className="p-3 whitespace-nowrap">
                             <span
                               className={`px-2 py-0.5 rounded-full text-[10px] font-bold block w-fit mb-1 ${
-                                order.order_status === 'arrived'
+                                order.order_status === 'cancelled'
+                                  ? 'bg-gray-100 text-gray-500 line-through'
+                                  : order.order_status === 'arrived'
                                   ? 'bg-rose-100 text-rose-800'
                                   : order.order_status === 'picked_up'
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : 'bg-amber-100 text-amber-800'
                               }`}
                             >
-                              {order.order_status === 'arrived'
+                              {order.order_status === 'cancelled'
+                                ? '已取消'
+                                : order.order_status === 'arrived'
                                 ? '商品已到貨'
                                 : order.order_status === 'picked_up'
                                 ? '已取貨完成'
@@ -534,7 +599,9 @@ export default function ShopAdminPage() {
 
                             <span
                               className={`px-2 py-0.5 rounded-md text-[10px] font-bold block w-fit ${
-                                order.payment_status === 'fully_paid'
+                                order.order_status === 'cancelled'
+                                  ? 'bg-gray-100 text-gray-400'
+                                  : order.payment_status === 'fully_paid'
                                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                   : isPaidDeposit
                                   ? 'bg-teal-50 text-teal-700 border border-teal-200'
@@ -543,7 +610,9 @@ export default function ShopAdminPage() {
                                   : 'bg-amber-50 text-amber-700 border border-amber-200'
                               }`}
                             >
-                              {order.payment_status === 'fully_paid'
+                              {order.order_status === 'cancelled'
+                                ? '已作廢'
+                                : order.payment_status === 'fully_paid'
                                 ? '全額結清'
                                 : isPaidDeposit
                                 ? '已收訂金'
@@ -554,7 +623,7 @@ export default function ShopAdminPage() {
                           </td>
 
                           <td className="p-3 text-right whitespace-nowrap space-x-1">
-                            {!isPaidDeposit && (
+                            {!isPaidDeposit && order.order_status !== 'cancelled' && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -569,31 +638,35 @@ export default function ShopAdminPage() {
                               </button>
                             )}
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setWishReplyOrder(order);
-                                setWishReplyText(order.wish_reply || '');
-                              }}
-                              className="px-2 py-1 bg-[#FAF7F2] hover:bg-[#F0EBE5] text-[#8B5B43] border border-[#E8DEC8] rounded-lg text-xs font-bold transition"
-                              title="回覆許願"
-                            >
-                              💬 許願
-                            </button>
+                            {order.order_status !== 'cancelled' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWishReplyOrder(order);
+                                    setWishReplyText(order.wish_reply || '');
+                                  }}
+                                  className="px-2 py-1 bg-[#FAF7F2] hover:bg-[#F0EBE5] text-[#8B5B43] border border-[#E8DEC8] rounded-lg text-xs font-bold transition"
+                                  title="回覆許願"
+                                >
+                                  💬 許願
+                                </button>
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setArrivalDateOrder(order);
-                                setArrivalDateText(order.estimated_arrival || '');
-                              }}
-                              className="px-2 py-1 bg-[#FAF7F2] hover:bg-[#F0EBE5] text-[#3E332B] border border-[#E8DEC8] rounded-lg text-xs font-bold transition"
-                              title="修改預計到貨日"
-                            >
-                              📅 到貨日
-                            </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setArrivalDateOrder(order);
+                                    setArrivalDateText(order.estimated_arrival || '');
+                                  }}
+                                  className="px-2 py-1 bg-[#FAF7F2] hover:bg-[#F0EBE5] text-[#3E332B] border border-[#E8DEC8] rounded-lg text-xs font-bold transition"
+                                  title="修改預計到貨日"
+                                >
+                                  📅 到貨日
+                                </button>
+                              </>
+                            )}
 
-                            {order.order_status !== 'picked_up' && (
+                            {order.order_status !== 'picked_up' && order.order_status !== 'cancelled' && (
                               <button
                                 type="button"
                                 onClick={() => handleNotifyArrival([order.id])}
@@ -604,13 +677,24 @@ export default function ShopAdminPage() {
                               </button>
                             )}
 
-                            {order.order_status !== 'picked_up' && (
+                            {order.order_status !== 'picked_up' && order.order_status !== 'cancelled' && (
                               <button
                                 type="button"
                                 onClick={() => handleMarkPickedUp(order.id)}
                                 className="px-2.5 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition"
                               >
                                 📦 取貨完成
+                              </button>
+                            )}
+
+                            {order.order_status !== 'picked_up' && order.order_status !== 'cancelled' && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelOrder(order)}
+                                className="px-2 py-1 bg-gray-50 hover:bg-rose-50 text-gray-500 hover:text-rose-700 border border-gray-200 hover:border-rose-200 rounded-lg text-xs font-bold transition"
+                                title="取消此預購訂單並釋放中信帳號"
+                              >
+                                ❌ 取消
                               </button>
                             )}
                           </td>
@@ -725,23 +809,122 @@ export default function ShopAdminPage() {
                 <span>多元付款方式開關與前台說明文案</span>
               </h3>
 
-              <div className="space-y-3">
-                {paymentMethods.map(method => (
-                  <div key={method.id} className="p-3.5 bg-[#FAF7F2] rounded-xl border border-[#E8DEC8] space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs text-[#3E332B]">{method.name}</span>
-                      <input
-                        type="checkbox"
-                        checked={method.is_enabled}
-                        onChange={() => handleTogglePaymentMethod(method)}
-                        className="w-4 h-4 accent-[#8B5B43]"
-                      />
+              <div className="space-y-4">
+                {paymentMethods.map(method => {
+                  const editData = editingPaymentMethods[method.id] || {};
+                  const currentInstructions = editData.display_instructions !== undefined
+                    ? editData.display_instructions
+                    : (method.display_instructions || '');
+
+                  const firstBank = method.bank_accounts_json?.[0] || {};
+                  const currentBankName = editData.bank_name !== undefined ? editData.bank_name : (firstBank.bank_name || '');
+                  const currentBankCode = editData.bank_code !== undefined ? editData.bank_code : (firstBank.bank_code || '');
+                  const currentAccountNumber = editData.bank_account_number !== undefined ? editData.bank_account_number : (firstBank.account || '');
+                  const currentAccountName = editData.bank_account_name !== undefined ? editData.bank_account_name : (firstBank.account_name || '');
+
+                  const isBankOrEwallet = method.code === 'bank_transfer' || method.code === 'jkopay' || (method.bank_accounts_json && method.bank_accounts_json.length > 0);
+                  const isSaving = savingPaymentId === method.id;
+
+                  return (
+                    <div key={method.id} className="p-4 bg-[#FAF7F2] rounded-2xl border border-[#E8DEC8] space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-[#E8DEC8]">
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-sm text-[#3E332B]">{method.name}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-white border border-[#E8DEC8] text-[#8C8279] font-mono">
+                            {method.code}
+                          </span>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-[#6D5D52]">
+                          <span>{method.is_enabled ? '已啟用' : '已停用'}</span>
+                          <input
+                            type="checkbox"
+                            checked={method.is_enabled}
+                            onChange={() => handleTogglePaymentMethod(method)}
+                            className="w-4 h-4 accent-[#8B5B43] cursor-pointer"
+                          />
+                        </label>
+                      </div>
+
+                      {/* Instructions Textarea */}
+                      <div>
+                        <label className="block text-[11px] font-bold text-[#6D5D52] mb-1">
+                          前台下單頁面說明文字：
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={currentInstructions}
+                          onChange={e => handleUpdatePaymentMethodField(method.id, 'display_instructions', e.target.value)}
+                          placeholder="請輸入給顧客看的付款說明..."
+                          className="w-full p-2.5 bg-white border border-[#E8DEC8] rounded-xl text-xs font-medium outline-none focus:border-[#8B5B43] text-[#3E332B]"
+                        />
+                      </div>
+
+                      {/* Bank / E-Wallet Info Fields */}
+                      {isBankOrEwallet && (
+                        <div className="space-y-2 pt-1 border-t border-[#E8DEC8]/60">
+                          <span className="text-[11px] font-bold text-[#8B5B43] block">
+                            收款銀行 / 電支帳號資訊（若多組前台將展示）：
+                          </span>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-[10px] text-[#8C8279] block mb-0.5">銀行 / 機構名稱</span>
+                              <input
+                                type="text"
+                                value={currentBankName}
+                                onChange={e => handleUpdatePaymentMethodField(method.id, 'bank_name', e.target.value)}
+                                placeholder="例如: 國泰世華銀行"
+                                className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs outline-none"
+                              />
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-[#8C8279] block mb-0.5">總行代碼</span>
+                              <input
+                                type="text"
+                                value={currentBankCode}
+                                onChange={e => handleUpdatePaymentMethodField(method.id, 'bank_code', e.target.value)}
+                                placeholder="例如: 013"
+                                className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs outline-none font-mono"
+                              />
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-[#8C8279] block mb-0.5">銀行帳號</span>
+                              <input
+                                type="text"
+                                value={currentAccountNumber}
+                                onChange={e => handleUpdatePaymentMethodField(method.id, 'bank_account_number', e.target.value)}
+                                placeholder="例如: 013-123456789012"
+                                className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs outline-none font-mono font-bold"
+                              />
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-[#8C8279] block mb-0.5">戶名</span>
+                              <input
+                                type="text"
+                                value={currentAccountName}
+                                onChange={e => handleUpdatePaymentMethodField(method.id, 'bank_account_name', e.target.value)}
+                                placeholder="例如: 拾光製所工作室"
+                                className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs outline-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Save Button */}
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => handleSavePaymentMethodConfig(method)}
+                          className="px-3.5 py-1.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold transition shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isSaving ? '儲存中...' : `儲存「${method.name}」設定`}</span>
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-[#8C8279] leading-relaxed">
-                      {method.display_instructions}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

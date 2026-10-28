@@ -18,7 +18,8 @@ import {
   AlertCircle,
   Cpu,
   Ticket,
-  Settings
+  Settings,
+  ShoppingBag
 } from 'lucide-react';
 import api from '../../api/axios';
 
@@ -36,6 +37,13 @@ const AVAILABLE_PERMISSIONS = [
     desc: '查詢顧客訂單、出席狀態、備註與取消預約', 
     icon: Users,
     color: 'text-blue-700 bg-blue-50 border-blue-200' 
+  },
+  { 
+    id: 'shop', 
+    label: '商品預購與對帳', 
+    desc: '預購訂單管理、中信社群帳號池對帳、商品與付款方式維護', 
+    icon: ShoppingBag,
+    color: 'text-[#8B5B43] bg-[#FAF7F2] border-[#E8DEC8]' 
   },
   { 
     id: 'members', 
