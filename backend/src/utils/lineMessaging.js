@@ -69,7 +69,16 @@ export const sendLinePushMessage = async (lineUserId, messages) => {
 
     let friendlyMessage = '發送 LINE 訊息失敗';
     if (status === 400) {
-      friendlyMessage = '發送失敗：該會員尚未加入官方帳號好友，或已封鎖官方帳號';
+      if (errorDetails?.message === 'Failed to send messages') {
+        friendlyMessage = '發送失敗：該會員尚未加入官方帳號好友、已封鎖官方帳號，或是該會員的 LINE 帳號屬於舊的 Provider（請讓該會員重新登入一次預約系統以更新 LINE 識別碼）';
+      } else if (errorDetails?.message) {
+        const detailsText = Array.isArray(errorDetails.details) && errorDetails.details.length > 0
+          ? ` (${errorDetails.details.map(d => `${d.property ? d.property + ': ' : ''}${d.message}`).join('; ')})`
+          : '';
+        friendlyMessage = `LINE 訊息格式錯誤：${errorDetails.message}${detailsText}`;
+      } else {
+        friendlyMessage = '發送失敗：LINE API 回報請求無效 (400)';
+      }
     } else if (status === 401) {
       friendlyMessage = 'LINE Messaging Token 無效或已過期，請至系統全域設定檢查 Channel Access Token';
     } else if (status === 429) {
@@ -152,8 +161,7 @@ export const buildBrandFlexMessage = ({
               text: '拾光製所 SHIGUANG STUDIO',
               size: 'xxs',
               color: '#FAF7F2',
-              weight: 'bold',
-              letterSpacing: '1px'
+              weight: 'bold'
             },
             ...(tagText
               ? [
