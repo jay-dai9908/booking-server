@@ -636,16 +636,16 @@ export default function ShopPage({ userRole }) {
       </header>
 
       {/* Top Banner Hero */}
-      <div className="bg-linear-to-b from-[#3E332B] to-[#2B231D] text-white py-10 px-4 sm:px-6">
-        <div className="max-w-5xl mx-auto space-y-3 text-center sm:text-left">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#8B5B43]/60 rounded-full text-xs font-bold text-[#FAF7F2] border border-white/10">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+      <div className="bg-[#F4EFE6] border-b border-[#E8DEC8] py-8 px-4 sm:px-6">
+        <div className="max-w-5xl mx-auto space-y-2.5 text-center sm:text-left">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-[#8B5B43] rounded-full text-xs font-bold text-white shadow-sm">
+            <Sparkles className="w-3.5 h-3.5 text-amber-200" />
             <span>拾光製所 官方商品預購商城</span>
           </div>
-          <h1 className="text-2xl sm:text-4xl font-black tracking-tight">
+          <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-[#3E332B]">
             221 色拼豆套裝預購 ＆ 專業工具單品
           </h1>
-          <p className="text-xs sm:text-sm text-[#D5CFC9] max-w-2xl leading-relaxed">
+          <p className="text-xs sm:text-sm text-[#6D5D52] font-medium max-w-2xl leading-relaxed">
             線上搶先預購享有訂金保留、贈品款式專屬許願，到店取貨再贈免費代燙集次卡！
           </p>
         </div>
@@ -822,7 +822,7 @@ export default function ShopPage({ userRole }) {
 
           {/* Tier Pricing + Interactive Color Picker Banner for Beads */}
           {beadsProduct && (activeCategory === 'all' || activeCategory === 'beads') && (
-            <div className="bg-linear-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-2xs">
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm">
               <div className="space-y-1.5">
                 <div className="flex items-center flex-wrap gap-2">
                   <span className="text-xs sm:text-sm font-black text-amber-950 flex items-center gap-1.5">
