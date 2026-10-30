@@ -644,6 +644,362 @@ export default function ShopPage({ userRole }) {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 mt-6 space-y-8">
+        {/* Top Checkout & Payment Box (Displayed immediately at the top when items are selected) */}
+        {cartItemsList.length > 0 && (
+          <form
+            id="shop-checkout-box"
+            onSubmit={handleOrderSubmit}
+            className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-[#8B5B43] shadow-xl space-y-6 animate-fade-in scroll-mt-20"
+          >
+            <div className="flex items-center justify-between gap-2 pb-4 border-b border-[#E8DEC8] flex-wrap">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#8B5B43] flex items-center justify-center text-white">
+                  <ShoppingBag className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-[#3E332B]">預購清單與付款資訊確認</h3>
+                  <p className="text-xs text-[#8C8279]">共選擇 {cartItemsList.length} 種品項（可繼續向下滑動加購其他單品）</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Cart Items List */}
+            <div className="space-y-2 text-xs">
+              {cartItemsList.map(item => (
+                <div key={item.product.id} className="flex justify-between items-start py-2 border-b border-[#FAF7F2] gap-2">
+                  <div>
+                    <span className="font-bold text-[#3E332B]">{item.product.name}</span>
+                    <span className="text-[#8C8279] ml-2">x {item.qty}</span>
+                    {item.product.category === 'beads' && beadColorNote && (
+                      <p className="text-[11px] text-[#8B5B43] mt-0.5">色號：{beadColorNote}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono font-bold text-[#8B5B43]">
+                      NT$ {item.subtotal.toLocaleString()}
+                    </span>
+                    <div className="flex items-center border border-[#E8DEC8] rounded-lg bg-[#FAF7F2]">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          item.product.category === 'beads' && selectedColorEntries.length > 0
+                            ? setShowBeadPickerModal(true)
+                            : updateCartQty(item.product.id, -1)
+                        }
+                        className="px-1.5 py-0.5 text-[#8B5B43] hover:bg-[#EBE5DF] font-bold"
+                      >
+                        -
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          item.product.category === 'beads' && selectedColorEntries.length > 0
+                            ? setShowBeadPickerModal(true)
+                            : updateCartQty(item.product.id, 1)
+                        }
+                        className="px-1.5 py-0.5 text-[#8B5B43] hover:bg-[#EBE5DF] font-bold border-l border-[#E8DEC8]"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Beads Color Notes & Selected Chips Box if Beads in Cart */}
+            {hasBeadsInCart && (
+              <div className="bg-[#FAF7F2]/70 p-4 rounded-2xl border border-[#8B5B43]/30 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-bold text-[#8B5B43] flex items-center gap-1.5">
+                    <Palette className="w-4 h-4" />
+                    <span>🌈 10g 融合豆 — 已選色號與包數明細：</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowBeadPickerModal(true)}
+                      className="px-3 py-1 bg-[#8B5B43] text-white rounded-lg text-xs font-bold hover:bg-[#724a35] transition"
+                    >
+                      🎨 開啟色卡增減色號
+                    </button>
+                    {selectedColorEntries.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearAllBeadColors}
+                        className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold hover:bg-rose-100 transition"
+                      >
+                        清空重選
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {selectedColorEntries.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 bg-white p-3 rounded-xl border border-[#E8DEC8]">
+                    {selectedColorEntries.map(([code, cQty]) => {
+                      const colorObj = allBeadColors.find(c => c.code === code);
+                      const swatchStyle = getBeadSwatchStyle(colorObj);
+                      return (
+                        <div
+                          key={code}
+                          className="inline-flex items-center gap-1.5 bg-[#FAF7F2] border border-[#E5DFD7] rounded-lg px-2 py-1 text-xs shadow-2xs"
+                        >
+                          <span
+                            className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-black border border-[#E8DEC8]/80"
+                            style={swatchStyle}
+                          >
+                            {code}
+                          </span>
+                          <span className="font-mono font-bold text-[#3E332B]">×{cQty}包</span>
+                          <button
+                            type="button"
+                            onClick={() => updateBeadColorQty(code, -1)}
+                            className="text-gray-400 hover:text-rose-600 font-bold ml-0.5"
+                            title="減少 1 包"
+                          >
+                            -
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateBeadColorQty(code, 1)}
+                            className="text-gray-400 hover:text-emerald-600 font-bold"
+                            title="增加 1 包"
+                          >
+                            +
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <textarea
+                  rows="2"
+                  value={beadColorNote}
+                  onChange={e => setBeadColorNote(e.target.value)}
+                  placeholder="可點選上方「開啟色卡」直接點選色號，或手動輸入欲購買的色號與包數（如尚未決定亦可備註現場挑選）"
+                  className="w-full px-3 py-2 bg-white text-xs font-medium border border-[#E8DEC8] rounded-xl outline-none focus:border-[#8B5B43] text-[#3E332B]"
+                />
+              </div>
+            )}
+
+            {/* Delivery Method */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-[#6D5D52]">取貨方式：</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryMethod('store_pickup')}
+                  className={`p-3 rounded-xl border text-left flex items-center gap-2.5 transition ${
+                    deliveryMethod === 'store_pickup'
+                      ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
+                      : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8]'
+                  }`}
+                >
+                  <Store className="w-4 h-4 shrink-0" />
+                  <div>
+                    <strong className="block font-bold">🏪 門市現場自取（免運費）</strong>
+                    <span className="text-[11px] opacity-80">備妥後將發送 LINE 通知至門市櫃檯出示單號領取</span>
+                  </div>
+                </button>
+
+                {paymentConfig?.enable_shipping && (
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryMethod('shipping')}
+                    className={`p-3 rounded-xl border text-left flex items-center gap-2.5 transition ${
+                      deliveryMethod === 'shipping'
+                        ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
+                        : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8]'
+                    }`}
+                  >
+                    <Truck className="w-4 h-4 shrink-0" />
+                    <div>
+                      <strong className="block font-bold">🚚 宅配 / 郵寄（運費 NT$ {paymentConfig.shipping_fee}）</strong>
+                      <span className="text-[11px] opacity-80">商品到貨後直接配送至指定收件地址</span>
+                    </div>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Payment Method Selector */}
+            <div className="space-y-3">
+              <label className="block text-xs font-bold text-[#6D5D52]">選擇付款方式：</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                {paymentConfig?.payment_methods?.map(method => {
+                  const isCtbc = method.code === 'ctbc_pool';
+                  const isPoolEmpty = isCtbc && paymentConfig?.ctbc_pool_available_count === 0;
+
+                  return (
+                    <button
+                      key={method.code}
+                      type="button"
+                      disabled={isPoolEmpty}
+                      onClick={() => {
+                        if (isPoolEmpty) return;
+                        setSelectedPaymentCode(method.code);
+                        if (method.bank_accounts_json?.length > 0) {
+                          const b = method.bank_accounts_json[0];
+                          setSelectedBankInfo(`${b.bank_name} (${b.bank_code}) ${b.account}`);
+                        } else {
+                          setSelectedBankInfo('');
+                        }
+                      }}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        isPoolEmpty
+                          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
+                          : selectedPaymentCode === method.code
+                            ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
+                            : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8] hover:bg-[#F2ECE4]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-0.5">
+                        <strong className="block font-bold">{method.name}</strong>
+                        {isCtbc && (
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                              isPoolEmpty
+                                ? 'bg-rose-100 text-rose-700'
+                                : selectedPaymentCode === method.code
+                                  ? 'bg-white/20 text-white'
+                                  : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            {isPoolEmpty ? '目前已發畢' : `剩餘 ${paymentConfig.ctbc_pool_available_count} 組`}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] opacity-80 line-clamp-1">
+                        {isPoolEmpty
+                          ? '一次性帳號已全數配發完畢，請選一般匯款'
+                          : method.code === 'ctbc_pool'
+                            ? '系統自動配發一次性專屬帳號'
+                            : '依說明完成匯款或支付'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {selectedPaymentMethod && (
+                <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] space-y-3 text-xs">
+                  <div className="text-[#3E332B] leading-relaxed font-medium">
+                    {selectedPaymentMethod.display_instructions}
+                  </div>
+
+                  {selectedPaymentMethod.method_type === 'MULTI_BANK' &&
+                    Array.isArray(selectedPaymentMethod.bank_accounts_json) && (
+                      <div className="space-y-1.5 pt-1">
+                        <span className="font-bold text-[#6D5D52] block">請選擇欲匯款的銀行：</span>
+                        <select
+                          value={selectedBankInfo}
+                          onChange={e => setSelectedBankInfo(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none"
+                        >
+                          {selectedPaymentMethod.bank_accounts_json.map((acc, idx) => (
+                            <option
+                              key={idx}
+                              value={`${acc.bank_name} (${acc.bank_code}) 帳號：${acc.account} 戶名：${acc.holder || '拾光製所'}`}
+                            >
+                              {acc.bank_name} ({acc.bank_code}) - {acc.account}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                  {selectedPaymentMethod.require_last5 && (
+                    <div className="pt-2 border-t border-[#E8DEC8] space-y-1.5">
+                      <label className="block text-xs font-bold text-[#3E332B]">
+                        ✏️ 預先填寫匯款末五碼（選填，稍後亦可隨時在訂單內回報）：
+                      </label>
+                      <input
+                        type="text"
+                        maxLength="5"
+                        value={remittanceLast5}
+                        onChange={e => setRemittanceLast5(e.target.value.replace(/\D/g, ''))}
+                        placeholder="例如：58291"
+                        className="w-full sm:w-48 px-3 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold font-mono outline-none"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-bold">
+                    <Clock className="w-3.5 h-3.5 text-amber-700" />
+                    <span>⚠️ 請於下單後 {paymentConfig?.deposit_deadline_days ?? 2} 天內完成訂金支付，逾期名額將自動取消釋出</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* General Customer Notes */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-[#6D5D52]">訂單備註（選填）：</label>
+              <input
+                type="text"
+                value={customerNote}
+                onChange={e => setCustomerNote(e.target.value)}
+                placeholder="有任何特殊需求歡迎於此備註..."
+                className="w-full px-4 py-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-medium outline-none text-[#3E332B]"
+              />
+            </div>
+
+            {!isLoggedInCustomer && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 text-xs text-emerald-900 flex items-center justify-between flex-wrap gap-2">
+                <span>
+                  💡 目前為<strong>免登入預覽模式</strong>，您已挑選的商品與拼豆色號會自動保留，點擊下方按鈕登入 LINE 即可直接完成下單！
+                </span>
+              </div>
+            )}
+
+            {/* Total Breakdown and Submit Button */}
+            <div className="pt-4 border-t border-[#E8DEC8] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xs text-[#8C8279]">訂單總金額</span>
+                  <span className="text-xl sm:text-2xl font-black text-[#3E332B]">
+                    NT$ {cartTotalAmount.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-xs font-extrabold text-emerald-800">
+                    本次應付訂金：NT$ {cartDepositRequired.toLocaleString()}
+                  </span>
+                  <span className="text-xs text-[#8C8279]">
+                    (門市取貨付尾款 NT$ {(cartTotalAmount - cartDepositRequired).toLocaleString()})
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={`w-full sm:w-auto px-8 py-3.5 disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-lg transition flex items-center justify-center gap-2 ${
+                  isLoggedInCustomer
+                    ? 'bg-[#8B5B43] hover:bg-[#7A4F3A]'
+                    : 'bg-[#06C755] hover:bg-[#05b34c]'
+                }`}
+              >
+                {isSubmitting ? (
+                  <span>處理訂單中...</span>
+                ) : isLoggedInCustomer ? (
+                  <>
+                    <span>確認送出預購訂單</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </>
+                ) : (
+                  <>
+                    <span>🔑 使用 LINE 登入並送出預購訂單</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+
         {/* Featured Card: 221-Color Bundle Hero */}
         {bundleProduct && (
           <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-[#8B5B43] shadow-lg relative overflow-hidden">
@@ -959,335 +1315,39 @@ export default function ShopPage({ userRole }) {
                 );
               })}
           </div>
-
-          {/* Beads Color Notes & Selected Chips Box if Beads in Cart */}
-          {hasBeadsInCart && (
-            <div className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-[#8B5B43]/40 space-y-3 animate-fade-in">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <label className="text-xs font-bold text-[#8B5B43] flex items-center gap-1.5">
-                  <Palette className="w-4 h-4" />
-                  <span>🌈 10g 融合豆 — 已選色號與包數明細：</span>
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowBeadPickerModal(true)}
-                    className="px-3 py-1 bg-[#8B5B43] text-white rounded-lg text-xs font-bold hover:bg-[#724a35] transition"
-                  >
-                    🎨 開啟色卡增減色號
-                  </button>
-                  {selectedColorEntries.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={clearAllBeadColors}
-                      className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold hover:bg-rose-100 transition"
-                    >
-                      清空重選
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {selectedColorEntries.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8]">
-                  {selectedColorEntries.map(([code, cQty]) => {
-                    const colorObj = allBeadColors.find(c => c.code === code);
-                    const swatchStyle = getBeadSwatchStyle(colorObj);
-                    return (
-                      <div
-                        key={code}
-                        className="inline-flex items-center gap-1.5 bg-white border border-[#E5DFD7] rounded-lg px-2 py-1 text-xs shadow-2xs"
-                      >
-                        <span
-                          className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-black border border-[#E8DEC8]/80"
-                          style={swatchStyle}
-                        >
-                          {code}
-                        </span>
-                        <span className="font-mono font-bold text-[#3E332B]">×{cQty}包</span>
-                        <button
-                          type="button"
-                          onClick={() => updateBeadColorQty(code, -1)}
-                          className="text-gray-400 hover:text-rose-600 font-bold ml-0.5"
-                          title="減少 1 包"
-                        >
-                          -
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => updateBeadColorQty(code, 1)}
-                          className="text-gray-400 hover:text-emerald-600 font-bold"
-                          title="增加 1 包"
-                        >
-                          +
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              <textarea
-                rows="2"
-                value={beadColorNote}
-                onChange={e => setBeadColorNote(e.target.value)}
-                placeholder="可點選上方「開啟色卡」直接點選色號，或手動輸入欲購買的色號與包數（如尚未決定亦可備註現場挑選）"
-                className="w-full px-3 py-2 text-xs font-medium border border-[#E8DEC8] rounded-xl outline-none focus:border-[#8B5B43] text-[#3E332B]"
-              />
-            </div>
-          )}
         </div>
-
-        {/* Checkout & Payment Box */}
-        {cartItemsList.length > 0 && (
-          <form
-            onSubmit={handleOrderSubmit}
-            className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-[#8B5B43] shadow-xl space-y-6 animate-fade-in"
-          >
-            <div className="flex items-center gap-2 pb-4 border-b border-[#E8DEC8]">
-              <div className="w-8 h-8 rounded-xl bg-[#8B5B43] flex items-center justify-center text-white">
-                <ShoppingBag className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-[#3E332B]">預購清單與付款資訊確認</h3>
-                <p className="text-xs text-[#8C8279]">共選擇 {cartItemsList.length} 種品項</p>
-              </div>
-            </div>
-
-            {/* Cart Items List */}
-            <div className="space-y-2 text-xs">
-              {cartItemsList.map(item => (
-                <div key={item.product.id} className="flex justify-between items-start py-2 border-b border-[#FAF7F2] gap-2">
-                  <div>
-                    <span className="font-bold text-[#3E332B]">{item.product.name}</span>
-                    <span className="text-[#8C8279] ml-2">x {item.qty}</span>
-                    {item.product.category === 'beads' && beadColorNote && (
-                      <p className="text-[11px] text-[#8B5B43] mt-0.5">色號：{beadColorNote}</p>
-                    )}
-                  </div>
-                  <span className="font-mono font-bold text-[#8B5B43] shrink-0">
-                    NT$ {item.subtotal.toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Delivery Method */}
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-[#6D5D52]">取貨方式：</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setDeliveryMethod('store_pickup')}
-                  className={`p-3 rounded-xl border text-left flex items-center gap-2.5 transition ${
-                    deliveryMethod === 'store_pickup'
-                      ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
-                      : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8]'
-                  }`}
-                >
-                  <Store className="w-4 h-4 shrink-0" />
-                  <div>
-                    <strong className="block font-bold">🏪 門市現場自取（免運費）</strong>
-                    <span className="text-[11px] opacity-80">備妥後將發送 LINE 通知至門市櫃檯出示單號領取</span>
-                  </div>
-                </button>
-
-                {paymentConfig?.enable_shipping && (
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryMethod('shipping')}
-                    className={`p-3 rounded-xl border text-left flex items-center gap-2.5 transition ${
-                      deliveryMethod === 'shipping'
-                        ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
-                        : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8]'
-                    }`}
-                  >
-                    <Truck className="w-4 h-4 shrink-0" />
-                    <div>
-                      <strong className="block font-bold">🚚 宅配 / 郵寄（運費 NT$ {paymentConfig.shipping_fee}）</strong>
-                      <span className="text-[11px] opacity-80">商品到貨後直接配送至指定收件地址</span>
-                    </div>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Payment Method Selector */}
-            <div className="space-y-3">
-              <label className="block text-xs font-bold text-[#6D5D52]">選擇付款方式：</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                {paymentConfig?.payment_methods?.map(method => {
-                  const isCtbc = method.code === 'ctbc_pool';
-                  const isPoolEmpty = isCtbc && paymentConfig?.ctbc_pool_available_count === 0;
-
-                  return (
-                    <button
-                      key={method.code}
-                      type="button"
-                      disabled={isPoolEmpty}
-                      onClick={() => {
-                        if (isPoolEmpty) return;
-                        setSelectedPaymentCode(method.code);
-                        if (method.bank_accounts_json?.length > 0) {
-                          const b = method.bank_accounts_json[0];
-                          setSelectedBankInfo(`${b.bank_name} (${b.bank_code}) ${b.account}`);
-                        } else {
-                          setSelectedBankInfo('');
-                        }
-                      }}
-                      className={`p-3 rounded-xl border text-left transition ${
-                        isPoolEmpty
-                          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
-                          : selectedPaymentCode === method.code
-                            ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
-                            : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8] hover:bg-[#F2ECE4]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-0.5">
-                        <strong className="block font-bold">{method.name}</strong>
-                        {isCtbc && (
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              isPoolEmpty
-                                ? 'bg-rose-100 text-rose-700'
-                                : selectedPaymentCode === method.code
-                                  ? 'bg-white/20 text-white'
-                                  : 'bg-emerald-100 text-emerald-800'
-                            }`}
-                          >
-                            {isPoolEmpty ? '目前已發畢' : `剩餘 ${paymentConfig.ctbc_pool_available_count} 組`}
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[11px] opacity-80 line-clamp-1">
-                        {isPoolEmpty
-                          ? '一次性帳號已全數配發完畢，請選一般匯款'
-                          : method.code === 'ctbc_pool'
-                            ? '系統自動配發一次性專屬帳號'
-                            : '依說明完成匯款或支付'}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {selectedPaymentMethod && (
-                <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] space-y-3 text-xs">
-                  <div className="text-[#3E332B] leading-relaxed font-medium">
-                    {selectedPaymentMethod.display_instructions}
-                  </div>
-
-                  {selectedPaymentMethod.method_type === 'MULTI_BANK' &&
-                    Array.isArray(selectedPaymentMethod.bank_accounts_json) && (
-                      <div className="space-y-1.5 pt-1">
-                        <span className="font-bold text-[#6D5D52] block">請選擇欲匯款的銀行：</span>
-                        <select
-                          value={selectedBankInfo}
-                          onChange={e => setSelectedBankInfo(e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none"
-                        >
-                          {selectedPaymentMethod.bank_accounts_json.map((acc, idx) => (
-                            <option
-                              key={idx}
-                              value={`${acc.bank_name} (${acc.bank_code}) 帳號：${acc.account} 戶名：${acc.holder || '拾光製所'}`}
-                            >
-                              {acc.bank_name} ({acc.bank_code}) - {acc.account}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                  {selectedPaymentMethod.require_last5 && (
-                    <div className="pt-2 border-t border-[#E8DEC8] space-y-1.5">
-                      <label className="block text-xs font-bold text-[#3E332B]">
-                        ✏️ 預先填寫匯款末五碼（選填，稍後亦可隨時在訂單內回報）：
-                      </label>
-                      <input
-                        type="text"
-                        maxLength="5"
-                        value={remittanceLast5}
-                        onChange={e => setRemittanceLast5(e.target.value.replace(/\D/g, ''))}
-                        placeholder="例如：58291"
-                        className="w-full sm:w-48 px-3 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold font-mono outline-none"
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-bold">
-                    <Clock className="w-3.5 h-3.5 text-amber-700" />
-                    <span>⚠️ 請於下單後 {paymentConfig?.deposit_deadline_days ?? 2} 天內完成訂金支付，逾期名額將自動取消釋出</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* General Customer Notes */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-[#6D5D52]">訂單備註（選填）：</label>
-              <input
-                type="text"
-                value={customerNote}
-                onChange={e => setCustomerNote(e.target.value)}
-                placeholder="有任何特殊需求歡迎於此備註..."
-                className="w-full px-4 py-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-medium outline-none text-[#3E332B]"
-              />
-            </div>
-
-            {!isLoggedInCustomer && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 text-xs text-emerald-900 flex items-center justify-between flex-wrap gap-2">
-                <span>
-                  💡 目前為<strong>免登入預覽模式</strong>，您已挑選的商品與拼豆色號會自動保留，點擊下方按鈕登入 LINE 即可直接完成下單！
-                </span>
-              </div>
-            )}
-
-            {/* Total Breakdown and Submit Button */}
-            <div className="pt-4 border-t border-[#E8DEC8] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-xs text-[#8C8279]">訂單總金額</span>
-                  <span className="text-xl sm:text-2xl font-black text-[#3E332B]">
-                    NT$ {cartTotalAmount.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-xs font-extrabold text-emerald-800">
-                    本次應付訂金：NT$ {cartDepositRequired.toLocaleString()}
-                  </span>
-                  <span className="text-xs text-[#8C8279]">
-                    (門市取貨付尾款 NT$ {(cartTotalAmount - cartDepositRequired).toLocaleString()})
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className={`w-full sm:w-auto px-8 py-3.5 disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-lg transition flex items-center justify-center gap-2 ${
-                  isLoggedInCustomer
-                    ? 'bg-[#8B5B43] hover:bg-[#7A4F3A]'
-                    : 'bg-[#06C755] hover:bg-[#05b34c]'
-                }`}
-              >
-                {isSubmitting ? (
-                  <span>處理訂單中...</span>
-                ) : isLoggedInCustomer ? (
-                  <>
-                    <span>確認送出預購訂單</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </>
-                ) : (
-                  <>
-                    <span>🔑 使用 LINE 登入並送出預購訂單</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-        )}
       </div>
+
+      {/* Floating Bottom Cart Bar (Guides customers back up to the top checkout box when scrolling) */}
+      {cartItemsList.length > 0 && (
+        <div className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t-2 border-[#8B5B43] px-4 py-3 shadow-2xl">
+          <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs sm:text-sm font-black text-[#3E332B] truncate">
+                🛍️ 已選 <span className="text-[#8B5B43]">{cartItemsList.length}</span> 種品項 ｜ 總額{' '}
+                <span className="text-[#8B5B43]">NT$ {cartTotalAmount.toLocaleString()}</span>
+              </div>
+              <div className="text-[11px] font-bold text-emerald-800">
+                應付訂金：NT$ {cartDepositRequired.toLocaleString()}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.getElementById('shop-checkout-box');
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } else {
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+              }}
+              className="px-4 sm:px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs sm:text-sm font-black shadow-md transition shrink-0 flex items-center gap-1.5"
+            >
+              <span>⬆️ 前往結帳確認</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Interactive MARD 291/302+ Bead Color Chart Modal */}
       {showBeadPickerModal && (
