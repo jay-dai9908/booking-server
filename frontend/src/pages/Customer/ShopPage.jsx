@@ -116,25 +116,17 @@ export default function ShopPage({ userRole }) {
     } catch (e) {}
   }, [cart, beadColorSelections, beadColorNote, wishNote, customerNote]);
 
+  const officialLineRedirectUrl =
+    paymentConfig?.official_line_url ||
+    paymentConfig?.line_button_url ||
+    'https://lin.ee/vsZhRW5';
+
   const redirectToLineLoginForShop = () => {
     try {
       sessionStorage.setItem('shiguang_post_login_redirect', '/shop');
     } catch (e) {}
 
-    if (userRole === 'temp_customer') {
-      navigate('/register');
-      return;
-    }
-
-    const channelId = import.meta.env.VITE_LINE_CHANNEL_ID;
-    const redirectUri = import.meta.env.VITE_LINE_CALLBACK_URL;
-    if (!channelId || !redirectUri || channelId === 'your_channel_id_here') {
-      navigate('/');
-      return;
-    }
-    const state = Math.random().toString(36).substring(7);
-    const lineLoginUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${channelId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=profile%20openid&bot_prompt=normal`;
-    window.location.href = lineLoginUrl;
+    window.location.href = officialLineRedirectUrl;
   };
 
   const fetchShopData = async () => {

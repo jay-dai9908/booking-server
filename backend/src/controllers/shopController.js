@@ -45,7 +45,14 @@ export const getPublicPaymentMethods = async (req, res) => {
       payment_methods: methods,
       ctbc_pool_available_count: ctbcPoolAvailableCount,
       deposit_deadline_days: globalSetting?.shop_deposit_deadline_days ?? 2,
-      official_line_url: globalSetting?.official_line_url || 'https://lin.ee/vsZhRW5',
+      official_line_url:
+        globalSetting?.official_line_url ||
+        globalSetting?.line_button_url ||
+        'https://lin.ee/vsZhRW5',
+      line_button_url:
+        globalSetting?.line_button_url ||
+        globalSetting?.official_line_url ||
+        'https://lin.ee/vsZhRW5',
       enable_shipping: !!globalSetting?.shop_enable_shipping,
       shipping_fee: globalSetting?.shop_shipping_fee ?? 60,
       default_arrival_note: globalSetting?.shop_default_arrival_note || '',
