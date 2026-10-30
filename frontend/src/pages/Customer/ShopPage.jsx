@@ -143,11 +143,7 @@ export default function ShopPage({ userRole }) {
 
       if (payRes.data?.payment_methods?.length > 0) {
         const methods = payRes.data.payment_methods;
-        const poolCount = payRes.data.ctbc_pool_available_count ?? 0;
-        const defaultMethod =
-          methods.find(m => m.code === 'ctbc_pool' && poolCount > 0) ||
-          methods.find(m => m.code !== 'ctbc_pool') ||
-          methods[0];
+        const defaultMethod = methods.find(m => m.code === 'ctbc_pool') || methods[0];
         if (defaultMethod) {
           setSelectedPaymentCode(defaultMethod.code);
         }
@@ -379,11 +375,13 @@ export default function ShopPage({ userRole }) {
         shipping_info: deliveryMethod === 'shipping' ? shippingAddress : null,
         wish_note: hasBundleInCart && wishNote ? wishNote.trim() : null,
         customer_note: combinedCustomerNote || null,
-        remittance_last5: remittanceLast5.trim() || null
+        remittance_last5: null
       };
 
       const res = await api.post('/shop/orders', payload);
       setCompletedOrder(res.data.order);
+      setRemittanceLast5('');
+      setLast5Submitted(false);
       setCart({});
       setBeadColorSelections({});
       setBeadColorNote('');
@@ -424,6 +422,11 @@ export default function ShopPage({ userRole }) {
 
   // If order was just placed, display confirmation card
   if (completedOrder) {
+    const completedMethod = paymentConfig?.payment_methods?.find(
+      m => m.code === completedOrder.payment_method_code
+    );
+    const showLast5Box = completedMethod ? completedMethod.require_last5 !== false : true;
+
     return (
       <div className="min-h-screen bg-[#FAF7F2] py-8 px-4 sm:px-6">
         <div className="max-w-2xl mx-auto bg-white rounded-3xl shadow-xl border border-[#E8DEC8] overflow-hidden">
@@ -449,18 +452,30 @@ export default function ShopPage({ userRole }) {
               </div>
             </div>
 
-            {completedOrder.payment_method_code === 'ctbc_pool' && (
+            {completedOrder.payment_method_code === 'ctbc_pool' ? (
               <div className="bg-emerald-50 rounded-2xl p-5 border-2 border-emerald-300 space-y-3">
                 <div className="flex items-center gap-2 text-emerald-900 font-extrabold text-sm">
                   <CreditCard className="w-4 h-4 text-emerald-700" />
-                  <span>您的一對一專屬「中信社群一次性收款帳號」已分配：</span>
+                  <span>
+                    {completedOrder.assigned_pool_account
+                      ? '您的一對一專屬「中信社群一次性收款帳號」已分配：'
+                      : '中信社群收款付款說明：'}
+                  </span>
                 </div>
                 <div className="bg-white p-4 rounded-xl border border-emerald-200 flex items-center justify-between gap-3">
                   <div>
-                    <span className="text-xs text-slate-500 block">中國信託商業銀行 (822)</span>
-                    <span className="font-mono font-black text-xl text-emerald-800 tracking-wider">
-                      {completedOrder.assigned_pool_account || '現場專屬號碼已備妥'}
-                    </span>
+                    {completedOrder.assigned_pool_account ? (
+                      <>
+                        <span className="text-xs text-slate-500 block">中國信託商業銀行 (822)</span>
+                        <span className="font-mono font-black text-xl text-emerald-800 tracking-wider">
+                          {completedOrder.assigned_pool_account}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="font-black text-base text-emerald-900">
+                        請聯繫店家進行付款
+                      </span>
+                    )}
                   </div>
                   {completedOrder.assigned_pool_account && (
                     <button
@@ -477,9 +492,80 @@ export default function ShopPage({ userRole }) {
                     </button>
                   )}
                 </div>
-                <p className="text-xs text-emerald-800">
-                  💡 此帳號為您個人專屬之一次性收款帳號，轉帳後系統將自動進行比對！
-                </p>
+                {completedOrder.assigned_pool_account && (
+                  <p className="text-xs text-emerald-800">
+                    💡 此帳號為您個人專屬之一次性收款帳號，轉帳後請於下方回填末五碼或傳送 LINE 訊息對帳！
+                  </p>
+                )}
+                {paymentConfig?.official_line_url && (
+                  <a
+                    href={paymentConfig.official_line_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center gap-2 w-full py-2.5 bg-[#06C755] hover:bg-[#05b34c] text-white rounded-xl text-xs font-extrabold shadow-sm transition"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>
+                      {completedOrder.assigned_pool_account
+                        ? '💬 點此傳送 LINE 訊息至官方帳號進行對帳'
+                        : '💬 點此聯繫店家 LINE 官方帳號進行付款'}
+                    </span>
+                  </a>
+                )}
+              </div>
+            ) : (
+              <div className="bg-emerald-50 rounded-2xl p-5 border-2 border-emerald-300 space-y-3">
+                <div className="flex items-center gap-2 text-emerald-900 font-extrabold text-sm">
+                  <CreditCard className="w-4 h-4 text-emerald-700" />
+                  <span>{completedMethod?.name || '匯款／付款帳戶資訊'}：</span>
+                </div>
+
+                {completedMethod?.display_instructions && (
+                  <div className="text-xs text-emerald-950 leading-relaxed font-medium bg-white/80 p-3.5 rounded-xl border border-emerald-200 whitespace-pre-line">
+                    {completedMethod.display_instructions}
+                  </div>
+                )}
+
+                {Array.isArray(completedMethod?.bank_accounts_json) &&
+                  completedMethod.bank_accounts_json.length > 0 && (
+                    <div className="space-y-2">
+                      {completedMethod.bank_accounts_json.map((acc, idx) => (
+                        <div
+                          key={idx}
+                          className="bg-white p-4 rounded-xl border border-emerald-200 flex items-center justify-between gap-3"
+                        >
+                          <div>
+                            <span className="text-xs text-slate-500 font-bold block">
+                              {acc.bank_name} ({acc.bank_code})
+                              {acc.holder ? ` · 戶名：${acc.holder}` : ''}
+                            </span>
+                            <span className="font-mono font-black text-lg sm:text-xl text-emerald-800 tracking-wider">
+                              {acc.account}
+                            </span>
+                          </div>
+                          {acc.account && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(acc.account);
+                                setCopiedAccount(acc.account);
+                                setTimeout(() => setCopiedAccount(false), 2000);
+                              }}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shrink-0"
+                            >
+                              {copiedAccount === acc.account ? (
+                                <Check className="w-4 h-4" />
+                              ) : (
+                                <Copy className="w-4 h-4" />
+                              )}
+                              <span>{copiedAccount === acc.account ? '已複製' : '一鍵複製'}</span>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                 {paymentConfig?.official_line_url && (
                   <a
                     href={paymentConfig.official_line_url}
@@ -494,32 +580,34 @@ export default function ShopPage({ userRole }) {
               </div>
             )}
 
-            <div className="bg-white rounded-2xl p-5 border border-[#E8DEC8] space-y-3">
-              <label className="block text-xs font-bold text-[#3E332B]">
-                ✏️ 回填匯款帳號末五碼（對帳更迅速）：
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  maxLength="5"
-                  value={remittanceLast5}
-                  onChange={e => setRemittanceLast5(e.target.value.replace(/\D/g, ''))}
-                  placeholder="請填寫 5 碼數字"
-                  className="flex-1 px-4 py-2 border border-[#E8DEC8] rounded-xl text-sm font-bold font-mono outline-none focus:border-[#8B5B43]"
-                />
-                <button
-                  type="button"
-                  onClick={handleQuickSubmitLast5}
-                  disabled={!remittanceLast5.trim() || last5Submitted}
-                  className="px-5 py-2 bg-[#8B5B43] hover:bg-[#7A4F3A] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shrink-0"
-                >
-                  {last5Submitted ? '✅ 已回填' : '確認送出'}
-                </button>
+            {showLast5Box && (
+              <div className="bg-white rounded-2xl p-5 border border-[#E8DEC8] space-y-3">
+                <label className="block text-xs font-bold text-[#3E332B]">
+                  ✏️ 回填匯款帳號末五碼（完成匯款後填寫，對帳更迅速）：
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    maxLength="5"
+                    value={remittanceLast5}
+                    onChange={e => setRemittanceLast5(e.target.value.replace(/\D/g, ''))}
+                    placeholder="請填寫 5 碼數字"
+                    className="flex-1 px-4 py-2 border border-[#E8DEC8] rounded-xl text-sm font-bold font-mono outline-none focus:border-[#8B5B43]"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleQuickSubmitLast5}
+                    disabled={!remittanceLast5.trim() || last5Submitted}
+                    className="px-5 py-2 bg-[#8B5B43] hover:bg-[#7A4F3A] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shrink-0"
+                  >
+                    {last5Submitted ? '✅ 已回填' : '確認送出'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-[#8C8279]">
+                  稍後您亦可隨時在「我的紀錄 ➔ 商品預購」頁面查看匯款帳戶並補填末五碼。
+                </p>
               </div>
-              <p className="text-[11px] text-[#8C8279]">
-                稍後您亦可隨時在「預購訂單查詢」頁面補填或修改末五碼。
-              </p>
-            </div>
+            )}
 
             <div className="bg-[#FAF7F2] rounded-2xl p-5 border border-[#E8DEC8] space-y-2.5 text-xs">
               <div className="flex justify-between text-[#6D5D52]">
@@ -826,19 +914,14 @@ export default function ShopPage({ userRole }) {
 
             {/* Payment Method Selector */}
             <div className="space-y-3">
-              <label className="block text-xs font-bold text-[#6D5D52]">選擇付款方式：</label>
+              <label className="block text-xs font-bold text-[#6D5D52]">選擇付款方式（送出訂單後顯示收款帳戶與回報欄）：</label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 {paymentConfig?.payment_methods?.map(method => {
-                  const isCtbc = method.code === 'ctbc_pool';
-                  const isPoolEmpty = isCtbc && paymentConfig?.ctbc_pool_available_count === 0;
-
                   return (
                     <button
                       key={method.code}
                       type="button"
-                      disabled={isPoolEmpty}
                       onClick={() => {
-                        if (isPoolEmpty) return;
                         setSelectedPaymentCode(method.code);
                         if (method.bank_accounts_json?.length > 0) {
                           const b = method.bank_accounts_json[0];
@@ -848,90 +931,33 @@ export default function ShopPage({ userRole }) {
                         }
                       }}
                       className={`p-3 rounded-xl border text-left transition ${
-                        isPoolEmpty
-                          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
-                          : selectedPaymentCode === method.code
-                            ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
-                            : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8] hover:bg-[#F2ECE4]'
+                        selectedPaymentCode === method.code
+                          ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-xs'
+                          : 'bg-[#FAF7F2] text-[#3E332B] border-[#E8DEC8] hover:bg-[#F2ECE4]'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
                         <strong className="block font-bold">{method.name}</strong>
-                        {isCtbc && (
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                              isPoolEmpty
-                                ? 'bg-rose-100 text-rose-700'
-                                : selectedPaymentCode === method.code
-                                  ? 'bg-white/20 text-white'
-                                  : 'bg-emerald-100 text-emerald-800'
-                            }`}
-                          >
-                            {isPoolEmpty ? '目前已發畢' : `剩餘 ${paymentConfig.ctbc_pool_available_count} 組`}
-                          </span>
-                        )}
                       </div>
                       <span className="text-[11px] opacity-80 line-clamp-1">
-                        {isPoolEmpty
-                          ? '一次性帳號已全數配發完畢，請選一般匯款'
-                          : method.code === 'ctbc_pool'
-                            ? '系統自動配發一次性專屬帳號'
-                            : '依說明完成匯款或支付'}
+                        {method.code === 'ctbc_pool'
+                          ? '送出訂單後配發收款帳號或聯繫店家付款'
+                          : '送出訂單後顯示匯款／收款帳戶與末五碼回報框'}
                       </span>
                     </button>
                   );
                 })}
               </div>
 
-              {selectedPaymentMethod && (
-                <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] space-y-3 text-xs">
-                  <div className="text-[#3E332B] leading-relaxed font-medium">
-                    {selectedPaymentMethod.display_instructions}
-                  </div>
-
-                  {selectedPaymentMethod.method_type === 'MULTI_BANK' &&
-                    Array.isArray(selectedPaymentMethod.bank_accounts_json) && (
-                      <div className="space-y-1.5 pt-1">
-                        <span className="font-bold text-[#6D5D52] block">請選擇欲匯款的銀行：</span>
-                        <select
-                          value={selectedBankInfo}
-                          onChange={e => setSelectedBankInfo(e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none"
-                        >
-                          {selectedPaymentMethod.bank_accounts_json.map((acc, idx) => (
-                            <option
-                              key={idx}
-                              value={`${acc.bank_name} (${acc.bank_code}) 帳號：${acc.account} 戶名：${acc.holder || '拾光製所'}`}
-                            >
-                              {acc.bank_name} ({acc.bank_code}) - {acc.account}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                  {selectedPaymentMethod.require_last5 && (
-                    <div className="pt-2 border-t border-[#E8DEC8] space-y-1.5">
-                      <label className="block text-xs font-bold text-[#3E332B]">
-                        ✏️ 預先填寫匯款末五碼（選填，稍後亦可隨時在訂單內回報）：
-                      </label>
-                      <input
-                        type="text"
-                        maxLength="5"
-                        value={remittanceLast5}
-                        onChange={e => setRemittanceLast5(e.target.value.replace(/\D/g, ''))}
-                        placeholder="例如：58291"
-                        className="w-full sm:w-48 px-3 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold font-mono outline-none"
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-bold">
-                    <Clock className="w-3.5 h-3.5 text-amber-700" />
-                    <span>⚠️ 請於下單後 {paymentConfig?.deposit_deadline_days ?? 2} 天內完成訂金支付，逾期名額將自動取消釋出</span>
-                  </div>
+              <div className="bg-[#FAF7F2] px-4 py-3 rounded-2xl border border-[#E8DEC8] space-y-1.5 text-xs">
+                <div className="text-[#6D5D52] font-medium">
+                  💡 為保障交易安全，匯款銀行帳號／收款帳戶與「匯款末五碼回填欄」將於<strong>送出預購訂單後</strong>顯示，亦可隨時於「我的預購紀錄」查看與回填。
                 </div>
-              )}
+                <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-bold">
+                  <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span>⚠️ 請於下單後 {paymentConfig?.deposit_deadline_days ?? 2} 天內完成訂金支付，逾期名額將自動取消釋出</span>
+                </div>
+              </div>
             </div>
 
             {/* General Customer Notes */}

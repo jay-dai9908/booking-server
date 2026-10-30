@@ -42,6 +42,7 @@ export default function HistoryPage() {
 
   // Preorders state
   const [preorders, setPreorders] = useState([]);
+  const [shopPaymentConfig, setShopPaymentConfig] = useState(null);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [remittanceInputs, setRemittanceInputs] = useState({}); // { [orderId]: string }
   const [remittanceSuccess, setRemittanceSuccess] = useState({});
@@ -81,8 +82,12 @@ export default function HistoryPage() {
   const fetchPreorders = async () => {
     try {
       setLoadingOrders(true);
-      const res = await api.get('/shop/my-orders');
-      setPreorders(Array.isArray(res.data) ? res.data : []);
+      const [ordersRes, payRes] = await Promise.all([
+        api.get('/shop/my-orders'),
+        api.get('/shop/payment-methods').catch(() => ({ data: null }))
+      ]);
+      setPreorders(Array.isArray(ordersRes.data) ? ordersRes.data : []);
+      if (payRes.data) setShopPaymentConfig(payRes.data);
     } catch (err) {
       console.error('Failed to fetch preorders', err);
     } finally {
@@ -555,31 +560,93 @@ export default function HistoryPage() {
                       )}
                     </div>
 
-                    {/* CTBC One-Time Account Details if Assigned */}
-                    {order.payment_method_code === 'ctbc_pool' && order.assigned_pool_account && (
-                      <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200 space-y-2 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-emerald-900">
-                            🏦 專屬中信一次性收款帳號：
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard?.writeText(order.assigned_pool_account);
-                              setCopiedAccount(prev => ({ ...prev, [order.id]: true }));
-                              setTimeout(() => setCopiedAccount(prev => ({ ...prev, [order.id]: false })), 2000);
-                            }}
-                            className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
-                          >
-                            {copiedAccount[order.id] ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                            <span>{copiedAccount[order.id] ? '已複製' : '複製帳號'}</span>
-                          </button>
+                    {/* CTBC One-Time Account Details or Contact Store if Pool Empty */}
+                    {order.payment_method_code === 'ctbc_pool' && (
+                      order.assigned_pool_account ? (
+                        <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200 space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-emerald-900">
+                              🏦 專屬中信一次性收款帳號：
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(order.assigned_pool_account);
+                                setCopiedAccount(prev => ({ ...prev, [order.id]: true }));
+                                setTimeout(() => setCopiedAccount(prev => ({ ...prev, [order.id]: false })), 2000);
+                              }}
+                              className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
+                            >
+                              {copiedAccount[order.id] ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                              <span>{copiedAccount[order.id] ? '已複製' : '複製帳號'}</span>
+                            </button>
+                          </div>
+                          <div className="font-mono font-black text-sm text-emerald-800">
+                            {order.assigned_pool_account}
+                          </div>
                         </div>
-                        <div className="font-mono font-black text-sm text-emerald-800">
-                          {order.assigned_pool_account}
+                      ) : !isPaidDeposit ? (
+                        <div className="bg-amber-50/80 p-3.5 rounded-xl border border-amber-200 text-xs font-bold text-amber-900">
+                          💬 請聯繫店家進行付款
                         </div>
-                      </div>
+                      ) : null
                     )}
+
+                    {/* Multi-Bank or Other Payment Method Account Details (Shown only after order submitted) */}
+                    {order.payment_method_code !== 'ctbc_pool' && !isPaidDeposit && (() => {
+                      const matchedMethod = shopPaymentConfig?.payment_methods?.find(
+                        m => m.code === order.payment_method_code
+                      );
+                      if (!matchedMethod) return null;
+                      return (
+                        <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8] space-y-2.5 text-xs">
+                          <div className="font-bold text-[#3E332B]">
+                            💳 付款方式：{matchedMethod.name}
+                          </div>
+                          {matchedMethod.display_instructions && (
+                            <div className="text-[#6D5D52] leading-relaxed whitespace-pre-line">
+                              {matchedMethod.display_instructions}
+                            </div>
+                          )}
+                          {Array.isArray(matchedMethod.bank_accounts_json) && matchedMethod.bank_accounts_json.length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              <span className="font-bold text-[#6D5D52] block">匯款收款銀行帳戶：</span>
+                              {matchedMethod.bank_accounts_json.map((acc, idx) => {
+                                const copyKey = `${order.id}_bank_${idx}`;
+                                return (
+                                  <div
+                                    key={idx}
+                                    className="bg-white p-2.5 rounded-lg border border-[#E8DEC8] flex flex-wrap items-center justify-between gap-2"
+                                  >
+                                    <div>
+                                      <div className="font-bold text-[#3E332B]">
+                                        {acc.bank_name} ({acc.bank_code})
+                                        {acc.holder ? ` · 戶名：${acc.holder}` : ''}
+                                      </div>
+                                      <div className="font-mono font-black text-sm text-[#8B5B43] tracking-wider">
+                                        {acc.account}
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard?.writeText(acc.account);
+                                        setCopiedAccount(prev => ({ ...prev, [copyKey]: true }));
+                                        setTimeout(() => setCopiedAccount(prev => ({ ...prev, [copyKey]: false })), 2000);
+                                      }}
+                                      className="px-2.5 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
+                                    >
+                                      {copiedAccount[copyKey] ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                                      <span>{copiedAccount[copyKey] ? '已複製' : '複製帳號'}</span>
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Remittance Last 5 Digits Input if not verified */}
                     {!isPaidDeposit && (

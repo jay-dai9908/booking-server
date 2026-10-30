@@ -211,7 +211,8 @@ export const createProductOrder = async (req, res) => {
       let assignedPoolAccount = null;
       let assignedPoolUrl = null;
 
-      // If CTBC one-time account pool selected, pull one AVAILABLE account from pool
+      // If CTBC one-time account pool selected, pull one AVAILABLE account from pool if available;
+      // if none left, allow order creation and instruct customer to contact store for payment.
       if (payment_method_code === 'ctbc_pool') {
         const availablePoolAccount = await tx.oneTimeAccountPool.findFirst({
           where: {
@@ -221,21 +222,19 @@ export const createProductOrder = async (req, res) => {
           orderBy: { id: 'asc' }
         });
 
-        if (!availablePoolAccount) {
-          throw new Error('目前「中信社群收款專屬一次性帳號」已全數配發完畢，請改選「一般銀行匯款」或「街口支付」完成下單！');
+        if (availablePoolAccount) {
+          await tx.oneTimeAccountPool.update({
+            where: { id: availablePoolAccount.id },
+            data: {
+              status: 'ASSIGNED',
+              assigned_order_ref: orderRef,
+              assigned_user_id: userId,
+              assigned_at: new Date()
+            }
+          });
+          assignedPoolAccount = availablePoolAccount.account_number;
+          assignedPoolUrl = availablePoolAccount.payment_url || null;
         }
-
-        await tx.oneTimeAccountPool.update({
-          where: { id: availablePoolAccount.id },
-          data: {
-            status: 'ASSIGNED',
-            assigned_order_ref: orderRef,
-            assigned_user_id: userId,
-            assigned_at: new Date()
-          }
-        });
-        assignedPoolAccount = availablePoolAccount.account_number;
-        assignedPoolUrl = availablePoolAccount.payment_url || null;
       }
 
       const cleanLast5 = remittance_last5 ? String(remittance_last5).trim() : null;
