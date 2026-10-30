@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Search } from 'lucide-react';
+import { Search, CheckCircle2, CreditCard } from 'lucide-react';
 import api from '../api/axios';
 import { getReservationStatusUI } from './ReservationDetailsModal';
 
-export default function DailyReservationsList({ date, onOpenDetails, refreshTrigger = 0 }) {
+export default function DailyReservationsList({ date, onOpenDetails, refreshTrigger = 0, onQuickCheckIn }) {
   const [reservations, setReservations] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending_checkin' | 'checked_in' | 'unpaid' | 'cancelled'
+  const [checkingInRef, setCheckingInRef] = useState(null);
 
   // Reset page to 1 when date or search changes
   useEffect(() => {
@@ -29,7 +31,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
   const fetchReservations = async () => {
     setIsLoading(true);
     try {
-      const res = await api.get(`/reservations/admin?page=${page}&limit=20&date=${date}&sort=start_time_asc&search=${encodeURIComponent(searchQuery)}`);
+      const res = await api.get(`/reservations/admin?page=${page}&limit=50&date=${date}&sort=start_time_asc&search=${encodeURIComponent(searchQuery)}`);
       setReservations(res.data?.data || (Array.isArray(res.data) ? res.data : []));
       setTotalPages(res.data?.totalPages || 1);
       setTotalRecords(res.data?.total || (Array.isArray(res.data) ? res.data.length : 0));
@@ -40,14 +42,62 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
     }
   };
 
+  const handleDirectCheckIn = async (e, bookingRef) => {
+    e.stopPropagation();
+    setCheckingInRef(bookingRef);
+    try {
+      if (onQuickCheckIn) {
+        await onQuickCheckIn(bookingRef);
+      } else {
+        await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'checked_in' });
+      }
+      fetchReservations();
+    } catch (err) {
+      alert('報到更新失敗');
+    } finally {
+      setCheckingInRef(null);
+    }
+  };
+
+  const filterCounts = useMemo(() => {
+    const counts = {
+      all: reservations.length,
+      pending_checkin: 0,
+      checked_in: 0,
+      unpaid: 0,
+      cancelled: 0
+    };
+    for (const r of reservations) {
+      if (r.status === 'cancelled') {
+        counts.cancelled++;
+      } else {
+        if (r.attendance === 'checked_in') counts.checked_in++;
+        else counts.pending_checkin++;
+        if (!r.is_paid) counts.unpaid++;
+      }
+    }
+    return counts;
+  }, [reservations]);
+
+  const filteredReservations = useMemo(() => {
+    return reservations.filter(r => {
+      if (statusFilter === 'all') return true;
+      if (statusFilter === 'cancelled') return r.status === 'cancelled';
+      if (r.status === 'cancelled') return false;
+      if (statusFilter === 'pending_checkin') return r.attendance !== 'checked_in';
+      if (statusFilter === 'checked_in') return r.attendance === 'checked_in';
+      if (statusFilter === 'unpaid') return !r.is_paid;
+      return true;
+    });
+  }, [reservations, statusFilter]);
+
   return (
     <div className="mt-8 pt-8 border-t-2 border-gray-200">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-4">
         <div className="flex items-center gap-4">
           <h2 className="text-xl font-bold text-gray-800 whitespace-nowrap">當日所有訂單列表</h2>
         </div>
 
-        
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -55,7 +105,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
             </div>
             <input
               type="text"
-              placeholder="搜尋姓名或電話..."
+              placeholder="搜尋姓名、電話或備註..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10 pr-4 py-2 border border-gray-200 bg-white rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 w-full transition-shadow"
@@ -66,13 +116,37 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
           </span>
         </div>
       </div>
+
+      {/* Quick Status Filter Pills */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-3 text-xs font-bold">
+        {[
+          { key: 'all', label: `全部 (${filterCounts.all})` },
+          { key: 'pending_checkin', label: `⏳ 待報到 (${filterCounts.pending_checkin})` },
+          { key: 'checked_in', label: `🟢 已報到/在場 (${filterCounts.checked_in})` },
+          { key: 'unpaid', label: `💳 待結帳 (${filterCounts.unpaid})` },
+          { key: 'cancelled', label: `❌ 已取消 (${filterCounts.cancelled})` }
+        ].map(tab => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setStatusFilter(tab.key)}
+            className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
+              statusFilter === tab.key
+                ? 'bg-gray-900 text-white shadow-xs'
+                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
       
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="p-12 text-center text-gray-400">載入中...</div>
-          ) : !reservations || reservations.length === 0 ? (
-            <div className="p-12 text-center text-gray-400 font-medium">此日期尚無任何預約紀錄</div>
+          ) : !filteredReservations || filteredReservations.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 font-medium">此篩選條件下尚無預約紀錄</div>
           ) : (
             <table className="w-full text-left whitespace-nowrap">
               <thead>
@@ -82,10 +156,11 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                   <th className="px-6 py-4 font-medium text-center">人數</th>
                   <th className="px-6 py-4 font-medium">狀態</th>
                   <th className="px-6 py-4 font-medium text-right">預約時間點</th>
+                  <th className="px-6 py-4 font-medium text-right">快捷操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {reservations.map(r => {
+                {filteredReservations.map(r => {
                   const isCancelled = r.status === 'cancelled';
                   const statusUI = getReservationStatusUI(r);
                   return (
@@ -181,6 +256,44 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                       </td>
                       <td className="px-6 py-4 text-right text-sm text-gray-500 font-medium">
                         {r.created_at ? format(new Date(r.created_at), 'MM/dd HH:mm') : '-'}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {!isCancelled && r.attendance !== 'checked_in' && (
+                            <button
+                              type="button"
+                              disabled={checkingInRef === r.booking_ref}
+                              onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
+                              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>報到</span>
+                            </button>
+                          )}
+                          {!isCancelled && !r.is_paid && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onOpenDetails) onOpenDetails(r.booking_ref);
+                              }}
+                              className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              <span>結帳</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onOpenDetails) onOpenDetails(r.booking_ref);
+                            }}
+                            className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold transition"
+                          >
+                            詳情
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

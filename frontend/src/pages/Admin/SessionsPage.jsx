@@ -329,6 +329,25 @@ export default function SessionsPage() {
     if (valid.length > 0) setListDate(valid[0]);
   };
 
+  const handleSelectMonToFri = () => {
+    const valid = getAvailableMonthDays()
+      .filter(d => {
+        const day = getDay(d);
+        return day >= 1 && day <= 5;
+      })
+      .map(d => format(d, 'yyyy-MM-dd'));
+    setSelectedDates(valid);
+    if (valid.length > 0) setListDate(valid[0]);
+  };
+
+  const handleSelectUnscheduledDays = () => {
+    const valid = getAvailableMonthDays()
+      .map(d => format(d, 'yyyy-MM-dd'))
+      .filter(dateStr => !monthSessionsMap[dateStr]);
+    setSelectedDates(valid);
+    if (valid.length > 0) setListDate(valid[0]);
+  };
+
   const handleSelectWeekends = () => {
     const valid = getAvailableMonthDays()
       .filter(d => {
@@ -434,10 +453,25 @@ export default function SessionsPage() {
                   </button>
                   <button
                     type="button"
+                    onClick={handleSelectMonToFri}
+                    className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
+                  >
+                    📅 週一~五
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleSelectWeekends}
                     className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
                     🌟 週末 (六~日)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectUnscheduledDays}
+                    className="px-2 py-0.5 text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-600 hover:text-white rounded-full transition-all"
+                    title="一鍵選取本月尚未排班的未來日期"
+                  >
+                    🔍 選取未排班日
                   </button>
                   <button
                     type="button"
@@ -529,13 +563,42 @@ export default function SessionsPage() {
                 </div>
               </div>
 
-              {/* Hour Range Drum/Scroll Picker */}
-              <HourRangeScrollPicker
-                startTime={startTime}
-                setStartTime={setStartTime}
-                endTime={endTime}
-                setEndTime={setEndTime}
-              />
+              {/* Quick Time-Range Presets + Hour Range Drum/Scroll Picker */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500">快速時段預設：</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setStartTime('13:00'); setEndTime('21:00'); }}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded-full border transition-all ${
+                        startTime === '13:00' && endTime === '21:00'
+                          ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                          : 'bg-[#FAF7F2] text-[#6E5D4F] border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white'
+                      }`}
+                    >
+                      ⚡ 平日 13:00-21:00
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setStartTime('10:00'); setEndTime('21:00'); }}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded-full border transition-all ${
+                        startTime === '10:00' && endTime === '21:00'
+                          ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                          : 'bg-[#FAF7F2] text-[#6E5D4F] border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white'
+                      }`}
+                    >
+                      ⚡ 假日 10:00-21:00
+                    </button>
+                  </div>
+                </div>
+                <HourRangeScrollPicker
+                  startTime={startTime}
+                  setStartTime={setStartTime}
+                  endTime={endTime}
+                  setEndTime={setEndTime}
+                />
+              </div>
 
               {/* Max Capacity Input */}
               <div>

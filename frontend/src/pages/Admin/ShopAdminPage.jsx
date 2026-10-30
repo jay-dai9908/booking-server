@@ -48,6 +48,7 @@ export default function ShopAdminPage() {
 
   const [arrivalDateOrder, setArrivalDateOrder] = useState(null);
   const [arrivalDateText, setArrivalDateText] = useState('');
+  const [showPickingModal, setShowPickingModal] = useState(false);
 
   // Tab 2: Payments & Account Pool
   const [accountPool, setAccountPool] = useState([]);
@@ -555,6 +556,104 @@ export default function ShopAdminPage() {
     await saveCustomBeadColorsArray(currentCustom);
   };
 
+  const handleBatchToggleFilteredColors = async (makeAvailable) => {
+    if (filteredAdminBeadColors.length === 0) return;
+    const actionLabel = makeAvailable ? '🟢 供貨中' : '🔴 補貨中';
+    if (
+      !window.confirm(
+        `確定要將目前篩選出的 ${filteredAdminBeadColors.length} 個色號全部設為「${actionLabel}」嗎？`
+      )
+    ) {
+      return;
+    }
+
+    const currentCustom = Array.isArray(shopSettings.bead_colors_json)
+      ? [...shopSettings.bead_colors_json]
+      : [];
+    const customMap = new Map(currentCustom.map(c => [String(c.code).toUpperCase(), { ...c }]));
+
+    for (const color of filteredAdminBeadColors) {
+      const code = color.code.toUpperCase();
+      const existing = customMap.get(code);
+      if (existing) {
+        existing.is_available = makeAvailable;
+      } else {
+        customMap.set(code, {
+          code,
+          series: color.series,
+          hex: color.hex,
+          name: color.name,
+          effect: color.effect,
+          is_available: makeAvailable
+        });
+      }
+    }
+
+    await saveCustomBeadColorsArray(Array.from(customMap.values()));
+  };
+
+  // Picking / Packing Summary Computation across selected orders (or active unpicked orders)
+  const pickingSummary = useMemo(() => {
+    const targetOrders =
+      selectedOrderIds.length > 0
+        ? orders.filter(o => selectedOrderIds.includes(o.id))
+        : orders.filter(o => o.order_status !== 'cancelled' && o.order_status !== 'picked_up');
+
+    const productTotals = new Map();
+    const beadColorTotals = new Map();
+    const unparsedNotes = [];
+
+    for (const order of targetOrders) {
+      for (const item of order.items || []) {
+        const key = item.product_code_snapshot || item.product_name_snapshot;
+        const prevProd = productTotals.get(key) || {
+          code: item.product_code_snapshot,
+          name: item.product_name_snapshot,
+          qty: 0,
+          ordersCount: 0
+        };
+        prevProd.qty += item.quantity || 0;
+        prevProd.ordersCount += 1;
+        productTotals.set(key, prevProd);
+
+        if (item.customization_note) {
+          const noteStr = String(item.customization_note);
+          const regex = /([A-Za-z]+\d+)\s*[×xX*]\s*(\d+)/g;
+          let match;
+          let foundAny = false;
+          while ((match = regex.exec(noteStr)) !== null) {
+            foundAny = true;
+            const rawCode = match[1].toUpperCase().replace(/^ZG(\d+)$/, 'Z$1');
+            const bagCount = parseInt(match[2], 10) || 0;
+            if (bagCount > 0) {
+              beadColorTotals.set(rawCode, (beadColorTotals.get(rawCode) || 0) + bagCount);
+            }
+          }
+          if (!foundAny) {
+            unparsedNotes.push({
+              order_ref: order.order_ref,
+              customer: order.user?.name || '顧客',
+              qty: item.quantity,
+              note: noteStr
+            });
+          }
+        }
+      }
+    }
+
+    const sortedBeadColors = Array.from(beadColorTotals.entries()).sort(([a], [b]) =>
+      a.localeCompare(b, undefined, { numeric: true })
+    );
+
+    return {
+      targetOrders,
+      products: Array.from(productTotals.values()),
+      beadColors: sortedBeadColors,
+      totalBeadBags: sortedBeadColors.reduce((sum, [, q]) => sum + q, 0),
+      unparsedNotes
+    };
+  }, [orders, selectedOrderIds]);
+
   const handleSaveEditingColor = async (e) => {
     e.preventDefault();
     if (!editingColorModal?.code?.trim()) {
@@ -710,16 +809,29 @@ export default function ShopAdminPage() {
               </button>
             </div>
 
-            {selectedOrderIds.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
-                onClick={() => handleNotifyArrival(selectedOrderIds)}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition"
+                onClick={() => setShowPickingModal(true)}
+                className="px-3.5 py-2 bg-[#2C241E] hover:bg-[#3E332B] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition"
               >
-                <Send className="w-3.5 h-3.5" />
-                <span>📢 批次推播 LINE 到貨通知 ({selectedOrderIds.length})</span>
+                <Package className="w-3.5 h-3.5 text-amber-300" />
+                <span>
+                  📊 備貨揀貨統計單 ({selectedOrderIds.length > 0 ? `已勾選 ${selectedOrderIds.length} 筆` : `待備貨 ${pickingSummary.targetOrders.length} 筆`})
+                </span>
               </button>
-            )}
+
+              {selectedOrderIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleNotifyArrival(selectedOrderIds)}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>📢 批次推播 LINE 到貨通知 ({selectedOrderIds.length})</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-[#E8DEC8] shadow-xs overflow-hidden">
@@ -1527,7 +1639,7 @@ export default function ShopAdminPage() {
 
           {/* Filter & Search Bar */}
           <div className="bg-white rounded-2xl p-4 border border-[#E8DEC8] shadow-xs space-y-3">
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -1537,6 +1649,24 @@ export default function ShopAdminPage() {
                   placeholder="搜尋色號或名稱（例如：Z1、H2、A1、夜光...）"
                   className="w-full pl-9 pr-4 py-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-bold outline-none focus:border-[#8B5B43]"
                 />
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  disabled={savingColor}
+                  onClick={() => handleBatchToggleFilteredColors(true)}
+                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition"
+                >
+                  🟢 篩選結果全設供貨中
+                </button>
+                <button
+                  type="button"
+                  disabled={savingColor}
+                  onClick={() => handleBatchToggleFilteredColors(false)}
+                  className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition"
+                >
+                  🔴 篩選結果全設補貨中
+                </button>
               </div>
             </div>
 
@@ -2230,6 +2360,157 @@ export default function ShopAdminPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* 6. Picking / Packing Summary Modal */}
+      {showPickingModal && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+          onClick={() => setShowPickingModal(false)}
+        >
+          <div
+            className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-2xl space-y-5 max-h-[90vh] overflow-y-auto animate-zoom-in"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b border-[#E8DEC8] pb-3">
+              <div>
+                <h3 className="font-black text-base sm:text-lg text-[#3E332B] flex items-center gap-2">
+                  <Package className="w-5 h-5 text-[#8B5B43]" />
+                  <span>
+                    📊 預購商品與拼豆色號揀貨總表（共匯總 {pickingSummary.targetOrders.length} 筆訂單）
+                  </span>
+                </h3>
+                <p className="text-xs text-[#8C8279] mt-0.5">
+                  {selectedOrderIds.length > 0
+                    ? `目前僅計算您手動勾選的 ${selectedOrderIds.length} 筆訂單`
+                    : '目前自動計算列表中所有「未取消且尚未取貨」的預購訂單'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPickingModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {pickingSummary.targetOrders.length === 0 ? (
+              <div className="py-12 text-center text-xs text-[#8C8279]">
+                目前尚無待備貨的預購訂單
+              </div>
+            ) : (
+              <div className="space-y-5 text-xs">
+                {/* 1. Product Totals */}
+                <div className="space-y-2">
+                  <h4 className="font-black text-sm text-[#3E332B]">
+                    📦 各項商品需求總數：
+                  </h4>
+                  <div className="bg-[#FAF7F2] rounded-2xl border border-[#E8DEC8] divide-y divide-[#E8DEC8]/70">
+                    {pickingSummary.products.map((prod, idx) => (
+                      <div key={idx} className="p-3 flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-[#3E332B] text-sm">{prod.name}</span>
+                          <span className="text-[11px] text-[#8C8279] ml-2">
+                            (來自 {prod.ordersCount} 筆訂單)
+                          </span>
+                        </div>
+                        <span className="font-mono font-black text-base text-[#8B5B43] bg-white px-3 py-1 rounded-xl border border-[#E8DEC8]">
+                          共 × {prod.qty}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. Parsed MARD Bead Colors Breakdown */}
+                {pickingSummary.beadColors.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-black text-sm text-[#3E332B]">
+                        🌈 10g 融合豆 — 各色號揀貨總包數（共 {pickingSummary.beadColors.length} 種色號、合計 {pickingSummary.totalBeadBags} 包）：
+                      </h4>
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 gap-2 bg-[#FAF7F2] p-3.5 rounded-2xl border border-[#E8DEC8]">
+                      {pickingSummary.beadColors.map(([code, totalBags]) => {
+                        const colorObj = allMergedBeadColors.find(c => c.code === code);
+                        const hex = colorObj?.hex || '#CCCCCC';
+                        const textColor = getContrastTextColor(hex);
+                        return (
+                          <div
+                            key={code}
+                            className="bg-white border border-[#E5DFD7] rounded-xl p-2 flex items-center justify-between shadow-2xs"
+                          >
+                            <span
+                              className="w-7 h-7 rounded-full inline-flex items-center justify-center font-mono font-black text-xs border border-black/15 shrink-0"
+                              style={{ backgroundColor: hex, color: textColor }}
+                            >
+                              {code}
+                            </span>
+                            <span className="font-mono font-black text-sm text-[#3E332B]">
+                              ×{totalBags}包
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Unparsed Manual Notes */}
+                {pickingSummary.unparsedNotes.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-black text-sm text-amber-800">
+                      📝 手動備註（未指定標準色號格式，需人工確認）：
+                    </h4>
+                    <div className="bg-amber-50 rounded-2xl border border-amber-200 p-3 space-y-1.5">
+                      {pickingSummary.unparsedNotes.map((u, i) => (
+                        <div key={i} className="text-amber-950">
+                          <span className="font-mono font-bold">#{u.order_ref}</span> ({u.customer} · {u.qty}包)：
+                          <span className="font-bold ml-1">{u.note}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-[#E8DEC8] flex justify-between items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const lines = [
+                    `【拾光製所 預購揀貨統計單】（共 ${pickingSummary.targetOrders.length} 筆訂單）`,
+                    '',
+                    '📦 商品總數：',
+                    ...pickingSummary.products.map(p => `- ${p.name}：共 ${p.qty}`),
+                    ''
+                  ];
+                  if (pickingSummary.beadColors.length > 0) {
+                    lines.push(
+                      `🌈 融合豆色號總計（共 ${pickingSummary.totalBeadBags} 包）：`,
+                      pickingSummary.beadColors.map(([c, q]) => `${c}×${q}包`).join('、')
+                    );
+                  }
+                  navigator.clipboard?.writeText(lines.join('\n'));
+                  alert('已複製揀貨統計清單文字！可直接貼至 LINE 或備忘錄');
+                }}
+                className="px-4 py-2 bg-[#FAF7F2] hover:bg-[#EBE5DF] text-[#8B5B43] border border-[#E8DEC8] rounded-xl text-xs font-bold transition"
+              >
+                📋 一鍵複製揀貨單文字
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowPickingModal(false)}
+                className="px-6 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold shadow-xs"
+              >
+                關閉視窗
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

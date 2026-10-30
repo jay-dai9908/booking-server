@@ -703,13 +703,23 @@ export const getAdminReservations = async (req, res) => {
     }
 
     if (search) {
-      // If we already have a whereClause.session, we need to combine them with AND
-      // The easiest way is to just assign the OR array directly to whereClause.OR
-      whereClause.OR = [
-        { booking_ref: { contains: search } },
-        { user: { name: { contains: search } } },
-        { user: { phone: { contains: search } } }
+      const shortRefMatch = search.match(/^(?:BK-)?([0-9a-fA-F]{4})-([0-9a-fA-F]{4})$/i);
+      const orConditions = [
+        { booking_ref: { contains: search, mode: 'insensitive' } },
+        { user: { name: { contains: search, mode: 'insensitive' } } },
+        { user: { phone: { contains: search } } },
+        { customer_note: { contains: search, mode: 'insensitive' } },
+        { admin_note: { contains: search, mode: 'insensitive' } }
       ];
+      if (shortRefMatch) {
+        orConditions.push({
+          AND: [
+            { booking_ref: { startsWith: shortRefMatch[1].toLowerCase() } },
+            { booking_ref: { endsWith: shortRefMatch[2].toLowerCase() } }
+          ]
+        });
+      }
+      whereClause.OR = orConditions;
     }
 
     // Fetch all reservations matching criteria (for the month)
@@ -1944,5 +1954,184 @@ export const updateReservationNotes = async (req, res) => {
   } catch (error) {
     console.error('Error updating reservation notes:', error);
     res.status(500).json({ error: '更新備註失敗' });
+  }
+};
+
+/**
+ * Admin Sidebar Navigation Live Badges
+ */
+export const getAdminNavBadges = async (req, res) => {
+  try {
+    const now = new Date();
+    const taipeiDateStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(now);
+
+    const startDate = new Date(`${taipeiDateStr}T00:00:00.000Z`);
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 1);
+
+    const [todayReservations, pendingShopVerifyCount, arrivedShopCount] = await Promise.all([
+      prisma.reservation.findMany({
+        where: {
+          status: 'confirmed',
+          session: {
+            session_date: {
+              gte: startDate,
+              lt: endDate
+            }
+          }
+        },
+        select: {
+          booking_ref: true,
+          attendance: true,
+          is_paid: true
+        }
+      }),
+      prisma.productOrder ? prisma.productOrder.count({
+        where: {
+          order_status: { not: 'cancelled' },
+          payment_status: 'reported_pending_verify'
+        }
+      }).catch(() => 0) : Promise.resolve(0),
+      prisma.productOrder ? prisma.productOrder.count({
+        where: {
+          order_status: 'arrived'
+        }
+      }).catch(() => 0) : Promise.resolve(0)
+    ]);
+
+    const refMap = new Map();
+    for (const r of todayReservations) {
+      const existing = refMap.get(r.booking_ref) || { checked_in: false, is_paid: false };
+      if (r.attendance === 'checked_in') existing.checked_in = true;
+      if (r.is_paid) existing.is_paid = true;
+      refMap.set(r.booking_ref, existing);
+    }
+
+    let todayTotalGroups = refMap.size;
+    let todayPendingCheckin = 0;
+    let todayUnpaid = 0;
+    for (const val of refMap.values()) {
+      if (!val.checked_in) todayPendingCheckin++;
+      if (!val.is_paid) todayUnpaid++;
+    }
+
+    res.json({
+      today_total_groups: todayTotalGroups,
+      today_pending_checkin: todayPendingCheckin,
+      today_unpaid: todayUnpaid,
+      shop_pending_verify: pendingShopVerifyCount,
+      shop_arrived_unpicked: arrivedShopCount
+    });
+  } catch (error) {
+    console.error('getAdminNavBadges error:', error);
+    res.json({
+      today_total_groups: 0,
+      today_pending_checkin: 0,
+      today_unpaid: 0,
+      shop_pending_verify: 0,
+      shop_arrived_unpicked: 0
+    });
+  }
+};
+
+/**
+ * Admin Universal Counter Quick Lookup (Reservations + Passes + Shop Preorders)
+ */
+export const adminQuickLookup = async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) {
+    return res.json({ reservations: [], passes: [], shop_orders: [] });
+  }
+
+  try {
+    const shortRefMatch = q.match(/^(?:BK-)?([0-9a-fA-F]{4})-([0-9a-fA-F]{4})$/i);
+    const resOrConditions = [
+      { booking_ref: { contains: q, mode: 'insensitive' } },
+      { user: { name: { contains: q, mode: 'insensitive' } } },
+      { user: { phone: { contains: q } } }
+    ];
+    if (shortRefMatch) {
+      resOrConditions.push({
+        AND: [
+          { booking_ref: { startsWith: shortRefMatch[1].toLowerCase() } },
+          { booking_ref: { endsWith: shortRefMatch[2].toLowerCase() } }
+        ]
+      });
+    }
+
+    const [rawReservations, passes, shopOrders] = await Promise.all([
+      prisma.reservation.findMany({
+        where: { OR: resOrConditions },
+        include: {
+          session: true,
+          user: {
+            select: { id: true, name: true, phone: true, line_user_id: true, line_display_name: true }
+          }
+        },
+        orderBy: { created_at: 'desc' },
+        take: 60
+      }),
+      prisma.userPass ? prisma.userPass.findMany({
+        where: {
+          OR: [
+            { pass_code: { contains: q, mode: 'insensitive' } },
+            { user: { name: { contains: q, mode: 'insensitive' } } },
+            { user: { phone: { contains: q } } }
+          ]
+        },
+        include: {
+          user: {
+            select: { id: true, name: true, phone: true }
+          }
+        },
+        orderBy: { created_at: 'desc' },
+        take: 10
+      }).catch(() => []) : Promise.resolve([]),
+      prisma.productOrder ? prisma.productOrder.findMany({
+        where: {
+          OR: [
+            { order_ref: { contains: q, mode: 'insensitive' } },
+            { remittance_last5: { contains: q } },
+            { assigned_pool_account: { contains: q } },
+            { user: { name: { contains: q, mode: 'insensitive' } } },
+            { user: { phone: { contains: q } } }
+          ]
+        },
+        include: {
+          user: {
+            select: { id: true, name: true, phone: true }
+          },
+          items: true
+        },
+        orderBy: { created_at: 'desc' },
+        take: 10
+      }).catch(() => []) : Promise.resolve([])
+    ]);
+
+    const bookingRefs = [...new Set(rawReservations.map(r => r.booking_ref))];
+    const equipments = bookingRefs.length > 0
+      ? await prisma.bookingEquipment.findMany({ where: { booking_ref: { in: bookingRefs } } })
+      : [];
+    const equipmentsMap = {};
+    equipments.forEach(eq => {
+      if (!equipmentsMap[eq.booking_ref]) equipmentsMap[eq.booking_ref] = [];
+      equipmentsMap[eq.booking_ref].push(eq);
+    });
+
+    const groupedReservations = groupReservations(rawReservations, equipmentsMap).slice(0, 10);
+
+    res.json({
+      reservations: groupedReservations,
+      passes,
+      shop_orders: shopOrders
+    });
+  } catch (error) {
+    console.error('adminQuickLookup error:', error);
+    res.status(500).json({ error: '查詢失敗' });
   }
 };

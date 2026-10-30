@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Search, Plus, XCircle, CheckCircle2, Cpu, Minus } from 'lucide-react';
+import { Search, Plus, XCircle, CheckCircle2, Cpu, Minus, CreditCard } from 'lucide-react';
 import api from '../../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from '../../components/ReservationDetailsModal';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
@@ -10,6 +10,8 @@ export default function ReservationsPage() {
   const [selectedReservation, setSelectedReservation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending_checkin' | 'checked_in' | 'unpaid' | 'cancelled'
+  const [checkingInRef, setCheckingInRef] = useState(null);
   
   // Pagination & Month filter
   const [page, setPage] = useState(1);
@@ -202,6 +204,51 @@ export default function ReservationsPage() {
 
   // getReservationStatusUI is now imported from ReservationDetailsModal
 
+  const handleDirectCheckIn = async (e, bookingRef) => {
+    e.stopPropagation();
+    setCheckingInRef(bookingRef);
+    try {
+      await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'checked_in' });
+      fetchReservations();
+    } catch (err) {
+      alert('報到更新失敗');
+    } finally {
+      setCheckingInRef(null);
+    }
+  };
+
+  const filterCounts = useMemo(() => {
+    const counts = {
+      all: reservations.length,
+      pending_checkin: 0,
+      checked_in: 0,
+      unpaid: 0,
+      cancelled: 0
+    };
+    for (const r of reservations) {
+      if (r.status === 'cancelled') {
+        counts.cancelled++;
+      } else {
+        if (r.attendance === 'checked_in') counts.checked_in++;
+        else counts.pending_checkin++;
+        if (!r.is_paid) counts.unpaid++;
+      }
+    }
+    return counts;
+  }, [reservations]);
+
+  const filteredReservations = useMemo(() => {
+    return reservations.filter(r => {
+      if (statusFilter === 'all') return true;
+      if (statusFilter === 'cancelled') return r.status === 'cancelled';
+      if (r.status === 'cancelled') return false;
+      if (statusFilter === 'pending_checkin') return r.attendance !== 'checked_in';
+      if (statusFilter === 'checked_in') return r.attendance === 'checked_in';
+      if (statusFilter === 'unpaid') return !r.is_paid;
+      return true;
+    });
+  }, [reservations, statusFilter]);
+
   return (
     <>
       <div className="p-4 md:p-8 space-y-8 animate-fade-in">
@@ -244,12 +291,36 @@ export default function ReservationsPage() {
         </div>
       </div>
 
+      {/* Quick Status Filter Pills */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-bold">
+        {[
+          { key: 'all', label: `本頁全部 (${filterCounts.all})` },
+          { key: 'pending_checkin', label: `⏳ 待報到 (${filterCounts.pending_checkin})` },
+          { key: 'checked_in', label: `🟢 已報到 (${filterCounts.checked_in})` },
+          { key: 'unpaid', label: `💳 待結帳 (${filterCounts.unpaid})` },
+          { key: 'cancelled', label: `❌ 已取消 (${filterCounts.cancelled})` }
+        ].map(tab => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setStatusFilter(tab.key)}
+            className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
+              statusFilter === tab.key
+                ? 'bg-gray-900 text-white shadow-xs'
+                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="p-12 text-center text-gray-400">載入中...</div>
-          ) : !reservations || reservations.length === 0 ? (
-            <div className="p-12 text-center text-gray-400 font-medium">此月份尚無預約紀錄或找不到符合的搜尋結果</div>
+          ) : !filteredReservations || filteredReservations.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 font-medium">此月份尚無預約紀錄或找不到符合的篩選結果</div>
           ) : (
             <table className="w-full text-left whitespace-nowrap">
               <thead>
@@ -259,10 +330,11 @@ export default function ReservationsPage() {
                   <th className="px-6 py-4 font-medium text-center">人數</th>
                   <th className="px-6 py-4 font-medium">狀態</th>
                   <th className="px-6 py-4 font-medium text-right">建立時間</th>
+                  <th className="px-6 py-4 font-medium text-right">快捷操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {reservations.map(r => {
+                {filteredReservations.map(r => {
                   const isCancelled = r.status === 'cancelled';
                   const statusUI = getReservationStatusUI(r);
                   return (
@@ -359,6 +431,34 @@ export default function ReservationsPage() {
                       </td>
                       <td className="px-6 py-4 text-right text-sm text-gray-400">
                         {format(new Date(r.created_at), 'MM/dd HH:mm')}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {!isCancelled && r.attendance !== 'checked_in' && (
+                            <button
+                              type="button"
+                              disabled={checkingInRef === r.booking_ref}
+                              onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
+                              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>報到</span>
+                            </button>
+                          )}
+                          {!isCancelled && !r.is_paid && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedReservation(r);
+                              }}
+                              className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              <span>結帳</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

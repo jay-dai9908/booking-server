@@ -401,6 +401,40 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn, refreshTri
             </div>
           )}
 
+          {/* Leaving Soon Alert Strip (groups whose booking ends at the end of current session) */}
+          {(() => {
+            const currentSession = sessions.find(s => s.id === selectedSessionId);
+            if (!currentSession) return null;
+            const leavingGroups = seatingData.filter(
+              r => r.status === 'confirmed' && r.booking_end_time === currentSession.end_time
+            );
+            if (leavingGroups.length === 0) return null;
+            return (
+              <div className="bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 text-xs">
+                <span className="font-bold text-rose-800 flex items-center gap-1.5">
+                  <span>🔔 本時段即將離場提醒（{currentSession.end_time} 到期，可提前 10 分鐘提醒壓平作品或詢問加時）：</span>
+                </span>
+                <div className="flex items-center flex-wrap gap-1.5">
+                  {leavingGroups.map(g => (
+                    <button
+                      key={g.booking_ref}
+                      type="button"
+                      onClick={() => onOpenDetails && onOpenDetails(g.booking_ref)}
+                      className="px-2.5 py-1 rounded-lg font-bold bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 transition flex items-center gap-1 shadow-2xs"
+                      title="點擊開啟訂單詳情 / 結帳 / 現場加時"
+                    >
+                      <span>{g.user?.name || '顧客'}</span>
+                      <span className="font-mono text-[11px] text-rose-600">
+                        ({(g.assigned_seats || []).join(', ')})
+                      </span>
+                      {!g.is_paid && <span className="text-amber-700">💳未結</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="bg-white p-8 rounded-2xl shadow-sm border">
           <div className="max-w-4xl mx-auto flex flex-col gap-12">
             
@@ -550,7 +584,21 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn, refreshTri
         </div>
         
         {/* Daily Reservations List Section */}
-        <DailyReservationsList date={selectedDate} onOpenDetails={onOpenDetails} refreshTrigger={dailyListRefreshKey} />
+        <DailyReservationsList
+          date={selectedDate}
+          onOpenDetails={onOpenDetails}
+          refreshTrigger={dailyListRefreshKey}
+          onQuickCheckIn={async (bookingRef) => {
+            if (onCheckIn) {
+              await onCheckIn(bookingRef);
+              setTimeout(() => {
+                fetchSeatingData(false);
+                fetchOccupancy();
+                setDailyListRefreshKey(prev => prev + 1);
+              }, 250);
+            }
+          }}
+        />
         
         </div>
       ) : (
