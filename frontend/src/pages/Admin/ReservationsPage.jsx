@@ -64,9 +64,13 @@ export default function ReservationsPage() {
   }, [showManualBooking]);
 
   useEffect(() => {
+    if (!searchQuery.trim()) {
+      fetchReservations();
+      return;
+    }
     const delayDebounceFn = setTimeout(() => {
       fetchReservations();
-    }, 300);
+    }, 220);
     return () => clearTimeout(delayDebounceFn);
   }, [page, currentMonth, searchQuery]);
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, 
@@ -20,12 +20,13 @@ import {
   Search
 } from 'lucide-react';
 import api from '../api/axios';
-import QuickPosLookupModal from './QuickPosLookupModal';
 
-export default function AdminLayout() {
+const QuickPosLookupModal = lazy(() => import('./QuickPosLookupModal'));
+
+export default function AdminLayout({ initialAdminInfo = null }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [adminInfo, setAdminInfo] = useState(null);
-  const [isLoadingInfo, setIsLoadingInfo] = useState(true);
+  const [adminInfo, setAdminInfo] = useState(initialAdminInfo);
+  const [isLoadingInfo, setIsLoadingInfo] = useState(!initialAdminInfo);
   const [showQuickLookup, setShowQuickLookup] = useState(false);
   const [navBadges, setNavBadges] = useState({
     today_total_groups: 0,
@@ -38,8 +39,9 @@ export default function AdminLayout() {
   const location = useLocation();
 
   useEffect(() => {
-    fetchAdminInfo();
-    fetchNavBadges();
+    if (!initialAdminInfo) {
+      fetchAdminInfo();
+    }
     const handleAdminDataUpdated = () => fetchNavBadges();
     window.addEventListener('admin-data-updated', handleAdminDataUpdated);
     return () => window.removeEventListener('admin-data-updated', handleAdminDataUpdated);
@@ -305,11 +307,15 @@ export default function AdminLayout() {
         </div>
       </div>
 
-      <QuickPosLookupModal
-        isOpen={showQuickLookup}
-        onClose={() => setShowQuickLookup(false)}
-        onDataChanged={fetchNavBadges}
-      />
+      {showQuickLookup && (
+        <Suspense fallback={null}>
+          <QuickPosLookupModal
+            isOpen={showQuickLookup}
+            onClose={() => setShowQuickLookup(false)}
+            onDataChanged={fetchNavBadges}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

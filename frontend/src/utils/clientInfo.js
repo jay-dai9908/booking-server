@@ -39,8 +39,8 @@ const fetchPublicIpOnce = () => {
   return inflightIpPromise;
 };
 
-// Warm up IP cache immediately on module load
-if (typeof window !== 'undefined') {
+// Warm up IP cache immediately on module load (skip on /admin routes to avoid unnecessary external calls)
+if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/admin')) {
   fetchPublicIpOnce();
 }
 

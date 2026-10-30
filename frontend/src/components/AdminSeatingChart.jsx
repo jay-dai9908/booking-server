@@ -586,24 +586,6 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn, refreshTri
 
           </div>
         </div>
-        
-        {/* Daily Reservations List Section */}
-        <DailyReservationsList
-          date={selectedDate}
-          onOpenDetails={onOpenDetails}
-          refreshTrigger={dailyListRefreshKey}
-          onQuickCheckIn={async (bookingRef) => {
-            if (onCheckIn) {
-              await onCheckIn(bookingRef);
-              setTimeout(() => {
-                fetchSeatingData(false);
-                fetchOccupancy();
-                setDailyListRefreshKey(prev => prev + 1);
-              }, 250);
-            }
-          }}
-        />
-        
         </div>
       ) : (
         <div className="bg-white p-16 rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400">
@@ -614,6 +596,23 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn, refreshTri
           <p className="text-sm mt-1">請先前往「營業時段設定」新增時段，或切換至其他日期。</p>
         </div>
       )}
+
+      {/* Daily Reservations List Section (Mounts immediately in parallel with session fetch) */}
+      <DailyReservationsList
+        date={selectedDate}
+        onOpenDetails={onOpenDetails}
+        refreshTrigger={dailyListRefreshKey}
+        onQuickCheckIn={async (bookingRef) => {
+          if (onCheckIn) {
+            await onCheckIn(bookingRef);
+            setTimeout(() => {
+              if (selectedSessionId) fetchSeatingData(false);
+              fetchOccupancy();
+              setDailyListRefreshKey(prev => prev + 1);
+            }, 250);
+          }
+        }}
+      />
 
       {/* Swap Confirmation Modal */}
       {showSwapModal && (

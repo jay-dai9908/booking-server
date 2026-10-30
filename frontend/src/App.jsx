@@ -1,17 +1,19 @@
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import api from './api/axios';
-import { getBrowserClientInfoAsync } from './utils/clientInfo';
+import { getBrowserClientInfo, getBrowserClientInfoAsync } from './utils/clientInfo';
 
-// Customer Pages (Eagerly loaded for instant LINE WebView startup)
+// Customer Entry Page (Eagerly loaded for instant LINE WebView startup)
 import Home from './pages/Customer/Home';
-import Register from './pages/Customer/Register';
-import Booking from './pages/Customer/Booking';
-import Preview from './pages/Customer/Preview';
-import HistoryPage from './pages/Customer/HistoryPage';
-import ShopPage from './pages/Customer/ShopPage';
 
-// Admin Pages (Lazy-loaded via Code Splitting to reduce customer bundle size by >40%)
+// Customer Secondary Pages (Lazy-loaded so neither Customer Home nor Staff Admin downloads them upfront)
+const Register = lazy(() => import('./pages/Customer/Register'));
+const Booking = lazy(() => import('./pages/Customer/Booking'));
+const Preview = lazy(() => import('./pages/Customer/Preview'));
+const HistoryPage = lazy(() => import('./pages/Customer/HistoryPage'));
+const ShopPage = lazy(() => import('./pages/Customer/ShopPage'));
+
+// Admin Pages (Lazy-loaded via Code Splitting)
 const AdminLogin = lazy(() => import('./pages/Admin/Login'));
 const AdminLayout = lazy(() => import('./components/AdminLayout'));
 const SessionsPage = lazy(() => import('./pages/Admin/SessionsPage'));
@@ -28,12 +30,15 @@ const SettingsPage = lazy(() => import('./pages/Admin/SettingsPage'));
 
 function App() {
   const [userRole, setUserRole] = useState(null); // 'customer', 'temp_customer', 'admin', or null
+  const [initialAdminInfo, setInitialAdminInfo] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const info = await getBrowserClientInfoAsync();
+        const isAdminPath = window.location.pathname.startsWith('/admin');
+        // Never block /admin routes waiting on external ipify.org IP lookup
+        const info = isAdminPath ? getBrowserClientInfo() : await getBrowserClientInfoAsync();
         const searchParams = new URLSearchParams(window.location.search);
         const hasOAuthCode = searchParams.has('code');
         const isEntryHome = window.location.pathname === '/' && !hasOAuthCode;
@@ -61,6 +66,9 @@ function App() {
           }
         });
         setUserRole(response.data.role);
+        if (response.data.role === 'admin') {
+          setInitialAdminInfo(response.data);
+        }
       } catch (error) {
         try {
           sessionStorage.removeItem('shiguang_line_fresh_login');
@@ -105,15 +113,15 @@ function App() {
         {/* Admin Login */}
         <Route 
           path="/admin/login" 
-          element={userRole === 'admin' ? <Navigate to="/admin/sessions" /> : <AdminLogin setUserRole={setUserRole} />} 
+          element={userRole === 'admin' ? <Navigate to="/admin/seating" /> : <AdminLogin setUserRole={setUserRole} />} 
         />
 
         {/* Admin Nested Routes */}
         <Route 
           path="/admin" 
-          element={userRole === 'admin' ? <AdminLayout /> : <Navigate to="/admin/login" />}
+          element={userRole === 'admin' ? <AdminLayout initialAdminInfo={initialAdminInfo} /> : <Navigate to="/admin/login" />}
         >
-          <Route index element={<Navigate to="sessions" replace />} />
+          <Route index element={<Navigate to="seating" replace />} />
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="reservations" element={<ReservationsPage />} />
           <Route path="shop" element={<ShopAdminPage />} />
@@ -128,7 +136,7 @@ function App() {
         </Route>
 
         {/* Catch old dashboard link */}
-        <Route path="/admin/dashboard" element={<Navigate to="/admin/sessions" replace />} />
+        <Route path="/admin/dashboard" element={<Navigate to="/admin/seating" replace />} />
       </Routes>
       </Suspense>
     </BrowserRouter>

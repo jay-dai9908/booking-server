@@ -83,7 +83,6 @@ export default function ShopAdminPage() {
   useEffect(() => {
     if (activeTab === 'orders') {
       fetchAdminOrders();
-      fetchPaymentSettings();
     }
     if (activeTab === 'payments') {
       fetchAccountPool();
@@ -95,6 +94,12 @@ export default function ShopAdminPage() {
       fetchAdminProducts();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (showPickingModal) {
+      fetchPaymentSettings();
+    }
+  }, [showPickingModal]);
 
   useEffect(() => {
     const handleAdminDataUpdated = () => {
@@ -500,10 +505,11 @@ export default function ShopAdminPage() {
     }
   };
 
-  // Bead Colors Management Logic
+  // Bead Colors Management Logic (only computed when viewing bead_colors tab or picking modal)
   const allMergedBeadColors = useMemo(() => {
+    if (activeTab !== 'bead_colors' && !showPickingModal) return [];
     return getMergedBeadColors(shopSettings.bead_colors_json || []);
-  }, [shopSettings.bead_colors_json]);
+  }, [shopSettings.bead_colors_json, activeTab, showPickingModal]);
 
   const adminSeriesTabs = useMemo(() => {
     const existingKeys = new Set(MARD_SERIES_INFO.map(s => s.key));
@@ -609,6 +615,15 @@ export default function ShopAdminPage() {
 
   // Picking / Packing Summary Computation across selected orders (or active unpicked orders)
   const pickingSummary = useMemo(() => {
+    if (!showPickingModal) {
+      return {
+        targetOrders: [],
+        products: [],
+        beadColors: [],
+        totalBeadBags: 0,
+        unparsedNotes: []
+      };
+    }
     const targetOrders =
       selectedOrderIds.length > 0
         ? orders.filter(o => selectedOrderIds.includes(o.id))
@@ -667,7 +682,7 @@ export default function ShopAdminPage() {
       totalBeadBags: sortedBeadColors.reduce((sum, [, q]) => sum + q, 0),
       unparsedNotes
     };
-  }, [orders, selectedOrderIds]);
+  }, [showPickingModal, orders, selectedOrderIds]);
 
   const handleSaveEditingColor = async (e) => {
     e.preventDefault();

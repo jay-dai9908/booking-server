@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { X, CheckCircle2, XCircle, Trash2, Pencil, Check, Cpu, MessageCircle } from 'lucide-react';
 import api from '../api/axios';
-import ExtendTimeModal from './ExtendTimeModal';
-import EquipmentAddonModal from './EquipmentAddonModal';
-import CheckoutModal from './CheckoutModal';
-import SendLineMessageModal from './SendLineMessageModal';
+
+const ExtendTimeModal = lazy(() => import('./ExtendTimeModal'));
+const EquipmentAddonModal = lazy(() => import('./EquipmentAddonModal'));
+const CheckoutModal = lazy(() => import('./CheckoutModal'));
+const SendLineMessageModal = lazy(() => import('./SendLineMessageModal'));
 
 export const getReservationStatusUI = (r) => {
   if (r.status === 'cancelled') {
@@ -549,66 +550,70 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
         </div>
       </div>
       
-      <ExtendTimeModal 
-        isOpen={showExtendModal}
-        onClose={() => setShowExtendModal(false)}
-        reservation={reservation}
-        onSuccess={async () => {
-          try {
-            const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
-            if (onUpdate) onUpdate(res.data);
-          } catch (err) {
-            if (onUpdate) onUpdate();
-          }
-        }}
-      />
-
-      {showEquipmentModal && (
-        <EquipmentAddonModal 
-          isOpen={showEquipmentModal}
-          onClose={() => setShowEquipmentModal(false)}
-          reservation={reservation}
-          isAdmin={true}
-          onSuccess={async (updatedData) => {
-            try {
-              const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
-              if (onUpdate) onUpdate(res.data);
-            } catch (e) {
-              if (updatedData && onUpdate) {
-                onUpdate({
-                  equipments: updatedData.equipments,
-                  total_amount: updatedData.total_amount
-                });
-              } else if (onUpdate) {
-                onUpdate();
+      <Suspense fallback={null}>
+        {showExtendModal && (
+          <ExtendTimeModal 
+            isOpen={showExtendModal}
+            onClose={() => setShowExtendModal(false)}
+            reservation={reservation}
+            onSuccess={async () => {
+              try {
+                const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
+                if (onUpdate) onUpdate(res.data);
+              } catch (err) {
+                if (onUpdate) onUpdate();
               }
-            }
-          }}
-        />
-      )}
-      {showCheckoutModal && (
-        <CheckoutModal
-          isOpen={showCheckoutModal}
-          onClose={() => setShowCheckoutModal(false)}
-          reservation={reservation}
-          onCheckoutSuccess={async () => {
-            try {
-              const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
-              if (onUpdate) onUpdate(res.data);
-            } catch (e) {
-              if (onUpdate) onUpdate();
-            }
-          }}
-        />
-      )}
-      {showLineModal && (
-        <SendLineMessageModal
-          isOpen={showLineModal}
-          onClose={() => setShowLineModal(false)}
-          user={reservation.user}
-          reservation={reservation}
-        />
-      )}
+            }}
+          />
+        )}
+
+        {showEquipmentModal && (
+          <EquipmentAddonModal 
+            isOpen={showEquipmentModal}
+            onClose={() => setShowEquipmentModal(false)}
+            reservation={reservation}
+            isAdmin={true}
+            onSuccess={async (updatedData) => {
+              try {
+                const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
+                if (onUpdate) onUpdate(res.data);
+              } catch (e) {
+                if (updatedData && onUpdate) {
+                  onUpdate({
+                    equipments: updatedData.equipments,
+                    total_amount: updatedData.total_amount
+                  });
+                } else if (onUpdate) {
+                  onUpdate();
+                }
+              }
+            }}
+          />
+        )}
+        {showCheckoutModal && (
+          <CheckoutModal
+            isOpen={showCheckoutModal}
+            onClose={() => setShowCheckoutModal(false)}
+            reservation={reservation}
+            onCheckoutSuccess={async () => {
+              try {
+                const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
+                if (onUpdate) onUpdate(res.data);
+              } catch (e) {
+                if (onUpdate) onUpdate();
+              }
+            }}
+          />
+        )}
+        {showLineModal && (
+          <SendLineMessageModal
+            isOpen={showLineModal}
+            onClose={() => setShowLineModal(false)}
+            user={reservation.user}
+            reservation={reservation}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

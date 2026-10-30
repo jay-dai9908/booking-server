@@ -20,11 +20,14 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
   }, [date, searchQuery]);
 
   useEffect(() => {
+    if (!date) return;
+    if (!searchQuery.trim()) {
+      fetchReservations();
+      return;
+    }
     const delayDebounceFn = setTimeout(() => {
-      if (date) {
-        fetchReservations();
-      }
-    }, 300);
+      fetchReservations();
+    }, 220);
     return () => clearTimeout(delayDebounceFn);
   }, [date, page, searchQuery, refreshTrigger]);
 
