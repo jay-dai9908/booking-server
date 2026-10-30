@@ -1203,11 +1203,6 @@ export default function ShopPage({ userRole }) {
                     <Sparkles className="w-4 h-4 text-amber-700" />
                     <span>🌈 高品質融合豆 10g 補充包（全店 {allBeadColors.length} 色選色表）：</span>
                   </span>
-                  <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-white text-amber-900 border border-amber-300">
-                    {beadsDiscountMode === 'per_color'
-                      ? '📌 單色獨立計算：單一色號滿 10 包 / 20 包享優惠'
-                      : '🎉 混色合計計算：任選色號加總滿 10 包 / 20 包享優惠'}
-                  </span>
                 </div>
                 <p className="text-xs text-amber-800">
                   單包 $16 ｜ <strong className="text-amber-950 font-black">滿 10 包 $150</strong>（每包 $15） ｜ <strong className="text-rose-700 font-black">滿 20 包 $280</strong>（每包 $14）！
@@ -1387,9 +1382,7 @@ export default function ShopPage({ userRole }) {
                   <span>🎨 拾光製所 MARD 拼豆色號表（共 {allBeadColors.length} 色）</span>
                 </h3>
                 <p className="text-[11px] sm:text-xs text-[#D5CFC9] mt-0.5">
-                  {beadsDiscountMode === 'per_color'
-                    ? '📌 單色獨立優惠：單一色號買滿 10 包 $150、滿 20 包 $280（未滿 10 包每包 $16）'
-                    : '🎉 混色合計優惠：全色號混搭加總滿 10 包 $150、滿 20 包 $280（未滿 10 包每包 $16）'}
+                  單包 $16 ｜ 滿 10 包 $150（每包 $15） ｜ 滿 20 包 $280（每包 $14）
                 </p>
               </div>
               <button
