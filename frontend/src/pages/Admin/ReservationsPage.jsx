@@ -71,6 +71,12 @@ export default function ReservationsPage() {
   }, [page, currentMonth, searchQuery]);
 
   useEffect(() => {
+    const handleAdminDataUpdated = () => fetchReservations();
+    window.addEventListener('admin-data-updated', handleAdminDataUpdated);
+    return () => window.removeEventListener('admin-data-updated', handleAdminDataUpdated);
+  }, [page, currentMonth, searchQuery]);
+
+  useEffect(() => {
     if (showManualBooking) {
       fetchManualSessions();
     }
@@ -197,6 +203,7 @@ export default function ReservationsPage() {
       setManualForceSplit(true);
       setManualEquipments({});
       fetchReservations();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       alert(err.response?.data?.error || '手動預約失敗');
     }
@@ -210,6 +217,7 @@ export default function ReservationsPage() {
     try {
       await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'checked_in' });
       fetchReservations();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       alert('報到更新失敗');
     } finally {

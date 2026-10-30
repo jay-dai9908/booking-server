@@ -40,6 +40,9 @@ export default function AdminLayout() {
   useEffect(() => {
     fetchAdminInfo();
     fetchNavBadges();
+    const handleAdminDataUpdated = () => fetchNavBadges();
+    window.addEventListener('admin-data-updated', handleAdminDataUpdated);
+    return () => window.removeEventListener('admin-data-updated', handleAdminDataUpdated);
   }, []);
 
   useEffect(() => {

@@ -405,9 +405,13 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn, refreshTri
           {(() => {
             const currentSession = sessions.find(s => s.id === selectedSessionId);
             if (!currentSession) return null;
-            const leavingGroups = seatingData.filter(
-              r => r.status === 'confirmed' && r.booking_end_time === currentSession.end_time
-            );
+            const seenRefs = new Set();
+            const leavingGroups = seatingData.filter(r => {
+              if (r.status !== 'confirmed' || r.booking_end_time !== currentSession.end_time) return false;
+              if (seenRefs.has(r.booking_ref)) return false;
+              seenRefs.add(r.booking_ref);
+              return true;
+            });
             if (leavingGroups.length === 0) return null;
             return (
               <div className="bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 text-xs">

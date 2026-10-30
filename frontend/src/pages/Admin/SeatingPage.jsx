@@ -9,6 +9,12 @@ export default function SeatingPage() {
   const [selectedReservation, setSelectedReservation] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  useEffect(() => {
+    const handleAdminDataUpdated = () => setRefreshKey(prev => prev + 1);
+    window.addEventListener('admin-data-updated', handleAdminDataUpdated);
+    return () => window.removeEventListener('admin-data-updated', handleAdminDataUpdated);
+  }, []);
+
   const fetchReservationDetails = async (booking_ref) => {
     try {
       const res = await api.get(`/reservations/admin/${booking_ref}/details`);
@@ -25,6 +31,7 @@ export default function SeatingPage() {
       if (selectedReservation && selectedReservation.booking_ref === booking_ref) {
         setSelectedReservation(prev => ({ ...prev, attendance }));
       }
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       console.error(err);
       alert('更新狀態失敗');

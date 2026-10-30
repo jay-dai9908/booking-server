@@ -31,7 +31,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
   const fetchReservations = async () => {
     setIsLoading(true);
     try {
-      const res = await api.get(`/reservations/admin?page=${page}&limit=50&date=${date}&sort=start_time_asc&search=${encodeURIComponent(searchQuery)}`);
+      const res = await api.get(`/reservations/admin?page=${page}&limit=100&date=${date}&sort=start_time_asc&search=${encodeURIComponent(searchQuery)}`);
       setReservations(res.data?.data || (Array.isArray(res.data) ? res.data : []));
       setTotalPages(res.data?.totalPages || 1);
       setTotalRecords(res.data?.total || (Array.isArray(res.data) ? res.data.length : 0));
@@ -52,6 +52,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
         await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'checked_in' });
       }
       fetchReservations();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       alert('報到更新失敗');
     } finally {

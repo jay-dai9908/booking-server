@@ -45,6 +45,16 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
 
   React.useEffect(() => {
     setAdminNoteInput(reservation?.admin_note || '');
+    if (reservation?.booking_ref && !reservation?.pricing_info && !readOnly) {
+      api
+        .get(`/reservations/admin/${reservation.booking_ref}/details`)
+        .then(res => {
+          if (res.data && onUpdate) {
+            onUpdate(res.data);
+          }
+        })
+        .catch(() => {});
+    }
   }, [reservation?.booking_ref, reservation?.admin_note]);
 
   if (!reservation) return null;
@@ -58,6 +68,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
       if (onUpdate) {
         onUpdate({ admin_note: res.data?.admin_note ?? (adminNoteInput.trim() || null) });
       }
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       console.error(err);
       alert('儲存內部備註失敗');
@@ -73,6 +84,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
         attendance,
         checked_in_at: res.data?.checked_in_at 
       });
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       console.error(err);
       alert('更新狀態失敗');
@@ -83,6 +95,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
     try {
       await api.patch(`/reservations/admin/${reservation.booking_ref}/payment`, { is_paid });
       if (onUpdate) onUpdate({ is_paid });
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       console.error(err);
       alert('更新付費狀態失敗');

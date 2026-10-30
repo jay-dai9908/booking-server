@@ -13,14 +13,16 @@ import {
   Sparkles,
   ExternalLink
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
 import { formatBookingRef } from './CustomerReservationDetailsModal';
 
 export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const inputRef = useRef(null);
+  const initialPathnameRef = useRef(location.pathname);
 
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,8 +31,14 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
   const [selectedReservationDetail, setSelectedReservationDetail] = useState(null);
   const [processingId, setProcessingId] = useState(null);
 
+  const notifyAdminDataChanged = () => {
+    if (onDataChanged) onDataChanged();
+    window.dispatchEvent(new CustomEvent('admin-data-updated'));
+  };
+
   useEffect(() => {
     if (isOpen) {
+      initialPathnameRef.current = location.pathname;
       setTimeout(() => {
         inputRef.current?.focus();
       }, 80);
@@ -40,6 +48,13 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
       setSelectedReservationDetail(null);
     }
   }, [isOpen]);
+
+  // Close QuickPosLookupModal if a nested modal navigates to another route (e.g., /admin/members)
+  useEffect(() => {
+    if (isOpen && location.pathname !== initialPathnameRef.current) {
+      onClose();
+    }
+  }, [location.pathname, isOpen, onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -87,7 +102,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
       await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'checked_in' });
       showToast('✅ 已完成預約報到！');
       await runLookup();
-      if (onDataChanged) onDataChanged();
+      notifyAdminDataChanged();
     } catch (err) {
       showToast(err.response?.data?.error || '報到失敗', true);
     } finally {
@@ -119,7 +134,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
       });
       showToast(res.data?.message || '🎟️ 卡券核銷成功！');
       await runLookup();
-      if (onDataChanged) onDataChanged();
+      notifyAdminDataChanged();
     } catch (err) {
       showToast(err.response?.data?.error || '卡券核銷失敗', true);
     } finally {
@@ -145,7 +160,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
       });
       showToast('📦 已標記取貨完成！');
       await runLookup();
-      if (onDataChanged) onDataChanged();
+      notifyAdminDataChanged();
     } catch (err) {
       showToast(err.response?.data?.error || '更新取貨狀態失敗', true);
     } finally {
@@ -537,7 +552,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
               setSelectedReservationDetail(null);
             }
             runLookup();
-            if (onDataChanged) onDataChanged();
+            notifyAdminDataChanged();
           }}
         />
       )}

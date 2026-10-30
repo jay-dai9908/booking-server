@@ -704,6 +704,7 @@ export const getAdminReservations = async (req, res) => {
 
     if (search) {
       const shortRefMatch = search.match(/^(?:BK-)?([0-9a-fA-F]{4})-([0-9a-fA-F]{4})$/i);
+      const cleanRefPrefix = search.replace(/^BK-/i, '');
       const orConditions = [
         { booking_ref: { contains: search, mode: 'insensitive' } },
         { user: { name: { contains: search, mode: 'insensitive' } } },
@@ -711,11 +712,14 @@ export const getAdminReservations = async (req, res) => {
         { customer_note: { contains: search, mode: 'insensitive' } },
         { admin_note: { contains: search, mode: 'insensitive' } }
       ];
+      if (cleanRefPrefix && cleanRefPrefix !== search) {
+        orConditions.push({ booking_ref: { contains: cleanRefPrefix, mode: 'insensitive' } });
+      }
       if (shortRefMatch) {
         orConditions.push({
           AND: [
-            { booking_ref: { startsWith: shortRefMatch[1].toLowerCase() } },
-            { booking_ref: { endsWith: shortRefMatch[2].toLowerCase() } }
+            { booking_ref: { startsWith: shortRefMatch[1], mode: 'insensitive' } },
+            { booking_ref: { endsWith: shortRefMatch[2], mode: 'insensitive' } }
           ]
         });
       }
@@ -2050,31 +2054,30 @@ export const adminQuickLookup = async (req, res) => {
 
   try {
     const shortRefMatch = q.match(/^(?:BK-)?([0-9a-fA-F]{4})-([0-9a-fA-F]{4})$/i);
+    const cleanRefPrefix = q.replace(/^BK-/i, '');
     const resOrConditions = [
       { booking_ref: { contains: q, mode: 'insensitive' } },
       { user: { name: { contains: q, mode: 'insensitive' } } },
       { user: { phone: { contains: q } } }
     ];
+    if (cleanRefPrefix && cleanRefPrefix !== q) {
+      resOrConditions.push({ booking_ref: { contains: cleanRefPrefix, mode: 'insensitive' } });
+    }
     if (shortRefMatch) {
       resOrConditions.push({
         AND: [
-          { booking_ref: { startsWith: shortRefMatch[1].toLowerCase() } },
-          { booking_ref: { endsWith: shortRefMatch[2].toLowerCase() } }
+          { booking_ref: { startsWith: shortRefMatch[1], mode: 'insensitive' } },
+          { booking_ref: { endsWith: shortRefMatch[2], mode: 'insensitive' } }
         ]
       });
     }
 
-    const [rawReservations, passes, shopOrders] = await Promise.all([
+    const [matchedRefRows, passes, shopOrders] = await Promise.all([
       prisma.reservation.findMany({
         where: { OR: resOrConditions },
-        include: {
-          session: true,
-          user: {
-            select: { id: true, name: true, phone: true, line_user_id: true, line_display_name: true }
-          }
-        },
+        select: { booking_ref: true, created_at: true },
         orderBy: { created_at: 'desc' },
-        take: 60
+        take: 100
       }),
       prisma.userPass ? prisma.userPass.findMany({
         where: {
@@ -2113,17 +2116,30 @@ export const adminQuickLookup = async (req, res) => {
       }).catch(() => []) : Promise.resolve([])
     ]);
 
-    const bookingRefs = [...new Set(rawReservations.map(r => r.booking_ref))];
-    const equipments = bookingRefs.length > 0
-      ? await prisma.bookingEquipment.findMany({ where: { booking_ref: { in: bookingRefs } } })
-      : [];
+    const bookingRefs = [...new Set(matchedRefRows.map(r => r.booking_ref))].slice(0, 10);
+    const [rawReservations, equipments] = bookingRefs.length > 0
+      ? await Promise.all([
+          prisma.reservation.findMany({
+            where: { booking_ref: { in: bookingRefs } },
+            include: {
+              session: true,
+              user: {
+                select: { id: true, name: true, phone: true, line_user_id: true, line_display_name: true }
+              }
+            },
+            orderBy: { created_at: 'desc' }
+          }),
+          prisma.bookingEquipment.findMany({ where: { booking_ref: { in: bookingRefs } } })
+        ])
+      : [[], []];
+
     const equipmentsMap = {};
     equipments.forEach(eq => {
       if (!equipmentsMap[eq.booking_ref]) equipmentsMap[eq.booking_ref] = [];
       equipmentsMap[eq.booking_ref].push(eq);
     });
 
-    const groupedReservations = groupReservations(rawReservations, equipmentsMap).slice(0, 10);
+    const groupedReservations = groupReservations(rawReservations, equipmentsMap);
 
     res.json({
       reservations: groupedReservations,

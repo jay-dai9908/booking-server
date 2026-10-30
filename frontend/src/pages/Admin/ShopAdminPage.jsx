@@ -81,7 +81,10 @@ export default function ShopAdminPage() {
   const [savingColor, setSavingColor] = useState(false);
 
   useEffect(() => {
-    if (activeTab === 'orders') fetchAdminOrders();
+    if (activeTab === 'orders') {
+      fetchAdminOrders();
+      fetchPaymentSettings();
+    }
     if (activeTab === 'payments') {
       fetchAccountPool();
       fetchPaymentSettings();
@@ -92,6 +95,14 @@ export default function ShopAdminPage() {
       fetchAdminProducts();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    const handleAdminDataUpdated = () => {
+      if (activeTab === 'orders') fetchAdminOrders();
+    };
+    window.addEventListener('admin-data-updated', handleAdminDataUpdated);
+    return () => window.removeEventListener('admin-data-updated', handleAdminDataUpdated);
+  }, [activeTab, orderSearch, orderPaymentStatusFilter, orderStatusFilter]);
 
   // Orders handlers
   const fetchAdminOrders = async () => {
@@ -123,6 +134,7 @@ export default function ShopAdminPage() {
       });
       setVerifyModalOrder(null);
       fetchAdminOrders();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       alert('對帳確認失敗：' + (err.response?.data?.error || err.message));
     }
@@ -162,6 +174,7 @@ export default function ShopAdminPage() {
       const res = await api.post('/shop/admin/orders/notify-arrival', { order_ids: orderIds });
       alert(res.data?.message || '到貨通知已成功推播！');
       fetchAdminOrders();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       alert('發送到貨通知失敗：' + (err.response?.data?.error || err.message));
     }
@@ -174,6 +187,7 @@ export default function ShopAdminPage() {
         order_status: 'picked_up'
       });
       fetchAdminOrders();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       alert('更新取貨狀態失敗：' + (err.response?.data?.error || err.message));
     }
@@ -190,6 +204,7 @@ export default function ShopAdminPage() {
       alert('訂單已取消，相關資源已釋放');
       fetchAdminOrders();
       fetchAccountPool();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       alert('取消訂單失敗：' + (err.response?.data?.error || err.message));
     }
