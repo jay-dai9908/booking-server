@@ -1,21 +1,22 @@
-// MARD 拼豆色號完整資料庫 (預設內建 291 色，ZG 系列依店內規範標示為 Z 系列，並支援後台無限擴充至 302+ 色)
+// MARD 拼豆色號完整資料庫 (預設內建 298 色：含標準 221 色 A~M + 特殊色系 L高透/P珠光/Q溫變/R半透/T亮片/Y夜光/Z光變，並支援後台無限擴充)
 
 export const MARD_SERIES_INFO = [
-  { id: 'A', name: 'A 系列', label: 'A 黃橘暖色', group: 'standard', description: '明亮黃、暖陽橘與奶油杏色系' },
-  { id: 'B', name: 'B 系列', label: 'B 翠綠森林', group: 'standard', description: '嫩芽綠、薄荷綠與深林綠色系' },
-  { id: 'C', name: 'C 系列', label: 'C 晴空海洋', group: 'standard', description: '冰川藍、天藍與深海靛藍色系' },
-  { id: 'D', name: 'D 系列', label: 'D 紫羅蘭系', group: 'standard', description: '薰衣草紫、丁香紫與魅影紫色系' },
-  { id: 'E', name: 'E 系列', label: 'E 櫻花玫瑰', group: 'standard', description: '蜜桃粉、櫻花粉與玫瑰桃色系' },
-  { id: 'F', name: 'F 系列', label: 'F 緋紅珊瑚', group: 'standard', description: '珊瑚紅、正紅與酒紅磚紅色系' },
-  { id: 'G', name: 'G 系列', label: 'G 膚色大地', group: 'standard', description: '人物膚色、奶茶色與木質棕色系' },
-  { id: 'H', name: 'H 系列', label: 'H 黑白灰階', group: 'standard', description: '純白、純黑与多層次冷暖灰階' },
-  { id: 'M', name: 'M 系列', label: 'M 莫蘭迪色', group: 'standard', description: '低飽和復古灰調莫蘭迪色系' },
-  { id: 'P', name: 'P 系列', label: 'P 珠光系列', group: 'special', badge: '✨ 珠光', description: '帶有細緻珠光光澤，隨角度閃耀' },
-  { id: 'Q', name: 'Q 系列', label: 'Q 溫變系列', group: 'special', badge: '🌡️ 溫變', description: '隨溫度變化產生可逆色彩轉換' },
-  { id: 'R', name: 'R 系列', label: 'R 果凍系列', group: 'special', badge: '🍬 果凍', description: '晶瑩剔透的半透明果凍質感' },
-  { id: 'T', name: 'T 系列', label: 'T 透明系列', group: 'special', badge: '💧 透明', description: '半透明白色，適合表現透光與高光' },
-  { id: 'Y', name: 'Y 系列', label: 'Y 夜光系列', group: 'special', badge: '🌙 夜光', description: '吸光後於暗處散發柔和夜光' },
-  { id: 'Z', name: 'Z 系列', label: 'Z 光變系列', group: 'special', badge: '☀️ 光變', description: '未照光呈透明白色，受紫外線/陽光照射後顯色' }
+  { id: 'A', key: 'A', name: 'A 系列', label: 'A 黃橘暖色', shortLabel: 'A系', group: 'standard', description: '明亮黃、暖陽橘與奶油杏色系' },
+  { id: 'B', key: 'B', name: 'B 系列', label: 'B 翠綠森林', shortLabel: 'B系', group: 'standard', description: '嫩芽綠、薄荷綠與深林綠色系' },
+  { id: 'C', key: 'C', name: 'C 系列', label: 'C 晴空海洋', shortLabel: 'C系', group: 'standard', description: '冰川藍、天藍與深海靛藍色系' },
+  { id: 'D', key: 'D', name: 'D 系列', label: 'D 紫羅蘭系', shortLabel: 'D系', group: 'standard', description: '薰衣草紫、丁香紫與魅影紫色系' },
+  { id: 'E', key: 'E', name: 'E 系列', label: 'E 櫻花玫瑰', shortLabel: 'E系', group: 'standard', description: '蜜桃粉、櫻花粉與玫瑰桃色系' },
+  { id: 'F', key: 'F', name: 'F 系列', label: 'F 緋紅珊瑚', shortLabel: 'F系', group: 'standard', description: '珊瑚紅、正紅與酒紅磚紅色系' },
+  { id: 'G', key: 'G', name: 'G 系列', label: 'G 膚色大地', shortLabel: 'G系', group: 'standard', description: '人物膚色、奶茶色與木質棕色系' },
+  { id: 'H', key: 'H', name: 'H 系列', label: 'H 黑白灰階', shortLabel: 'H系', group: 'standard', description: '純白、純黑與多層次冷暖灰階' },
+  { id: 'M', key: 'M', name: 'M 系列', label: 'M 莫蘭迪色', shortLabel: 'M系', group: 'standard', description: '低飽和復古灰調莫蘭迪色系' },
+  { id: 'L', key: 'L', name: 'L 高透系列', label: 'L 高透系列', shortLabel: 'L 高透', group: 'special', badge: '💧 高透', description: 'L1~L7 高透光玻璃質感色系' },
+  { id: 'P', key: 'P', name: 'P 珠光系列', label: 'P 珠光系列', shortLabel: 'P 珠光', group: 'special', badge: '✨ 珠光', description: '帶有細緻珠光光澤，隨角度閃耀' },
+  { id: 'Q', key: 'Q', name: 'Q 溫變系列', label: 'Q 溫變系列', shortLabel: 'Q 溫變', group: 'special', badge: '🌡️ 溫變', description: '隨溫度高低產生雙色漸層轉換' },
+  { id: 'R', key: 'R', name: 'R 半透系列', label: 'R 半透系列', shortLabel: 'R 半透', group: 'special', badge: '🍬 半透', description: '晶瑩剔透的半透明果凍質感' },
+  { id: 'T', key: 'T', name: 'T 亮片系列', label: 'T 亮片系列', shortLabel: 'T 亮片', group: 'special', badge: '💎 亮片', description: '內含璀璨細閃亮片的透明色系' },
+  { id: 'Y', key: 'Y', name: 'Y 夜光系列', label: 'Y 夜光系列', shortLabel: 'Y 夜光', group: 'special', badge: '🌙 夜光', description: '吸光後於暗處散發柔和夜光' },
+  { id: 'Z', key: 'Z', name: 'Z 光變系列', label: 'Z 光變系列', shortLabel: 'Z 光變', group: 'special', badge: '☀️ 光變', description: '未照光呈透明白色，受陽光/UV照射後顯色' }
 ];
 
 export const DEFAULT_MARD_COLORS = [
@@ -258,87 +259,200 @@ export const DEFAULT_MARD_COLORS = [
   { code: 'M14', series: 'M', hex: '#C77361' },
   { code: 'M15', series: 'M', hex: '#757D7B' },
 
+  // L 系列 - 高透系列 (1~7 共7色)
+  { code: 'L1', series: 'L', hex: '#F2F7FA', name: '高透透明', effect: '高透' },
+  { code: 'L2', series: 'L', hex: '#FFF168', name: '高透亮黃', effect: '高透' },
+  { code: 'L3', series: 'L', hex: '#5CE68B', name: '高透翠綠', effect: '高透' },
+  { code: 'L4', series: 'L', hex: '#58C4FF', name: '高透晴藍', effect: '高透' },
+  { code: 'L5', series: 'L', hex: '#B882FF', name: '高透薰衣紫', effect: '高透' },
+  { code: 'L6', series: 'L', hex: '#FF8EC6', name: '高透櫻花粉', effect: '高透' },
+  { code: 'L7', series: 'L', hex: '#FFA04D', name: '高透活力橙', effect: '高透' },
+
   // P 系列 - 珠光系列 (23色)
-  { code: 'P1', series: 'P', hex: '#FCF8F9', effect: 'pearl' },
-  { code: 'P2', series: 'P', hex: '#BDA9AB', effect: 'pearl' },
-  { code: 'P3', series: 'P', hex: '#AEDDA9', effect: 'pearl' },
-  { code: 'P4', series: 'P', hex: '#FDA49E', effect: 'pearl' },
-  { code: 'P5', series: 'P', hex: '#EC8D3D', effect: 'pearl' },
-  { code: 'P6', series: 'P', hex: '#60CFA8', effect: 'pearl' },
-  { code: 'P7', series: 'P', hex: '#EB9271', effect: 'pearl' },
-  { code: 'P8', series: 'P', hex: '#F0D958', effect: 'pearl' },
-  { code: 'P9', series: 'P', hex: '#D9D9D9', effect: 'pearl' },
-  { code: 'P10', series: 'P', hex: '#D5C8E9', effect: 'pearl' },
-  { code: 'P11', series: 'P', hex: '#F3ECC8', effect: 'pearl' },
-  { code: 'P12', series: 'P', hex: '#E6EEF1', effect: 'pearl' },
-  { code: 'P13', series: 'P', hex: '#A9CBF1', effect: 'pearl' },
-  { code: 'P14', series: 'P', hex: '#3177B0', effect: 'pearl' },
-  { code: 'P15', series: 'P', hex: '#668575', effect: 'pearl' },
-  { code: 'P16', series: 'P', hex: '#FFBE46', effect: 'pearl' },
-  { code: 'P17', series: 'P', hex: '#FFA324', effect: 'pearl' },
-  { code: 'P18', series: 'P', hex: '#FEB89F', effect: 'pearl' },
-  { code: 'P19', series: 'P', hex: '#FFE0E8', effect: 'pearl' },
-  { code: 'P20', series: 'P', hex: '#FEBECF', effect: 'pearl' },
-  { code: 'P21', series: 'P', hex: '#ECBEC0', effect: 'pearl' },
-  { code: 'P22', series: 'P', hex: '#E4A89E', effect: 'pearl' },
-  { code: 'P23', series: 'P', hex: '#A56269', effect: 'pearl' },
+  { code: 'P1', series: 'P', hex: '#FCF8F9', name: '珠光白', effect: '珠光' },
+  { code: 'P2', series: 'P', hex: '#BDA9AB', name: '珠光銀灰', effect: '珠光' },
+  { code: 'P3', series: 'P', hex: '#AEDDA9', name: '珠光薄荷綠', effect: '珠光' },
+  { code: 'P4', series: 'P', hex: '#FDA49E', name: '珠光珊瑚粉', effect: '珠光' },
+  { code: 'P5', series: 'P', hex: '#EC8D3D', name: '珠光暖橘', effect: '珠光' },
+  { code: 'P6', series: 'P', hex: '#60CFA8', name: '珠光湖水綠', effect: '珠光' },
+  { code: 'P7', series: 'P', hex: '#EB9271', name: '珠光蜜桃橘', effect: '珠光' },
+  { code: 'P8', series: 'P', hex: '#F0D958', name: '珠光金黃', effect: '珠光' },
+  { code: 'P9', series: 'P', hex: '#D9D9D9', name: '珠光珍珠銀', effect: '珠光' },
+  { code: 'P10', series: 'P', hex: '#D5C8E9', name: '珠光薰衣草紫', effect: '珠光' },
+  { code: 'P11', series: 'P', hex: '#F3ECC8', name: '珠光香檳金', effect: '珠光' },
+  { code: 'P12', series: 'P', hex: '#E6EEF1', name: '珠光冰川白', effect: '珠光' },
+  { code: 'P13', series: 'P', hex: '#A9CBF1', name: '珠光天藍', effect: '珠光' },
+  { code: 'P14', series: 'P', hex: '#3177B0', name: '珠光寶石藍', effect: '珠光' },
+  { code: 'P15', series: 'P', hex: '#668575', name: '珠光墨玉綠', effect: '珠光' },
+  { code: 'P16', series: 'P', hex: '#FFBE46', name: '珠光向日葵黃', effect: '珠光' },
+  { code: 'P17', series: 'P', hex: '#FFA324', name: '珠光亮金橘', effect: '珠光' },
+  { code: 'P18', series: 'P', hex: '#FEB89F', name: '珠光粉膚杏', effect: '珠光' },
+  { code: 'P19', series: 'P', hex: '#FFE0E8', name: '珠光櫻花粉', effect: '珠光' },
+  { code: 'P20', series: 'P', hex: '#FEBECF', name: '珠光甜美粉', effect: '珠光' },
+  { code: 'P21', series: 'P', hex: '#ECBEC0', name: '珠光玫瑰粉', effect: '珠光' },
+  { code: 'P22', series: 'P', hex: '#E4A89E', name: '珠光豆沙粉', effect: '珠光' },
+  { code: 'P23', series: 'P', hex: '#A56269', name: '珠光乾燥玫瑰', effect: '珠光' },
 
-  // Q 系列 - 溫變系列 (5色)
-  { code: 'Q1', series: 'Q', hex: '#F2A5E8', effect: 'thermo' },
-  { code: 'Q2', series: 'Q', hex: '#73B29E', effect: 'thermo' },
-  { code: 'Q3', series: 'Q', hex: '#FFFF00', effect: 'thermo' },
-  { code: 'Q4', series: 'Q', hex: '#FFEBFA', effect: 'thermo' },
-  { code: 'Q5', series: 'Q', hex: '#4F5E5B', effect: 'thermo' },
+  // Q 系列 - 溫變系列 (5色，支援雙色漸層顯示)
+  {
+    code: 'Q1',
+    series: 'Q',
+    hex: '#F2A5E8',
+    subHex: '#FFF7FD',
+    name: '溫變紫粉➔淺白',
+    effect: '溫變',
+    gradient: 'linear-gradient(135deg, #F2A5E8 0%, #FAD6F4 52%, #FFF7FD 100%)'
+  },
+  {
+    code: 'Q2',
+    series: 'Q',
+    hex: '#73B29E',
+    subHex: '#E9EC91',
+    name: '溫變青綠➔嫩黃',
+    effect: '溫變',
+    gradient: 'linear-gradient(135deg, #73B29E 0%, #B4D4B0 52%, #E9EC91 100%)'
+  },
+  {
+    code: 'Q3',
+    series: 'Q',
+    hex: '#FFFF00',
+    subHex: '#FFFDF2',
+    name: '溫變亮黃➔淺白',
+    effect: '溫變',
+    gradient: 'linear-gradient(135deg, #F59E0B 0%, #FFFF00 50%, #FFFDF2 100%)'
+  },
+  {
+    code: 'Q4',
+    series: 'Q',
+    hex: '#FFEBFA',
+    subHex: '#FFFFFF',
+    name: '溫變櫻粉➔透白',
+    effect: '溫變',
+    gradient: 'linear-gradient(135deg, #FF85B3 0%, #FFD4E8 52%, #FFFFFF 100%)'
+  },
+  {
+    code: 'Q5',
+    series: 'Q',
+    hex: '#4F5E5B',
+    subHex: '#76CEDE',
+    name: '溫變墨綠➔冰藍',
+    effect: '溫變',
+    gradient: 'linear-gradient(135deg, #4F5E5B 0%, #5F9BA6 52%, #76CEDE 100%)'
+  },
 
-  // R 系列 - 果凍系列 (28色)
-  { code: 'R1', series: 'R', hex: '#D50E21', effect: 'jelly' },
-  { code: 'R2', series: 'R', hex: '#F92E83', effect: 'jelly' },
-  { code: 'R3', series: 'R', hex: '#FD8225', effect: 'jelly' },
-  { code: 'R4', series: 'R', hex: '#F8EC31', effect: 'jelly' },
-  { code: 'R5', series: 'R', hex: '#34C75B', effect: 'jelly' },
-  { code: 'R6', series: 'R', hex: '#25B891', effect: 'jelly' },
-  { code: 'R7', series: 'R', hex: '#17779D', effect: 'jelly' },
-  { code: 'R8', series: 'R', hex: '#1B60C3', effect: 'jelly' },
-  { code: 'R9', series: 'R', hex: '#9A56B4', effect: 'jelly' },
-  { code: 'R10', series: 'R', hex: '#FFDB4D', effect: 'jelly' },
-  { code: 'R11', series: 'R', hex: '#FFEBFA', effect: 'jelly' },
-  { code: 'R12', series: 'R', hex: '#D8D5CE', effect: 'jelly' },
-  { code: 'R13', series: 'R', hex: '#55514C', effect: 'jelly' },
-  { code: 'R14', series: 'R', hex: '#9EE4DF', effect: 'jelly' },
-  { code: 'R15', series: 'R', hex: '#77CEE9', effect: 'jelly' },
-  { code: 'R16', series: 'R', hex: '#3DCFCA', effect: 'jelly' },
-  { code: 'R17', series: 'R', hex: '#4A867A', effect: 'jelly' },
-  { code: 'R18', series: 'R', hex: '#7FCD9D', effect: 'jelly' },
-  { code: 'R19', series: 'R', hex: '#CDE55D', effect: 'jelly' },
-  { code: 'R20', series: 'R', hex: '#E8C7B4', effect: 'jelly' },
-  { code: 'R21', series: 'R', hex: '#AD6F3C', effect: 'jelly' },
-  { code: 'R22', series: 'R', hex: '#6C372F', effect: 'jelly' },
-  { code: 'R23', series: 'R', hex: '#FEB872', effect: 'jelly' },
-  { code: 'R24', series: 'R', hex: '#F2C1C0', effect: 'jelly' },
-  { code: 'R25', series: 'R', hex: '#C9675D', effect: 'jelly' },
-  { code: 'R26', series: 'R', hex: '#D293BE', effect: 'jelly' },
-  { code: 'R27', series: 'R', hex: '#EA8CB1', effect: 'jelly' },
-  { code: 'R28', series: 'R', hex: '#9C87D6', effect: 'jelly' },
+  // R 系列 - 半透系列 (28色)
+  { code: 'R1', series: 'R', hex: '#D50E21', name: '半透正紅', effect: '半透' },
+  { code: 'R2', series: 'R', hex: '#F92E83', name: '半透桃紅', effect: '半透' },
+  { code: 'R3', series: 'R', hex: '#FD8225', name: '半透亮橘', effect: '半透' },
+  { code: 'R4', series: 'R', hex: '#F8EC31', name: '半透檸檬黃', effect: '半透' },
+  { code: 'R5', series: 'R', hex: '#34C75B', name: '半透翠綠', effect: '半透' },
+  { code: 'R6', series: 'R', hex: '#25B891', name: '半透松石綠', effect: '半透' },
+  { code: 'R7', series: 'R', hex: '#17779D', name: '半透海藍', effect: '半透' },
+  { code: 'R8', series: 'R', hex: '#1B60C3', name: '半透寶藍', effect: '半透' },
+  { code: 'R9', series: 'R', hex: '#9A56B4', name: '半透葡萄紫', effect: '半透' },
+  { code: 'R10', series: 'R', hex: '#FFDB4D', name: '半透暖黃', effect: '半透' },
+  { code: 'R11', series: 'R', hex: '#FFEBFA', name: '半透冰粉白', effect: '半透' },
+  { code: 'R12', series: 'R', hex: '#D8D5CE', name: '半透霧灰白', effect: '半透' },
+  { code: 'R13', series: 'R', hex: '#55514C', name: '半透煙燻黑', effect: '半透' },
+  { code: 'R14', series: 'R', hex: '#9EE4DF', name: '半透薄荷冰藍', effect: '半透' },
+  { code: 'R15', series: 'R', hex: '#77CEE9', name: '半透天空藍', effect: '半透' },
+  { code: 'R16', series: 'R', hex: '#3DCFCA', name: '半透蒂芬妮藍', effect: '半透' },
+  { code: 'R17', series: 'R', hex: '#4A867A', name: '半透湖水深綠', effect: '半透' },
+  { code: 'R18', series: 'R', hex: '#7FCD9D', name: '半透嫩芽綠', effect: '半透' },
+  { code: 'R19', series: 'R', hex: '#CDE55D', name: '半透青檸綠', effect: '半透' },
+  { code: 'R20', series: 'R', hex: '#E8C7B4', name: '半透奶茶膚', effect: '半透' },
+  { code: 'R21', series: 'R', hex: '#AD6F3C', name: '半透焦糖琥珀', effect: '半透' },
+  { code: 'R22', series: 'R', hex: '#6C372F', name: '半透紅棕茶', effect: '半透' },
+  { code: 'R23', series: 'R', hex: '#FEB872', name: '半透蜜桃杏', effect: '半透' },
+  { code: 'R24', series: 'R', hex: '#F2C1C0', name: '半透櫻花粉', effect: '半透' },
+  { code: 'R25', series: 'R', hex: '#C9675D', name: '半透珊瑚紅', effect: '半透' },
+  { code: 'R26', series: 'R', hex: '#D293BE', name: '半透丁香粉紫', effect: '半透' },
+  { code: 'R27', series: 'R', hex: '#EA8CB1', name: '半透玫瑰粉', effect: '半透' },
+  { code: 'R28', series: 'R', hex: '#9C87D6', name: '半透薰衣草紫', effect: '半透' },
 
-  // T 系列 - 透明系列 (1色)
-  { code: 'T1', series: 'T', hex: '#E2DFD7', name: '透明白', effect: 'transparent' },
+  // T 系列 - 亮片系列 (1色)
+  { code: 'T1', series: 'T', hex: '#E2DFD7', name: '亮片透明白', effect: '亮片' },
 
   // Y 系列 - 夜光系列 (5色)
-  { code: 'Y1', series: 'Y', hex: '#FD6FB4', effect: 'glow' },
-  { code: 'Y2', series: 'Y', hex: '#FEB481', effect: 'glow' },
-  { code: 'Y3', series: 'Y', hex: '#D7FAA0', effect: 'glow' },
-  { code: 'Y4', series: 'Y', hex: '#8BDBFA', effect: 'glow' },
-  { code: 'Y5', series: 'Y', hex: '#E987EA', effect: 'glow' },
+  { code: 'Y1', series: 'Y', hex: '#FD6FB4', name: '夜光甜心粉', effect: '夜光' },
+  { code: 'Y2', series: 'Y', hex: '#FEB481', name: '夜光暖陽橘', effect: '夜光' },
+  { code: 'Y3', series: 'Y', hex: '#D7FAA0', name: '夜光螢光綠', effect: '夜光' },
+  { code: 'Y4', series: 'Y', hex: '#8BDBFA', name: '夜光星空藍', effect: '夜光' },
+  { code: 'Y5', series: 'Y', hex: '#E987EA', name: '夜光極光紫', effect: '夜光' },
 
-  // Z 系列 (原 ZG 系列) - 光變系列 (8色)
-  { code: 'Z1', series: 'Z', hex: '#F28985', effect: 'uv', name: '光變粉紅' },
-  { code: 'Z2', series: 'Z', hex: '#ECA55D', effect: 'uv', name: '光變暖橘' },
-  { code: 'Z3', series: 'Z', hex: '#E8CE6A', effect: 'uv', name: '光變亮黃' },
-  { code: 'Z4', series: 'Z', hex: '#88C772', effect: 'uv', name: '光變嫩綠' },
-  { code: 'Z5', series: 'Z', hex: '#718CBF', effect: 'uv', name: '光變靛藍' },
-  { code: 'Z6', series: 'Z', hex: '#77ACD2', effect: 'uv', name: '光變晴藍' },
-  { code: 'Z7', series: 'Z', hex: '#E88F8C', effect: 'uv', name: '光變珊瑚' },
-  { code: 'Z8', series: 'Z', hex: '#AE84BD', effect: 'uv', name: '光變紫羅蘭' }
+  // Z 系列 (原 ZG 系列) - 光變系列 (8色，支援白➔顯色漸層顯示，對齊 pixel-beads 色卡)
+  {
+    code: 'Z1',
+    series: 'Z',
+    hex: '#F28985',
+    subHex: '#F6BFB7',
+    effect: '光變',
+    name: '光變粉紅',
+    gradient: 'linear-gradient(135deg, #FFFFFF 0%, #F6BFB7 48%, #F28985 100%)'
+  },
+  {
+    code: 'Z2',
+    series: 'Z',
+    hex: '#ECA55D',
+    subHex: '#F1D1BA',
+    effect: '光變',
+    name: '光變暖橘',
+    gradient: 'linear-gradient(135deg, #FFFFFF 0%, #F1D1BA 48%, #ECA55D 100%)'
+  },
+  {
+    code: 'Z3',
+    series: 'Z',
+    hex: '#E8CE6A',
+    subHex: '#EEDDCE',
+    effect: '光變',
+    name: '光變亮黃',
+    gradient: 'linear-gradient(135deg, #FFFFFF 0%, #EEDDCE 48%, #E8CE6A 100%)'
+  },
+  {
+    code: 'Z4',
+    series: 'Z',
+    hex: '#88C772',
+    subHex: '#C6DAC4',
+    effect: '光變',
+    name: '光變嫩綠',
+    gradient: 'linear-gradient(135deg, #FFFFFF 0%, #C6DAC4 48%, #88C772 100%)'
+  },
+  {
+    code: 'Z5',
+    series: 'Z',
+    hex: '#718CBF',
+    subHex: '#E7DAB7',
+    effect: '光變',
+    name: '光變靛藍',
+    gradient: 'linear-gradient(135deg, #FFFFFF 0%, #E7DAB7 48%, #718CBF 100%)'
+  },
+  {
+    code: 'Z6',
+    series: 'Z',
+    hex: '#77ACD2',
+    subHex: '#B9E3E4',
+    effect: '光變',
+    name: '光變晴藍',
+    gradient: 'linear-gradient(135deg, #FFFFFF 0%, #B9E3E4 48%, #77ACD2 100%)'
+  },
+  {
+    code: 'Z7',
+    series: 'Z',
+    hex: '#E88F8C',
+    subHex: '#EFD9C9',
+    effect: '光變',
+    name: '光變珊瑚',
+    gradient: 'linear-gradient(135deg, #FFFFFF 0%, #EFD9C9 48%, #E88F8C 100%)'
+  },
+  {
+    code: 'Z8',
+    series: 'Z',
+    hex: '#AE84BD',
+    subHex: '#F3E8D4',
+    effect: '光變',
+    name: '光變紫羅蘭',
+    gradient: 'linear-gradient(135deg, #FFFFFF 0%, #F3E8D4 48%, #AE84BD 100%)'
+  }
 ];
 
 /**
@@ -358,20 +472,47 @@ export const sortBeadColors = (colors) => {
 };
 
 /**
- * Merge built-in 291 colors with admin custom/override colors from GlobalSetting.bead_colors_json
- * Admin overrides can:
- * - Modify hex / name / is_available of existing codes
- * - Add brand new codes (e.g. expanding 291 -> 302+ colors)
- * - Delete custom codes (marked with is_deleted: true)
+ * Normalize legacy effect codes to readable Chinese labels
+ */
+const normalizeEffectLabel = (effect, series) => {
+  if (!effect || effect === '標準色') {
+    if (series === 'L') return '高透';
+    if (series === 'P') return '珠光';
+    if (series === 'Q') return '溫變';
+    if (series === 'R') return '半透';
+    if (series === 'T') return '亮片';
+    if (series === 'Y') return '夜光';
+    if (series === 'Z') return '光變';
+    return '標準色';
+  }
+  const map = {
+    pearl: '珠光',
+    thermo: '溫變',
+    jelly: '半透',
+    果凍: '半透',
+    transparent: '亮片',
+    透明: '亮片',
+    glitter: '亮片',
+    glow: '夜光',
+    uv: '光變'
+  };
+  return map[effect] || effect;
+};
+
+/**
+ * Merge built-in 298 colors with admin custom/override colors from GlobalSetting.bead_colors_json
  */
 export const getMergedBeadColors = (customColorsJson) => {
   const colorMap = new Map();
 
   for (const item of DEFAULT_MARD_COLORS) {
-    colorMap.set(item.code.toUpperCase(), {
+    const code = item.code.toUpperCase();
+    const series = (item.series || code.replace(/\d+$/, '') || 'A').toUpperCase();
+    colorMap.set(code, {
       ...item,
-      code: item.code.toUpperCase(),
-      series: (item.series || item.code.replace(/\d+$/, '') || 'A').toUpperCase(),
+      code,
+      series,
+      effect: normalizeEffectLabel(item.effect, series),
       is_available: true,
       is_builtin: true
     });
@@ -380,7 +521,10 @@ export const getMergedBeadColors = (customColorsJson) => {
   if (Array.isArray(customColorsJson)) {
     for (const custom of customColorsJson) {
       if (!custom || !custom.code) continue;
-      const cleanCode = String(custom.code).trim().toUpperCase();
+      const cleanCode = String(custom.code)
+        .trim()
+        .toUpperCase()
+        .replace(/^ZG(\d+)$/, 'Z$1');
       if (!cleanCode) continue;
 
       if (custom.is_deleted) {
@@ -389,15 +533,49 @@ export const getMergedBeadColors = (customColorsJson) => {
       }
 
       const existing = colorMap.get(cleanCode);
-      const inferredSeries = (custom.series || cleanCode.replace(/\d+$/, '') || existing?.series || ' OTHER').trim().toUpperCase();
+      const inferredSeries = (
+        custom.series ||
+        cleanCode.replace(/\d+$/, '') ||
+        existing?.series ||
+        'OTHER'
+      )
+        .trim()
+        .toUpperCase();
+
+      // Use built-in rich name if custom only stored empty string or the raw code itself
+      const resolvedName =
+        custom.name && String(custom.name).trim() && String(custom.name).trim().toUpperCase() !== cleanCode
+          ? String(custom.name).trim()
+          : existing?.name || custom.name || '';
+
+      // If L1~L7 was previously added with the modal's default #FF88AA placeholder, prefer the built-in L-series hex
+      const resolvedHex =
+        existing && custom.hex === '#FF88AA' && inferredSeries === 'L'
+          ? existing.hex
+          : custom.hex || existing?.hex || '#CCCCCC';
+
+      const resolvedEffect = normalizeEffectLabel(
+        custom.effect && custom.effect !== '標準色' ? custom.effect : existing?.effect || custom.effect,
+        inferredSeries
+      );
+
+      // Build or preserve gradient for color-changing series (Z 光變 / Q 溫變)
+      let resolvedGradient = custom.gradient || existing?.gradient || null;
+      if (!resolvedGradient && (inferredSeries === 'Z' || resolvedEffect === '光變')) {
+        resolvedGradient = `linear-gradient(135deg, #FFFFFF 0%, ${custom.subHex || '#F3E8D4'} 48%, ${resolvedHex} 100%)`;
+      } else if (!resolvedGradient && (inferredSeries === 'Q' || resolvedEffect === '溫變')) {
+        resolvedGradient = `linear-gradient(135deg, ${resolvedHex} 0%, ${custom.subHex || '#FFFDF2'} 100%)`;
+      }
 
       colorMap.set(cleanCode, {
         ...(existing || {}),
         ...custom,
         code: cleanCode,
         series: inferredSeries,
-        hex: custom.hex || existing?.hex || '#CCCCCC',
-        name: custom.name !== undefined ? custom.name : (existing?.name || ''),
+        hex: resolvedHex,
+        name: resolvedName,
+        effect: resolvedEffect,
+        gradient: resolvedGradient,
         is_available: custom.is_available !== false
       });
     }
@@ -407,7 +585,7 @@ export const getMergedBeadColors = (customColorsJson) => {
 };
 
 /**
- * Calculate contrasting text color (#000000 or #FFFFFF) for a given hex background
+ * Calculate contrasting text color (#2C241E or #FFFFFF) for a given hex background
  */
 export const getContrastTextColor = (hex) => {
   if (!hex || typeof hex !== 'string') return '#3E332B';
@@ -418,6 +596,25 @@ export const getContrastTextColor = (hex) => {
   const b = parseInt(clean.substring(4, 6), 16);
   const yiq = (r * 299 + g * 587 + b * 114) / 1000;
   return yiq >= 150 ? '#2C241E' : '#FFFFFF';
+};
+
+/**
+ * Return inline style for a bead color swatch, supporting CSS linear-gradient for color-changing beads (Q溫變 / Z光變)
+ */
+export const getBeadSwatchStyle = (colorObj) => {
+  if (!colorObj) return { backgroundColor: '#CCCCCC', color: '#2C241E' };
+  if (colorObj.gradient) {
+    return {
+      background: colorObj.gradient,
+      color: '#2C241E',
+      textShadow: '0 0 3px rgba(255, 255, 255, 0.95)'
+    };
+  }
+  const hex = colorObj.hex || '#CCCCCC';
+  return {
+    backgroundColor: hex,
+    color: getContrastTextColor(hex)
+  };
 };
 
 /**

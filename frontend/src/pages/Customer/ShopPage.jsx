@@ -26,6 +26,7 @@ import {
   MARD_SERIES_INFO,
   getMergedBeadColors,
   getContrastTextColor,
+  getBeadSwatchStyle,
   calculateBeadsSubtotalWithMode
 } from '../../utils/mardBeadColors';
 
@@ -105,8 +106,10 @@ export default function ShopPage() {
       if (c.series && !baseKeys.has(c.series)) {
         baseKeys.add(c.series);
         extraSeries.push({
+          id: c.series,
           key: c.series,
           name: `${c.series} 擴充色系`,
+          shortLabel: `${c.series}系`,
           group: 'custom',
           desc: '店家擴充色號'
         });
@@ -122,6 +125,7 @@ export default function ShopPage() {
         return (
           c.code.toUpperCase().includes(q) ||
           (c.name && c.name.toUpperCase().includes(q)) ||
+          (c.effect && c.effect.toUpperCase().includes(q)) ||
           (c.series && c.series.toUpperCase().includes(q))
         );
       }
@@ -890,16 +894,15 @@ export default function ShopPage() {
                 <div className="flex flex-wrap gap-1.5 bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8]">
                   {selectedColorEntries.map(([code, cQty]) => {
                     const colorObj = allBeadColors.find(c => c.code === code);
-                    const hex = colorObj?.hex || '#CCCCCC';
-                    const textColor = getContrastTextColor(hex);
+                    const swatchStyle = getBeadSwatchStyle(colorObj);
                     return (
                       <div
                         key={code}
                         className="inline-flex items-center gap-1.5 bg-white border border-[#E5DFD7] rounded-lg px-2 py-1 text-xs shadow-2xs"
                       >
                         <span
-                          className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-black border border-black/10"
-                          style={{ backgroundColor: hex, color: textColor }}
+                          className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-black border border-black/15"
+                          style={swatchStyle}
                         >
                           {code}
                         </span>
@@ -1206,7 +1209,7 @@ export default function ShopPage() {
                     type="text"
                     value={beadSearchQuery}
                     onChange={e => setBeadSearchQuery(e.target.value)}
-                    placeholder="搜尋色號或名稱（例如：H2、A1、Z1、夜光、果凍...）"
+                    placeholder="搜尋色號、名稱或材質（例如：Z1、L1、高透、半透、亮片、夜光、溫變、光變、珠光...）"
                     className="w-full pl-9 pr-8 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none focus:border-[#8B5B43]"
                   />
                   {beadSearchQuery && (
@@ -1226,8 +1229,14 @@ export default function ShopPage() {
                 {[
                   { key: 'ALL', label: `全部 (${allBeadColors.length})` },
                   { key: 'STANDARD_221', label: '標準221色 (A~M)' },
-                  { key: 'SPECIAL', label: '特殊/擴充色 (P/Q/R/T/Y/Z)' },
-                  ...seriesTabs.map(s => ({ key: s.key, label: `${s.key}系` }))
+                  { key: 'SPECIAL', label: '✨ 特殊色系總覽 (L/P/Q/R/T/Y/Z)' },
+                  ...seriesTabs.map(s => {
+                    const count = allBeadColors.filter(c => c.series === s.key).length;
+                    return {
+                      key: s.key,
+                      label: `${s.shortLabel || `${s.key}系`} (${count})`
+                    };
+                  })
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -1254,7 +1263,7 @@ export default function ShopPage() {
                 {filteredBeadColors.map(color => {
                   const qty = beadColorSelections[color.code] || 0;
                   const isAvailable = color.is_available !== false;
-                  const textColor = getContrastTextColor(color.hex);
+                  const swatchStyle = getBeadSwatchStyle(color);
 
                   return (
                     <div
@@ -1270,14 +1279,19 @@ export default function ShopPage() {
                       <div className="flex items-center gap-2 w-full">
                         <div
                           className="w-10 h-10 rounded-full flex items-center justify-center font-mono font-black text-xs shadow-inner border border-black/15 shrink-0"
-                          style={{ backgroundColor: color.hex, color: textColor }}
+                          style={swatchStyle}
+                          title={color.gradient ? `${color.code} ${color.name} (變色漸層)` : `${color.code} ${color.name || ''}`}
                         >
                           {color.code}
                         </div>
                         <div className="min-w-0 flex-1 text-left">
                           <div className="font-bold text-xs text-[#3E332B] truncate">{color.name || color.code}</div>
-                          <div className="text-[10px] text-[#8C8279] font-mono">
-                            {color.effect !== '標準色' ? color.effect : color.hex}
+                          <div className="text-[10px] text-[#8C8279] font-medium truncate">
+                            {color.effect && color.effect !== '標準色' ? (
+                              <span className="text-[#8B5B43] font-bold">{color.effect}系</span>
+                            ) : (
+                              <span className="font-mono">{color.hex}</span>
+                            )}
                           </div>
                         </div>
                       </div>

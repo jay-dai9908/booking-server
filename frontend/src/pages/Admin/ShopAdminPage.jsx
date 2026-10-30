@@ -23,7 +23,8 @@ import { format } from 'date-fns';
 import {
   MARD_SERIES_INFO,
   getMergedBeadColors,
-  getContrastTextColor
+  getContrastTextColor,
+  getBeadSwatchStyle
 } from '../../utils/mardBeadColors';
 
 export default function ShopAdminPage() {
@@ -505,11 +506,10 @@ export default function ShopAdminPage() {
     }
   };
 
-  // Bead Colors Management Logic (only computed when viewing bead_colors tab or picking modal)
+  // Bead Colors Management Logic
   const allMergedBeadColors = useMemo(() => {
-    if (activeTab !== 'bead_colors' && !showPickingModal) return [];
     return getMergedBeadColors(shopSettings.bead_colors_json || []);
-  }, [shopSettings.bead_colors_json, activeTab, showPickingModal]);
+  }, [shopSettings.bead_colors_json]);
 
   const adminSeriesTabs = useMemo(() => {
     const existingKeys = new Set(MARD_SERIES_INFO.map(s => s.key));
@@ -517,7 +517,12 @@ export default function ShopAdminPage() {
     for (const c of allMergedBeadColors) {
       if (c.series && !existingKeys.has(c.series)) {
         existingKeys.add(c.series);
-        extraSeries.push({ key: c.series, label: `${c.series}系列 (擴充)` });
+        extraSeries.push({
+          id: c.series,
+          key: c.series,
+          shortLabel: `${c.series}系`,
+          label: `${c.series}系列 (擴充)`
+        });
       }
     }
     return [...MARD_SERIES_INFO, ...extraSeries];
@@ -530,10 +535,14 @@ export default function ShopAdminPage() {
         return (
           c.code.toUpperCase().includes(q) ||
           (c.name && c.name.toUpperCase().includes(q)) ||
+          (c.effect && c.effect.toUpperCase().includes(q)) ||
           (c.series && c.series.toUpperCase().includes(q))
         );
       }
       if (adminColorSeriesFilter === 'ALL') return true;
+      if (adminColorSeriesFilter === 'SPECIAL') {
+        return !['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M'].includes(c.series);
+      }
       return c.series === adminColorSeriesFilter;
     });
   }, [allMergedBeadColors, adminColorSeriesFilter, adminColorSearch]);
@@ -698,6 +707,21 @@ export default function ShopAdminPage() {
     const cleanHex = editingColorModal.hex?.startsWith('#')
       ? editingColorModal.hex.toUpperCase()
       : `#${editingColorModal.hex || 'CCCCCC'}`.toUpperCase();
+    const cleanSubHex = editingColorModal.subHex
+      ? editingColorModal.subHex.startsWith('#')
+        ? editingColorModal.subHex.toUpperCase()
+        : `#${editingColorModal.subHex}`.toUpperCase()
+      : undefined;
+
+    const effectVal = editingColorModal.effect || '標準色';
+    let resolvedGradient = editingColorModal.gradient || undefined;
+    if (effectVal === '光變' || cleanSeries === 'Z') {
+      resolvedGradient = `linear-gradient(135deg, #FFFFFF 0%, ${cleanSubHex || '#F3E8D4'} 48%, ${cleanHex} 100%)`;
+    } else if (effectVal === '溫變' || cleanSeries === 'Q') {
+      resolvedGradient = `linear-gradient(135deg, ${cleanHex} 0%, ${cleanSubHex || '#FFFDF2'} 100%)`;
+    } else {
+      resolvedGradient = undefined;
+    }
 
     const currentCustom = Array.isArray(shopSettings.bead_colors_json)
       ? [...shopSettings.bead_colors_json]
@@ -707,8 +731,10 @@ export default function ShopAdminPage() {
       code: cleanCode,
       series: cleanSeries,
       hex: cleanHex,
+      ...(cleanSubHex ? { subHex: cleanSubHex } : {}),
+      ...(resolvedGradient ? { gradient: resolvedGradient } : {}),
       name: editingColorModal.name?.trim() || cleanCode,
-      effect: editingColorModal.effect || '標準色',
+      effect: effectVal,
       is_available: editingColorModal.is_available !== false
     };
 
@@ -1602,7 +1628,7 @@ export default function ShopAdminPage() {
       )}
 
       {/* ========================================================= */}
-      {/* SUB-TAB 4: BEAD COLORS MANAGEMENT (291 -> 302+ COLORS) */}
+      {/* SUB-TAB 4: BEAD COLORS MANAGEMENT (298+ COLORS) */}
       {/* ========================================================= */}
       {activeTab === 'bead_colors' && (
         <div className="space-y-4">
@@ -1614,7 +1640,7 @@ export default function ShopAdminPage() {
                 <span>🎨 拼豆色號表與階梯優惠規則設定（目前已建檔 {allMergedBeadColors.length} 色）</span>
               </h3>
               <p className="text-xs text-[#8C8279]">
-                已內建 MARD 291 色（ZG 系列已自動轉為 Z 系列 Z1~Z8）。您可點擊右側「➕ 新增擴充色號」補齊至店內 302 色！
+                已完整歸類 MARD 標準色 (A~M) 與特殊色系：💧L高透(1~7)、✨P珠光(1~23)、🌡️Q溫變(1~5 漸層)、🍬R半透(1~28)、💎T亮片、🌙Y夜光(1~5)、☀️Z光變(1~8 漸層)。
               </p>
             </div>
 
@@ -1651,10 +1677,10 @@ export default function ShopAdminPage() {
                 onClick={() =>
                   setEditingColorModal({
                     code: '',
-                    series: 'Z',
-                    hex: '#FF88AA',
+                    series: 'T',
+                    hex: '#E2DFD7',
                     name: '',
-                    effect: '標準色',
+                    effect: '亮片',
                     is_available: true,
                     isNew: true
                   })
@@ -1662,7 +1688,7 @@ export default function ShopAdminPage() {
                 className="px-4 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition"
               >
                 <Plus className="w-4 h-4" />
-                <span>➕ 新增擴充色號 (擴充至302色)</span>
+                <span>➕ 新增擴充色號</span>
               </button>
             </div>
           </div>
@@ -1676,7 +1702,7 @@ export default function ShopAdminPage() {
                   type="text"
                   value={adminColorSearch}
                   onChange={e => setAdminColorSearch(e.target.value)}
-                  placeholder="搜尋色號或名稱（例如：Z1、H2、A1、夜光...）"
+                  placeholder="搜尋色號、名稱或材質（例如：L1、Z1、Q1、高透、半透、亮片、夜光、溫變、光變、珠光...）"
                   className="w-full pl-9 pr-4 py-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-bold outline-none focus:border-[#8B5B43]"
                 />
               </div>
@@ -1712,20 +1738,43 @@ export default function ShopAdminPage() {
               >
                 全部 ({allMergedBeadColors.length})
               </button>
-              {adminSeriesTabs.map(s => (
-                <button
-                  key={s.key}
-                  type="button"
-                  onClick={() => setAdminColorSeriesFilter(s.key)}
-                  className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
-                    adminColorSeriesFilter === s.key
-                      ? 'bg-[#8B5B43] text-white'
-                      : 'bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]'
-                  }`}
-                >
-                  {s.key}系 ({allMergedBeadColors.filter(c => c.series === s.key).length})
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={() => setAdminColorSeriesFilter('SPECIAL')}
+                className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
+                  adminColorSeriesFilter === 'SPECIAL'
+                    ? 'bg-[#8B5B43] text-white'
+                    : 'bg-amber-50/80 text-[#8B5B43] border border-amber-200'
+                }`}
+              >
+                ✨ 特殊色系總覽 (
+                {
+                  allMergedBeadColors.filter(
+                    c => !['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M'].includes(c.series)
+                  ).length
+                }
+                )
+              </button>
+              {adminSeriesTabs.map(s => {
+                const count = allMergedBeadColors.filter(c => c.series === s.key).length;
+                const isSpecial = s.group === 'special';
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => setAdminColorSeriesFilter(s.key)}
+                    className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
+                      adminColorSeriesFilter === s.key
+                        ? 'bg-[#8B5B43] text-white'
+                        : isSpecial
+                          ? 'bg-[#FAF7F2] text-[#8B5B43] border border-[#D8C6B0]'
+                          : 'bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]'
+                    }`}
+                  >
+                    {s.shortLabel || `${s.key}系`} ({count})
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -1734,7 +1783,7 @@ export default function ShopAdminPage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5">
               {filteredAdminBeadColors.map(color => {
                 const isAvailable = color.is_available !== false;
-                const textColor = getContrastTextColor(color.hex);
+                const swatchStyle = getBeadSwatchStyle(color);
 
                 return (
                   <div
@@ -1747,8 +1796,13 @@ export default function ShopAdminPage() {
                   >
                     <div className="flex items-center gap-2">
                       <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center font-mono font-black text-xs border border-black/15 shrink-0"
-                        style={{ backgroundColor: color.hex, color: textColor }}
+                        className="w-9 h-9 rounded-full flex items-center justify-center font-mono font-black text-xs border border-black/15 shrink-0 shadow-inner"
+                        style={swatchStyle}
+                        title={
+                          color.gradient
+                            ? `${color.code} ${color.name} (變色漸層)`
+                            : `${color.code} ${color.name || ''}`
+                        }
                       >
                         {color.code}
                       </div>
@@ -1756,7 +1810,12 @@ export default function ShopAdminPage() {
                         <div className="font-bold text-xs text-[#3E332B] truncate">
                           {color.name || color.code}
                         </div>
-                        <div className="text-[10px] font-mono text-[#8C8279]">{color.hex}</div>
+                        <div className="text-[10px] text-[#8C8279] flex items-center gap-1 truncate">
+                          {color.effect && color.effect !== '標準色' ? (
+                            <span className="text-[#8B5B43] font-bold">{color.effect}</span>
+                          ) : null}
+                          <span className="font-mono">{color.hex}</span>
+                        </div>
                       </div>
                     </div>
 
@@ -2265,21 +2324,32 @@ export default function ShopAdminPage() {
             <div className="space-y-3 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-[#6D5D52] mb-1">色號代碼 (如 Z9、H24)：</label>
+                  <label className="block font-bold text-[#6D5D52] mb-1">色號代碼 (如 T2、L7、Z9)：</label>
                   <input
                     type="text"
                     required
                     value={editingColorModal.code || ''}
                     onChange={e => {
                       const val = e.target.value.toUpperCase();
-                      const detectedSeries = val.replace(/[0-9]/g, '') || editingColorModal.series;
+                      const rawSeries = val.replace(/[0-9]/g, '') || editingColorModal.series;
+                      const detectedSeries = rawSeries === 'ZG' ? 'Z' : rawSeries;
+                      const seriesEffectMap = {
+                        L: '高透',
+                        P: '珠光',
+                        Q: '溫變',
+                        R: '半透',
+                        T: '亮片',
+                        Y: '夜光',
+                        Z: '光變'
+                      };
                       setEditingColorModal(prev => ({
                         ...prev,
                         code: val,
-                        series: detectedSeries === 'ZG' ? 'Z' : detectedSeries
+                        series: detectedSeries,
+                        effect: seriesEffectMap[detectedSeries] || prev.effect || '標準色'
                       }));
                     }}
-                    placeholder="例如: Z9"
+                    placeholder="例如: T2 或 L7"
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold outline-none"
                   />
                 </div>
@@ -2288,21 +2358,21 @@ export default function ShopAdminPage() {
                   <input
                     type="text"
                     required
-                    value={editingColorModal.series || 'Z'}
+                    value={editingColorModal.series || 'T'}
                     onChange={e =>
                       setEditingColorModal(prev => ({
                         ...prev,
                         series: e.target.value.toUpperCase()
                       }))
                     }
-                    placeholder="例如: Z"
+                    placeholder="例如: L / P / Q / R / T / Y / Z"
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold outline-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-[#6D5D52] mb-1">代表色碼 (HEX)：</label>
+                <label className="block font-bold text-[#6D5D52] mb-1">代表主色碼 (HEX)：</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
@@ -2327,6 +2397,46 @@ export default function ShopAdminPage() {
                 </div>
               </div>
 
+              {(editingColorModal.effect === '光變' ||
+                editingColorModal.effect === '溫變' ||
+                editingColorModal.series === 'Z' ||
+                editingColorModal.series === 'Q') && (
+                <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200 space-y-1.5">
+                  <label className="block font-bold text-amber-900">
+                    🌈 變色漸層副色碼 (選填，用於溫變/光變雙色漸層顯示)：
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={
+                        /^#[0-9A-Fa-f]{6}$/.test(editingColorModal.subHex)
+                          ? editingColorModal.subHex
+                          : '#FFFFFF'
+                      }
+                      onChange={e =>
+                        setEditingColorModal(prev => ({
+                          ...prev,
+                          subHex: e.target.value.toUpperCase()
+                        }))
+                      }
+                      className="w-9 h-8 rounded-lg border border-amber-300 cursor-pointer p-0.5 bg-white"
+                    />
+                    <input
+                      type="text"
+                      value={editingColorModal.subHex || ''}
+                      onChange={e =>
+                        setEditingColorModal(prev => ({
+                          ...prev,
+                          subHex: e.target.value.toUpperCase()
+                        }))
+                      }
+                      placeholder="例如: #FFFFFF 或過渡色碼"
+                      className="flex-1 px-2.5 py-1.5 bg-white border border-amber-200 rounded-lg font-mono font-bold outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-[#6D5D52] mb-1">顯示名稱 / 備註：</label>
@@ -2334,7 +2444,7 @@ export default function ShopAdminPage() {
                     type="text"
                     value={editingColorModal.name || ''}
                     onChange={e => setEditingColorModal(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="例如: Z9 夜光藍"
+                    placeholder="例如: 高透藍 / 亮片粉"
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-bold outline-none"
                   />
                 </div>
@@ -2347,12 +2457,14 @@ export default function ShopAdminPage() {
                     }
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-bold outline-none"
                   >
-                    <option value="標準色">標準色</option>
-                    <option value="珠光">珠光 (P系)</option>
-                    <option value="溫變">溫變 (Q系)</option>
-                    <option value="果凍">果凍透明 (R/T/Y系)</option>
-                    <option value="夜光">夜光 (Z系)</option>
-                    <option value="特殊色">特殊擴充色</option>
+                    <option value="標準色">標準色 (A~M系)</option>
+                    <option value="高透">💧 高透系列 (L系 1~7)</option>
+                    <option value="珠光">✨ 珠光系列 (P系)</option>
+                    <option value="溫變">🌡️ 溫變系列 (Q系 - 漸層)</option>
+                    <option value="半透">🍬 半透系列 (R系)</option>
+                    <option value="亮片">💎 亮片系列 (T系)</option>
+                    <option value="夜光">🌙 夜光系列 (Y系)</option>
+                    <option value="光變">☀️ 光變系列 (Z系 - 漸層)</option>
                   </select>
                 </div>
               </div>
@@ -2465,8 +2577,7 @@ export default function ShopAdminPage() {
                     <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 gap-2 bg-[#FAF7F2] p-3.5 rounded-2xl border border-[#E8DEC8]">
                       {pickingSummary.beadColors.map(([code, totalBags]) => {
                         const colorObj = allMergedBeadColors.find(c => c.code === code);
-                        const hex = colorObj?.hex || '#CCCCCC';
-                        const textColor = getContrastTextColor(hex);
+                        const swatchStyle = getBeadSwatchStyle(colorObj);
                         return (
                           <div
                             key={code}
@@ -2474,7 +2585,7 @@ export default function ShopAdminPage() {
                           >
                             <span
                               className="w-7 h-7 rounded-full inline-flex items-center justify-center font-mono font-black text-xs border border-black/15 shrink-0"
-                              style={{ backgroundColor: hex, color: textColor }}
+                              style={swatchStyle}
                             >
                               {code}
                             </span>
