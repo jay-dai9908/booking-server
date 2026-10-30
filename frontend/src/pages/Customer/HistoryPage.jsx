@@ -454,7 +454,7 @@ export default function HistoryPage() {
               </p>
               <button
                 type="button"
-                onClick={() => navigate('/shop')}
+                onClick={() => navigate('/preorder')}
                 className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-full font-bold text-xs shadow-xs transition"
               >
                 前往 221 色套裝預購商城

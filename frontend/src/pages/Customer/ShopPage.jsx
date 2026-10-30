@@ -32,53 +32,61 @@ import {
 
 const SHOP_DRAFT_STORAGE_KEY = 'shiguang_shop_draft_cart';
 
-export default function ShopPage({ userRole }) {
+const loadSavedShopDraft = () => {
+  try {
+    const raw =
+      sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) ||
+      localStorage.getItem(SHOP_DRAFT_STORAGE_KEY) ||
+      '{}';
+    return JSON.parse(raw);
+  } catch (e) {
+    return {};
+  }
+};
+
+export default function ShopPage({ userRole, isLineEntry = false }) {
   const navigate = useNavigate();
   const isLoggedInCustomer = userRole === 'customer';
+  const isLineOrderPage =
+    isLineEntry ||
+    window.location.pathname.startsWith('/preorder') ||
+    window.location.pathname.startsWith('/shop/order');
+
+  useEffect(() => {
+    if (userRole === 'temp_customer') {
+      try {
+        const returnPath = isLineOrderPage ? '/preorder' : '/shop';
+        sessionStorage.setItem('shiguang_post_login_redirect', returnPath);
+        localStorage.setItem('shiguang_post_login_redirect', returnPath);
+      } catch (e) {}
+      navigate('/register');
+    }
+  }, [userRole, isLineOrderPage, navigate]);
+
   const [products, setProducts] = useState([]);
   const [paymentConfig, setPaymentConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [cart, setCart] = useState(() => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
-      return saved.cart && typeof saved.cart === 'object' ? saved.cart : {};
-    } catch (e) {
-      return {};
-    }
+    const saved = loadSavedShopDraft();
+    return saved.cart && typeof saved.cart === 'object' ? saved.cart : {};
   }); // { [productId]: quantity }
   const [wishNote, setWishNote] = useState(() => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
-      return saved.wishNote || '';
-    } catch (e) {
-      return '';
-    }
+    const saved = loadSavedShopDraft();
+    return saved.wishNote || '';
   });
   const [customerNote, setCustomerNote] = useState(() => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
-      return saved.customerNote || '';
-    } catch (e) {
-      return '';
-    }
+    const saved = loadSavedShopDraft();
+    return saved.customerNote || '';
   });
   const [beadColorNote, setBeadColorNote] = useState(() => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
-      return saved.beadColorNote || '';
-    } catch (e) {
-      return '';
-    }
+    const saved = loadSavedShopDraft();
+    return saved.beadColorNote || '';
   });
   const [beadColorSelections, setBeadColorSelections] = useState(() => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
-      return saved.beadColorSelections && typeof saved.beadColorSelections === 'object'
-        ? saved.beadColorSelections
-        : {};
-    } catch (e) {
-      return {};
-    }
+    const saved = loadSavedShopDraft();
+    return saved.beadColorSelections && typeof saved.beadColorSelections === 'object'
+      ? saved.beadColorSelections
+      : {};
   }); // { [colorCode]: qty }
   const [showBeadPickerModal, setShowBeadPickerModal] = useState(false);
   const [selectedSeriesTab, setSelectedSeriesTab] = useState('ALL');
@@ -100,19 +108,18 @@ export default function ShopPage({ userRole }) {
     fetchShopData();
   }, []);
 
-  // Persist draft cart & color selections in sessionStorage so guests don't lose selections after LINE login
+  // Persist draft cart & color selections in sessionStorage & localStorage so guests don't lose selections after LINE login
   useEffect(() => {
     try {
-      sessionStorage.setItem(
-        SHOP_DRAFT_STORAGE_KEY,
-        JSON.stringify({
-          cart,
-          beadColorSelections,
-          beadColorNote,
-          wishNote,
-          customerNote
-        })
-      );
+      const serialized = JSON.stringify({
+        cart,
+        beadColorSelections,
+        beadColorNote,
+        wishNote,
+        customerNote
+      });
+      sessionStorage.setItem(SHOP_DRAFT_STORAGE_KEY, serialized);
+      localStorage.setItem(SHOP_DRAFT_STORAGE_KEY, serialized);
     } catch (e) {}
   }, [cart, beadColorSelections, beadColorNote, wishNote, customerNote]);
 
@@ -121,9 +128,35 @@ export default function ShopPage({ userRole }) {
     paymentConfig?.line_button_url ||
     'https://lin.ee/vsZhRW5';
 
-  const redirectToLineLoginForShop = () => {
+  const initiateDirectLineOAuthForPreorder = () => {
     try {
-      sessionStorage.setItem('shiguang_post_login_redirect', '/shop');
+      sessionStorage.setItem('shiguang_post_login_redirect', '/preorder');
+      localStorage.setItem('shiguang_post_login_redirect', '/preorder');
+    } catch (e) {}
+
+    const channelId = import.meta.env.VITE_LINE_CHANNEL_ID;
+    const redirectUri = import.meta.env.VITE_LINE_CALLBACK_URL;
+    if (!channelId || !redirectUri || channelId === 'your_channel_id_here') {
+      navigate('/');
+      return;
+    }
+
+    const state = `preorder_${Math.random().toString(36).substring(2, 9)}`;
+    const lineLoginUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${channelId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=profile%20openid&bot_prompt=normal`;
+    window.location.href = lineLoginUrl;
+  };
+
+  const redirectToLineLoginForShop = () => {
+    // On /preorder (Official LINE Rich Menu entry), trigger real LINE OAuth 2.0 login and return to /preorder
+    if (isLineOrderPage) {
+      initiateDirectLineOAuthForPreorder();
+      return;
+    }
+
+    // On /shop (External social media preview), jump to Official LINE friend link
+    try {
+      sessionStorage.setItem('shiguang_post_login_redirect', '/preorder');
+      localStorage.setItem('shiguang_post_login_redirect', '/preorder');
     } catch (e) {}
 
     window.location.href = officialLineRedirectUrl;
@@ -387,6 +420,7 @@ export default function ShopPage({ userRole }) {
       setBeadColorNote('');
       try {
         sessionStorage.removeItem(SHOP_DRAFT_STORAGE_KEY);
+        localStorage.removeItem(SHOP_DRAFT_STORAGE_KEY);
       } catch (e) {}
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {

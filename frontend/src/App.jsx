@@ -39,6 +39,7 @@ function App() {
         const isFastLoadPath =
           window.location.pathname.startsWith('/admin') ||
           window.location.pathname.startsWith('/shop') ||
+          window.location.pathname.startsWith('/preorder') ||
           window.location.pathname.startsWith('/preview');
         // Never block /admin, /shop, or /preview routes waiting on external ipify.org IP lookup
         const info = isFastLoadPath ? getBrowserClientInfo() : await getBrowserClientInfoAsync();
@@ -110,7 +111,15 @@ function App() {
         />
         <Route 
           path="/shop" 
-          element={<ShopPage userRole={userRole} />} 
+          element={<ShopPage userRole={userRole} isLineEntry={false} />} 
+        />
+        <Route 
+          path="/preorder" 
+          element={<ShopPage userRole={userRole} isLineEntry={true} />} 
+        />
+        <Route 
+          path="/shop/order" 
+          element={<ShopPage userRole={userRole} isLineEntry={true} />} 
         />
 
         {/* Admin Login */}

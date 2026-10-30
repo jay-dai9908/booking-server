@@ -8,12 +8,18 @@ function Home({ userRole }) {
   const location = useLocation();
 
   useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    if (queryParams.has('code')) return; // Let OAuth callback effect handle redirect
+
     if (userRole === 'customer') {
       let target = '/booking';
       try {
-        const savedRedirect = sessionStorage.getItem('shiguang_post_login_redirect');
+        const savedRedirect =
+          sessionStorage.getItem('shiguang_post_login_redirect') ||
+          localStorage.getItem('shiguang_post_login_redirect');
         if (savedRedirect) {
           sessionStorage.removeItem('shiguang_post_login_redirect');
+          localStorage.removeItem('shiguang_post_login_redirect');
           target = savedRedirect;
         }
       } catch (e) {}
@@ -21,7 +27,7 @@ function Home({ userRole }) {
     } else if (userRole === 'temp_customer') {
       navigate('/register');
     }
-  }, [userRole, navigate]);
+  }, [userRole, navigate, location.search]);
 
   const isProcessing = React.useRef(false);
 
@@ -29,9 +35,17 @@ function Home({ userRole }) {
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
     const code = queryParams.get('code');
+    const oauthState = queryParams.get('state') || '';
 
     if (code && !isProcessing.current) {
       isProcessing.current = true;
+      const isPreorderLogin = oauthState.startsWith('preorder_');
+      if (isPreorderLogin) {
+        try {
+          sessionStorage.setItem('shiguang_post_login_redirect', '/preorder');
+          localStorage.setItem('shiguang_post_login_redirect', '/preorder');
+        } catch (e) {}
+      }
       
       // 立即清除 URL 上的 code 避免 React StrictMode 觸發兩次
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -47,11 +61,14 @@ function Home({ userRole }) {
           if (res.data.isNewUser) {
             window.location.href = '/register'; // Full reload to update App state
           } else {
-            let target = '/booking';
+            let target = isPreorderLogin ? '/preorder' : '/booking';
             try {
-              const savedRedirect = sessionStorage.getItem('shiguang_post_login_redirect');
+              const savedRedirect =
+                sessionStorage.getItem('shiguang_post_login_redirect') ||
+                localStorage.getItem('shiguang_post_login_redirect');
               if (savedRedirect) {
                 sessionStorage.removeItem('shiguang_post_login_redirect');
+                localStorage.removeItem('shiguang_post_login_redirect');
                 target = savedRedirect;
               }
             } catch (e) {}

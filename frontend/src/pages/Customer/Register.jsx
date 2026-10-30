@@ -21,9 +21,12 @@ function Register({ setUserRole }) {
         if (res.data?.token) {
           sessionStorage.setItem('shiguang_auth_token', res.data.token);
         }
-        const savedRedirect = sessionStorage.getItem('shiguang_post_login_redirect');
+        const savedRedirect =
+          sessionStorage.getItem('shiguang_post_login_redirect') ||
+          localStorage.getItem('shiguang_post_login_redirect');
         if (savedRedirect) {
           sessionStorage.removeItem('shiguang_post_login_redirect');
+          localStorage.removeItem('shiguang_post_login_redirect');
           target = savedRedirect;
         }
       } catch (e) {}
