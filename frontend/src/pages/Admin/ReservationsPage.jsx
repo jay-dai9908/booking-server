@@ -283,9 +283,29 @@ export default function ReservationsPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-col">
+                        <div className="flex flex-col gap-0.5">
                           <span className={`font-medium ${isCancelled ? 'text-gray-400' : 'text-gray-800'}`}>{r.user.name}</span>
                           <span className="text-sm text-gray-500">{r.user.phone}</span>
+                          {(r.customer_note || r.admin_note) && (
+                            <div className="flex flex-wrap gap-1 mt-1 max-w-[240px]">
+                              {r.customer_note && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 truncate max-w-full"
+                                  title={`顧客備註：${r.customer_note}`}
+                                >
+                                  💬 {r.customer_note}
+                                </span>
+                              )}
+                              {r.admin_note && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 truncate max-w-full"
+                                  title={`內部備註：${r.admin_note}`}
+                                >
+                                  📌 {r.admin_note}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">

@@ -121,6 +121,14 @@ function Booking() {
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [promoError, setPromoError] = useState('');
   const [isCheckingPromo, setIsCheckingPromo] = useState(false);
+  const [customerNote, setCustomerNote] = useState('');
+  const QUICK_NOTE_TAGS = [
+    '🔰 第一次玩拼豆需教學',
+    '👶 有攜帶幼童',
+    '🎂 生日/紀念日體驗',
+    '🪑 希望同桌/靠邊座位',
+    '⏰ 可能會晚到 5~10 分鐘'
+  ];
   const [equipmentDiscount, setEquipmentDiscount] = useState({
     enabled: true,
     buy_hours: 3,
@@ -664,6 +672,7 @@ function Booking() {
         appliedPromo,
         promoDiscountAmount,
         estimatedGrandTotal,
+        customer_note: customerNote.trim() || null,
         equipmentBreakdown: breakdownParts.length > 0 
           ? `${breakdownParts.join(' + ')}，共 ${totalBoards} 台 × ${rentalHours} 小時${discountSummary}`
           : null
@@ -683,7 +692,8 @@ function Booking() {
         pax: parseInt(data.pax),
         isUnlimited: data.isUnlimited,
         equipments: data.equipments,
-        promo_code: appliedPromo?.code || null
+        promo_code: appliedPromo?.code || null,
+        customer_note: data.customer_note || null
       });
       
       const reservationData = res.data?.reservation || {};
@@ -709,6 +719,7 @@ function Booking() {
       setEnableSmartBoard(false);
       setAppliedPromo(null);
       setPromoCodeInput('');
+      setCustomerNote('');
     } catch (err) {
       if (err.response?.status === 409 && err.response?.data?.error?.includes('拆散')) {
         setSplitBookingData({
@@ -717,6 +728,7 @@ function Booking() {
           isUnlimited: data.isUnlimited,
           equipments: data.equipments,
           promo_code: appliedPromo?.code || null,
+          customer_note: data.customer_note || null,
           date: data.date,
           timeRange: data.timeRange,
           sortedSessions: data.sortedSessions,
@@ -1575,6 +1587,63 @@ function Booking() {
                   )}
                 </div>
 
+                {/* Customer Note Input & Quick Tags */}
+                <div className="border-t border-dashed border-[#E5DFD7] pt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#4A3F35] flex items-center gap-1.5">
+                      <span>📝</span> 預約備註（選填）：
+                    </span>
+                    {customerNote && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomerNote('')}
+                        className="text-[11px] font-bold text-[#8C8279] hover:text-red-500"
+                      >
+                        清除備註
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {QUICK_NOTE_TAGS.map((tag) => {
+                      const isIncluded = customerNote.includes(tag);
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => {
+                            if (isIncluded) {
+                              setCustomerNote((prev) =>
+                                prev
+                                  .split('、')
+                                  .map((s) => s.trim())
+                                  .filter((s) => s && s !== tag)
+                                  .join('、')
+                              );
+                            } else {
+                              setCustomerNote((prev) => (prev.trim() ? `${prev.trim()}、${tag}` : tag));
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                            isIncluded
+                              ? 'bg-[#8B5B43] text-white border-[#8B5B43] shadow-2xs'
+                              : 'bg-white text-[#6D5D52] border-[#D5CFC9] hover:border-[#8B5B43]'
+                          }`}
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="可點選上方快捷標籤或手動輸入需求（如：第一次體驗需教學、慶生、晚到10分鐘...）"
+                    value={customerNote}
+                    onChange={(e) => setCustomerNote(e.target.value)}
+                    maxLength={120}
+                    className="w-full px-3 py-2 text-xs font-medium bg-white border border-[#D5CFC9] rounded-xl focus:outline-none focus:border-[#8B5B43] text-[#3E332B]"
+                  />
+                </div>
+
                 <div className="border-t border-[#E8DEC8] pt-3 flex justify-between items-baseline">
                   <span className="font-bold text-sm sm:text-base text-[#3E332B]">預估應付總金額：</span>
                   <div className="text-right">
@@ -1734,6 +1803,12 @@ function Booking() {
                     <span className="font-bold text-rose-600">
                       -NT$ {confirmModalData.promoDiscountAmount} ({confirmModalData.appliedPromo.name || confirmModalData.appliedPromo.code})
                     </span>
+                  </div>
+                )}
+                {confirmModalData.customer_note && (
+                  <div className="flex items-start text-[#3E332B] border-t border-dashed border-[#E5DFD7] pt-2">
+                    <span className="w-16 font-medium text-[#8C8279] shrink-0">📝 備註</span>
+                    <span className="font-medium text-xs text-[#4A3F35] break-words">{confirmModalData.customer_note}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between text-[#3E332B] border-t border-dashed border-[#E5DFD7] pt-2">

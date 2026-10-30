@@ -40,8 +40,31 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
   const [showEquipmentModal, setShowEquipmentModal] = React.useState(false);
   const [showCheckoutModal, setShowCheckoutModal] = React.useState(false);
   const [showLineModal, setShowLineModal] = React.useState(false);
+  const [adminNoteInput, setAdminNoteInput] = React.useState(reservation?.admin_note || '');
+  const [isSavingAdminNote, setIsSavingAdminNote] = React.useState(false);
+
+  React.useEffect(() => {
+    setAdminNoteInput(reservation?.admin_note || '');
+  }, [reservation?.booking_ref, reservation?.admin_note]);
 
   if (!reservation) return null;
+
+  const handleSaveAdminNote = async () => {
+    setIsSavingAdminNote(true);
+    try {
+      const res = await api.patch(`/reservations/${reservation.booking_ref}/notes`, {
+        admin_note: adminNoteInput.trim() || null
+      });
+      if (onUpdate) {
+        onUpdate({ admin_note: res.data?.admin_note ?? (adminNoteInput.trim() || null) });
+      }
+    } catch (err) {
+      console.error(err);
+      alert('儲存內部備註失敗');
+    } finally {
+      setIsSavingAdminNote(false);
+    }
+  };
 
   const handleUpdateAttendance = async (attendance) => {
     try {
@@ -325,6 +348,51 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                     </div>
                   )}
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* Customer Note & Admin Internal Note Section */}
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-4">
+              <h3 className="text-xs font-bold text-indigo-800 mb-1.5 flex items-center gap-1.5">
+                💬 顧客預約備註
+              </h3>
+              {reservation.customer_note ? (
+                <p className="text-sm font-bold text-indigo-950 whitespace-pre-wrap break-words">
+                  {reservation.customer_note}
+                </p>
+              ) : (
+                <p className="text-xs text-gray-400">顧客未填寫備註</p>
+              )}
+            </div>
+
+            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <h3 className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                  📌 店家當日內部備註（僅店員可見）
+                </h3>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    disabled={isSavingAdminNote}
+                    onClick={handleSaveAdminNote}
+                    className="text-xs bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-2.5 py-1 rounded-lg font-bold transition-colors"
+                  >
+                    {isSavingAdminNote ? '儲存中...' : '儲存備註'}
+                  </button>
+                )}
+              </div>
+              {readOnly ? (
+                <p className="text-sm text-amber-950">{reservation.admin_note || '無內部備註'}</p>
+              ) : (
+                <input
+                  type="text"
+                  value={adminNoteInput}
+                  onChange={(e) => setAdminNoteInput(e.target.value)}
+                  placeholder="輸入當日交接備註（如：寄放作品、指定靠窗、已電話確認...）"
+                  className="w-full px-3 py-1.5 text-xs sm:text-sm bg-white border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-gray-800"
+                />
               )}
             </div>
           </div>

@@ -1,5 +1,5 @@
 import express from 'express';
-import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount } from '../controllers/reservationController.js';
+import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount, updateReservationNotes } from '../controllers/reservationController.js';
 import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
 import { rateLimiter } from '../middlewares/rateLimiter.js';
 
@@ -14,6 +14,7 @@ const reservationStaffAuth = [verifyToken, requireAnyPermission(['reservations',
 router.post('/', verifyToken, createReservation);
 router.get('/my', queryLimiter, verifyToken, getMyReservations);
 router.delete('/:id', verifyToken, cancelReservation);
+router.patch('/:booking_ref/notes', verifyToken, updateReservationNotes);
 router.patch('/:booking_ref/equipment', verifyToken, modifyBookingEquipment);
 router.delete('/:id/record', ...reservationStaffAuth, deleteReservationRecord);
 router.get('/admin', ...reservationStaffAuth, getAdminReservations);

@@ -41,6 +41,8 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
         promo_code: r.promo_code || null,
         discount_amount: r.discount_amount || 0,
         addons_amount: r.addons_amount || 0,
+        customer_note: r.customer_note || null,
+        admin_note: r.admin_note || null,
         cancelled_at: r.cancelled_at || null,
         cancelled_by: r.cancelled_by || null
       };
@@ -81,6 +83,12 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
       }
       if (r.addons_amount && !groups[ref].addons_amount) {
         groups[ref].addons_amount = r.addons_amount;
+      }
+      if (r.customer_note && !groups[ref].customer_note) {
+        groups[ref].customer_note = r.customer_note;
+      }
+      if (r.admin_note && !groups[ref].admin_note) {
+        groups[ref].admin_note = r.admin_note;
       }
     }
     groups[ref].sessions.push(r.session);
@@ -140,6 +148,8 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
       promo_code: group.promo_code,
       discount_amount: group.discount_amount,
       addons_amount: group.addons_amount,
+      customer_note: group.customer_note || null,
+      admin_note: group.admin_note || null,
       cancelled_at: group.cancelled_at,
       cancelled_by: group.cancelled_by,
       checked_in_at: group.checked_in_at || null,
@@ -511,6 +521,7 @@ export const createReservation = async (req, res) => {
       }
 
       const totalAmount = Math.max(0, subtotalAmount - appliedDiscountAmount);
+      const cleanCustomerNote = req.body.customer_note ? String(req.body.customer_note).trim() : null;
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -524,7 +535,8 @@ export const createReservation = async (req, res) => {
           is_unlimited: is_unlimited,
           total_amount: totalAmount,
           promo_code: appliedPromoCode,
-          discount_amount: appliedDiscountAmount
+          discount_amount: appliedDiscountAmount,
+          customer_note: cleanCustomerNote
         });
       }
 
@@ -1265,6 +1277,8 @@ export const getSessionSeats = async (req, res) => {
     const endTimeMap = {};
     const attendanceMap = {};
     const checkedInAtMap = {};
+    const customerNoteMap = {};
+    const adminNoteMap = {};
 
     allRelatedReservations.forEach(r => {
       if (!endTimeMap[r.booking_ref] || r.session.end_time > endTimeMap[r.booking_ref]) {
@@ -1279,6 +1293,12 @@ export const getSessionSeats = async (req, res) => {
         if (!checkedInAtMap[r.booking_ref] || new Date(r.checked_in_at) < new Date(checkedInAtMap[r.booking_ref])) {
           checkedInAtMap[r.booking_ref] = r.checked_in_at;
         }
+      }
+      if (r.customer_note && !customerNoteMap[r.booking_ref]) {
+        customerNoteMap[r.booking_ref] = r.customer_note;
+      }
+      if (r.admin_note && !adminNoteMap[r.booking_ref]) {
+        adminNoteMap[r.booking_ref] = r.admin_note;
       }
     });
 
@@ -1314,6 +1334,8 @@ export const getSessionSeats = async (req, res) => {
       ...r,
       attendance: attendanceMap[r.booking_ref] || r.attendance,
       checked_in_at: checkedInAtMap[r.booking_ref] || r.checked_in_at,
+      customer_note: customerNoteMap[r.booking_ref] || r.customer_note || null,
+      admin_note: adminNoteMap[r.booking_ref] || r.admin_note || null,
       booking_end_time: endTimeMap[r.booking_ref] || session.end_time,
       equipments: equipmentsMap[r.booking_ref] || []
     }));
@@ -1507,6 +1529,8 @@ export const adminCreateReservation = async (req, res) => {
       const shouldAutoCheckIn = attendance === 'checked_in' || autoCheckIn === true || autoCheckIn === 'true' || isWalkIn === true || isWalkIn === 'true' || isForceWait === true || isForceWait === 'true';
       const checkInStatus = shouldAutoCheckIn ? 'checked_in' : (attendance || null);
       const checkInTime = shouldAutoCheckIn ? new Date() : null;
+      const cleanCustomerNote = req.body.customer_note ? String(req.body.customer_note).trim() : null;
+      const cleanAdminNote = req.body.admin_note ? String(req.body.admin_note).trim() : null;
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -1521,7 +1545,9 @@ export const adminCreateReservation = async (req, res) => {
           is_force_split: forceSplit === true || forceSplit === 'true',
           is_walk_in: isWalkIn === true || isWalkIn === 'true',
           is_unlimited: is_unlimited,
-          total_amount: totalAmount
+          total_amount: totalAmount,
+          customer_note: cleanCustomerNote,
+          admin_note: cleanAdminNote
         });
       }
 
@@ -1700,7 +1726,9 @@ export const extendReservation = async (req, res) => {
           checkout_details: baseReservation.checkout_details,
           promo_code: baseReservation.promo_code,
           discount_amount: baseReservation.discount_amount,
-          addons_amount: baseReservation.addons_amount
+          addons_amount: baseReservation.addons_amount,
+          customer_note: baseReservation.customer_note,
+          admin_note: baseReservation.admin_note
         });
       }
 
@@ -1867,5 +1895,48 @@ export const updateAmount = async (req, res) => {
   } catch (error) {
     console.error('Error updating amount:', error);
     res.status(500).json({ error: 'Failed to update amount' });
+  }
+};
+
+export const updateReservationNotes = async (req, res) => {
+  const { booking_ref } = req.params;
+  const { customer_note, admin_note } = req.body;
+  const userId = req.user?.id;
+  const isStaff = req.user?.role === 'admin' || req.user?.role === 'staff';
+
+  try {
+    const reservations = await prisma.reservation.findMany({
+      where: { booking_ref }
+    });
+
+    if (reservations.length === 0) {
+      return res.status(404).json({ error: '找不到該筆預約訂單' });
+    }
+
+    if (!isStaff && reservations[0].user_id !== userId) {
+      return res.status(403).json({ error: '無權限修改此預約備註' });
+    }
+
+    const dataToUpdate = {};
+    if (customer_note !== undefined) {
+      dataToUpdate.customer_note = customer_note ? String(customer_note).trim() : null;
+    }
+    if (isStaff && admin_note !== undefined) {
+      dataToUpdate.admin_note = admin_note ? String(admin_note).trim() : null;
+    }
+
+    await prisma.reservation.updateMany({
+      where: { booking_ref },
+      data: dataToUpdate
+    });
+
+    res.json({
+      message: '備註已更新！',
+      customer_note: dataToUpdate.customer_note !== undefined ? dataToUpdate.customer_note : reservations[0].customer_note,
+      admin_note: dataToUpdate.admin_note !== undefined ? dataToUpdate.admin_note : reservations[0].admin_note
+    });
+  } catch (error) {
+    console.error('Error updating reservation notes:', error);
+    res.status(500).json({ error: '更新備註失敗' });
   }
 };

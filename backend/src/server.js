@@ -50,6 +50,8 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "promo_code" TEXT`,
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "discount_amount" INTEGER DEFAULT 0`,
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "addons_amount" INTEGER DEFAULT 0`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "customer_note" TEXT`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "admin_note" TEXT`,
 
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "allow_equipment_exceed_pax" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_equipment_live_stock" BOOLEAN NOT NULL DEFAULT true`,
@@ -167,6 +169,7 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_enable_shipping" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_shipping_fee" INTEGER NOT NULL DEFAULT 60`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "official_line_url" TEXT DEFAULT 'https://lin.ee/vsZhRW5'`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "bead_colors_json" JSONB`,
 
     `CREATE TABLE IF NOT EXISTS "PaymentMethodConfig" (
       "id" SERIAL NOT NULL,
@@ -224,6 +227,8 @@ const ensureDatabaseSchema = async () => {
       "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "Product_pkey" PRIMARY KEY ("id")
     )`,
+    `ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "images_json" JSONB`,
+    `ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "tier_discount_mode" TEXT NOT NULL DEFAULT 'combined'`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "Product_code_key" ON "Product"("code")`,
 
     `CREATE TABLE IF NOT EXISTS "ProductOrder" (
@@ -386,7 +391,8 @@ app.use(cors({
   credentials: true, // Allow cookies to be sent
 }));
 app.use(checkBannedIP);
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
 app.use(cookieParser());
 
 // Routes

@@ -278,13 +278,21 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
           <div className="text-xs font-semibold mb-1 opacity-50 pointer-events-none">{seatId}</div>
           {isOccupied ? (
             <div className="flex flex-col items-center pointer-events-none">
-              <div className="text-sm font-bold truncate px-1 max-w-[80px]">
+              <div className="text-sm font-bold truncate px-1 max-w-[85px]">
                 {occupant.is_walk_in && <span className="text-orange-500 mr-0.5">🚶</span>}
                 {occupant.user?.name}
                 {occupant.is_paid && <span className="ml-0.5" title="已付費">💰</span>}
                 {occupant.equipments && occupant.equipments.length > 0 && (
                   <span className="ml-0.5" title={`智能拼豆板: ${occupant.equipments.map(e => `${e.equipment_name_snapshot}×${e.quantity}`).join('、')}`}>
                     ⚙️
+                  </span>
+                )}
+                {(occupant.customer_note || occupant.admin_note) && (
+                  <span
+                    className="ml-0.5"
+                    title={`${occupant.customer_note ? `顧客備註: ${occupant.customer_note}` : ''}${occupant.customer_note && occupant.admin_note ? ' | ' : ''}${occupant.admin_note ? `內部備註: ${occupant.admin_note}` : ''}`}
+                  >
+                    💬
                   </span>
                 )}
               </div>

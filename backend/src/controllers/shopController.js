@@ -34,7 +34,7 @@ export const getPublicPaymentMethods = async (req, res) => {
     });
 
     const ctbcPoolAvailableCount = await prisma.oneTimeAccountPool.count({
-      where: { payment_method_code: 'ctbc_pool', status: 'AVAILABLE', is_enabled: true }
+      where: { payment_method_code: 'ctbc_pool', status: 'AVAILABLE' }
     });
 
     const globalSetting = await prisma.globalSetting.findUnique({
@@ -48,7 +48,8 @@ export const getPublicPaymentMethods = async (req, res) => {
       official_line_url: globalSetting?.official_line_url || 'https://lin.ee/vsZhRW5',
       enable_shipping: !!globalSetting?.shop_enable_shipping,
       shipping_fee: globalSetting?.shop_shipping_fee ?? 60,
-      default_arrival_note: globalSetting?.shop_default_arrival_note || ''
+      default_arrival_note: globalSetting?.shop_default_arrival_note || '',
+      bead_colors_json: Array.isArray(globalSetting?.bead_colors_json) ? globalSetting.bead_colors_json : []
     });
   } catch (error) {
     console.error('getPublicPaymentMethods error:', error);
@@ -102,7 +103,7 @@ export const createProductOrder = async (req, res) => {
     let totalAmount = 0;
     let depositRequired = 0;
     const orderItemsData = [];
-    let arrivalNote = globalSetting?.shop_default_arrival_note || '';
+    let arrivalNote = '';
 
     for (const item of items) {
       const pid = parseInt(item.product_id, 10);
@@ -115,10 +116,13 @@ export const createProductOrder = async (req, res) => {
       let unitPrice = prod.price;
 
       // Handle tiered pricing if configured (e.g. 10g beads: 20 bags $280, 10 bags $150, 1 bag $16)
-      let lineSubtotal = 0;
-      if (Array.isArray(prod.tier_pricing) && prod.tier_pricing.length > 0) {
+      // Supports two modes: 'combined' (混色合計包數) or 'per_color' (單色獨立計算)
+      const calcTieredPriceForQty = (targetQty) => {
+        if (!Array.isArray(prod.tier_pricing) || prod.tier_pricing.length === 0) {
+          return unitPrice * targetQty;
+        }
         const sortedTiers = [...prod.tier_pricing].sort((a, b) => (b.qty || 0) - (a.qty || 0));
-        let remainingQty = qty;
+        let remainingQty = targetQty;
         let tierTotal = 0;
         for (const tier of sortedTiers) {
           if (remainingQty >= tier.qty && tier.qty > 0) {
@@ -130,9 +134,30 @@ export const createProductOrder = async (req, res) => {
         if (remainingQty > 0) {
           tierTotal += remainingQty * prod.price;
         }
-        lineSubtotal = tierTotal;
+        return tierTotal;
+      };
+
+      let lineSubtotal = 0;
+      const discountMode = prod.tier_discount_mode || 'combined';
+      const colorBreakdown = item.color_breakdown && typeof item.color_breakdown === 'object' ? item.color_breakdown : null;
+      const breakdownEntries = colorBreakdown
+        ? Object.entries(colorBreakdown).filter(([, cQty]) => (parseInt(cQty, 10) || 0) > 0)
+        : [];
+
+      if (discountMode === 'per_color' && breakdownEntries.length > 0) {
+        let sumByColor = 0;
+        let breakdownQtySum = 0;
+        for (const [, rawCQty] of breakdownEntries) {
+          const cQty = Math.max(0, parseInt(rawCQty, 10) || 0);
+          breakdownQtySum += cQty;
+          sumByColor += calcTieredPriceForQty(cQty);
+        }
+        if (qty > breakdownQtySum) {
+          sumByColor += calcTieredPriceForQty(qty - breakdownQtySum);
+        }
+        lineSubtotal = sumByColor;
       } else {
-        lineSubtotal = unitPrice * qty;
+        lineSubtotal = calcTieredPriceForQty(qty);
       }
 
       totalAmount += lineSubtotal;
@@ -181,8 +206,7 @@ export const createProductOrder = async (req, res) => {
         const availablePoolAccount = await tx.oneTimeAccountPool.findFirst({
           where: {
             payment_method_code: 'ctbc_pool',
-            status: 'AVAILABLE',
-            is_enabled: true
+            status: 'AVAILABLE'
           },
           orderBy: { id: 'asc' }
         });
@@ -312,7 +336,7 @@ export const getMyProductOrders = async (req, res) => {
         items: {
           include: {
             product: {
-              select: { image_url: true, category: true, allow_wish_input: true }
+              select: { image_url: true, images_json: true, category: true, allow_wish_input: true }
             }
           }
         }
@@ -742,7 +766,8 @@ export const getAdminPaymentMethods = async (req, res) => {
         shop_default_arrival_note: globalSetting?.shop_default_arrival_note || '',
         shop_enable_shipping: !!globalSetting?.shop_enable_shipping,
         shop_shipping_fee: globalSetting?.shop_shipping_fee ?? 60,
-        official_line_url: globalSetting?.official_line_url || 'https://lin.ee/vsZhRW5'
+        official_line_url: globalSetting?.official_line_url || 'https://lin.ee/vsZhRW5',
+        bead_colors_json: Array.isArray(globalSetting?.bead_colors_json) ? globalSetting.bead_colors_json : []
       }
     });
   } catch (error) {
@@ -790,7 +815,8 @@ export const updateShopGlobalSettings = async (req, res) => {
     shop_default_arrival_note,
     shop_enable_shipping,
     shop_shipping_fee,
-    official_line_url
+    official_line_url,
+    bead_colors_json
   } = req.body;
 
   try {
@@ -804,6 +830,7 @@ export const updateShopGlobalSettings = async (req, res) => {
     if (shop_enable_shipping !== undefined) dataToUpdate.shop_enable_shipping = Boolean(shop_enable_shipping);
     if (shop_shipping_fee !== undefined) dataToUpdate.shop_shipping_fee = Math.max(0, parseInt(shop_shipping_fee, 10) || 0);
     if (official_line_url !== undefined) dataToUpdate.official_line_url = official_line_url;
+    if (bead_colors_json !== undefined) dataToUpdate.bead_colors_json = Array.isArray(bead_colors_json) ? bead_colors_json : [];
 
     const setting = await prisma.globalSetting.upsert({
       where: { id: 1 },
@@ -838,6 +865,7 @@ export const createAdminProduct = async (req, res) => {
     category = 'bundle',
     description,
     image_url,
+    images_json,
     price,
     is_preorder = true,
     deposit_amount = 600,
@@ -846,6 +874,7 @@ export const createAdminProduct = async (req, res) => {
     wish_input_placeholder,
     bonus_pass_plan_code,
     tier_pricing,
+    tier_discount_mode = 'combined',
     visibility_status = 'ACTIVE',
     sort_order = 0
   } = req.body;
@@ -861,7 +890,8 @@ export const createAdminProduct = async (req, res) => {
         name: String(name).trim(),
         category,
         description,
-        image_url,
+        image_url: image_url || (Array.isArray(images_json) && images_json[0] ? images_json[0] : null),
+        images_json: Array.isArray(images_json) ? images_json : null,
         price: parseInt(price, 10) || 0,
         is_preorder: Boolean(is_preorder),
         deposit_amount: parseInt(deposit_amount, 10) || 0,
@@ -870,6 +900,7 @@ export const createAdminProduct = async (req, res) => {
         wish_input_placeholder,
         bonus_pass_plan_code,
         tier_pricing: tier_pricing || null,
+        tier_discount_mode: tier_discount_mode === 'per_color' ? 'per_color' : 'combined',
         visibility_status,
         sort_order: parseInt(sort_order, 10) || 0
       }
@@ -885,10 +916,20 @@ export const createAdminProduct = async (req, res) => {
 export const updateAdminProduct = async (req, res) => {
   const { id } = req.params;
   const updateData = { ...req.body };
+  delete updateData.id;
+  delete updateData.created_at;
+  delete updateData.updated_at;
+  delete updateData.items;
 
   if (updateData.price !== undefined) updateData.price = parseInt(updateData.price, 10) || 0;
   if (updateData.deposit_amount !== undefined) updateData.deposit_amount = parseInt(updateData.deposit_amount, 10) || 0;
   if (updateData.sort_order !== undefined) updateData.sort_order = parseInt(updateData.sort_order, 10) || 0;
+  if (updateData.tier_discount_mode !== undefined) {
+    updateData.tier_discount_mode = updateData.tier_discount_mode === 'per_color' ? 'per_color' : 'combined';
+  }
+  if (Array.isArray(updateData.images_json) && updateData.images_json.length > 0 && !updateData.image_url) {
+    updateData.image_url = updateData.images_json[0];
+  }
 
   try {
     const updated = await prisma.product.update({

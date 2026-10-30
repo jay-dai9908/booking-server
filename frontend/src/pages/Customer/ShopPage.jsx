@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShoppingBag,
   Sparkles,
@@ -7,18 +7,27 @@ import {
   Check,
   CreditCard,
   Copy,
-  ExternalLink,
   ChevronRight,
+  ChevronLeft,
   Plus,
   Minus,
-  AlertCircle,
   Truck,
   Store,
   MessageCircle,
-  Gift
+  Gift,
+  Search,
+  Palette,
+  X,
+  ZoomIn
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
+import {
+  MARD_SERIES_INFO,
+  getMergedBeadColors,
+  getContrastTextColor,
+  calculateBeadsSubtotalWithMode
+} from '../../utils/mardBeadColors';
 
 export default function ShopPage() {
   const navigate = useNavigate();
@@ -29,6 +38,12 @@ export default function ShopPage() {
   const [wishNote, setWishNote] = useState('');
   const [customerNote, setCustomerNote] = useState('');
   const [beadColorNote, setBeadColorNote] = useState('');
+  const [beadColorSelections, setBeadColorSelections] = useState({}); // { [colorCode]: qty }
+  const [showBeadPickerModal, setShowBeadPickerModal] = useState(false);
+  const [selectedSeriesTab, setSelectedSeriesTab] = useState('ALL');
+  const [beadSearchQuery, setBeadSearchQuery] = useState('');
+  const [lightboxData, setLightboxData] = useState(null); // { title, images: [], index: 0 }
+
   const [selectedPaymentCode, setSelectedPaymentCode] = useState('ctbc_pool');
   const [selectedBankInfo, setSelectedBankInfo] = useState('');
   const [deliveryMethod, setDeliveryMethod] = useState('store_pickup');
@@ -56,13 +71,13 @@ export default function ShopPage() {
       setProducts(prods);
       setPaymentConfig(payRes.data);
 
-      // Default select first available payment method (if CTBC pool empty, select another)
       if (payRes.data?.payment_methods?.length > 0) {
         const methods = payRes.data.payment_methods;
         const poolCount = payRes.data.ctbc_pool_available_count ?? 0;
-        const defaultMethod = methods.find(m => m.code === 'ctbc_pool' && poolCount > 0) ||
-                              methods.find(m => m.code !== 'ctbc_pool') ||
-                              methods[0];
+        const defaultMethod =
+          methods.find(m => m.code === 'ctbc_pool' && poolCount > 0) ||
+          methods.find(m => m.code !== 'ctbc_pool') ||
+          methods[0];
         if (defaultMethod) {
           setSelectedPaymentCode(defaultMethod.code);
         }
@@ -71,6 +86,114 @@ export default function ShopPage() {
       console.error('Failed to load shop data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const bundleProduct = products.find(p => p.category === 'bundle');
+  const beadsProduct = products.find(p => p.category === 'beads');
+
+  // Merge default 291 MARD colors (with ZG->Z) + admin custom overrides (up to 302+ colors)
+  const allBeadColors = useMemo(() => {
+    return getMergedBeadColors(paymentConfig?.bead_colors_json || []);
+  }, [paymentConfig]);
+
+  // Dynamic series list including any new series added in backend
+  const seriesTabs = useMemo(() => {
+    const baseKeys = new Set(MARD_SERIES_INFO.map(s => s.key));
+    const extraSeries = [];
+    for (const c of allBeadColors) {
+      if (c.series && !baseKeys.has(c.series)) {
+        baseKeys.add(c.series);
+        extraSeries.push({
+          key: c.series,
+          name: `${c.series} 擴充色系`,
+          group: 'custom',
+          desc: '店家擴充色號'
+        });
+      }
+    }
+    return [...MARD_SERIES_INFO, ...extraSeries];
+  }, [allBeadColors]);
+
+  const filteredBeadColors = useMemo(() => {
+    const q = beadSearchQuery.trim().toUpperCase();
+    return allBeadColors.filter(c => {
+      if (q) {
+        return (
+          c.code.toUpperCase().includes(q) ||
+          (c.name && c.name.toUpperCase().includes(q)) ||
+          (c.series && c.series.toUpperCase().includes(q))
+        );
+      }
+      if (selectedSeriesTab === 'ALL') return true;
+      if (selectedSeriesTab === 'STANDARD_221') {
+        return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M'].includes(c.series);
+      }
+      if (selectedSeriesTab === 'SPECIAL') {
+        return !['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M'].includes(c.series);
+      }
+      return c.series === selectedSeriesTab;
+    });
+  }, [allBeadColors, selectedSeriesTab, beadSearchQuery]);
+
+  const selectedColorEntries = useMemo(() => {
+    return Object.entries(beadColorSelections)
+      .filter(([, q]) => q > 0)
+      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [beadColorSelections]);
+
+  const totalPickedBeadBags = useMemo(() => {
+    return selectedColorEntries.reduce((sum, [, q]) => sum + q, 0);
+  }, [selectedColorEntries]);
+
+  // Update bead color selection and sync with cart & note
+  const updateBeadColorQty = (code, delta) => {
+    setBeadColorSelections(prev => {
+      const current = prev[code] || 0;
+      const next = Math.max(0, current + delta);
+      const updated = { ...prev };
+      if (next === 0) {
+        delete updated[code];
+      } else {
+        updated[code] = next;
+      }
+
+      const entries = Object.entries(updated)
+        .filter(([, q]) => q > 0)
+        .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+      const sumBags = entries.reduce((s, [, q]) => s + q, 0);
+
+      if (beadsProduct) {
+        setCart(prevCart => {
+          const nextCart = { ...prevCart };
+          if (sumBags === 0) {
+            delete nextCart[beadsProduct.id];
+          } else {
+            nextCart[beadsProduct.id] = sumBags;
+          }
+          return nextCart;
+        });
+      }
+
+      if (entries.length > 0) {
+        setBeadColorNote(entries.map(([c, q]) => `${c}×${q}包`).join('、'));
+      } else {
+        setBeadColorNote('');
+      }
+
+      return updated;
+    });
+  };
+
+  const clearAllBeadColors = () => {
+    setBeadColorSelections({});
+    setBeadColorNote('');
+    if (beadsProduct) {
+      setCart(prev => {
+        const copy = { ...prev };
+        delete copy[beadsProduct.id];
+        return copy;
+      });
     }
   };
 
@@ -87,51 +210,51 @@ export default function ShopPage() {
     });
   };
 
-  const setCartQty = (productId, qty) => {
-    const val = Math.max(0, parseInt(qty, 10) || 0);
-    setCart(prev => {
-      if (val === 0) {
-        const copy = { ...prev };
-        delete copy[productId];
-        return copy;
+  const getProductImages = (prod) => {
+    if (!prod) return [];
+    const list = [];
+    if (Array.isArray(prod.images_json)) {
+      for (const u of prod.images_json) {
+        if (u && typeof u === 'string' && !list.includes(u)) list.push(u);
       }
-      return { ...prev, [productId]: val };
+    }
+    if (prod.image_url && !list.includes(prod.image_url)) {
+      list.unshift(prod.image_url);
+    }
+    return list;
+  };
+
+  const openProductLightbox = (prod, startIndex = 0) => {
+    const imgs = getProductImages(prod);
+    if (imgs.length === 0) return;
+    setLightboxData({
+      title: prod.name,
+      images: imgs,
+      index: startIndex
     });
   };
 
-  // Compute pricing
-  const bundleProduct = products.find(p => p.category === 'bundle');
-  const beadsProduct = products.find(p => p.category === 'beads');
-
   const calculateItemSubtotal = (product, qty) => {
     if (!product || qty <= 0) return 0;
-    if (Array.isArray(product.tier_pricing) && product.tier_pricing.length > 0) {
-      const sortedTiers = [...product.tier_pricing].sort((a, b) => (b.qty || 0) - (a.qty || 0));
-      let remaining = qty;
-      let total = 0;
-      for (const tier of sortedTiers) {
-        if (remaining >= tier.qty && tier.qty > 0) {
-          const count = Math.floor(remaining / tier.qty);
-          total += count * tier.price;
-          remaining = remaining % tier.qty;
-        }
-      }
-      if (remaining > 0) {
-        total += remaining * product.price;
-      }
-      return total;
+    if (product.category === 'beads') {
+      return calculateBeadsSubtotalWithMode(product, qty, beadColorSelections);
     }
-    return product.price * qty;
+    return calculateBeadsSubtotalWithMode(product, qty, null);
   };
 
-  const cartItemsList = Object.entries(cart).map(([pId, qty]) => {
-    const prod = products.find(p => p.id === parseInt(pId, 10));
-    const subtotal = prod ? calculateItemSubtotal(prod, qty) : 0;
-    const deposit = prod && prod.is_preorder
-      ? (prod.deposit_amount > 0 ? Math.min(prod.deposit_amount * qty, subtotal) : subtotal)
-      : subtotal;
-    return { product: prod, qty, subtotal, deposit };
-  }).filter(item => item.product && item.qty > 0);
+  const cartItemsList = Object.entries(cart)
+    .map(([pId, qty]) => {
+      const prod = products.find(p => p.id === parseInt(pId, 10));
+      const subtotal = prod ? calculateItemSubtotal(prod, qty) : 0;
+      const deposit =
+        prod && prod.is_preorder
+          ? prod.deposit_amount > 0
+            ? Math.min(prod.deposit_amount * qty, subtotal)
+            : subtotal
+          : subtotal;
+      return { product: prod, qty, subtotal, deposit };
+    })
+    .filter(item => item.product && item.qty > 0);
 
   const cartTotalAmount = cartItemsList.reduce((sum, item) => sum + item.subtotal, 0);
   const cartDepositRequired = cartItemsList.reduce((sum, item) => sum + item.deposit, 0);
@@ -154,13 +277,19 @@ export default function ShopPage() {
       const combinedCustomerNote = [
         hasBeadsInCart && beadColorNote ? `【融合豆色號明細】：${beadColorNote}` : '',
         customerNote ? `【一般備註】：${customerNote}` : ''
-      ].filter(Boolean).join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
 
       const payload = {
         items: cartItemsList.map(item => ({
           product_id: item.product.id,
           quantity: item.qty,
-          customization_note: item.product.category === 'beads' ? beadColorNote : null
+          customization_note: item.product.category === 'beads' ? beadColorNote : null,
+          color_breakdown:
+            item.product.category === 'beads' && Object.keys(beadColorSelections).length > 0
+              ? beadColorSelections
+              : null
         })),
         payment_method_code: selectedPaymentCode,
         selected_bank_info: selectedBankInfo || null,
@@ -174,6 +303,8 @@ export default function ShopPage() {
       const res = await api.post('/shop/orders', payload);
       setCompletedOrder(res.data.order);
       setCart({});
+      setBeadColorSelections({});
+      setBeadColorNote('');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       console.error('Submit preorder error:', err);
@@ -206,24 +337,22 @@ export default function ShopPage() {
     );
   }
 
-  // If order was just placed, display high-conversion confirmation card
+  // If order was just placed, display confirmation card
   if (completedOrder) {
     return (
       <div className="min-h-screen bg-[#FAF7F2] py-8 px-4 sm:px-6">
         <div className="max-w-2xl mx-auto bg-white rounded-3xl shadow-xl border border-[#E8DEC8] overflow-hidden">
-          {/* Header */}
           <div className="bg-[#8B5B43] text-white p-6 sm:p-8 text-center space-y-2">
             <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
               <Check className="w-8 h-8 text-white stroke-[3]" />
             </div>
             <h2 className="text-2xl sm:text-3xl font-black">預購訂單建立成功！</h2>
             <p className="text-sm text-[#FAF7F2]/90">
-              感謝您的訂購，我們已為您保留套裝預購名額。
+              感謝您的訂購，我們已為您保留預購商品名額。
             </p>
           </div>
 
           <div className="p-6 sm:p-8 space-y-6">
-            {/* Order Ref & Deadline Banner */}
             <div className="bg-[#FAF7F2] rounded-2xl p-4 sm:p-5 border border-[#E8DEC8] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div>
                 <span className="text-xs text-[#8C8279] font-bold block">預購單號</span>
@@ -231,11 +360,10 @@ export default function ShopPage() {
               </div>
               <div className="bg-amber-100 text-amber-900 px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-amber-700 shrink-0" />
-                <span>請於 2 天內完成訂金支付</span>
+                <span>請於 {paymentConfig?.deposit_deadline_days ?? 2} 天內完成款項支付</span>
               </div>
             </div>
 
-            {/* CTBC One-Time Account Pool Banner */}
             {completedOrder.payment_method_code === 'ctbc_pool' && (
               <div className="bg-emerald-50 rounded-2xl p-5 border-2 border-emerald-300 space-y-3">
                 <div className="flex items-center gap-2 text-emerald-900 font-extrabold text-sm">
@@ -281,7 +409,6 @@ export default function ShopPage() {
               </div>
             )}
 
-            {/* Remittance Last 5 Digits Input */}
             <div className="bg-white rounded-2xl p-5 border border-[#E8DEC8] space-y-3">
               <label className="block text-xs font-bold text-[#3E332B]">
                 ✏️ 回填匯款帳號末五碼（對帳更迅速）：
@@ -309,7 +436,6 @@ export default function ShopPage() {
               </p>
             </div>
 
-            {/* Price & Pickup Details */}
             <div className="bg-[#FAF7F2] rounded-2xl p-5 border border-[#E8DEC8] space-y-2.5 text-xs">
               <div className="flex justify-between text-[#6D5D52]">
                 <span>訂單總金額</span>
@@ -323,10 +449,12 @@ export default function ShopPage() {
                 <span>門市取貨待付尾款</span>
                 <span>NT$ {completedOrder.balance_amount?.toLocaleString()}</span>
               </div>
-              <div className="pt-2 border-t border-[#E8DEC8] flex justify-between text-[#6D5D52]">
-                <span>預計到貨區間</span>
-                <span className="font-bold text-[#3E332B]">{completedOrder.estimated_arrival || '依門市到貨通知為準'}</span>
-              </div>
+              {completedOrder.estimated_arrival && (
+                <div className="pt-2 border-t border-[#E8DEC8] flex justify-between text-[#6D5D52]">
+                  <span>預計到貨說明</span>
+                  <span className="font-bold text-[#3E332B]">{completedOrder.estimated_arrival}</span>
+                </div>
+              )}
               {completedOrder.wish_note && (
                 <div className="pt-1 text-[#8B5B43]">
                   <span className="font-bold">您的許願：</span> {completedOrder.wish_note}
@@ -334,7 +462,6 @@ export default function ShopPage() {
               )}
             </div>
 
-            {/* Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 type="button"
@@ -356,6 +483,9 @@ export default function ShopPage() {
       </div>
     );
   }
+
+  const bundleImages = getProductImages(bundleProduct);
+  const beadsDiscountMode = beadsProduct?.tier_discount_mode || 'combined';
 
   return (
     <div className="min-h-screen bg-[#FAF7F2] text-[#3E332B] pb-24">
@@ -411,18 +541,29 @@ export default function ShopPage() {
         {/* Featured Card: 221-Color Bundle Hero */}
         {bundleProduct && (
           <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-[#8B5B43] shadow-lg relative overflow-hidden">
-            <div className="absolute top-0 right-0 bg-[#8B5B43] text-white px-5 py-1.5 rounded-bl-2xl text-xs font-extrabold tracking-wider">
+            <div className="absolute top-0 right-0 bg-[#8B5B43] text-white px-5 py-1.5 rounded-bl-2xl text-xs font-extrabold tracking-wider z-10">
               🔥 鎮店主打 限量預購
             </div>
 
             <div className="flex flex-col lg:flex-row gap-6 items-start">
-              <div className="w-full lg:w-2/5 aspect-4/3 rounded-2xl bg-[#FAF7F2] border border-[#E8DEC8] flex items-center justify-center p-6 text-center relative overflow-hidden group">
-                {bundleProduct.image_url ? (
-                  <img
-                    src={bundleProduct.image_url}
-                    alt={bundleProduct.name}
-                    className="w-full h-full object-cover rounded-xl"
-                  />
+              <div
+                onClick={() => bundleImages.length > 0 && openProductLightbox(bundleProduct, 0)}
+                className={`w-full lg:w-2/5 aspect-4/3 rounded-2xl bg-[#FAF7F2] border border-[#E8DEC8] flex items-center justify-center p-4 text-center relative overflow-hidden group ${
+                  bundleImages.length > 0 ? 'cursor-pointer' : ''
+                }`}
+              >
+                {bundleImages.length > 0 ? (
+                  <>
+                    <img
+                      src={bundleImages[0]}
+                      alt={bundleProduct.name}
+                      className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-300"
+                    />
+                    <div className="absolute bottom-3 right-3 bg-black/65 backdrop-blur-xs text-white px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1">
+                      <ZoomIn className="w-3.5 h-3.5" />
+                      <span>{bundleImages.length > 1 ? `點擊放大 (${bundleImages.length}張)` : '點擊放大'}</span>
+                    </div>
+                  </>
                 ) : (
                   <div className="space-y-3">
                     <div className="w-20 h-20 bg-[#8B5B43]/15 rounded-3xl flex items-center justify-center mx-auto text-4xl">
@@ -439,7 +580,7 @@ export default function ShopPage() {
               <div className="flex-1 space-y-4">
                 <div>
                   <h3 className="text-xl sm:text-2xl font-black text-[#3E332B]">{bundleProduct.name}</h3>
-                  <p className="text-xs text-[#6D5D52] mt-1.5 leading-relaxed">
+                  <p className="text-xs text-[#6D5D52] mt-1.5 leading-relaxed whitespace-pre-line">
                     {bundleProduct.description}
                   </p>
                 </div>
@@ -456,11 +597,13 @@ export default function ShopPage() {
                   </div>
                 </div>
 
-                {/* Arrival text banner */}
-                <div className="bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8] text-xs text-[#6D5D52] flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-[#8B5B43] shrink-0" />
-                  <span>{bundleProduct.estimated_arrival_text || '預計 11/10 ~ 11/15 到貨'}</span>
-                </div>
+                {/* Arrival text banner (Only shown if configured) */}
+                {bundleProduct.estimated_arrival_text && (
+                  <div className="bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8] text-xs text-[#6D5D52] flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-[#8B5B43] shrink-0" />
+                    <span>{bundleProduct.estimated_arrival_text}</span>
+                  </div>
+                )}
 
                 {/* Price and Cart Action */}
                 <div className="pt-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -508,7 +651,7 @@ export default function ShopPage() {
                   </div>
                 </div>
 
-                {/* Wish Input Box (Appears when bundle is selected) */}
+                {/* Wish Input Box */}
                 {cart[bundleProduct.id] > 0 && (
                   <div className="pt-3 border-t border-[#E8DEC8] space-y-2 animate-fade-in">
                     <label className="block text-xs font-bold text-[#8B5B43] flex items-center gap-1.5">
@@ -532,7 +675,7 @@ export default function ShopPage() {
           </div>
         )}
 
-        {/* Individual Items Category Pills */}
+        {/* Individual Items Section */}
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-lg sm:text-xl font-black text-[#3E332B] flex items-center gap-2">
@@ -563,23 +706,40 @@ export default function ShopPage() {
             </div>
           </div>
 
-          {/* Tier Pricing Banner for Beads */}
+          {/* Tier Pricing + Interactive Color Picker Banner for Beads */}
           {beadsProduct && (activeCategory === 'all' || activeCategory === 'beads') && (
-            <div className="bg-linear-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-              <div className="space-y-1">
-                <span className="text-xs font-black text-amber-900 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-amber-700" />
-                  <span>🌈 221色高品質融合豆 10g包 — 多包自動階梯優惠：</span>
-                </span>
+            <div className="bg-linear-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-2xs">
+              <div className="space-y-1.5">
+                <div className="flex items-center flex-wrap gap-2">
+                  <span className="text-xs sm:text-sm font-black text-amber-950 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-700" />
+                    <span>🌈 高品質融合豆 10g 補充包（全店 {allBeadColors.length} 色選色表）：</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-white text-amber-900 border border-amber-300">
+                    {beadsDiscountMode === 'per_color'
+                      ? '📌 單色獨立計算：單一色號滿 10 包 / 20 包享優惠'
+                      : '🎉 混色合計計算：任選色號加總滿 10 包 / 20 包享優惠'}
+                  </span>
+                </div>
                 <p className="text-xs text-amber-800">
                   單包 $16 ｜ <strong className="text-amber-950 font-black">滿 10 包 $150</strong>（每包 $15） ｜ <strong className="text-rose-700 font-black">滿 20 包 $280</strong>（每包 $14）！
                 </p>
               </div>
-              {cart[beadsProduct.id] > 0 && (
-                <span className="px-3 py-1 bg-amber-600 text-white rounded-lg text-xs font-bold shrink-0">
-                  已選 {cart[beadsProduct.id]} 包（小計 NT$ {calculateItemSubtotal(beadsProduct, cart[beadsProduct.id])}）
-                </span>
-              )}
+              <div className="flex items-center flex-wrap gap-2 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowBeadPickerModal(true)}
+                  className="flex-1 md:flex-none px-4 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-black shadow-sm transition flex items-center justify-center gap-1.5"
+                >
+                  <Palette className="w-4 h-4" />
+                  <span>🎨 開啟互動色號表選色 ({allBeadColors.length}色)</span>
+                </button>
+                {cart[beadsProduct.id] > 0 && (
+                  <span className="px-3 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold shrink-0">
+                    已選 {cart[beadsProduct.id]} 包（NT$ {calculateItemSubtotal(beadsProduct, cart[beadsProduct.id])}）
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
@@ -590,27 +750,65 @@ export default function ShopPage() {
               .filter(p => activeCategory === 'all' || p.category === activeCategory)
               .map(prod => {
                 const qty = cart[prod.id] || 0;
+                const prodImages = getProductImages(prod);
+                const isBeads = prod.category === 'beads';
+
                 return (
                   <div
                     key={prod.id}
                     className="bg-white rounded-2xl p-4 border border-[#E8DEC8] shadow-xs flex flex-col justify-between hover:shadow-md transition"
                   >
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-start gap-2">
-                        <h4 className="font-bold text-sm text-[#3E332B]">{prod.name}</h4>
-                        <span className="font-black text-sm text-[#8B5B43] whitespace-nowrap">
-                          NT$ {prod.price}
-                        </span>
+                    <div className="space-y-3">
+                      {/* Product Image Thumbnail if uploaded */}
+                      {prodImages.length > 0 && (
+                        <div
+                          onClick={() => openProductLightbox(prod, 0)}
+                          className="w-full h-44 rounded-xl bg-[#FAF7F2] border border-[#E8DEC8] overflow-hidden relative cursor-pointer group"
+                        >
+                          <img
+                            src={prodImages[0]}
+                            alt={prod.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                          <div className="absolute bottom-2 right-2 bg-black/60 text-white px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1">
+                            <ZoomIn className="w-3 h-3" />
+                            <span>{prodImages.length > 1 ? `${prodImages.length}張圖` : '放大'}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-start gap-2">
+                          <h4 className="font-bold text-sm text-[#3E332B]">{prod.name}</h4>
+                          <span className="font-black text-sm text-[#8B5B43] whitespace-nowrap">
+                            NT$ {prod.price}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#8C8279] whitespace-pre-line leading-relaxed">
+                          {prod.description}
+                        </p>
+                        {prod.estimated_arrival_text && (
+                          <div className="text-[11px] font-bold text-[#8B5B43] bg-[#FAF7F2] px-2.5 py-1 rounded-lg border border-[#E8DEC8] flex items-center gap-1">
+                            <Clock className="w-3 h-3 shrink-0" />
+                            <span>{prod.estimated_arrival_text}</span>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-xs text-[#8C8279] line-clamp-2">
-                        {prod.description}
-                      </p>
                     </div>
 
-                    <div className="mt-4 pt-3 border-t border-[#F5F0EB] flex items-center justify-between">
-                      <span className="text-[11px] text-[#8C8279]">
-                        {prod.category === 'beads' ? '每包約 1000 顆' : '門市自取'}
-                      </span>
+                    <div className="mt-4 pt-3 border-t border-[#F5F0EB] flex items-center justify-between gap-2">
+                      {isBeads ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowBeadPickerModal(true)}
+                          className="text-xs font-bold text-[#8B5B43] bg-[#FAF7F2] hover:bg-[#F2ECE4] border border-[#E8DEC8] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition"
+                        >
+                          <Palette className="w-3.5 h-3.5" />
+                          <span>點此選色號 ({allBeadColors.length}色)</span>
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-[#8C8279]">門市自取</span>
+                      )}
 
                       {qty > 0 ? (
                         <div className="flex items-center border border-[#8B5B43] rounded-lg bg-white">
@@ -633,11 +831,11 @@ export default function ShopPage() {
                       ) : (
                         <button
                           type="button"
-                          onClick={() => updateCartQty(prod.id, 1)}
+                          onClick={() => (isBeads ? setShowBeadPickerModal(true) : updateCartQty(prod.id, 1))}
                           className="px-3 py-1.5 bg-[#FAF7F2] hover:bg-[#8B5B43] text-[#8B5B43] hover:text-white border border-[#E8DEC8] hover:border-[#8B5B43] rounded-lg text-xs font-bold transition flex items-center gap-1"
                         >
                           <Plus className="w-3.5 h-3.5" />
-                          <span>加購</span>
+                          <span>{isBeads ? '選色加購' : '加購'}</span>
                         </button>
                       )}
                     </div>
@@ -646,18 +844,79 @@ export default function ShopPage() {
               })}
           </div>
 
-          {/* Beads Color Notes Input if Beads in Cart */}
+          {/* Beads Color Notes & Selected Chips Box if Beads in Cart */}
           {hasBeadsInCart && (
-            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#E8DEC8] space-y-2 animate-fade-in">
-              <label className="block text-xs font-bold text-[#8B5B43] flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>🌈 10g 融合豆 — 色號明細填寫：</span>
-              </label>
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-[#8B5B43]/40 space-y-3 animate-fade-in">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-xs font-bold text-[#8B5B43] flex items-center gap-1.5">
+                  <Palette className="w-4 h-4" />
+                  <span>🌈 10g 融合豆 — 已選色號與包數明細：</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBeadPickerModal(true)}
+                    className="px-3 py-1 bg-[#8B5B43] text-white rounded-lg text-xs font-bold hover:bg-[#724a35] transition"
+                  >
+                    🎨 開啟色卡增減色號
+                  </button>
+                  {selectedColorEntries.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearAllBeadColors}
+                      className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold hover:bg-rose-100 transition"
+                    >
+                      清空重選
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {selectedColorEntries.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8]">
+                  {selectedColorEntries.map(([code, cQty]) => {
+                    const colorObj = allBeadColors.find(c => c.code === code);
+                    const hex = colorObj?.hex || '#CCCCCC';
+                    const textColor = getContrastTextColor(hex);
+                    return (
+                      <div
+                        key={code}
+                        className="inline-flex items-center gap-1.5 bg-white border border-[#E5DFD7] rounded-lg px-2 py-1 text-xs shadow-2xs"
+                      >
+                        <span
+                          className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-black border border-black/10"
+                          style={{ backgroundColor: hex, color: textColor }}
+                        >
+                          {code}
+                        </span>
+                        <span className="font-mono font-bold text-[#3E332B]">×{cQty}包</span>
+                        <button
+                          type="button"
+                          onClick={() => updateBeadColorQty(code, -1)}
+                          className="text-gray-400 hover:text-rose-600 font-bold ml-0.5"
+                          title="減少 1 包"
+                        >
+                          -
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateBeadColorQty(code, 1)}
+                          className="text-gray-400 hover:text-emerald-600 font-bold"
+                          title="增加 1 包"
+                        >
+                          +
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <textarea
                 rows="2"
                 value={beadColorNote}
                 onChange={e => setBeadColorNote(e.target.value)}
-                placeholder="請輸入您欲購買的色號與包數（例如：A01 x2包、B12 x3包、黑色 5包...，若尚未決定亦可取貨現場挑選）"
+                placeholder="可點選上方「開啟色卡」直接點選色號，或手動輸入欲購買的色號與包數（如尚未決定亦可備註現場挑選）"
                 className="w-full px-3 py-2 text-xs font-medium border border-[#E8DEC8] rounded-xl outline-none focus:border-[#8B5B43] text-[#3E332B]"
               />
             </div>
@@ -683,19 +942,22 @@ export default function ShopPage() {
             {/* Cart Items List */}
             <div className="space-y-2 text-xs">
               {cartItemsList.map(item => (
-                <div key={item.product.id} className="flex justify-between items-center py-1.5 border-b border-[#FAF7F2]">
+                <div key={item.product.id} className="flex justify-between items-start py-2 border-b border-[#FAF7F2] gap-2">
                   <div>
                     <span className="font-bold text-[#3E332B]">{item.product.name}</span>
                     <span className="text-[#8C8279] ml-2">x {item.qty}</span>
+                    {item.product.category === 'beads' && beadColorNote && (
+                      <p className="text-[11px] text-[#8B5B43] mt-0.5">色號：{beadColorNote}</p>
+                    )}
                   </div>
-                  <span className="font-mono font-bold text-[#8B5B43]">
+                  <span className="font-mono font-bold text-[#8B5B43] shrink-0">
                     NT$ {item.subtotal.toLocaleString()}
                   </span>
                 </div>
               ))}
             </div>
 
-            {/* Delivery Method (Store Pickup locked for now, extensible for shipping) */}
+            {/* Delivery Method */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-[#6D5D52]">取貨方式：</label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -711,7 +973,7 @@ export default function ShopPage() {
                   <Store className="w-4 h-4 shrink-0" />
                   <div>
                     <strong className="block font-bold">🏪 門市現場自取（免運費）</strong>
-                    <span className="text-[11px] opacity-80">到貨將發送 LINE 通知至門市櫃檯出示單號領取</span>
+                    <span className="text-[11px] opacity-80">備妥後將發送 LINE 通知至門市櫃檯出示單號領取</span>
                   </div>
                 </button>
 
@@ -769,13 +1031,15 @@ export default function ShopPage() {
                       <div className="flex items-center justify-between mb-0.5">
                         <strong className="block font-bold">{method.name}</strong>
                         {isCtbc && (
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                            isPoolEmpty
-                              ? 'bg-rose-100 text-rose-700'
-                              : selectedPaymentCode === method.code
-                                ? 'bg-white/20 text-white'
-                                : 'bg-emerald-100 text-emerald-800'
-                          }`}>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                              isPoolEmpty
+                                ? 'bg-rose-100 text-rose-700'
+                                : selectedPaymentCode === method.code
+                                  ? 'bg-white/20 text-white'
+                                  : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
                             {isPoolEmpty ? '目前已發畢' : `剩餘 ${paymentConfig.ctbc_pool_available_count} 組`}
                           </span>
                         )}
@@ -792,32 +1056,33 @@ export default function ShopPage() {
                 })}
               </div>
 
-              {/* Dynamic Instructions of Selected Payment */}
               {selectedPaymentMethod && (
                 <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] space-y-3 text-xs">
                   <div className="text-[#3E332B] leading-relaxed font-medium">
                     {selectedPaymentMethod.display_instructions}
                   </div>
 
-                  {/* Multi-bank dropdown if applicable */}
-                  {selectedPaymentMethod.method_type === 'MULTI_BANK' && Array.isArray(selectedPaymentMethod.bank_accounts_json) && (
-                    <div className="space-y-1.5 pt-1">
-                      <span className="font-bold text-[#6D5D52] block">請選擇欲匯款的銀行：</span>
-                      <select
-                        value={selectedBankInfo}
-                        onChange={e => setSelectedBankInfo(e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none"
-                      >
-                        {selectedPaymentMethod.bank_accounts_json.map((acc, idx) => (
-                          <option key={idx} value={`${acc.bank_name} (${acc.bank_code}) 帳號：${acc.account} 戶名：${acc.holder || '拾光製所'}`}>
-                            {acc.bank_name} ({acc.bank_code}) - {acc.account}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  {selectedPaymentMethod.method_type === 'MULTI_BANK' &&
+                    Array.isArray(selectedPaymentMethod.bank_accounts_json) && (
+                      <div className="space-y-1.5 pt-1">
+                        <span className="font-bold text-[#6D5D52] block">請選擇欲匯款的銀行：</span>
+                        <select
+                          value={selectedBankInfo}
+                          onChange={e => setSelectedBankInfo(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none"
+                        >
+                          {selectedPaymentMethod.bank_accounts_json.map((acc, idx) => (
+                            <option
+                              key={idx}
+                              value={`${acc.bank_name} (${acc.bank_code}) 帳號：${acc.account} 戶名：${acc.holder || '拾光製所'}`}
+                            >
+                              {acc.bank_name} ({acc.bank_code}) - {acc.account}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
-                  {/* Remittance last 5 digits input */}
                   {selectedPaymentMethod.require_last5 && (
                     <div className="pt-2 border-t border-[#E8DEC8] space-y-1.5">
                       <label className="block text-xs font-bold text-[#3E332B]">
@@ -834,10 +1099,9 @@ export default function ShopPage() {
                     </div>
                   )}
 
-                  {/* 2 Days Deadline Reminder */}
                   <div className="flex items-center gap-1.5 text-[11px] text-amber-800 font-bold">
                     <Clock className="w-3.5 h-3.5 text-amber-700" />
-                    <span>⚠️ 請於下單後 2 天內完成訂金支付，逾期名額將自動取消釋出</span>
+                    <span>⚠️ 請於下單後 {paymentConfig?.deposit_deadline_days ?? 2} 天內完成訂金支付，逾期名額將自動取消釋出</span>
                   </div>
                 </div>
               )}
@@ -892,6 +1156,266 @@ export default function ShopPage() {
           </form>
         )}
       </div>
+
+      {/* Interactive MARD 291/302+ Bead Color Chart Modal */}
+      {showBeadPickerModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-[#E8DEC8]">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 bg-[#3E332B] text-white flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-black text-base sm:text-lg flex items-center gap-2">
+                  <Palette className="w-5 h-5 text-amber-300" />
+                  <span>🎨 拾光製所 MARD 拼豆色號表（共 {allBeadColors.length} 色）</span>
+                </h3>
+                <p className="text-[11px] sm:text-xs text-[#D5CFC9] mt-0.5">
+                  {beadsDiscountMode === 'per_color'
+                    ? '📌 單色獨立優惠：單一色號買滿 10 包 $150、滿 20 包 $280（未滿 10 包每包 $16）'
+                    : '🎉 混色合計優惠：全色號混搭加總滿 10 包 $150、滿 20 包 $280（未滿 10 包每包 $16）'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBeadPickerModal(false)}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Search & Series Filter Bar */}
+            <div className="p-3 sm:p-4 bg-[#FAF7F2] border-b border-[#E8DEC8] space-y-2.5">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-[#8C8279] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={beadSearchQuery}
+                    onChange={e => setBeadSearchQuery(e.target.value)}
+                    placeholder="搜尋色號或名稱（例如：H2、A1、Z1、夜光、果凍...）"
+                    className="w-full pl-9 pr-8 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none focus:border-[#8B5B43]"
+                  />
+                  {beadSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setBeadSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Series Tabs */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-bold">
+                {[
+                  { key: 'ALL', label: `全部 (${allBeadColors.length})` },
+                  { key: 'STANDARD_221', label: '標準221色 (A~M)' },
+                  { key: 'SPECIAL', label: '特殊/擴充色 (P/Q/R/T/Y/Z)' },
+                  ...seriesTabs.map(s => ({ key: s.key, label: `${s.key}系` }))
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSeriesTab(tab.key);
+                      setBeadSearchQuery('');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
+                      selectedSeriesTab === tab.key && !beadSearchQuery
+                        ? 'bg-[#8B5B43] text-white shadow-xs'
+                        : 'bg-white text-[#6D5D52] border border-[#E8DEC8] hover:bg-[#F2ECE4]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Color Grid */}
+            <div className="p-3 sm:p-5 overflow-y-auto flex-1 bg-white">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2.5">
+                {filteredBeadColors.map(color => {
+                  const qty = beadColorSelections[color.code] || 0;
+                  const isAvailable = color.is_available !== false;
+                  const textColor = getContrastTextColor(color.hex);
+
+                  return (
+                    <div
+                      key={color.code}
+                      className={`p-2.5 rounded-2xl border transition flex flex-col items-center justify-between gap-2 ${
+                        !isAvailable
+                          ? 'bg-gray-100 border-gray-200 opacity-55'
+                          : qty > 0
+                            ? 'bg-amber-50/70 border-2 border-[#8B5B43] shadow-xs'
+                            : 'bg-[#FAF7F2]/60 border-[#E8DEC8] hover:border-[#8B5B43]/50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 w-full">
+                        <div
+                          className="w-10 h-10 rounded-full flex items-center justify-center font-mono font-black text-xs shadow-inner border border-black/15 shrink-0"
+                          style={{ backgroundColor: color.hex, color: textColor }}
+                        >
+                          {color.code}
+                        </div>
+                        <div className="min-w-0 flex-1 text-left">
+                          <div className="font-bold text-xs text-[#3E332B] truncate">{color.name || color.code}</div>
+                          <div className="text-[10px] text-[#8C8279] font-mono">
+                            {color.effect !== '標準色' ? color.effect : color.hex}
+                          </div>
+                        </div>
+                      </div>
+
+                      {!isAvailable ? (
+                        <span className="w-full py-1 text-center text-[11px] font-bold bg-gray-200 text-gray-500 rounded-lg">
+                          補貨中
+                        </span>
+                      ) : (
+                        <div className="flex items-center justify-between w-full bg-white border border-[#E5DFD7] rounded-xl px-1.5 py-1">
+                          <button
+                            type="button"
+                            disabled={qty <= 0}
+                            onClick={() => updateBeadColorQty(color.code, -1)}
+                            className="w-6 h-6 rounded-lg bg-[#FAF7F2] hover:bg-[#EBE5DF] disabled:opacity-30 text-[#8B5B43] font-black flex items-center justify-center"
+                          >
+                            -
+                          </button>
+                          <span className="font-mono font-black text-xs text-[#3E332B]">
+                            {qty > 0 ? `${qty}包` : '0'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => updateBeadColorQty(color.code, 1)}
+                            className="w-6 h-6 rounded-lg bg-[#8B5B43] hover:bg-[#724a35] text-white font-black flex items-center justify-center"
+                          >
+                            +
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Footer Summary */}
+            <div className="p-4 bg-[#FAF7F2] border-t border-[#E8DEC8] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="text-xs sm:text-sm font-black text-[#3E332B]">
+                  已選 <span className="text-[#8B5B43]">{selectedColorEntries.length}</span> 種色號，共{' '}
+                  <span className="text-[#8B5B43]">{totalPickedBeadBags}</span> 包 ｜ 小計：
+                  <span className="text-base sm:text-lg text-emerald-800 ml-1">
+                    NT$ {beadsProduct ? calculateItemSubtotal(beadsProduct, totalPickedBeadBags) : 0}
+                  </span>
+                </div>
+                {selectedColorEntries.length > 0 && (
+                  <p className="text-[11px] text-[#6D5D52] line-clamp-1">
+                    明細：{selectedColorEntries.map(([c, q]) => `${c}×${q}`).join('、')}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                {selectedColorEntries.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearAllBeadColors}
+                    className="px-3.5 py-2.5 bg-white border border-rose-200 text-rose-600 rounded-xl text-xs font-bold hover:bg-rose-50"
+                  >
+                    清空
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowBeadPickerModal(false)}
+                  className="flex-1 sm:flex-none px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs sm:text-sm font-black shadow-sm"
+                >
+                  完成選色並帶入購物車
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Product Image Lightbox Modal */}
+      {lightboxData && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setLightboxData(null)}
+        >
+          <div
+            className="relative max-w-3xl w-full flex flex-col items-center gap-3"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between text-white px-2">
+              <h4 className="font-bold text-sm sm:text-base">{lightboxData.title}</h4>
+              <button
+                type="button"
+                onClick={() => setLightboxData(null)}
+                className="p-2 rounded-full bg-white/15 hover:bg-white/25 text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="relative w-full bg-black/40 rounded-2xl overflow-hidden flex items-center justify-center max-h-[75vh]">
+              <img
+                src={lightboxData.images[lightboxData.index]}
+                alt={lightboxData.title}
+                className="max-h-[75vh] w-auto object-contain rounded-xl"
+              />
+              {lightboxData.images.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLightboxData(prev => ({
+                        ...prev,
+                        index: (prev.index - 1 + prev.images.length) % prev.images.length
+                      }))
+                    }
+                    className="absolute left-3 p-2.5 rounded-full bg-black/60 hover:bg-black/80 text-white"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLightboxData(prev => ({
+                        ...prev,
+                        index: (prev.index + 1) % prev.images.length
+                      }))
+                    }
+                    className="absolute right-3 p-2.5 rounded-full bg-black/60 hover:bg-black/80 text-white"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {lightboxData.images.length > 1 && (
+              <div className="flex items-center gap-2 overflow-x-auto py-1">
+                {lightboxData.images.map((imgUrl, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setLightboxData(prev => ({ ...prev, index: idx }))}
+                    className={`w-14 h-14 rounded-lg overflow-hidden border-2 transition ${
+                      lightboxData.index === idx ? 'border-amber-400 scale-105' : 'border-transparent opacity-60'
+                    }`}
+                  >
+                    <img src={imgUrl} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

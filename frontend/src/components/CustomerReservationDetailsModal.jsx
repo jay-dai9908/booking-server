@@ -40,8 +40,26 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState('');
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [noteInput, setNoteInput] = useState(reservation?.customer_note || '');
+  const [isSavingNote, setIsSavingNote] = useState(false);
 
   if (!reservation) return null;
+
+  const handleSaveCustomerNote = async () => {
+    setIsSavingNote(true);
+    try {
+      await api.patch(`/reservations/${reservation.booking_ref}/notes`, {
+        customer_note: noteInput.trim() || null
+      });
+      setIsEditingNote(false);
+      if (onUpdate) onUpdate();
+    } catch (err) {
+      alert(err.response?.data?.error || '儲存備註失敗');
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
 
   const handleCopyRef = () => {
     const textToCopy = formatBookingRef(reservation.booking_ref);
@@ -227,6 +245,60 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
                 <span className="text-lg font-bold text-[#8B5B43]">NT$ {reservation.total_amount}</span>
               </div>
             )}
+
+            {/* Customer Note */}
+            <div className="border-b border-dashed border-[#E5DFD7] pb-5">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-[#7A7067]">📝 預約備註</h3>
+                {reservation.status !== 'cancelled' && !isExpired && !isEditingNote && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNoteInput(reservation.customer_note || '');
+                      setIsEditingNote(true);
+                    }}
+                    className="text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] hover:bg-[#EBE5DF] px-2.5 py-1 rounded-full transition-colors"
+                  >
+                    ✏️ {reservation.customer_note ? '修改備註' : '新增備註'}
+                  </button>
+                )}
+              </div>
+              {isEditingNote ? (
+                <div className="space-y-2">
+                  <textarea
+                    rows={2}
+                    value={noteInput}
+                    onChange={(e) => setNoteInput(e.target.value)}
+                    placeholder="輸入給店家的備註（如：第一次玩需教學、攜帶幼童、晚到10分鐘...）"
+                    maxLength={120}
+                    className="w-full px-3 py-2 text-xs sm:text-sm bg-white border border-[#D5CFC9] rounded-xl focus:outline-none focus:border-[#8B5B43] text-[#2C241E]"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingNote(false)}
+                      className="px-3 py-1 text-xs font-bold text-[#7A7067] bg-white border border-[#D5CFC9] rounded-lg"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSavingNote}
+                      onClick={handleSaveCustomerNote}
+                      className="px-3 py-1 text-xs font-bold text-white bg-[#8B5B43] hover:bg-[#724a35] rounded-lg disabled:opacity-50"
+                    >
+                      {isSavingNote ? '儲存中...' : '儲存備註'}
+                    </button>
+                  </div>
+                </div>
+              ) : reservation.customer_note ? (
+                <p className="text-sm font-medium text-[#2C241E] bg-white p-3 rounded-xl border border-[#E5DFD7]">
+                  {reservation.customer_note}
+                </p>
+              ) : (
+                <p className="text-sm text-[#8C8279]">無特別備註</p>
+              )}
+            </div>
 
             {/* Status */}
             <div>

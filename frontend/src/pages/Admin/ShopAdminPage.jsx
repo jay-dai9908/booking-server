@@ -1,31 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShoppingBag,
   Package,
   CreditCard,
   Search,
   RefreshCw,
-  CheckCircle2,
-  AlertCircle,
   Clock,
   Send,
-  MessageCircle,
-  Copy,
   Plus,
   Edit2,
   Trash2,
   Sparkles,
   Store,
-  Truck,
   Check,
-  ChevronDown,
-  X
+  X,
+  Palette,
+  Image as ImageIcon,
+  Upload
 } from 'lucide-react';
 import api from '../../api/axios';
 import { format } from 'date-fns';
+import {
+  MARD_SERIES_INFO,
+  getMergedBeadColors,
+  getContrastTextColor
+} from '../../utils/mardBeadColors';
 
 export default function ShopAdminPage() {
-  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'payments' | 'products'
+  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'payments' | 'products' | 'bead_colors'
 
   // Tab 1: Orders
   const [orders, setOrders] = useState([]);
@@ -59,7 +61,8 @@ export default function ShopAdminPage() {
     shop_default_arrival_note: '',
     shop_enable_shipping: false,
     shop_shipping_fee: 60,
-    official_line_url: 'https://lin.ee/vsZhRW5'
+    official_line_url: 'https://lin.ee/vsZhRW5',
+    bead_colors_json: []
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -67,6 +70,14 @@ export default function ShopAdminPage() {
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [editProductModal, setEditProductModal] = useState(null); // null or product object
+  const [newImageUrlInput, setNewImageUrlInput] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Tab 4: Bead Colors Management (291 -> 302+ colors)
+  const [adminColorSeriesFilter, setAdminColorSeriesFilter] = useState('ALL');
+  const [adminColorSearch, setAdminColorSearch] = useState('');
+  const [editingColorModal, setEditingColorModal] = useState(null); // { code, series, hex, name, effect, is_available, isNew }
+  const [savingColor, setSavingColor] = useState(false);
 
   useEffect(() => {
     if (activeTab === 'orders') fetchAdminOrders();
@@ -75,6 +86,10 @@ export default function ShopAdminPage() {
       fetchPaymentSettings();
     }
     if (activeTab === 'products') fetchAdminProducts();
+    if (activeTab === 'bead_colors') {
+      fetchPaymentSettings();
+      fetchAdminProducts();
+    }
   }, [activeTab]);
 
   // Orders handlers
@@ -194,7 +209,10 @@ export default function ShopAdminPage() {
     try {
       const res = await api.get('/shop/admin/payment-methods');
       setPaymentMethods(res.data.payment_methods || []);
-      setShopSettings(res.data.settings || {});
+      setShopSettings(prev => ({
+        ...prev,
+        ...(res.data.settings || {})
+      }));
     } catch (err) {
       console.error('Failed to fetch payment settings:', err);
     }
@@ -257,18 +275,38 @@ export default function ShopAdminPage() {
 
   const handleSavePaymentMethodConfig = async (method) => {
     const editData = editingPaymentMethods[method.id] || {};
-    const displayInstructions = editData.display_instructions !== undefined
-      ? editData.display_instructions
-      : method.display_instructions;
+    const displayInstructions =
+      editData.display_instructions !== undefined
+        ? editData.display_instructions
+        : method.display_instructions;
 
     let bankAccounts = method.bank_accounts_json;
-    if (editData.bank_account_number !== undefined || editData.bank_name !== undefined || editData.bank_code !== undefined || editData.bank_account_name !== undefined) {
-      bankAccounts = [{
-        bank_name: editData.bank_name !== undefined ? editData.bank_name : (method.bank_accounts_json?.[0]?.bank_name || ''),
-        bank_code: editData.bank_code !== undefined ? editData.bank_code : (method.bank_accounts_json?.[0]?.bank_code || ''),
-        account: editData.bank_account_number !== undefined ? editData.bank_account_number : (method.bank_accounts_json?.[0]?.account || ''),
-        account_name: editData.bank_account_name !== undefined ? editData.bank_account_name : (method.bank_accounts_json?.[0]?.account_name || '')
-      }];
+    if (
+      editData.bank_account_number !== undefined ||
+      editData.bank_name !== undefined ||
+      editData.bank_code !== undefined ||
+      editData.bank_account_name !== undefined
+    ) {
+      bankAccounts = [
+        {
+          bank_name:
+            editData.bank_name !== undefined
+              ? editData.bank_name
+              : method.bank_accounts_json?.[0]?.bank_name || '',
+          bank_code:
+            editData.bank_code !== undefined
+              ? editData.bank_code
+              : method.bank_accounts_json?.[0]?.bank_code || '',
+          account:
+            editData.bank_account_number !== undefined
+              ? editData.bank_account_number
+              : method.bank_accounts_json?.[0]?.account || '',
+          account_name:
+            editData.bank_account_name !== undefined
+              ? editData.bank_account_name
+              : method.bank_accounts_json?.[0]?.account_name || ''
+        }
+      ];
     }
 
     setSavingPaymentId(method.id);
@@ -299,6 +337,126 @@ export default function ShopAdminPage() {
     }
   };
 
+  // Compress uploaded image client-side to WebP/JPEG DataURL (max 1000px)
+  const compressImageFile = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX_DIM = 1000;
+          let width = img.width;
+          let height = img.height;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            } else {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/webp', 0.82);
+          resolve(dataUrl);
+        };
+        img.onerror = reject;
+        img.src = ev.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleProductFileSelect = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploadingImage(true);
+    try {
+      const compressedList = [];
+      for (const file of files) {
+        const dataUrl = await compressImageFile(file);
+        compressedList.push(dataUrl);
+      }
+      setEditProductModal(prev => {
+        const existingImgs = Array.isArray(prev.images_json)
+          ? [...prev.images_json]
+          : prev.image_url
+            ? [prev.image_url]
+            : [];
+        const merged = [...existingImgs, ...compressedList];
+        return {
+          ...prev,
+          images_json: merged,
+          image_url: merged[0] || ''
+        };
+      });
+    } catch (err) {
+      alert('處理圖片失敗，請重試');
+    } finally {
+      setUploadingImage(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleAddExternalImageUrl = () => {
+    const clean = newImageUrlInput.trim();
+    if (!clean) return;
+    setEditProductModal(prev => {
+      const existingImgs = Array.isArray(prev.images_json)
+        ? [...prev.images_json]
+        : prev.image_url
+          ? [prev.image_url]
+          : [];
+      const merged = existingImgs.includes(clean) ? existingImgs : [...existingImgs, clean];
+      return {
+        ...prev,
+        images_json: merged,
+        image_url: merged[0] || ''
+      };
+    });
+    setNewImageUrlInput('');
+  };
+
+  const handleRemoveProductImage = (idxToRemove) => {
+    setEditProductModal(prev => {
+      const existingImgs = Array.isArray(prev.images_json)
+        ? [...prev.images_json]
+        : prev.image_url
+          ? [prev.image_url]
+          : [];
+      const nextImgs = existingImgs.filter((_, i) => i !== idxToRemove);
+      return {
+        ...prev,
+        images_json: nextImgs,
+        image_url: nextImgs[0] || null
+      };
+    });
+  };
+
+  const handleSetPrimaryProductImage = (idx) => {
+    setEditProductModal(prev => {
+      const existingImgs = Array.isArray(prev.images_json)
+        ? [...prev.images_json]
+        : prev.image_url
+          ? [prev.image_url]
+          : [];
+      if (!existingImgs[idx]) return prev;
+      const target = existingImgs[idx];
+      const rest = existingImgs.filter((_, i) => i !== idx);
+      const nextImgs = [target, ...rest];
+      return {
+        ...prev,
+        images_json: nextImgs,
+        image_url: nextImgs[0]
+      };
+    });
+  };
+
   const handleSaveProduct = async (productData) => {
     try {
       if (productData.id) {
@@ -313,26 +471,138 @@ export default function ShopAdminPage() {
     }
   };
 
+  const handleQuickUpdateBeadsDiscountMode = async (mode) => {
+    const beadsProd = products.find(p => p.category === 'beads');
+    if (!beadsProd) return;
+    try {
+      await api.put(`/shop/admin/products/${beadsProd.id}`, {
+        tier_discount_mode: mode
+      });
+      fetchAdminProducts();
+    } catch (err) {
+      alert('切換階梯優惠計算模式失敗');
+    }
+  };
+
+  // Bead Colors Management Logic
+  const allMergedBeadColors = useMemo(() => {
+    return getMergedBeadColors(shopSettings.bead_colors_json || []);
+  }, [shopSettings.bead_colors_json]);
+
+  const filteredAdminBeadColors = useMemo(() => {
+    const q = adminColorSearch.trim().toUpperCase();
+    return allMergedBeadColors.filter(c => {
+      if (q) {
+        return (
+          c.code.toUpperCase().includes(q) ||
+          (c.name && c.name.toUpperCase().includes(q)) ||
+          (c.series && c.series.toUpperCase().includes(q))
+        );
+      }
+      if (adminColorSeriesFilter === 'ALL') return true;
+      return c.series === adminColorSeriesFilter;
+    });
+  }, [allMergedBeadColors, adminColorSeriesFilter, adminColorSearch]);
+
+  const saveCustomBeadColorsArray = async (nextCustomArray) => {
+    setSavingColor(true);
+    try {
+      const updatedSettings = {
+        ...shopSettings,
+        bead_colors_json: nextCustomArray
+      };
+      await api.post('/shop/admin/settings', updatedSettings);
+      setShopSettings(updatedSettings);
+    } catch (err) {
+      alert('儲存色號設定失敗：' + (err.response?.data?.error || err.message));
+    } finally {
+      setSavingColor(false);
+    }
+  };
+
+  const handleToggleColorAvailability = async (color) => {
+    const currentCustom = Array.isArray(shopSettings.bead_colors_json)
+      ? [...shopSettings.bead_colors_json]
+      : [];
+    const code = color.code.toUpperCase();
+    const nextAvailable = color.is_available === false;
+    const idx = currentCustom.findIndex(c => String(c.code).toUpperCase() === code);
+
+    if (idx >= 0) {
+      currentCustom[idx] = { ...currentCustom[idx], is_available: nextAvailable };
+    } else {
+      currentCustom.push({
+        code,
+        series: color.series,
+        hex: color.hex,
+        name: color.name,
+        effect: color.effect,
+        is_available: nextAvailable
+      });
+    }
+    await saveCustomBeadColorsArray(currentCustom);
+  };
+
+  const handleSaveEditingColor = async (e) => {
+    e.preventDefault();
+    if (!editingColorModal?.code?.trim()) {
+      alert('請輸入色號代碼（例如：Z9、H24）');
+      return;
+    }
+    const cleanCode = editingColorModal.code.trim().toUpperCase().replace(/^ZG(\d+)$/, 'Z$1');
+    const cleanSeries =
+      editingColorModal.series?.trim().toUpperCase() ||
+      cleanCode.replace(/[0-9]/g, '') ||
+      'Z';
+    const cleanHex = editingColorModal.hex?.startsWith('#')
+      ? editingColorModal.hex.toUpperCase()
+      : `#${editingColorModal.hex || 'CCCCCC'}`.toUpperCase();
+
+    const currentCustom = Array.isArray(shopSettings.bead_colors_json)
+      ? [...shopSettings.bead_colors_json]
+      : [];
+    const idx = currentCustom.findIndex(c => String(c.code).toUpperCase() === cleanCode);
+    const entry = {
+      code: cleanCode,
+      series: cleanSeries,
+      hex: cleanHex,
+      name: editingColorModal.name?.trim() || cleanCode,
+      effect: editingColorModal.effect || '標準色',
+      is_available: editingColorModal.is_available !== false
+    };
+
+    if (idx >= 0) {
+      currentCustom[idx] = entry;
+    } else {
+      currentCustom.push(entry);
+    }
+
+    await saveCustomBeadColorsArray(currentCustom);
+    setEditingColorModal(null);
+  };
+
+  const beadsProduct = products.find(p => p.category === 'beads');
+
   return (
     <div className="space-y-6">
       {/* Top Banner & Tab Navigation */}
-      <div className="bg-white rounded-2xl p-5 border border-[#E8DEC8] shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-5 border border-[#E8DEC8] shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-black text-[#3E332B] flex items-center gap-2">
             <ShoppingBag className="w-5 h-5 text-[#8B5B43]" />
             <span>商品預購、金流對帳與商城管理</span>
           </h2>
           <p className="text-xs text-[#8C8279] mt-0.5">
-            管理 221 色套裝預購單、中信社群收款一次性帳號池、許願回覆與到貨推播
+            管理 221 色套裝預購單、中信社群收款一次性帳號池、商品圖片與 302 色拼豆色號表
           </p>
         </div>
 
         {/* Tab Pills */}
-        <div className="flex bg-[#F5F0EB] p-1 rounded-xl text-xs font-bold text-[#6D5D52] self-stretch sm:self-auto">
+        <div className="flex flex-wrap bg-[#F5F0EB] p-1 rounded-xl text-xs font-bold text-[#6D5D52] self-stretch lg:self-auto gap-1">
           <button
             type="button"
             onClick={() => setActiveTab('orders')}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg transition ${
+            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg transition ${
               activeTab === 'orders' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
@@ -341,7 +611,7 @@ export default function ShopAdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('payments')}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg transition ${
+            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg transition ${
               activeTab === 'payments' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
@@ -350,11 +620,20 @@ export default function ShopAdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('products')}
-            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg transition ${
+            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg transition ${
               activeTab === 'products' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
-            📦 商品與套餐設定
+            📦 商品與圖片設定
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('bead_colors')}
+            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg transition ${
+              activeTab === 'bead_colors' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
+            }`}
+          >
+            🎨 拼豆色號管理 ({allMergedBeadColors.length}色)
           </button>
         </div>
       </div>
@@ -364,7 +643,6 @@ export default function ShopAdminPage() {
       {/* ========================================================= */}
       {activeTab === 'orders' && (
         <div className="space-y-4">
-          {/* Filter & Batch Action Bar */}
           <div className="bg-white rounded-2xl p-4 border border-[#E8DEC8] shadow-xs flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 flex-wrap flex-1 min-w-[280px]">
               <div className="relative flex-1 min-w-[200px]">
@@ -420,7 +698,6 @@ export default function ShopAdminPage() {
               </button>
             </div>
 
-            {/* Batch Notify Arrival Button */}
             {selectedOrderIds.length > 0 && (
               <button
                 type="button"
@@ -433,7 +710,6 @@ export default function ShopAdminPage() {
             )}
           </div>
 
-          {/* Orders Table */}
           <div className="bg-white rounded-2xl border border-[#E8DEC8] shadow-xs overflow-hidden">
             {loadingOrders ? (
               <div className="py-20 text-center text-[#8C8279] text-sm">載入訂單資料中...</div>
@@ -468,7 +744,9 @@ export default function ShopAdminPage() {
                   <tbody className="divide-y divide-[#F5F0EB]">
                     {orders.map((order) => {
                       const isSelected = selectedOrderIds.includes(order.id);
-                      const isPaidDeposit = order.payment_status === 'deposit_verified' || order.payment_status === 'fully_paid';
+                      const isPaidDeposit =
+                        order.payment_status === 'deposit_verified' ||
+                        order.payment_status === 'fully_paid';
                       const isReported = order.payment_status === 'reported_pending_verify';
 
                       return (
@@ -478,8 +756,10 @@ export default function ShopAdminPage() {
                               type="checkbox"
                               checked={isSelected}
                               onChange={e => {
-                                if (e.target.checked) setSelectedOrderIds(prev => [...prev, order.id]);
-                                else setSelectedOrderIds(prev => prev.filter(id => id !== order.id));
+                                if (e.target.checked)
+                                  setSelectedOrderIds(prev => [...prev, order.id]);
+                                else
+                                  setSelectedOrderIds(prev => prev.filter(id => id !== order.id));
                               }}
                               className="w-4 h-4 accent-[#8B5B43]"
                             />
@@ -508,12 +788,17 @@ export default function ShopAdminPage() {
                             )}
                           </td>
 
-                          <td className="p-3 max-w-[200px]">
+                          <td className="p-3 max-w-[220px]">
                             <div className="space-y-0.5">
                               {order.items?.map((item) => (
-                                <div key={item.id} className="truncate text-[11px]">
+                                <div key={item.id} className="text-[11px]">
                                   <strong className="text-[#3E332B]">{item.product_name_snapshot}</strong>
                                   <span className="text-[#8C8279] ml-1">x{item.quantity}</span>
+                                  {item.customization_note && (
+                                    <div className="text-[10px] text-[#8B5B43] bg-[#FAF7F2] px-1.5 py-0.5 rounded mt-0.5 break-words">
+                                      色號：{item.customization_note}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -567,7 +852,11 @@ export default function ShopAdminPage() {
                             <span className="font-mono font-bold text-[#3E332B] block">
                               總額 NT$ {order.total_amount?.toLocaleString()}
                             </span>
-                            <span className={`text-[11px] font-bold block ${isPaidDeposit ? 'text-emerald-700' : 'text-amber-700'}`}>
+                            <span
+                              className={`text-[11px] font-bold block ${
+                                isPaidDeposit ? 'text-emerald-700' : 'text-amber-700'
+                              }`}
+                            >
                               已收訂金 NT$ {order.paid_amount?.toLocaleString()}
                             </span>
                             {order.balance_amount > 0 && (
@@ -583,19 +872,19 @@ export default function ShopAdminPage() {
                                 order.order_status === 'cancelled'
                                   ? 'bg-gray-100 text-gray-500 line-through'
                                   : order.order_status === 'arrived'
-                                  ? 'bg-rose-100 text-rose-800'
-                                  : order.order_status === 'picked_up'
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : 'bg-amber-100 text-amber-800'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : order.order_status === 'picked_up'
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-amber-100 text-amber-800'
                               }`}
                             >
                               {order.order_status === 'cancelled'
                                 ? '已取消'
                                 : order.order_status === 'arrived'
-                                ? '商品已到貨'
-                                : order.order_status === 'picked_up'
-                                ? '已取貨完成'
-                                : '備貨登記中'}
+                                  ? '商品已到貨'
+                                  : order.order_status === 'picked_up'
+                                    ? '已取貨完成'
+                                    : '備貨登記中'}
                             </span>
 
                             <span
@@ -603,23 +892,23 @@ export default function ShopAdminPage() {
                                 order.order_status === 'cancelled'
                                   ? 'bg-gray-100 text-gray-400'
                                   : order.payment_status === 'fully_paid'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : isPaidDeposit
-                                  ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                                  : isReported
-                                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : isPaidDeposit
+                                      ? 'bg-teal-50 text-teal-700 border border-teal-200'
+                                      : isReported
+                                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
                               }`}
                             >
                               {order.order_status === 'cancelled'
                                 ? '已作廢'
                                 : order.payment_status === 'fully_paid'
-                                ? '全額結清'
-                                : isPaidDeposit
-                                ? '已收訂金'
-                                : isReported
-                                ? '已報待對帳'
-                                : '待繳訂金'}
+                                  ? '全額結清'
+                                  : isPaidDeposit
+                                    ? '已收訂金'
+                                    : isReported
+                                      ? '已報待對帳'
+                                      : '待繳訂金'}
                             </span>
                           </td>
 
@@ -715,7 +1004,6 @@ export default function ShopAdminPage() {
       {/* ========================================================= */}
       {activeTab === 'payments' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* CTBC One-Time Account Pool Management */}
           <div className="bg-white rounded-2xl p-6 border border-[#E8DEC8] shadow-xs space-y-5">
             <div>
               <h3 className="text-base font-black text-[#3E332B] flex items-center gap-2">
@@ -727,7 +1015,6 @@ export default function ShopAdminPage() {
               </p>
             </div>
 
-            {/* Account Pool Counters */}
             <div className="grid grid-cols-4 gap-2 text-center text-xs">
               <div className="bg-[#FAF7F2] p-2.5 rounded-xl border border-[#E8DEC8]">
                 <span className="text-[#8C8279] block text-[10px]">總組數</span>
@@ -747,7 +1034,6 @@ export default function ShopAdminPage() {
               </div>
             </div>
 
-            {/* Batch Import Textarea */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-[#6D5D52]">
                 📥 批次匯入帳號（一行一組，可直接貼上，支援自動略過重複）：
@@ -770,7 +1056,6 @@ export default function ShopAdminPage() {
               </button>
             </div>
 
-            {/* Pool Accounts Table */}
             <div className="max-h-60 overflow-y-auto border border-[#E8DEC8] rounded-xl divide-y divide-[#F5F0EB] text-xs">
               {accountPool.length === 0 ? (
                 <div className="p-4 text-center text-[#8C8279]">目前帳號池尚無帳號，請由上方批次匯入</div>
@@ -790,8 +1075,8 @@ export default function ShopAdminPage() {
                         item.status === 'AVAILABLE'
                           ? 'bg-emerald-100 text-emerald-800'
                           : item.status === 'ASSIGNED'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-blue-100 text-blue-800'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-blue-100 text-blue-800'
                       }`}
                     >
                       {item.status === 'AVAILABLE' ? '可用' : item.status === 'ASSIGNED' ? '已配給' : '已收款'}
@@ -802,7 +1087,6 @@ export default function ShopAdminPage() {
             </div>
           </div>
 
-          {/* Payment Methods & Shop Settings Editor */}
           <div className="space-y-6">
             <div className="bg-white rounded-2xl p-6 border border-[#E8DEC8] shadow-xs space-y-4">
               <h3 className="text-base font-black text-[#3E332B] flex items-center gap-2">
@@ -813,17 +1097,29 @@ export default function ShopAdminPage() {
               <div className="space-y-4">
                 {paymentMethods.map(method => {
                   const editData = editingPaymentMethods[method.id] || {};
-                  const currentInstructions = editData.display_instructions !== undefined
-                    ? editData.display_instructions
-                    : (method.display_instructions || '');
+                  const currentInstructions =
+                    editData.display_instructions !== undefined
+                      ? editData.display_instructions
+                      : method.display_instructions || '';
 
                   const firstBank = method.bank_accounts_json?.[0] || {};
-                  const currentBankName = editData.bank_name !== undefined ? editData.bank_name : (firstBank.bank_name || '');
-                  const currentBankCode = editData.bank_code !== undefined ? editData.bank_code : (firstBank.bank_code || '');
-                  const currentAccountNumber = editData.bank_account_number !== undefined ? editData.bank_account_number : (firstBank.account || '');
-                  const currentAccountName = editData.bank_account_name !== undefined ? editData.bank_account_name : (firstBank.account_name || '');
+                  const currentBankName =
+                    editData.bank_name !== undefined ? editData.bank_name : firstBank.bank_name || '';
+                  const currentBankCode =
+                    editData.bank_code !== undefined ? editData.bank_code : firstBank.bank_code || '';
+                  const currentAccountNumber =
+                    editData.bank_account_number !== undefined
+                      ? editData.bank_account_number
+                      : firstBank.account || '';
+                  const currentAccountName =
+                    editData.bank_account_name !== undefined
+                      ? editData.bank_account_name
+                      : firstBank.account_name || '';
 
-                  const isBankOrEwallet = method.code === 'bank_transfer' || method.code === 'jkopay' || (method.bank_accounts_json && method.bank_accounts_json.length > 0);
+                  const isBankOrEwallet =
+                    method.code === 'bank_transfer' ||
+                    method.code === 'jkopay' ||
+                    (method.bank_accounts_json && method.bank_accounts_json.length > 0);
                   const isSaving = savingPaymentId === method.id;
 
                   return (
@@ -846,7 +1142,6 @@ export default function ShopAdminPage() {
                         </label>
                       </div>
 
-                      {/* Instructions Textarea */}
                       <div>
                         <label className="block text-[11px] font-bold text-[#6D5D52] mb-1">
                           前台下單頁面說明文字：
@@ -854,13 +1149,14 @@ export default function ShopAdminPage() {
                         <textarea
                           rows={2}
                           value={currentInstructions}
-                          onChange={e => handleUpdatePaymentMethodField(method.id, 'display_instructions', e.target.value)}
+                          onChange={e =>
+                            handleUpdatePaymentMethodField(method.id, 'display_instructions', e.target.value)
+                          }
                           placeholder="請輸入給顧客看的付款說明..."
                           className="w-full p-2.5 bg-white border border-[#E8DEC8] rounded-xl text-xs font-medium outline-none focus:border-[#8B5B43] text-[#3E332B]"
                         />
                       </div>
 
-                      {/* Bank / E-Wallet Info Fields */}
                       {isBankOrEwallet && (
                         <div className="space-y-2 pt-1 border-t border-[#E8DEC8]/60">
                           <span className="text-[11px] font-bold text-[#8B5B43] block">
@@ -872,7 +1168,9 @@ export default function ShopAdminPage() {
                               <input
                                 type="text"
                                 value={currentBankName}
-                                onChange={e => handleUpdatePaymentMethodField(method.id, 'bank_name', e.target.value)}
+                                onChange={e =>
+                                  handleUpdatePaymentMethodField(method.id, 'bank_name', e.target.value)
+                                }
                                 placeholder="例如: 國泰世華銀行"
                                 className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs outline-none"
                               />
@@ -882,7 +1180,9 @@ export default function ShopAdminPage() {
                               <input
                                 type="text"
                                 value={currentBankCode}
-                                onChange={e => handleUpdatePaymentMethodField(method.id, 'bank_code', e.target.value)}
+                                onChange={e =>
+                                  handleUpdatePaymentMethodField(method.id, 'bank_code', e.target.value)
+                                }
                                 placeholder="例如: 013"
                                 className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs outline-none font-mono"
                               />
@@ -892,7 +1192,13 @@ export default function ShopAdminPage() {
                               <input
                                 type="text"
                                 value={currentAccountNumber}
-                                onChange={e => handleUpdatePaymentMethodField(method.id, 'bank_account_number', e.target.value)}
+                                onChange={e =>
+                                  handleUpdatePaymentMethodField(
+                                    method.id,
+                                    'bank_account_number',
+                                    e.target.value
+                                  )
+                                }
                                 placeholder="例如: 013-123456789012"
                                 className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs outline-none font-mono font-bold"
                               />
@@ -902,7 +1208,13 @@ export default function ShopAdminPage() {
                               <input
                                 type="text"
                                 value={currentAccountName}
-                                onChange={e => handleUpdatePaymentMethodField(method.id, 'bank_account_name', e.target.value)}
+                                onChange={e =>
+                                  handleUpdatePaymentMethodField(
+                                    method.id,
+                                    'bank_account_name',
+                                    e.target.value
+                                  )
+                                }
                                 placeholder="例如: 拾光製所工作室"
                                 className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs outline-none"
                               />
@@ -911,7 +1223,6 @@ export default function ShopAdminPage() {
                         </div>
                       )}
 
-                      {/* Save Button */}
                       <div className="flex justify-end pt-1">
                         <button
                           type="button"
@@ -929,7 +1240,6 @@ export default function ShopAdminPage() {
               </div>
             </div>
 
-            {/* Global Shop Rules Form */}
             <form
               onSubmit={handleSaveShopSettings}
               className="bg-white rounded-2xl p-6 border border-[#E8DEC8] shadow-xs space-y-4"
@@ -953,7 +1263,9 @@ export default function ShopAdminPage() {
                     <input
                       type="checkbox"
                       checked={shopSettings.show_shop_button !== false}
-                      onChange={e => setShopSettings(prev => ({ ...prev, show_shop_button: e.target.checked }))}
+                      onChange={e =>
+                        setShopSettings(prev => ({ ...prev, show_shop_button: e.target.checked }))
+                      }
                       className="sr-only peer"
                     />
                     <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#8B5B43]"></div>
@@ -969,7 +1281,9 @@ export default function ShopAdminPage() {
                     min="1"
                     max="14"
                     value={shopSettings.shop_deposit_deadline_days}
-                    onChange={e => setShopSettings(prev => ({ ...prev, shop_deposit_deadline_days: e.target.value }))}
+                    onChange={e =>
+                      setShopSettings(prev => ({ ...prev, shop_deposit_deadline_days: e.target.value }))
+                    }
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-bold outline-none"
                   />
                 </div>
@@ -981,7 +1295,9 @@ export default function ShopAdminPage() {
                   <input
                     type="text"
                     value={shopSettings.official_line_url || ''}
-                    onChange={e => setShopSettings(prev => ({ ...prev, official_line_url: e.target.value }))}
+                    onChange={e =>
+                      setShopSettings(prev => ({ ...prev, official_line_url: e.target.value }))
+                    }
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-medium outline-none"
                   />
                 </div>
@@ -993,7 +1309,9 @@ export default function ShopAdminPage() {
                   <input
                     type="text"
                     value={shopSettings.shop_default_arrival_note || ''}
-                    onChange={e => setShopSettings(prev => ({ ...prev, shop_default_arrival_note: e.target.value }))}
+                    onChange={e =>
+                      setShopSettings(prev => ({ ...prev, shop_default_arrival_note: e.target.value }))
+                    }
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-medium outline-none"
                   />
                 </div>
@@ -1014,17 +1332,31 @@ export default function ShopAdminPage() {
       )}
 
       {/* ========================================================= */}
-      {/* SUB-TAB 3: PRODUCTS & BUNDLES MANAGEMENT */}
+      {/* SUB-TAB 3: PRODUCTS & IMAGES MANAGEMENT */}
       {/* ========================================================= */}
       {activeTab === 'products' && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-[#E8DEC8]">
-            <span className="text-xs font-bold text-[#6D5D52]">
-              共建檔 {products.length} 項預購套餐與專業工具商品
-            </span>
+          <div className="flex flex-wrap justify-between items-center bg-white p-4 rounded-2xl border border-[#E8DEC8] gap-3">
+            <div>
+              <span className="text-xs font-bold text-[#3E332B] block">
+                共建檔 {products.length} 項預購套餐與專業工具商品
+              </span>
+              <span className="text-[11px] text-[#8C8279]">
+                點擊任一商品的「編輯」即可上傳商品展示照片（支援多張圖片與點擊放大）或調整階梯優惠模式
+              </span>
+            </div>
             <button
               type="button"
-              onClick={() => setEditProductModal({})}
+              onClick={() =>
+                setEditProductModal({
+                  category: 'tools',
+                  price: 100,
+                  deposit_amount: 0,
+                  estimated_arrival_text: '',
+                  images_json: [],
+                  tier_discount_mode: 'combined'
+                })
+              }
               className="px-4 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -1033,37 +1365,255 @@ export default function ShopAdminPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {products.map(prod => (
-              <div
-                key={prod.id}
-                className="bg-white rounded-2xl p-5 border border-[#E8DEC8] shadow-xs flex flex-col justify-between space-y-3"
-              >
-                <div className="space-y-2">
-                  <div className="flex justify-between items-start gap-2">
-                    <div>
-                      <span className="font-bold text-sm text-[#3E332B] block">{prod.name}</span>
-                      <span className="font-mono text-[11px] text-[#8C8279]">代碼: {prod.code}</span>
-                    </div>
-                    <span className="font-black text-sm text-[#8B5B43]">NT$ {prod.price}</span>
-                  </div>
-                  <p className="text-xs text-[#8C8279] line-clamp-2">{prod.description}</p>
-                </div>
+            {products.map(prod => {
+              const thumb =
+                prod.image_url || (Array.isArray(prod.images_json) && prod.images_json[0]) || null;
+              const imgCount = Array.isArray(prod.images_json)
+                ? prod.images_json.length
+                : prod.image_url
+                  ? 1
+                  : 0;
 
-                <div className="pt-3 border-t border-[#F5F0EB] flex justify-between items-center text-xs">
-                  <span className="text-emerald-800 font-bold">
-                    訂金: NT$ {prod.deposit_amount}
-                  </span>
+              return (
+                <div
+                  key={prod.id}
+                  className="bg-white rounded-2xl p-5 border border-[#E8DEC8] shadow-xs flex flex-col justify-between space-y-3"
+                >
+                  <div className="space-y-3">
+                    {thumb ? (
+                      <div className="w-full h-36 rounded-xl bg-[#FAF7F2] border border-[#E8DEC8] overflow-hidden relative">
+                        <img src={thumb} alt={prod.name} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-2 right-2 bg-black/65 text-white px-2 py-0.5 rounded text-[10px] font-bold">
+                          🖼️ {imgCount} 張圖
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="w-full h-24 rounded-xl bg-[#FAF7F2] border border-dashed border-[#E8DEC8] flex items-center justify-center text-xs text-[#8C8279] gap-1.5">
+                        <ImageIcon className="w-4 h-4" />
+                        <span>尚未上傳商品圖（點編輯可上傳）</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <span className="font-bold text-sm text-[#3E332B] block">{prod.name}</span>
+                        <span className="font-mono text-[11px] text-[#8C8279]">代碼: {prod.code}</span>
+                      </div>
+                      <span className="font-black text-sm text-[#8B5B43] shrink-0">NT$ {prod.price}</span>
+                    </div>
+                    <p className="text-xs text-[#8C8279] line-clamp-2">{prod.description}</p>
+
+                    {prod.category === 'beads' && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1.5 text-[11px] font-bold text-amber-900">
+                        階梯優惠模式：
+                        {prod.tier_discount_mode === 'per_color'
+                          ? '📌 單色獨立計算（同色滿 10/20 包才折）'
+                          : '🎉 混色合計包數（全部色號加總滿 10/20 包即折）'}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-3 border-t border-[#F5F0EB] flex justify-between items-center text-xs">
+                    <div className="space-y-0.5">
+                      <span className="text-emerald-800 font-bold block">
+                        訂金: NT$ {prod.deposit_amount}
+                      </span>
+                      <span className="text-[10px] text-[#8C8279] block">
+                        {prod.estimated_arrival_text ? `到貨說明: ${prod.estimated_arrival_text}` : '無預計到貨說明'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditProductModal({
+                          ...prod,
+                          images_json: Array.isArray(prod.images_json)
+                            ? prod.images_json
+                            : prod.image_url
+                              ? [prod.image_url]
+                              : []
+                        })
+                      }
+                      className="px-3 py-1.5 bg-[#FAF7F2] hover:bg-[#8B5B43] text-[#8B5B43] hover:text-white border border-[#E8DEC8] rounded-lg font-bold transition flex items-center gap-1"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                      <span>編輯 / 上傳圖片</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* SUB-TAB 4: BEAD COLORS MANAGEMENT (291 -> 302+ COLORS) */}
+      {/* ========================================================= */}
+      {activeTab === 'bead_colors' && (
+        <div className="space-y-4">
+          {/* Top Config Card: Discount Calculation Mode + Add Color Button */}
+          <div className="bg-white rounded-2xl p-5 border border-[#E8DEC8] shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h3 className="font-black text-base text-[#3E332B] flex items-center gap-2">
+                <Palette className="w-5 h-5 text-[#8B5B43]" />
+                <span>🎨 拼豆色號表與階梯優惠規則設定（目前已建檔 {allMergedBeadColors.length} 色）</span>
+              </h3>
+              <p className="text-xs text-[#8C8279]">
+                已內建 MARD 291 色（ZG 系列已自動轉為 Z 系列 Z1~Z8）。您可點擊右側「➕ 新增擴充色號」補齊至店內 302 色！
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+              {beadsProduct && (
+                <div className="flex items-center bg-[#FAF7F2] p-1 rounded-xl border border-[#E8DEC8] text-xs font-bold">
                   <button
                     type="button"
-                    onClick={() => setEditProductModal(prod)}
-                    className="px-3 py-1 bg-[#FAF7F2] hover:bg-[#8B5B43] text-[#8B5B43] hover:text-white border border-[#E8DEC8] rounded-lg font-bold transition flex items-center gap-1"
+                    onClick={() => handleQuickUpdateBeadsDiscountMode('combined')}
+                    className={`px-3 py-1.5 rounded-lg transition ${
+                      (beadsProduct.tier_discount_mode || 'combined') === 'combined'
+                        ? 'bg-[#8B5B43] text-white shadow-2xs'
+                        : 'text-[#6D5D52] hover:text-[#3E332B]'
+                    }`}
                   >
-                    <Edit2 className="w-3 h-3" />
-                    <span>編輯</span>
+                    🎉 混色合計包數享優惠
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickUpdateBeadsDiscountMode('per_color')}
+                    className={`px-3 py-1.5 rounded-lg transition ${
+                      beadsProduct.tier_discount_mode === 'per_color'
+                        ? 'bg-[#8B5B43] text-white shadow-2xs'
+                        : 'text-[#6D5D52] hover:text-[#3E332B]'
+                    }`}
+                  >
+                    📌 單一色號滿包才享優惠
                   </button>
                 </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setEditingColorModal({
+                    code: '',
+                    series: 'Z',
+                    hex: '#FF88AA',
+                    name: '',
+                    effect: '標準色',
+                    is_available: true,
+                    isNew: true
+                  })
+                }
+                className="px-4 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>➕ 新增擴充色號 (擴充至302色)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Filter & Search Bar */}
+          <div className="bg-white rounded-2xl p-4 border border-[#E8DEC8] shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={adminColorSearch}
+                  onChange={e => setAdminColorSearch(e.target.value)}
+                  placeholder="搜尋色號或名稱（例如：Z1、H2、A1、夜光...）"
+                  className="w-full pl-9 pr-4 py-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-bold outline-none focus:border-[#8B5B43]"
+                />
               </div>
-            ))}
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setAdminColorSeriesFilter('ALL')}
+                className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
+                  adminColorSeriesFilter === 'ALL'
+                    ? 'bg-[#8B5B43] text-white'
+                    : 'bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]'
+                }`}
+              >
+                全部 ({allMergedBeadColors.length})
+              </button>
+              {MARD_SERIES_INFO.map(s => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setAdminColorSeriesFilter(s.key)}
+                  className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
+                    adminColorSeriesFilter === s.key
+                      ? 'bg-[#8B5B43] text-white'
+                      : 'bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]'
+                  }`}
+                >
+                  {s.key}系 ({allMergedBeadColors.filter(c => c.series === s.key).length})
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Colors Grid */}
+          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-[#E8DEC8] shadow-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5">
+              {filteredAdminBeadColors.map(color => {
+                const isAvailable = color.is_available !== false;
+                const textColor = getContrastTextColor(color.hex);
+
+                return (
+                  <div
+                    key={color.code}
+                    className={`p-2.5 rounded-2xl border flex flex-col justify-between gap-2 transition ${
+                      isAvailable
+                        ? 'bg-[#FAF7F2]/60 border-[#E8DEC8]'
+                        : 'bg-rose-50/40 border-rose-200 opacity-75'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center font-mono font-black text-xs border border-black/15 shrink-0"
+                        style={{ backgroundColor: color.hex, color: textColor }}
+                      >
+                        {color.code}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-xs text-[#3E332B] truncate">
+                          {color.name || color.code}
+                        </div>
+                        <div className="text-[10px] font-mono text-[#8C8279]">{color.hex}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 pt-1 border-t border-[#E8DEC8]/60">
+                      <button
+                        type="button"
+                        disabled={savingColor}
+                        onClick={() => handleToggleColorAvailability(color)}
+                        className={`flex-1 py-1 rounded-lg text-[10px] font-bold transition ${
+                          isAvailable
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                            : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+                        }`}
+                      >
+                        {isAvailable ? '🟢 供貨中' : '🔴 補貨中'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingColorModal({ ...color, isNew: false })}
+                        className="p-1 rounded-lg bg-white border border-[#E8DEC8] text-[#6D5D52] hover:text-[#8B5B43]"
+                        title="編輯色號名稱與色碼"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -1089,7 +1639,9 @@ export default function ShopAdminPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-[#8C8279]">顧客：</span>
-                <span className="font-bold text-[#3E332B]">{verifyModalOrder.user?.name} ({verifyModalOrder.user?.phone})</span>
+                <span className="font-bold text-[#3E332B]">
+                  {verifyModalOrder.user?.name} ({verifyModalOrder.user?.phone})
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[#8C8279]">總額 / 應付訂金：</span>
@@ -1161,7 +1713,7 @@ export default function ShopAdminPage() {
         </div>
       )}
 
-      {/* 2. Wish Reply Modal (STRICTLY NO LINE PUSHED) */}
+      {/* 2. Wish Reply Modal */}
       {wishReplyOrder && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-md space-y-4 animate-zoom-in">
@@ -1254,20 +1806,20 @@ export default function ShopAdminPage() {
         </div>
       )}
 
-      {/* 4. Edit Product Modal */}
+      {/* 4. Edit Product Modal (With Multi-Image Upload & Tier Discount Mode) */}
       {editProductModal && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-lg space-y-4 max-h-[90vh] overflow-y-auto animate-zoom-in">
+          <div className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-xl space-y-4 max-h-[92vh] overflow-y-auto animate-zoom-in">
             <div className="flex justify-between items-center border-b border-[#E8DEC8] pb-3">
               <h3 className="font-black text-base text-[#3E332B]">
-                {editProductModal.id ? '✏️ 編輯商品資訊' : '➕ 新增商品品項'}
+                {editProductModal.id ? '✏️ 編輯商品資訊與展示圖片' : '➕ 新增商品品項'}
               </h3>
               <button onClick={() => setEditProductModal(null)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
+            <div className="space-y-4 text-xs">
               <div>
                 <label className="block font-bold text-[#6D5D52] mb-1">商品名稱：</label>
                 <input
@@ -1311,7 +1863,7 @@ export default function ShopAdminPage() {
                   <label className="block font-bold text-[#6D5D52] mb-1">售價 ($)：</label>
                   <input
                     type="number"
-                    value={editProductModal.price || 0}
+                    value={editProductModal.price ?? 0}
                     onChange={e => setEditProductModal(prev => ({ ...prev, price: e.target.value }))}
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold outline-none"
                   />
@@ -1321,19 +1873,153 @@ export default function ShopAdminPage() {
                   <label className="block font-bold text-[#6D5D52] mb-1">預購訂金金額 ($)：</label>
                   <input
                     type="number"
-                    value={editProductModal.deposit_amount || 0}
+                    value={editProductModal.deposit_amount ?? 0}
                     onChange={e => setEditProductModal(prev => ({ ...prev, deposit_amount: e.target.value }))}
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold outline-none"
                   />
                 </div>
               </div>
 
+              {/* Product Images Upload & Multi-Image Gallery */}
+              <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-[#3E332B] flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-[#8B5B43]" />
+                    <span>商品展示圖片（支援多張圖片、前台可點擊放大預覽）：</span>
+                  </label>
+                  <label className="px-3 py-1.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl font-bold cursor-pointer flex items-center gap-1.5 transition shadow-2xs">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{uploadingImage ? '壓縮處理中...' : '📷 選擇照片上傳'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleProductFileSelect}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {/* Paste External Image URL */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newImageUrlInput}
+                    onChange={e => setNewImageUrlInput(e.target.value)}
+                    placeholder="或貼上外部圖片網址 (https://...)"
+                    className="flex-1 px-3 py-1.5 bg-white border border-[#E8DEC8] rounded-xl outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddExternalImageUrl}
+                    className="px-3 py-1.5 bg-white border border-[#8B5B43] text-[#8B5B43] hover:bg-[#8B5B43] hover:text-white rounded-xl font-bold transition"
+                  >
+                    加入網址
+                  </button>
+                </div>
+
+                {/* Uploaded Images Preview List */}
+                {Array.isArray(editProductModal.images_json) && editProductModal.images_json.length > 0 ? (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-1">
+                    {editProductModal.images_json.map((imgUrl, idx) => (
+                      <div
+                        key={idx}
+                        className={`relative rounded-xl overflow-hidden border-2 bg-white aspect-square group ${
+                          idx === 0 ? 'border-[#8B5B43]' : 'border-[#E8DEC8]'
+                        }`}
+                      >
+                        <img src={imgUrl} alt="" className="w-full h-full object-cover" />
+                        {idx === 0 && (
+                          <span className="absolute top-1 left-1 bg-[#8B5B43] text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+                            主圖
+                          </span>
+                        )}
+                        <div className="absolute inset-x-0 bottom-0 bg-black/65 p-1 flex items-center justify-between opacity-0 group-hover:opacity-100 transition">
+                          {idx !== 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleSetPrimaryProductImage(idx)}
+                              className="text-[10px] text-amber-300 font-bold hover:underline"
+                            >
+                              設為主圖
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-white/70">封面</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveProductImage(idx)}
+                            className="text-rose-300 hover:text-rose-400 p-0.5"
+                            title="移除圖片"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[#8C8279]">
+                    目前尚無商品圖片，可點擊右上角「📷 選擇照片上傳」直接從手機或電腦選取照片。
+                  </p>
+                )}
+              </div>
+
+              {/* Tier Discount Mode Selector (for Beads or tiered items) */}
+              {(editProductModal.category === 'beads' ||
+                (Array.isArray(editProductModal.tier_pricing) && editProductModal.tier_pricing.length > 0)) && (
+                <div className="bg-amber-50/80 p-4 rounded-2xl border border-amber-200 space-y-2">
+                  <label className="block font-bold text-amber-950">
+                    🌈 多包階梯優惠計算方式（滿 10 包 $150、滿 20 包 $280）：
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditProductModal(prev => ({ ...prev, tier_discount_mode: 'combined' }))
+                      }
+                      className={`p-2.5 rounded-xl border text-left transition ${
+                        (editProductModal.tier_discount_mode || 'combined') === 'combined'
+                          ? 'bg-[#8B5B43] text-white border-[#8B5B43] font-bold'
+                          : 'bg-white text-[#3E332B] border-amber-200'
+                      }`}
+                    >
+                      <div className="font-bold">🎉 混色合計包數享優惠</div>
+                      <div className="text-[10px] opacity-85 mt-0.5">
+                        不同色號加總達 10 包 / 20 包即享優惠價
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditProductModal(prev => ({ ...prev, tier_discount_mode: 'per_color' }))
+                      }
+                      className={`p-2.5 rounded-xl border text-left transition ${
+                        editProductModal.tier_discount_mode === 'per_color'
+                          ? 'bg-[#8B5B43] text-white border-[#8B5B43] font-bold'
+                          : 'bg-white text-[#3E332B] border-amber-200'
+                      }`}
+                    >
+                      <div className="font-bold">📌 單一色號獨立計算</div>
+                      <div className="text-[10px] opacity-85 mt-0.5">
+                        同一個色號購買達 10 包 / 20 包才享優惠價
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="block font-bold text-[#6D5D52] mb-1">預計到貨說明：</label>
+                <label className="block font-bold text-[#6D5D52] mb-1">
+                  預計到貨說明（留空則前台不顯示預計到貨區間）：
+                </label>
                 <input
                   type="text"
                   value={editProductModal.estimated_arrival_text || ''}
-                  onChange={e => setEditProductModal(prev => ({ ...prev, estimated_arrival_text: e.target.value }))}
+                  onChange={e =>
+                    setEditProductModal(prev => ({ ...prev, estimated_arrival_text: e.target.value }))
+                  }
+                  placeholder="留空即不顯示（僅 221色全配套裝建議填寫）"
                   className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-medium outline-none"
                 />
               </div>
@@ -1343,7 +2029,9 @@ export default function ShopAdminPage() {
                   type="checkbox"
                   id="allowWish"
                   checked={!!editProductModal.allow_wish_input}
-                  onChange={e => setEditProductModal(prev => ({ ...prev, allow_wish_input: e.target.checked }))}
+                  onChange={e =>
+                    setEditProductModal(prev => ({ ...prev, allow_wish_input: e.target.checked }))
+                  }
                   className="w-4 h-4 accent-[#8B5B43]"
                 />
                 <label htmlFor="allowWish" className="font-bold text-[#3E332B]">
@@ -1354,7 +2042,7 @@ export default function ShopAdminPage() {
               <div>
                 <label className="block font-bold text-[#6D5D52] mb-1">商品說明：</label>
                 <textarea
-                  rows="2"
+                  rows="3"
                   value={editProductModal.description || ''}
                   onChange={e => setEditProductModal(prev => ({ ...prev, description: e.target.value }))}
                   className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-medium outline-none"
@@ -1379,6 +2067,157 @@ export default function ShopAdminPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 5. Add / Edit Bead Color Modal */}
+      {editingColorModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <form
+            onSubmit={handleSaveEditingColor}
+            className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-md space-y-4 animate-zoom-in"
+          >
+            <div className="flex justify-between items-center border-b border-[#E8DEC8] pb-3">
+              <h3 className="font-black text-base text-[#3E332B]">
+                {editingColorModal.isNew ? '➕ 新增擴充拼豆色號' : `✏️ 編輯色號 ${editingColorModal.code}`}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingColorModal(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#6D5D52] mb-1">色號代碼 (如 Z9、H24)：</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingColorModal.code || ''}
+                    onChange={e => {
+                      const val = e.target.value.toUpperCase();
+                      const detectedSeries = val.replace(/[0-9]/g, '') || editingColorModal.series;
+                      setEditingColorModal(prev => ({
+                        ...prev,
+                        code: val,
+                        series: detectedSeries === 'ZG' ? 'Z' : detectedSeries
+                      }));
+                    }}
+                    placeholder="例如: Z9"
+                    className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-[#6D5D52] mb-1">所屬色系分區：</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingColorModal.series || 'Z'}
+                    onChange={e =>
+                      setEditingColorModal(prev => ({
+                        ...prev,
+                        series: e.target.value.toUpperCase()
+                      }))
+                    }
+                    placeholder="例如: Z"
+                    className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-[#6D5D52] mb-1">代表色碼 (HEX)：</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={
+                      /^#[0-9A-Fa-f]{6}$/.test(editingColorModal.hex)
+                        ? editingColorModal.hex
+                        : '#CCCCCC'
+                    }
+                    onChange={e =>
+                      setEditingColorModal(prev => ({ ...prev, hex: e.target.value.toUpperCase() }))
+                    }
+                    className="w-11 h-10 rounded-lg border border-[#E8DEC8] cursor-pointer p-0.5 bg-white"
+                  />
+                  <input
+                    type="text"
+                    value={editingColorModal.hex || '#CCCCCC'}
+                    onChange={e =>
+                      setEditingColorModal(prev => ({ ...prev, hex: e.target.value.toUpperCase() }))
+                    }
+                    className="flex-1 px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#6D5D52] mb-1">顯示名稱 / 備註：</label>
+                  <input
+                    type="text"
+                    value={editingColorModal.name || ''}
+                    onChange={e => setEditingColorModal(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="例如: Z9 夜光藍"
+                    className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-bold outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-[#6D5D52] mb-1">材質 / 特效類型：</label>
+                  <select
+                    value={editingColorModal.effect || '標準色'}
+                    onChange={e =>
+                      setEditingColorModal(prev => ({ ...prev, effect: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-bold outline-none"
+                  >
+                    <option value="標準色">標準色</option>
+                    <option value="珠光">珠光 (P系)</option>
+                    <option value="溫變">溫變 (Q系)</option>
+                    <option value="果凍">果凍透明 (R/T/Y系)</option>
+                    <option value="夜光">夜光 (Z系)</option>
+                    <option value="特殊色">特殊擴充色</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="colorAvail"
+                  checked={editingColorModal.is_available !== false}
+                  onChange={e =>
+                    setEditingColorModal(prev => ({ ...prev, is_available: e.target.checked }))
+                  }
+                  className="w-4 h-4 accent-[#8B5B43]"
+                />
+                <label htmlFor="colorAvail" className="font-bold text-[#3E332B]">
+                  開放顧客選購（勾選為供貨中；取消勾選則顯示補貨中）
+                </label>
+              </div>
+            </div>
+
+            <div className="pt-3 flex justify-end gap-2 border-t border-[#E8DEC8]">
+              <button
+                type="button"
+                onClick={() => setEditingColorModal(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-[#3E332B] rounded-xl text-xs font-bold"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={savingColor}
+                className="px-5 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold shadow-xs"
+              >
+                {savingColor ? '儲存中...' : '確認儲存色號'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

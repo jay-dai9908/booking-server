@@ -77,10 +77,11 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
             <table className="w-full text-left whitespace-nowrap">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
-                  <th className="px-6 py-4 font-medium">預約時間</th>
+                  <th className="px-6 py-4 font-medium">預約時段</th>
                   <th className="px-6 py-4 font-medium">顧客資料</th>
                   <th className="px-6 py-4 font-medium text-center">人數</th>
                   <th className="px-6 py-4 font-medium">狀態</th>
+                  <th className="px-6 py-4 font-medium text-right">預約時間點</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -104,9 +105,29 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-col">
+                        <div className="flex flex-col gap-0.5">
                           <span className={`font-medium ${isCancelled ? 'text-gray-400' : 'text-gray-800'}`}>{r.user.name}</span>
                           <span className="text-sm text-gray-500">{r.user.phone}</span>
+                          {(r.customer_note || r.admin_note) && (
+                            <div className="flex flex-wrap gap-1 mt-1 max-w-[240px]">
+                              {r.customer_note && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 truncate max-w-full"
+                                  title={`顧客備註：${r.customer_note}`}
+                                >
+                                  💬 {r.customer_note}
+                                </span>
+                              )}
+                              {r.admin_note && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 truncate max-w-full"
+                                  title={`內部備註：${r.admin_note}`}
+                                >
+                                  📌 {r.admin_note}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
@@ -130,9 +151,22 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                          {statusUI.icon} {statusUI.text}
-                        </span>
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                            {statusUI.icon} {statusUI.text}
+                          </span>
+                          {r.status !== 'cancelled' && (
+                            r.is_paid ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                💰 已結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                💳 待結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
+                              </span>
+                            )
+                          )}
+                        </div>
                         {r.attendance === 'checked_in' && r.checked_in_at && (
                           <div className="mt-1 text-[11px] font-medium text-blue-600 flex items-center gap-0.5">
                             <span>🕒 報到 {format(new Date(r.checked_in_at), 'HH:mm')}</span>
@@ -144,6 +178,9 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                             <span>({r.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})</span>
                           </div>
                         )}
+                      </td>
+                      <td className="px-6 py-4 text-right text-sm text-gray-500 font-medium">
+                        {r.created_at ? format(new Date(r.created_at), 'MM/dd HH:mm') : '-'}
                       </td>
                     </tr>
                   );

@@ -83,6 +83,8 @@ model Reservation {
   promo_code     String?
   discount_amount Int?    @default(0)
   addons_amount  Int?     @default(0)
+  customer_note  String?
+  admin_note     String?
   cancelled_at   DateTime?
   cancelled_by   String?
   
@@ -133,6 +135,7 @@ model GlobalSetting {
   shop_enable_shipping        Boolean  @default(false)
   shop_shipping_fee           Int      @default(60)
   official_line_url           String?  @default("https://lin.ee/vsZhRW5")
+  bead_colors_json            Json?
 }
 
 model BannedIP {
@@ -258,6 +261,7 @@ model Product {
   category               String    @default("bundle") // "bundle", "beads", "tools", "boards", "cloth"
   description            String?
   image_url              String?
+  images_json            Json?
   price                  Int
   is_preorder            Boolean   @default(true)
   deposit_amount         Int       @default(600)
@@ -266,6 +270,7 @@ model Product {
   wish_input_placeholder String?   @default("可輸入喜歡的顏色、款式或 IP 角色（例如：吉伊卡哇、馬卡龍粉、雙針筆優先）")
   bonus_pass_plan_code   String?
   tier_pricing           Json?
+  tier_discount_mode     String    @default("combined") // "combined" (混色合計包數) or "per_color" (單色獨立計算)
   visibility_status      String    @default("ACTIVE") // "ACTIVE", "SOLD_OUT", "HIDDEN"
   sort_order             Int       @default(0)
   created_at             DateTime  @default(now())
