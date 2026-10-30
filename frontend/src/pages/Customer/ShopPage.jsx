@@ -901,7 +901,7 @@ export default function ShopPage() {
                         className="inline-flex items-center gap-1.5 bg-white border border-[#E5DFD7] rounded-lg px-2 py-1 text-xs shadow-2xs"
                       >
                         <span
-                          className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-black border border-black/15"
+                          className="w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-black border border-[#E8DEC8]/80"
                           style={swatchStyle}
                         >
                           {code}
@@ -1278,7 +1278,7 @@ export default function ShopPage() {
                     >
                       <div className="flex items-center gap-2 w-full">
                         <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center font-mono font-black text-xs shadow-inner border border-black/15 shrink-0"
+                          className="w-10 h-10 rounded-full flex items-center justify-center font-mono font-black text-xs border border-[#E8DEC8]/80 shrink-0"
                           style={swatchStyle}
                           title={color.gradient ? `${color.code} ${color.name} (變色漸層)` : `${color.code} ${color.name || ''}`}
                         >

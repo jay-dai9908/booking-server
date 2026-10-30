@@ -1796,7 +1796,7 @@ export default function ShopAdminPage() {
                   >
                     <div className="flex items-center gap-2">
                       <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center font-mono font-black text-xs border border-black/15 shrink-0 shadow-inner"
+                        className="w-9 h-9 rounded-full flex items-center justify-center font-mono font-black text-xs border border-[#E8DEC8]/80 shrink-0"
                         style={swatchStyle}
                         title={
                           color.gradient
@@ -2584,7 +2584,7 @@ export default function ShopAdminPage() {
                             className="bg-white border border-[#E5DFD7] rounded-xl p-2 flex items-center justify-between shadow-2xs"
                           >
                             <span
-                              className="w-7 h-7 rounded-full inline-flex items-center justify-center font-mono font-black text-xs border border-black/15 shrink-0"
+                              className="w-7 h-7 rounded-full inline-flex items-center justify-center font-mono font-black text-xs border border-[#E8DEC8]/80 shrink-0"
                               style={swatchStyle}
                             >
                               {code}
