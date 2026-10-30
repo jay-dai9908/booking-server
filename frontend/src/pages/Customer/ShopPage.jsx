@@ -589,7 +589,7 @@ export default function ShopPage({ userRole }) {
             <div className="w-9 h-9 rounded-xl bg-[#FAF7F2] border border-[#E8DEC8] flex items-center justify-center p-1 shrink-0">
               <img src="/logo.png" alt="拾光製所" className="w-full h-full object-contain" />
             </div>
-            <div>
+            <div className="whitespace-nowrap">
               <span className="font-black text-sm text-[#3E332B] block leading-tight">拾光製所</span>
               <span className="text-[10px] text-[#8C8279] block">商品預購商城</span>
             </div>
@@ -656,7 +656,7 @@ export default function ShopPage({ userRole }) {
         {bundleProduct && (
           <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-[#8B5B43] shadow-lg relative overflow-hidden">
             <div className="absolute top-0 right-0 bg-[#8B5B43] text-white px-5 py-1.5 rounded-bl-2xl text-xs font-extrabold tracking-wider z-10">
-              🔥 鎮店主打 限量預購
+              ✨ 限量預購
             </div>
 
             <div className="flex flex-col lg:flex-row gap-6 items-start">
