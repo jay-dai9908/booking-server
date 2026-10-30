@@ -10,7 +10,7 @@ const SEATS = {
   B: ['B1-1', 'B1-2', 'B1-3', 'B1-4', 'B2-1', 'B2-2', 'B2-3', 'B2-4']
 };
 
-export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
+export default function AdminSeatingChart({ onOpenDetails, onCheckIn, refreshTrigger = 0 }) {
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [sessions, setSessions] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
@@ -49,6 +49,16 @@ export default function AdminSeatingChart({ onOpenDetails, onCheckIn }) {
       setSeatingData([]);
     }
   }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      if (selectedSessionId) {
+        fetchSeatingData(false);
+      }
+      fetchOccupancy();
+      setDailyListRefreshKey(prev => prev + 1);
+    }
+  }, [refreshTrigger]);
 
   // Polling logic
   useEffect(() => {

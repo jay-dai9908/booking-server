@@ -457,17 +457,18 @@ export const calculateBeadsSubtotalWithMode = (product, totalQty, colorBreakdown
     const entries = Object.entries(colorBreakdown).filter(([, cQty]) => Number(cQty) > 0);
     if (entries.length > 0) {
       let sumSubtotal = 0;
-      let allocatedQty = 0;
+      let remainingToAllocate = totalQty;
       for (const [, cQtyRaw] of entries) {
-        const cQty = Math.max(0, parseInt(cQtyRaw, 10) || 0);
+        if (remainingToAllocate <= 0) break;
+        const cQty = Math.min(remainingToAllocate, Math.max(0, parseInt(cQtyRaw, 10) || 0));
         if (cQty > 0) {
-          allocatedQty += cQty;
+          remainingToAllocate -= cQty;
           sumSubtotal += calculateSingleGroupTierTotal(product, cQty);
         }
       }
       // If totalQty exceeds allocated colors (e.g. manual adjustment), charge remaining at unit price
-      if (totalQty > allocatedQty) {
-        sumSubtotal += (totalQty - allocatedQty) * product.price;
+      if (remainingToAllocate > 0) {
+        sumSubtotal += remainingToAllocate * product.price;
       }
       return sumSubtotal;
     }

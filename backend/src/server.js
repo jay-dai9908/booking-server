@@ -338,13 +338,52 @@ const ensureDatabaseSchema = async () => {
   console.log('[Schema Check] Database schema verified successfully.');
 };
 
-// Initialize database schema, default configs, and cron jobs safely
+// Middleware
+app.set('trust proxy', 1);
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true, // Allow cookies to be sent
+}));
+app.use(checkBannedIP);
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
+app.use(cookieParser());
+
+// Routes
+app.get('/', (req, res) => {
+  res.send('預約系統後端伺服器運行中！請前往前端網址 (通常為 http://localhost:5173) 操作系統。');
+});
+app.use('/api/auth', authRoutes);
+app.use('/api/sessions', sessionRoutes);
+app.use('/api/reservations', reservationRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/daily-settings', dailySettingsRoutes);
+app.get('/api/global-settings', getGlobalSetting);
+app.use('/api/accounting', accountingRoutes);
+app.use('/api/staff', staffRoutes);
+app.use('/api/equipment', equipmentRoutes);
+app.use('/api/checkout', checkoutRoutes);
+app.use('/api/shop', shopRoutes);
+app.use('/api/passes', passRoutes);
+
+// Basic error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong on the server!' });
+});
+
+// Initialize database schema BEFORE listening so no request hits Prisma before columns exist
 (async () => {
   try {
     await ensureDatabaseSchema();
   } catch (err) {
     console.error('[Startup] ensureDatabaseSchema notice:', err?.message || err);
   }
+
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+
   try {
     await ensureDefaultEquipmentConfigs();
   } catch (err) {
@@ -382,42 +421,3 @@ const ensureDatabaseSchema = async () => {
     console.error('[Startup] startCronJobs notice:', err?.message || err);
   }
 })();
-
-app.set('trust proxy', 1);
-
-// Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true, // Allow cookies to be sent
-}));
-app.use(checkBannedIP);
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ limit: '15mb', extended: true }));
-app.use(cookieParser());
-
-// Routes
-app.get('/', (req, res) => {
-  res.send('預約系統後端伺服器運行中！請前往前端網址 (通常為 http://localhost:5173) 操作系統。');
-});
-app.use('/api/auth', authRoutes);
-app.use('/api/sessions', sessionRoutes);
-app.use('/api/reservations', reservationRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/daily-settings', dailySettingsRoutes);
-app.get('/api/global-settings', getGlobalSetting);
-app.use('/api/accounting', accountingRoutes);
-app.use('/api/staff', staffRoutes);
-app.use('/api/equipment', equipmentRoutes);
-app.use('/api/checkout', checkoutRoutes);
-app.use('/api/shop', shopRoutes);
-app.use('/api/passes', passRoutes);
-
-// Basic error handler
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong on the server!' });
-});
-
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});

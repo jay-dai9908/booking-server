@@ -60,6 +60,12 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
         }
       }
 
+      if (r.created_at) {
+        if (!groups[ref].created_at || new Date(r.created_at) < new Date(groups[ref].created_at)) {
+          groups[ref].created_at = r.created_at;
+        }
+      }
+
       if (r.is_paid) {
         groups[ref].is_paid = true;
       }

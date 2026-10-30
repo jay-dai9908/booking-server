@@ -49,11 +49,12 @@ export default function CustomerReservationDetailsModal({ reservation, onClose, 
   const handleSaveCustomerNote = async () => {
     setIsSavingNote(true);
     try {
+      const cleanNote = noteInput.trim() || null;
       await api.patch(`/reservations/${reservation.booking_ref}/notes`, {
-        customer_note: noteInput.trim() || null
+        customer_note: cleanNote
       });
       setIsEditingNote(false);
-      if (onUpdate) onUpdate();
+      if (onUpdate) onUpdate({ customer_note: cleanNote });
     } catch (err) {
       alert(err.response?.data?.error || '儲存備註失敗');
     } finally {

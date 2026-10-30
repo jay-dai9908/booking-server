@@ -489,6 +489,18 @@ export default function ShopAdminPage() {
     return getMergedBeadColors(shopSettings.bead_colors_json || []);
   }, [shopSettings.bead_colors_json]);
 
+  const adminSeriesTabs = useMemo(() => {
+    const existingKeys = new Set(MARD_SERIES_INFO.map(s => s.key));
+    const extraSeries = [];
+    for (const c of allMergedBeadColors) {
+      if (c.series && !existingKeys.has(c.series)) {
+        existingKeys.add(c.series);
+        extraSeries.push({ key: c.series, label: `${c.series}系列 (擴充)` });
+      }
+    }
+    return [...MARD_SERIES_INFO, ...extraSeries];
+  }, [allMergedBeadColors]);
+
   const filteredAdminBeadColors = useMemo(() => {
     const q = adminColorSearch.trim().toUpperCase();
     return allMergedBeadColors.filter(c => {
@@ -1540,7 +1552,7 @@ export default function ShopAdminPage() {
               >
                 全部 ({allMergedBeadColors.length})
               </button>
-              {MARD_SERIES_INFO.map(s => (
+              {adminSeriesTabs.map(s => (
                 <button
                   key={s.key}
                   type="button"

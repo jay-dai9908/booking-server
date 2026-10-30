@@ -146,14 +146,17 @@ export const createProductOrder = async (req, res) => {
 
       if (discountMode === 'per_color' && breakdownEntries.length > 0) {
         let sumByColor = 0;
-        let breakdownQtySum = 0;
+        let remainingToAllocate = qty;
         for (const [, rawCQty] of breakdownEntries) {
-          const cQty = Math.max(0, parseInt(rawCQty, 10) || 0);
-          breakdownQtySum += cQty;
-          sumByColor += calcTieredPriceForQty(cQty);
+          if (remainingToAllocate <= 0) break;
+          const cQty = Math.min(remainingToAllocate, Math.max(0, parseInt(rawCQty, 10) || 0));
+          if (cQty > 0) {
+            remainingToAllocate -= cQty;
+            sumByColor += calcTieredPriceForQty(cQty);
+          }
         }
-        if (qty > breakdownQtySum) {
-          sumByColor += calcTieredPriceForQty(qty - breakdownQtySum);
+        if (remainingToAllocate > 0) {
+          sumByColor += remainingToAllocate * prod.price;
         }
         lineSubtotal = sumByColor;
       } else {

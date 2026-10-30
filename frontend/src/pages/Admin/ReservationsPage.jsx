@@ -284,8 +284,8 @@ export default function ReservationsPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col gap-0.5">
-                          <span className={`font-medium ${isCancelled ? 'text-gray-400' : 'text-gray-800'}`}>{r.user.name}</span>
-                          <span className="text-sm text-gray-500">{r.user.phone}</span>
+                          <span className={`font-medium ${isCancelled ? 'text-gray-400' : 'text-gray-800'}`}>{r.user?.name || '未設定'}</span>
+                          <span className="text-sm text-gray-500">{r.user?.phone || '未提供'}</span>
                           {(r.customer_note || r.admin_note) && (
                             <div className="flex flex-wrap gap-1 mt-1 max-w-[240px]">
                               {r.customer_note && (

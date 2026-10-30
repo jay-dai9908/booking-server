@@ -202,6 +202,10 @@ export default function ShopPage() {
       const current = prev[productId] || 0;
       const next = Math.max(0, current + delta);
       if (next === 0) {
+        if (beadsProduct && productId === beadsProduct.id) {
+          setBeadColorSelections({});
+          setBeadColorNote('');
+        }
         const copy = { ...prev };
         delete copy[productId];
         return copy;
@@ -811,23 +815,33 @@ export default function ShopPage() {
                       )}
 
                       {qty > 0 ? (
-                        <div className="flex items-center border border-[#8B5B43] rounded-lg bg-white">
+                        isBeads && selectedColorEntries.length > 0 ? (
                           <button
                             type="button"
-                            onClick={() => updateCartQty(prod.id, -1)}
-                            className="px-2 py-1 text-[#8B5B43] hover:bg-[#FAF7F2]"
+                            onClick={() => setShowBeadPickerModal(true)}
+                            className="px-3 py-1.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs"
                           >
-                            <Minus className="w-3.5 h-3.5" />
+                            <span>已選 {qty} 包 · 調整色號</span>
                           </button>
-                          <span className="px-2.5 font-mono font-bold text-xs">{qty}</span>
-                          <button
-                            type="button"
-                            onClick={() => updateCartQty(prod.id, 1)}
-                            className="px-2 py-1 text-[#8B5B43] hover:bg-[#FAF7F2]"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        ) : (
+                          <div className="flex items-center border border-[#8B5B43] rounded-lg bg-white">
+                            <button
+                              type="button"
+                              onClick={() => updateCartQty(prod.id, -1)}
+                              className="px-2 py-1 text-[#8B5B43] hover:bg-[#FAF7F2]"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <span className="px-2.5 font-mono font-bold text-xs">{qty}</span>
+                            <button
+                              type="button"
+                              onClick={() => updateCartQty(prod.id, 1)}
+                              className="px-2 py-1 text-[#8B5B43] hover:bg-[#FAF7F2]"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )
                       ) : (
                         <button
                           type="button"

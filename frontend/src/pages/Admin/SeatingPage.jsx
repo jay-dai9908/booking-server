@@ -60,7 +60,7 @@ export default function SeatingPage() {
     <>
       <div className="h-full relative">
         <AdminSeatingChart 
-          key={refreshKey}
+          refreshTrigger={refreshKey}
           onOpenDetails={(booking_ref) => {
             fetchReservationDetails(booking_ref);
           }}

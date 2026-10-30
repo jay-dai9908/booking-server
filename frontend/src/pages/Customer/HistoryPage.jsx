@@ -833,7 +833,12 @@ export default function HistoryPage() {
         <CustomerReservationDetailsModal 
           reservation={selectedReservation} 
           onClose={() => setSelectedReservation(null)} 
-          onUpdate={fetchReservations}
+          onUpdate={(updates) => {
+            if (updates && typeof updates === 'object') {
+              setSelectedReservation(prev => (prev ? { ...prev, ...updates } : prev));
+            }
+            fetchReservations();
+          }}
           onOpenEquipmentAddon={() => {
             const target = selectedReservation;
             setSelectedReservation(null);
