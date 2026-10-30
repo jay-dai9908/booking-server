@@ -36,9 +36,12 @@ function App() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const isAdminPath = window.location.pathname.startsWith('/admin');
-        // Never block /admin routes waiting on external ipify.org IP lookup
-        const info = isAdminPath ? getBrowserClientInfo() : await getBrowserClientInfoAsync();
+        const isFastLoadPath =
+          window.location.pathname.startsWith('/admin') ||
+          window.location.pathname.startsWith('/shop') ||
+          window.location.pathname.startsWith('/preview');
+        // Never block /admin, /shop, or /preview routes waiting on external ipify.org IP lookup
+        const info = isFastLoadPath ? getBrowserClientInfo() : await getBrowserClientInfoAsync();
         const searchParams = new URLSearchParams(window.location.search);
         const hasOAuthCode = searchParams.has('code');
         const isEntryHome = window.location.pathname === '/' && !hasOAuthCode;
@@ -107,7 +110,7 @@ function App() {
         />
         <Route 
           path="/shop" 
-          element={userRole === 'customer' ? <ShopPage /> : <Navigate to="/" />} 
+          element={<ShopPage userRole={userRole} />} 
         />
 
         {/* Admin Login */}

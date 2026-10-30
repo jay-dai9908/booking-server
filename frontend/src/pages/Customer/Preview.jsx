@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { format, addDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths, isBefore, startOfDay } from 'date-fns';
 import api from '../../api/axios';
 
 const GLOBAL_SETTINGS_CACHE_KEY = 'shiguang_booking_global_settings_cache';
 
 function Preview() {
+  const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -26,6 +28,7 @@ function Preview() {
   const [lineButtonUrl, setLineButtonUrl] = useState('https://lin.ee/vsZhRW5');
   const [enablePreviewPage, setEnablePreviewPage] = useState(true);
   const [previewDisabledText, setPreviewDisabledText] = useState('系統維護中，請點擊下方按鈕使用 LINE 進行預約');
+  const [showShopButton, setShowShopButton] = useState(false);
 
   // Load cached settings immediately
   useEffect(() => {
@@ -83,6 +86,7 @@ function Preview() {
           setLineButtonUrl(lineUrl);
           setEnablePreviewPage(previewEnabled);
           setPreviewDisabledText(disabledMsg);
+          setShowShopButton(res.data.show_shop_button !== false);
 
           try {
             localStorage.setItem(
@@ -189,9 +193,20 @@ function Preview() {
 
       {/* Header */}
       <header className="sticky top-0 z-40 bg-wood-bg/90 backdrop-blur-md border-b border-wood-border px-4 py-4 mb-6">
-        <div className="max-w-3xl mx-auto flex justify-center items-center gap-3">
-          <img src="/logo.png" alt="拾光製所 Logo" className="w-8 h-8 object-cover rounded-full" />
-          <h1 className="text-xl font-bold tracking-wide">拾光製所 預約時段預覽</h1>
+        <div className="max-w-3xl mx-auto flex justify-between items-center gap-3">
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="拾光製所 Logo" className="w-8 h-8 object-cover rounded-full" />
+            <h1 className="text-lg sm:text-xl font-bold tracking-wide">拾光製所 預約時段預覽</h1>
+          </div>
+          {showShopButton && (
+            <button
+              type="button"
+              onClick={() => navigate('/shop')}
+              className="px-3 py-1.5 bg-white hover:bg-[#FAF7F2] border border-[#E8DEC8] text-[#8B5B43] rounded-xl text-xs font-bold transition shadow-2xs shrink-0"
+            >
+              🛍️ 商品預購
+            </button>
+          )}
         </div>
       </header>
 

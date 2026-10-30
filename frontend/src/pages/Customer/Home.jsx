@@ -9,7 +9,15 @@ function Home({ userRole }) {
 
   useEffect(() => {
     if (userRole === 'customer') {
-      navigate('/booking');
+      let target = '/booking';
+      try {
+        const savedRedirect = sessionStorage.getItem('shiguang_post_login_redirect');
+        if (savedRedirect) {
+          sessionStorage.removeItem('shiguang_post_login_redirect');
+          target = savedRedirect;
+        }
+      } catch (e) {}
+      navigate(target);
     } else if (userRole === 'temp_customer') {
       navigate('/register');
     }
@@ -39,7 +47,15 @@ function Home({ userRole }) {
           if (res.data.isNewUser) {
             window.location.href = '/register'; // Full reload to update App state
           } else {
-            window.location.href = '/booking';
+            let target = '/booking';
+            try {
+              const savedRedirect = sessionStorage.getItem('shiguang_post_login_redirect');
+              if (savedRedirect) {
+                sessionStorage.removeItem('shiguang_post_login_redirect');
+                target = savedRedirect;
+              }
+            } catch (e) {}
+            window.location.href = target;
           }
         })
         .catch(err => {

@@ -30,16 +30,56 @@ import {
   calculateBeadsSubtotalWithMode
 } from '../../utils/mardBeadColors';
 
-export default function ShopPage() {
+const SHOP_DRAFT_STORAGE_KEY = 'shiguang_shop_draft_cart';
+
+export default function ShopPage({ userRole }) {
   const navigate = useNavigate();
+  const isLoggedInCustomer = userRole === 'customer';
   const [products, setProducts] = useState([]);
   const [paymentConfig, setPaymentConfig] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [cart, setCart] = useState({}); // { [productId]: quantity }
-  const [wishNote, setWishNote] = useState('');
-  const [customerNote, setCustomerNote] = useState('');
-  const [beadColorNote, setBeadColorNote] = useState('');
-  const [beadColorSelections, setBeadColorSelections] = useState({}); // { [colorCode]: qty }
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
+      return saved.cart && typeof saved.cart === 'object' ? saved.cart : {};
+    } catch (e) {
+      return {};
+    }
+  }); // { [productId]: quantity }
+  const [wishNote, setWishNote] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
+      return saved.wishNote || '';
+    } catch (e) {
+      return '';
+    }
+  });
+  const [customerNote, setCustomerNote] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
+      return saved.customerNote || '';
+    } catch (e) {
+      return '';
+    }
+  });
+  const [beadColorNote, setBeadColorNote] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
+      return saved.beadColorNote || '';
+    } catch (e) {
+      return '';
+    }
+  });
+  const [beadColorSelections, setBeadColorSelections] = useState(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SHOP_DRAFT_STORAGE_KEY) || '{}');
+      return saved.beadColorSelections && typeof saved.beadColorSelections === 'object'
+        ? saved.beadColorSelections
+        : {};
+    } catch (e) {
+      return {};
+    }
+  }); // { [colorCode]: qty }
   const [showBeadPickerModal, setShowBeadPickerModal] = useState(false);
   const [selectedSeriesTab, setSelectedSeriesTab] = useState('ALL');
   const [beadSearchQuery, setBeadSearchQuery] = useState('');
@@ -59,6 +99,43 @@ export default function ShopPage() {
   useEffect(() => {
     fetchShopData();
   }, []);
+
+  // Persist draft cart & color selections in sessionStorage so guests don't lose selections after LINE login
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        SHOP_DRAFT_STORAGE_KEY,
+        JSON.stringify({
+          cart,
+          beadColorSelections,
+          beadColorNote,
+          wishNote,
+          customerNote
+        })
+      );
+    } catch (e) {}
+  }, [cart, beadColorSelections, beadColorNote, wishNote, customerNote]);
+
+  const redirectToLineLoginForShop = () => {
+    try {
+      sessionStorage.setItem('shiguang_post_login_redirect', '/shop');
+    } catch (e) {}
+
+    if (userRole === 'temp_customer') {
+      navigate('/register');
+      return;
+    }
+
+    const channelId = import.meta.env.VITE_LINE_CHANNEL_ID;
+    const redirectUri = import.meta.env.VITE_LINE_CALLBACK_URL;
+    if (!channelId || !redirectUri || channelId === 'your_channel_id_here') {
+      navigate('/');
+      return;
+    }
+    const state = Math.random().toString(36).substring(7);
+    const lineLoginUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${channelId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=profile%20openid&bot_prompt=normal`;
+    window.location.href = lineLoginUrl;
+  };
 
   const fetchShopData = async () => {
     try {
@@ -280,6 +357,11 @@ export default function ShopPage() {
       return;
     }
 
+    if (!isLoggedInCustomer) {
+      redirectToLineLoginForShop();
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const combinedCustomerNote = [
@@ -313,6 +395,9 @@ export default function ShopPage() {
       setCart({});
       setBeadColorSelections({});
       setBeadColorNote('');
+      try {
+        sessionStorage.removeItem(SHOP_DRAFT_STORAGE_KEY);
+      } catch (e) {}
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       console.error('Submit preorder error:', err);
@@ -511,20 +596,41 @@ export default function ShopPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => navigate('/booking')}
-              className="px-3 py-1.5 bg-[#FAF7F2] hover:bg-[#F2ECE4] border border-[#E8DEC8] text-[#8B5B43] rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
-            >
-              <span>🎨 手作預約</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate('/history')}
-              className="px-3.5 py-1.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
-            >
-              <span>📋 我的紀錄與條碼</span>
-            </button>
+            {isLoggedInCustomer ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigate('/booking')}
+                  className="px-3 py-1.5 bg-[#FAF7F2] hover:bg-[#F2ECE4] border border-[#E8DEC8] text-[#8B5B43] rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+                >
+                  <span>🎨 手作預約</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/history')}
+                  className="px-3.5 py-1.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <span>📋 我的紀錄與條碼</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigate('/preview')}
+                  className="px-3 py-1.5 bg-[#FAF7F2] hover:bg-[#F2ECE4] border border-[#E8DEC8] text-[#8B5B43] rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+                >
+                  <span>📅 時段預覽</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={redirectToLineLoginForShop}
+                  className="px-3.5 py-1.5 bg-[#06C755] hover:bg-[#05b34c] text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <span>🔑 LINE 登入預購</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -1136,6 +1242,14 @@ export default function ShopPage() {
               />
             </div>
 
+            {!isLoggedInCustomer && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 text-xs text-emerald-900 flex items-center justify-between flex-wrap gap-2">
+                <span>
+                  💡 目前為<strong>免登入預覽模式</strong>，您已挑選的商品與拼豆色號會自動保留，點擊下方按鈕登入 LINE 即可直接完成下單！
+                </span>
+              </div>
+            )}
+
             {/* Total Breakdown and Submit Button */}
             <div className="pt-4 border-t border-[#E8DEC8] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
@@ -1158,13 +1272,22 @@ export default function ShopPage() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full sm:w-auto px-8 py-3.5 bg-[#8B5B43] hover:bg-[#7A4F3A] disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-lg transition flex items-center justify-center gap-2"
+                className={`w-full sm:w-auto px-8 py-3.5 disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-lg transition flex items-center justify-center gap-2 ${
+                  isLoggedInCustomer
+                    ? 'bg-[#8B5B43] hover:bg-[#7A4F3A]'
+                    : 'bg-[#06C755] hover:bg-[#05b34c]'
+                }`}
               >
                 {isSubmitting ? (
                   <span>處理訂單中...</span>
-                ) : (
+                ) : isLoggedInCustomer ? (
                   <>
                     <span>確認送出預購訂單</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </>
+                ) : (
+                  <>
+                    <span>🔑 使用 LINE 登入並送出預購訂單</span>
                     <ChevronRight className="w-4 h-4" />
                   </>
                 )}

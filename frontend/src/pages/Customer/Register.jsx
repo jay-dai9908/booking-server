@@ -15,14 +15,20 @@ function Register({ setUserRole }) {
     try {
       const clientInfo = await getBrowserClientInfoAsync();
       const res = await api.post('/auth/register', { name, phone, clientInfo });
+      let target = '/booking';
       try {
         sessionStorage.setItem('shiguang_line_fresh_login', '1');
         if (res.data?.token) {
           sessionStorage.setItem('shiguang_auth_token', res.data.token);
         }
+        const savedRedirect = sessionStorage.getItem('shiguang_post_login_redirect');
+        if (savedRedirect) {
+          sessionStorage.removeItem('shiguang_post_login_redirect');
+          target = savedRedirect;
+        }
       } catch (e) {}
       setUserRole('customer');
-      window.location.href = '/booking';
+      window.location.href = target;
     } catch (err) {
       setError(err.response?.data?.error || '註冊失敗');
     } finally {
