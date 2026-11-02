@@ -146,13 +146,14 @@ model BannedIP {
 }
 
 model AdminUser {
-  id          Int      @id @default(autoincrement())
-  name        String
-  password    String   @unique
-  role        String   @default("staff")
-  permissions String[] @default([])
-  is_active   Boolean  @default(true)
-  created_at  DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  name          String
+  password      String   @unique
+  role          String   @default("staff")
+  permissions   String[] @default([])
+  is_active     Boolean  @default(true)
+  token_version Int      @default(0)
+  created_at    DateTime @default(now())
 }
 
 model EquipmentConfig {

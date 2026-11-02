@@ -132,14 +132,30 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
   };
 
   const handleCancelReservation = async () => {
-    if (window.confirm('確定要取消此預約嗎？此操作無法復原。')) {
-      try {
-        await api.delete(`/reservations/${reservation.booking_ref}`);
-        if (onUpdate) onUpdate();
-        onClose();
-      } catch (err) {
-        alert(err.response?.data?.error || '取消失敗');
+    let confirmPaid = false;
+    if (reservation.is_paid) {
+      const doubleCheck = window.prompt(
+        '⚠️ 注意：此預約已完成付款結帳！\n若取消預約，當日結帳營收將產生異動。\n\n請輸入「確認取消」以完成強制取消：'
+      );
+      if (doubleCheck !== '確認取消') {
+        alert('輸入不符，已中止取消操作。');
+        return;
       }
+      confirmPaid = true;
+    } else {
+      if (!window.confirm('確定要取消此預約嗎？')) {
+        return;
+      }
+    }
+
+    try {
+      await api.delete(`/reservations/${reservation.booking_ref}`, {
+        data: { confirmPaidCancel: confirmPaid }
+      });
+      if (onUpdate) onUpdate();
+      onClose();
+    } catch (err) {
+      alert(err.response?.data?.error || '取消失敗');
     }
   };
 

@@ -75,6 +75,7 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_auto_notify_booking" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "line_auto_notify_cancel" BOOLEAN NOT NULL DEFAULT false`,
 
+    `ALTER TABLE "AdminUser" ADD COLUMN IF NOT EXISTS "token_version" INTEGER NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS "UserLoginLog" (
       "id" SERIAL NOT NULL,
       "user_id" INTEGER NOT NULL,

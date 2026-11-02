@@ -101,6 +101,24 @@ export const createProductOrder = async (req, res) => {
     const deadlineDays = globalSetting?.shop_deposit_deadline_days ?? 2;
     const paymentDeadline = new Date(Date.now() + deadlineDays * 24 * 60 * 60 * 1000);
 
+    // 防洗單機制：若選擇社群收款 (ctbc_pool)，檢查顧客尚未完成付款且佔用虛擬帳號的筆數上限 (最多 2 筆)
+    if (payment_method_code === 'ctbc_pool') {
+      const activePendingPoolOrdersCount = await prisma.productOrder.count({
+        where: {
+          user_id: userId,
+          order_status: { not: 'cancelled' },
+          payment_status: 'pending_payment',
+          assigned_pool_account: { not: null }
+        }
+      });
+
+      if (activePendingPoolOrdersCount >= 2) {
+        return res.status(400).json({
+          error: '您目前已有 2 筆待繳納訂金並佔用專屬收款帳號的訂單，請先完成現有訂單之匯款與回報，或聯繫門市人員協助！'
+        });
+      }
+    }
+
     const productIds = items.map(i => parseInt(i.product_id, 10)).filter(Boolean);
     const dbProducts = await prisma.product.findMany({
       where: { id: { in: productIds } }
@@ -211,29 +229,28 @@ export const createProductOrder = async (req, res) => {
       let assignedPoolAccount = null;
       let assignedPoolUrl = null;
 
-      // If CTBC one-time account pool selected, pull one AVAILABLE account from pool if available;
-      // if none left, allow order creation and instruct customer to contact store for payment.
+      // If CTBC one-time account pool selected, pull one AVAILABLE account from pool atomically with FOR UPDATE SKIP LOCKED.
+      // If none left, allow order creation and instruct customer to contact store for payment.
       if (payment_method_code === 'ctbc_pool') {
-        const availablePoolAccount = await tx.oneTimeAccountPool.findFirst({
-          where: {
-            payment_method_code: 'ctbc_pool',
-            status: 'AVAILABLE'
-          },
-          orderBy: { id: 'asc' }
-        });
+        const allocated = await tx.$queryRaw`
+          UPDATE "OneTimeAccountPool"
+          SET "status" = 'ASSIGNED',
+              "assigned_order_ref" = ${orderRef},
+              "assigned_user_id" = ${userId},
+              "assigned_at" = NOW()
+          WHERE "id" = (
+            SELECT "id" FROM "OneTimeAccountPool"
+            WHERE "payment_method_code" = 'ctbc_pool' AND "status" = 'AVAILABLE'
+            ORDER BY "id" ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+          )
+          RETURNING "id", "account_number", "payment_url";
+        `;
 
-        if (availablePoolAccount) {
-          await tx.oneTimeAccountPool.update({
-            where: { id: availablePoolAccount.id },
-            data: {
-              status: 'ASSIGNED',
-              assigned_order_ref: orderRef,
-              assigned_user_id: userId,
-              assigned_at: new Date()
-            }
-          });
-          assignedPoolAccount = availablePoolAccount.account_number;
-          assignedPoolUrl = availablePoolAccount.payment_url || null;
+        if (Array.isArray(allocated) && allocated.length > 0) {
+          assignedPoolAccount = allocated[0].account_number;
+          assignedPoolUrl = allocated[0].payment_url || null;
         }
       }
 
@@ -275,9 +292,12 @@ export const createProductOrder = async (req, res) => {
       return newOrder;
     });
 
+    const sanitizedOrder = { ...order };
+    delete sanitizedOrder.admin_note;
+
     res.json({
       message: '預購訂單建立成功！',
-      order
+      order: sanitizedOrder
     });
   } catch (error) {
     console.error('createProductOrder error:', error);
@@ -322,7 +342,12 @@ export const updateRemittanceLast5 = async (req, res) => {
       }
     });
 
-    res.json({ message: '匯款末五碼已成功回填！門市人員將於確認入帳後更新狀態。', order: updated });
+    const sanitizedUpdated = { ...updated };
+    if (req.user?.role !== 'admin') {
+      delete sanitizedUpdated.admin_note;
+    }
+
+    res.json({ message: '匯款末五碼已成功回填！門市人員將於確認入帳後更新狀態。', order: sanitizedUpdated });
   } catch (error) {
     console.error('updateRemittanceLast5 error:', error);
     res.status(500).json({ error: '回報末五碼失敗' });
@@ -353,7 +378,13 @@ export const getMyProductOrders = async (req, res) => {
       orderBy: { created_at: 'desc' }
     });
 
-    res.json(orders);
+    const sanitizedOrders = orders.map(ord => {
+      const copy = { ...ord };
+      delete copy.admin_note;
+      return copy;
+    });
+
+    res.json(sanitizedOrders);
   } catch (error) {
     console.error('getMyProductOrders error:', error);
     res.status(500).json({ error: '獲取預購訂單失敗' });

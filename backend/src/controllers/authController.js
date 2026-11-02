@@ -1,6 +1,6 @@
 import axios from 'axios';
 import prisma from '../prismaClient.js';
-import { generateToken } from '../middlewares/authMiddleware.js';
+import { generateToken, getSuperAdminFingerprint, syncAndVerifyAdminUser } from '../middlewares/authMiddleware.js';
 import { recordUserLoginLog } from '../utils/deviceParser.js';
 
 export const lineCallback = async (req, res) => {
@@ -211,31 +211,26 @@ export const adminLogin = async (req, res) => {
   const envAdminPassword = process.env.ADMIN_PASSWORD
     ? String(process.env.ADMIN_PASSWORD).trim().replace(/^["']|["']$/g, '').replace(/[\r\n]/g, '')
     : '';
-  const defaultAdminPassword = 'gathering.light2609';
 
-  const isSuperAdminMatch = Boolean(
-    inputPass && (
-      inputPass === envAdminPassword ||
-      inputPass.toLowerCase() === envAdminPassword.toLowerCase() ||
-      inputPass === defaultAdminPassword ||
-      inputPass.toLowerCase() === defaultAdminPassword.toLowerCase()
-    )
-  );
-
+  // 嚴格大小寫比對環境變數中的 ADMIN_PASSWORD，不再保留任何寫死預設值
+  const isSuperAdminMatch = Boolean(envAdminPassword && inputPass === envAdminPassword);
   const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
 
   if (isSuperAdminMatch) {
+    const pwdHash = getSuperAdminFingerprint();
     const token = generateToken({
       role: 'admin',
       isSuperAdmin: true,
       name: '最高管理員',
+      pwd_hash: pwdHash,
       permissions: ['all']
-    });
+    }, { expiresIn: '12h' });
+
     res.cookie('token', token, {
       httpOnly: true,
       secure: isHttps,
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: 12 * 60 * 60 * 1000 // 後台 token 效期縮短至 12 小時 (約一個班次)
     });
     return res.json({
       message: 'Admin login successful',
@@ -249,10 +244,8 @@ export const adminLogin = async (req, res) => {
       where: { is_active: true }
     });
 
-    const staff = activeStaffs.find(s => 
-      s.password === inputPass || 
-      (s.password && s.password.trim().toLowerCase() === inputPass.toLowerCase())
-    );
+    // 員工密碼比對維持精確字串比對
+    const staff = activeStaffs.find(s => s.password === inputPass);
 
     if (staff) {
       const isSuperAdmin = staff.role === 'super_admin';
@@ -261,13 +254,15 @@ export const adminLogin = async (req, res) => {
         role: 'admin',
         isSuperAdmin,
         name: staff.name,
+        token_version: staff.token_version,
         permissions: isSuperAdmin ? ['all'] : staff.permissions
-      });
+      }, { expiresIn: '12h' });
+
       res.cookie('token', token, {
         httpOnly: true,
         secure: isHttps,
         sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        maxAge: 12 * 60 * 60 * 1000 // 後台 token 效期縮短至 12 小時
       });
       return res.json({
         message: 'Staff login successful',
@@ -295,12 +290,16 @@ export const logout = (req, res) => {
 export const me = async (req, res) => {
   try {
     if (req.user.role === 'admin') {
-      const isSuper = !!(req.user.isSuperAdmin || (!req.user.id && req.user.isSuperAdmin === undefined && !req.user.permissions));
+      const verifiedAdmin = await syncAndVerifyAdminUser(req.user);
+      if (!verifiedAdmin) {
+        res.clearCookie('token');
+        return res.status(401).json({ error: '後台登入憑證已失效或已變更，請重新登入' });
+      }
       return res.json({
         role: 'admin',
-        isSuperAdmin: isSuper,
-        name: req.user.name || '最高管理員',
-        permissions: isSuper ? ['all'] : (req.user.permissions || [])
+        isSuperAdmin: verifiedAdmin.isSuperAdmin,
+        name: verifiedAdmin.name || '最高管理員',
+        permissions: verifiedAdmin.permissions || []
       });
     }
 

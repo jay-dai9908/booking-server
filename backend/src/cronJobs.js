@@ -1,19 +1,19 @@
 import cron from 'node-cron';
 import prisma from './prismaClient.js';
+import { getTaipeiDateParts } from './utils/dateUtils.js';
 
 export const startCronJobs = () => {
-  // Run every day at midnight (00:00) Taipei time
+  // 1. Run every day at midnight (00:00) Taipei time
   cron.schedule('0 0 * * *', async () => {
-    console.log('[Cron Job] Running midnight attendance check...');
+    console.log('[Cron Job] Running midnight attendance check & expired preorder cleanup...');
     try {
-      // Find all sessions from yesterday or earlier
-      const today = new Date();
-      today.setHours(0, 0, 0, 0); // Start of today
+      // Find all sessions from yesterday or earlier using precise Taipei midnight
+      const { dateObject: todayMidnightUtc } = getTaipeiDateParts(new Date());
 
       const pastSessions = await prisma.session.findMany({
         where: {
           session_date: {
-            lt: today
+            lt: todayMidnightUtc
           }
         },
         select: { id: true }
@@ -39,6 +39,9 @@ export const startCronJobs = () => {
         console.log('[Cron Job] No past sessions found.');
       }
 
+      // 自動釋放逾期未繳費預購單與虛擬帳號
+      await releaseExpiredPreorders();
+
       // Clean up UserLoginLog records older than 60 days (2 months)
       const sixtyDaysAgo = new Date();
       sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
@@ -55,16 +58,23 @@ export const startCronJobs = () => {
     }
   }, { timezone: 'Asia/Taipei' });
 
-  // Run every day at 23:59 to solidify today's price (Taipei time)
+  // 2. 每小時檢查並自動釋放逾期未付款之預購虛擬帳號
+  cron.schedule('0 * * * *', async () => {
+    try {
+      await releaseExpiredPreorders();
+    } catch (err) {
+      console.error('[Cron Job] Error checking expired preorders hourly:', err);
+    }
+  }, { timezone: 'Asia/Taipei' });
+
+  // 3. Run every day at 23:59 to solidify today's price (Taipei time)
   cron.schedule('59 23 * * *', async () => {
     console.log('[Cron Job] Solidifying daily settings for today...');
     try {
-      const today = new Date();
-      // Ensure we are working with today's date at 00:00:00 for the database
-      today.setHours(0, 0, 0, 0);
+      const { dateObject: todayDateUtc, isWeekend } = getTaipeiDateParts(new Date());
 
       const existingSetting = await prisma.dailySetting.findUnique({
-        where: { date: today }
+        where: { date: todayDateUtc }
       });
 
       // If there's no setting, or if it lacks prices, pull from global
@@ -72,20 +82,17 @@ export const startCronJobs = () => {
         let globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
         if (!globalSetting) return;
 
-        const dayOfWeek = today.getDay();
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-
         const hourly_price = isWeekend ? globalSetting.weekend_hourly_price : globalSetting.weekday_hourly_price;
         const unlimited_price = isWeekend ? globalSetting.weekend_unlimited_price : globalSetting.weekday_unlimited_price;
 
         await prisma.dailySetting.upsert({
-          where: { date: today },
+          where: { date: todayDateUtc },
           update: {
             hourly_price: existingSetting?.hourly_price ?? hourly_price,
             unlimited_price: existingSetting?.unlimited_price ?? unlimited_price
           },
           create: {
-            date: today,
+            date: todayDateUtc,
             allow_unlimited: true,
             hourly_price,
             unlimited_price
@@ -100,5 +107,59 @@ export const startCronJobs = () => {
     }
   }, { timezone: 'Asia/Taipei' });
 
-  console.log('[Cron Job] Scheduled midnight attendance check and price solidification.');
+  console.log('[Cron Job] Scheduled midnight attendance check, hourly preorder pool cleaner, and price solidification.');
+};
+
+/**
+ * 逾期未付款預購單自動取消並釋放虛擬帳號回帳號池
+ */
+export const releaseExpiredPreorders = async () => {
+  const now = new Date();
+  const expiredOrders = await prisma.productOrder.findMany({
+    where: {
+      order_status: 'preorder_placed',
+      payment_status: 'pending_payment',
+      payment_deadline: { lt: now }
+    }
+  });
+
+  if (expiredOrders.length === 0) return 0;
+
+  console.log(`[Cron Job] Found ${expiredOrders.length} expired preorders to cancel...`);
+
+  for (const order of expiredOrders) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.productOrder.update({
+          where: { id: order.id },
+          data: {
+            order_status: 'cancelled',
+            admin_note: order.admin_note
+              ? `${order.admin_note} (系統自動取消：逾期未繳納訂金)`
+              : '系統自動取消：逾期未繳納訂金'
+          }
+        });
+
+        if (order.assigned_pool_account) {
+          await tx.oneTimeAccountPool.updateMany({
+            where: {
+              account_number: order.assigned_pool_account,
+              status: 'ASSIGNED'
+            },
+            data: {
+              status: 'AVAILABLE',
+              assigned_order_ref: null,
+              assigned_user_id: null,
+              assigned_at: null
+            }
+          });
+        }
+      });
+    } catch (orderErr) {
+      console.error(`[Cron Job] Failed to auto-cancel order #${order.order_ref}:`, orderErr);
+    }
+  }
+
+  console.log(`[Cron Job] Successfully processed ${expiredOrders.length} expired preorders.`);
+  return expiredOrders.length;
 };

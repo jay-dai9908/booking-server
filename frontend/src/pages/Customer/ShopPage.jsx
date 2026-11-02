@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
+import { initiateLineOAuth } from '../../utils/lineAuth';
 import {
   MARD_SERIES_INFO,
   getMergedBeadColors,
@@ -129,21 +130,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
     'https://lin.ee/vsZhRW5';
 
   const initiateDirectLineOAuthForPreorder = () => {
-    try {
-      sessionStorage.setItem('shiguang_post_login_redirect', '/preorder');
-      localStorage.setItem('shiguang_post_login_redirect', '/preorder');
-    } catch (e) {}
-
-    const channelId = import.meta.env.VITE_LINE_CHANNEL_ID;
-    const redirectUri = import.meta.env.VITE_LINE_CALLBACK_URL;
-    if (!channelId || !redirectUri || channelId === 'your_channel_id_here') {
-      navigate('/');
-      return;
-    }
-
-    const state = `preorder_${Math.random().toString(36).substring(2, 9)}`;
-    const lineLoginUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${channelId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=profile%20openid&bot_prompt=normal`;
-    window.location.href = lineLoginUrl;
+    initiateLineOAuth({ prefix: 'preorder_', returnPath: '/preorder' });
   };
 
   const redirectToLineLoginForShop = () => {

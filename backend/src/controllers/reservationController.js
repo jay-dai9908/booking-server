@@ -10,7 +10,8 @@ import {
 } from '../utils/lineMessaging.js';
 
 // Helper function to group reservations by booking_ref
-const groupReservations = (reservations, equipmentsMap = {}) => {
+const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
+  const includeAdminNote = options.includeAdminNote !== false;
   const groups = {};
   for (const r of reservations) {
     const ref = r.booking_ref;
@@ -42,7 +43,7 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
         discount_amount: r.discount_amount || 0,
         addons_amount: r.addons_amount || 0,
         customer_note: r.customer_note || null,
-        admin_note: r.admin_note || null,
+        admin_note: includeAdminNote ? (r.admin_note || null) : undefined,
         cancelled_at: r.cancelled_at || null,
         cancelled_by: r.cancelled_by || null
       };
@@ -93,7 +94,7 @@ const groupReservations = (reservations, equipmentsMap = {}) => {
       if (r.customer_note && !groups[ref].customer_note) {
         groups[ref].customer_note = r.customer_note;
       }
-      if (r.admin_note && !groups[ref].admin_note) {
+      if (includeAdminNote && r.admin_note && !groups[ref].admin_note) {
         groups[ref].admin_note = r.admin_note;
       }
     }
@@ -860,7 +861,16 @@ export const getMyReservations = async (req, res) => {
       where: { user_id: userId },
       include: {
         session: true,
-        user: true
+        user: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            line_user_id: true,
+            line_display_name: true,
+            line_picture_url: true
+          }
+        }
       },
       orderBy: {
         created_at: 'desc'
@@ -877,7 +887,8 @@ export const getMyReservations = async (req, res) => {
       equipmentsMap[eq.booking_ref].push(eq);
     });
 
-    const grouped = groupReservations(reservations, equipmentsMap);
+    // 顧客端不回傳 admin_note 與敏感資料
+    const grouped = groupReservations(reservations, equipmentsMap, { includeAdminNote: false });
     res.json(grouped);
   } catch (error) {
     console.error('Error fetching my reservations:', error);
@@ -888,27 +899,69 @@ export const getMyReservations = async (req, res) => {
 export const cancelReservation = async (req, res) => {
   // We use :id parameter, but it actually receives booking_ref now.
   const { id: booking_ref } = req.params;
-  const userId = req.user.id;
-  const isAdmin = req.user.role === 'admin';
+  const userId = req.user?.id;
+  const isAdmin = req.user?.role === 'admin';
+  const confirmPaidCancel = Boolean(req.body?.confirmPaidCancel || req.query?.confirmPaidCancel === 'true');
 
   try {
     // Find all reservations with this booking_ref
     const reservations = await prisma.reservation.findMany({
-      where: { booking_ref }
+      where: { booking_ref },
+      include: { session: true }
     });
 
     if (reservations.length === 0) {
-      return res.status(404).json({ error: 'Reservation not found' });
+      return res.status(404).json({ error: '找不到該筆預約' });
     }
 
-    // Check ownership (only need to check first one since they share booking_ref)
+    // Check ownership
     if (!isAdmin && reservations[0].user_id !== userId) {
-      return res.status(403).json({ error: 'Forbidden' });
+      return res.status(403).json({ error: '無權限取消此預約' });
     }
 
     if (reservations[0].status === 'cancelled') {
-      return res.status(400).json({ error: 'Reservation is already cancelled' });
+      return res.status(400).json({ error: '此預約先前已取消' });
     }
+
+    const hasPaid = reservations.some(r => r.is_paid);
+    const hasCheckedIn = reservations.some(r => r.attendance === 'checked_in');
+
+    // 計算該預約最早開始的時間
+    let earliestStartDateTime = null;
+    for (const r of reservations) {
+      if (r.session?.session_date && r.session?.start_time) {
+        const dateStr = r.session.session_date.toISOString().slice(0, 10);
+        const dt = new Date(`${dateStr}T${r.session.start_time}:00+08:00`);
+        if (!earliestStartDateTime || dt < earliestStartDateTime) {
+          earliestStartDateTime = dt;
+        }
+      }
+    }
+    const hasStarted = earliestStartDateTime && new Date() >= earliestStartDateTime;
+
+    // 顧客端規則校驗 (非管理員一律嚴格攔截)
+    if (!isAdmin) {
+      if (hasPaid) {
+        return res.status(400).json({ error: '此預約已完成付款，如需取消或退款請直接聯繫門市人員協助！' });
+      }
+      if (hasCheckedIn) {
+        return res.status(400).json({ error: '此預約已報到入座，無法取消。' });
+      }
+      if (hasStarted) {
+        return res.status(400).json({ error: '此預約時段已過開始時間，無法線上取消。如需協助請聯繫門市人員。' });
+      }
+    } else {
+      // 員工端防呆二次確認：若訂單已付款且未帶確認旗標，要求二次確認以保護營收帳務
+      if (hasPaid && !confirmPaidCancel) {
+        return res.status(409).json({
+          code: 'REQUIRE_PAID_CANCEL_CONFIRM',
+          error: '此預約已完成付款結帳，取消將影響營收帳務，請再次確認是否強制取消？'
+        });
+      }
+    }
+
+    const operatorName = isAdmin ? (req.user.name || '管理員') : 'customer';
+    const cancelledByTag = isAdmin ? `admin:${operatorName}` : 'customer';
 
     // Cancel all related rows
     const updated = await prisma.reservation.updateMany({
@@ -916,7 +969,7 @@ export const cancelReservation = async (req, res) => {
       data: { 
         status: 'cancelled',
         cancelled_at: new Date(),
-        cancelled_by: isAdmin ? 'admin' : 'customer'
+        cancelled_by: cancelledByTag
       }
     });
 
@@ -931,7 +984,7 @@ export const cancelReservation = async (req, res) => {
       }
     }
 
-    res.json({ message: 'Reservation cancelled successfully', count: updated.count });
+    res.json({ message: '預約已成功取消', count: updated.count });
 
     // Auto LINE cancellation notification (asynchronously dispatched, never blocks response)
     (async () => {
@@ -1950,11 +2003,15 @@ export const updateReservationNotes = async (req, res) => {
       data: dataToUpdate
     });
 
-    res.json({
+    const responseData = {
       message: '備註已更新！',
-      customer_note: dataToUpdate.customer_note !== undefined ? dataToUpdate.customer_note : reservations[0].customer_note,
-      admin_note: dataToUpdate.admin_note !== undefined ? dataToUpdate.admin_note : reservations[0].admin_note
-    });
+      customer_note: dataToUpdate.customer_note !== undefined ? dataToUpdate.customer_note : reservations[0].customer_note
+    };
+    if (isStaff) {
+      responseData.admin_note = dataToUpdate.admin_note !== undefined ? dataToUpdate.admin_note : reservations[0].admin_note;
+    }
+
+    res.json(responseData);
   } catch (error) {
     console.error('Error updating reservation notes:', error);
     res.status(500).json({ error: '更新備註失敗' });

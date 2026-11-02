@@ -1,11 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../api/axios';
 import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
+import { initiateLineOAuth, verifyAndConsumeLineOAuthState } from '../../utils/lineAuth';
 
 function Home({ userRole }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [authErrorMsg, setAuthErrorMsg] = useState('');
 
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
@@ -39,7 +41,17 @@ function Home({ userRole }) {
 
     if (code && !isProcessing.current) {
       isProcessing.current = true;
-      const isPreorderLogin = oauthState.startsWith('preorder_');
+
+      // 嚴格校驗 state 是否與本地發起時一致且未逾期
+      const verifyResult = verifyAndConsumeLineOAuthState(oauthState);
+      if (!verifyResult.valid) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setAuthErrorMsg(verifyResult.error || '登入狀態驗證失效，請重新嘗試登入。');
+        isProcessing.current = false;
+        return;
+      }
+
+      const isPreorderLogin = oauthState.startsWith('preorder_') || verifyResult.returnPath === '/preorder';
       if (isPreorderLogin) {
         try {
           sessionStorage.setItem('shiguang_post_login_redirect', '/preorder');
@@ -61,7 +73,7 @@ function Home({ userRole }) {
           if (res.data.isNewUser) {
             window.location.href = '/register'; // Full reload to update App state
           } else {
-            let target = isPreorderLogin ? '/preorder' : '/booking';
+            let target = verifyResult.returnPath || (isPreorderLogin ? '/preorder' : '/booking');
             try {
               const savedRedirect =
                 sessionStorage.getItem('shiguang_post_login_redirect') ||
@@ -89,24 +101,15 @@ function Home({ userRole }) {
           } else if (details) {
             errorMsg = JSON.stringify(details);
           }
-          alert(`登入失敗，請重試。\n錯誤原因: ${errorMsg}`);
+          setAuthErrorMsg(`登入失敗，請重試。\n錯誤原因: ${errorMsg}`);
           isProcessing.current = false;
         });
     }
   }, [location]);
 
   const initiateLineLogin = () => {
-    const channelId = import.meta.env.VITE_LINE_CHANNEL_ID;
-    const redirectUri = import.meta.env.VITE_LINE_CALLBACK_URL;
-    
-    if (!channelId || !redirectUri || channelId === 'your_channel_id_here') {
-      alert('請先在 frontend/.env 設定 VITE_LINE_CHANNEL_ID 與 VITE_LINE_CALLBACK_URL');
-      return;
-    }
-
-    const state = Math.random().toString(36).substring(7);
-    const lineLoginUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${channelId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=profile%20openid&bot_prompt=normal`;
-    window.location.href = lineLoginUrl;
+    setAuthErrorMsg('');
+    initiateLineOAuth({ returnPath: '/booking' });
   };
 
   const isHandlingCallback = new URLSearchParams(location.search).has('code');
@@ -133,6 +136,12 @@ function Home({ userRole }) {
           <h1 className="text-2xl sm:text-3xl font-bold text-wood-textMain mb-4">拾光製所<br/>拼豆時段預約系統</h1>
           <p className="text-wood-textMuted font-medium">請登入您的 LINE 帳號以進行預約</p>
         </div>
+
+        {authErrorMsg && (
+          <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold leading-relaxed whitespace-pre-line text-left">
+            ⚠️ {authErrorMsg}
+          </div>
+        )}
         
         {/* LINE Button */}
         <button 

@@ -19,8 +19,10 @@ export const createStaff = async (req, res) => {
     return res.status(400).json({ error: '姓名與密碼為必填欄位' });
   }
 
-  const superAdminPassword = process.env.ADMIN_PASSWORD || 'gathering.light2609';
-  if (password === superAdminPassword) {
+  const superAdminPassword = process.env.ADMIN_PASSWORD
+    ? String(process.env.ADMIN_PASSWORD).trim().replace(/^["']|["']$/g, '').replace(/[\r\n]/g, '')
+    : '';
+  if (superAdminPassword && password === superAdminPassword) {
     return res.status(400).json({ error: '此密碼已被最高管理員佔用，請更換其他密碼' });
   }
 
@@ -65,14 +67,27 @@ export const updateStaff = async (req, res) => {
     }
 
     const updateData = {};
+    let shouldRevokeTokens = false;
+
     if (name !== undefined) updateData.name = name;
-    if (permissions !== undefined) updateData.permissions = permissions;
-    if (role !== undefined) updateData.role = role;
-    if (is_active !== undefined) updateData.is_active = is_active;
+    if (permissions !== undefined) {
+      updateData.permissions = permissions;
+      shouldRevokeTokens = true;
+    }
+    if (role !== undefined && role !== existingStaff.role) {
+      updateData.role = role;
+      shouldRevokeTokens = true;
+    }
+    if (is_active !== undefined && is_active !== existingStaff.is_active) {
+      updateData.is_active = is_active;
+      shouldRevokeTokens = true;
+    }
 
     if (password !== undefined && password !== existingStaff.password) {
-      const superAdminPassword = process.env.ADMIN_PASSWORD || 'gathering.light2609';
-      if (password === superAdminPassword) {
+      const superAdminPassword = process.env.ADMIN_PASSWORD
+        ? String(process.env.ADMIN_PASSWORD).trim().replace(/^["']|["']$/g, '').replace(/[\r\n]/g, '')
+        : '';
+      if (superAdminPassword && password === superAdminPassword) {
         return res.status(400).json({ error: '此密碼已被最高管理員佔用，請更換其他密碼' });
       }
 
@@ -88,6 +103,11 @@ export const updateStaff = async (req, res) => {
       }
 
       updateData.password = password;
+      shouldRevokeTokens = true;
+    }
+
+    if (shouldRevokeTokens) {
+      updateData.token_version = { increment: 1 };
     }
 
     const updated = await prisma.adminUser.update({
