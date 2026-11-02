@@ -7,7 +7,7 @@ import {
   getPassPlans,
   togglePassStatus
 } from '../controllers/passController.js';
-import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
+import { verifyToken, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 const checkPassPermission = requireAnyPermission(['members', 'coupons', 'reservations']);
@@ -16,7 +16,7 @@ const checkPassPermission = requireAnyPermission(['members', 'coupons', 'reserva
 router.get('/plans', getPassPlans);
 
 // Customer routes
-router.get('/my', verifyToken, getMyPasses);
+router.get('/my', verifyToken, requireRegisteredUser, getMyPasses);
 
 // Admin routes
 router.post('/admin/grant', verifyToken, checkPassPermission, grantUserPass);

@@ -111,12 +111,14 @@ export const startCronJobs = () => {
 };
 
 /**
- * 逾期未付款預購單自動取消並釋放虛擬帳號回帳號池
+ * 逾期未付款預購單自動取消並釋放虛擬帳號回帳號池（僅針對 ctbc_pool 且真正佔用帳號之訂單）
  */
 export const releaseExpiredPreorders = async () => {
   const now = new Date();
   const expiredOrders = await prisma.productOrder.findMany({
     where: {
+      payment_method_code: 'ctbc_pool',
+      assigned_pool_account: { not: null },
       order_status: 'preorder_placed',
       payment_status: 'pending_payment',
       payment_deadline: { lt: now }
@@ -125,13 +127,19 @@ export const releaseExpiredPreorders = async () => {
 
   if (expiredOrders.length === 0) return 0;
 
-  console.log(`[Cron Job] Found ${expiredOrders.length} expired preorders to cancel...`);
+  console.log(`[Cron Job] Found ${expiredOrders.length} expired ctbc_pool preorders to cancel...`);
+  let cancelledCount = 0;
 
   for (const order of expiredOrders) {
     try {
       await prisma.$transaction(async (tx) => {
-        await tx.productOrder.update({
-          where: { id: order.id },
+        // 原子性 updateMany 確保狀態在交易執行時仍為 preorder_placed 才進行取消
+        const updateResult = await tx.productOrder.updateMany({
+          where: {
+            id: order.id,
+            order_status: 'preorder_placed',
+            payment_status: 'pending_payment'
+          },
           data: {
             order_status: 'cancelled',
             admin_note: order.admin_note
@@ -140,11 +148,13 @@ export const releaseExpiredPreorders = async () => {
           }
         });
 
-        if (order.assigned_pool_account) {
+        // 僅在訂單成功被更新為 cancelled 且確有佔用帳號時，才釋放帳號回帳號池
+        if (updateResult.count > 0 && order.assigned_pool_account) {
           await tx.oneTimeAccountPool.updateMany({
             where: {
               account_number: order.assigned_pool_account,
-              status: 'ASSIGNED'
+              status: 'ASSIGNED',
+              assigned_order_ref: order.order_ref
             },
             data: {
               status: 'AVAILABLE',
@@ -153,6 +163,7 @@ export const releaseExpiredPreorders = async () => {
               assigned_at: null
             }
           });
+          cancelledCount++;
         }
       });
     } catch (orderErr) {
@@ -160,6 +171,6 @@ export const releaseExpiredPreorders = async () => {
     }
   }
 
-  console.log(`[Cron Job] Successfully processed ${expiredOrders.length} expired preorders.`);
-  return expiredOrders.length;
+  console.log(`[Cron Job] Successfully processed ${cancelledCount} expired ctbc_pool preorders.`);
+  return cancelledCount;
 };

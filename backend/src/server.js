@@ -1,8 +1,8 @@
+import './loadEnv.js';
 process.env.TZ = 'Asia/Taipei';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import dotenv from 'dotenv';
 import prisma from './prismaClient.js';
 import authRoutes from './routes/auth.js';
 import sessionRoutes from './routes/sessions.js';
@@ -21,13 +21,6 @@ import { ensureDefaultEquipmentConfigs } from './controllers/equipmentController
 import { ensureDefaultCheckoutConfigs } from './controllers/checkoutController.js';
 import { ensureDefaultPaymentMethods, ensureDefaultProducts, ensureDefaultPassPlans } from './utils/shopDefaults.js';
 import { startCronJobs } from './cronJobs.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -340,7 +333,11 @@ const ensureDatabaseSchema = async () => {
 };
 
 // Middleware
-app.set('trust proxy', 1);
+const trustProxyEnv = process.env.TRUST_PROXY;
+const trustProxyVal = trustProxyEnv !== undefined
+  ? (isNaN(trustProxyEnv) ? trustProxyEnv : Number(trustProxyEnv))
+  : 1;
+app.set('trust proxy', trustProxyVal);
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true, // Allow cookies to be sent

@@ -1,24 +1,21 @@
 import express from 'express';
 import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount, updateReservationNotes, getAdminNavBadges, adminQuickLookup } from '../controllers/reservationController.js';
-import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
-import { rateLimiter } from '../middlewares/rateLimiter.js';
+import { verifyToken, requireAdmin, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
 
 import { modifyBookingEquipment } from '../controllers/equipmentController.js';
 
 const router = express.Router();
 
-const queryLimiter = rateLimiter({ windowMs: 3 * 60 * 1000, max: 15, reason: 'Too many reservation queries' });
-
 const reservationStaffAuth = [verifyToken, requireAnyPermission(['reservations', 'seating', 'weekly'])];
 
-router.post('/', verifyToken, createReservation);
-router.get('/my', queryLimiter, verifyToken, getMyReservations);
-router.delete('/:id', verifyToken, cancelReservation);
-router.patch('/:booking_ref/notes', verifyToken, updateReservationNotes);
-router.patch('/:booking_ref/equipment', verifyToken, modifyBookingEquipment);
+router.post('/', verifyToken, requireRegisteredUser, createReservation);
+router.get('/my', verifyToken, requireRegisteredUser, getMyReservations);
+router.delete('/:id', verifyToken, requireRegisteredUser, cancelReservation);
+router.patch('/:booking_ref/notes', verifyToken, requireRegisteredUser, updateReservationNotes);
+router.patch('/:booking_ref/equipment', verifyToken, requireRegisteredUser, modifyBookingEquipment);
 router.delete('/:id/record', ...reservationStaffAuth, deleteReservationRecord);
-router.get('/admin/nav-badges', verifyToken, getAdminNavBadges);
-router.get('/admin/quick-lookup', verifyToken, adminQuickLookup);
+router.get('/admin/nav-badges', verifyToken, requireAdmin, getAdminNavBadges);
+router.get('/admin/quick-lookup', verifyToken, requireAnyPermission(['reservations', 'seating', 'shop', 'members', 'coupons', 'accounting', 'weekly']), adminQuickLookup);
 router.get('/admin', ...reservationStaffAuth, getAdminReservations);
 router.get('/admin/:booking_ref/details', ...reservationStaffAuth, getAdminReservationDetails);
 router.post('/admin', ...reservationStaffAuth, adminCreateReservation);

@@ -72,7 +72,12 @@ export const updateStaff = async (req, res) => {
     if (name !== undefined) updateData.name = name;
     if (permissions !== undefined) {
       updateData.permissions = permissions;
-      shouldRevokeTokens = true;
+      const oldPerms = Array.isArray(existingStaff.permissions) ? [...existingStaff.permissions].sort() : [];
+      const newPerms = Array.isArray(permissions) ? [...permissions].sort() : [];
+      const isPermChanged = oldPerms.length !== newPerms.length || oldPerms.some((p, i) => p !== newPerms[i]);
+      if (isPermChanged) {
+        shouldRevokeTokens = true;
+      }
     }
     if (role !== undefined && role !== existingStaff.role) {
       updateData.role = role;

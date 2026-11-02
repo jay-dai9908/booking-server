@@ -106,8 +106,7 @@ export const lineCallback = async (req, res) => {
   } catch (error) {
     console.error('Line login error:', error.response?.data || error.message);
     res.status(500).json({ 
-      error: 'Internal server error during Line login', 
-      details: error.response?.data 
+      error: 'LINE 登入驗證失敗，請重新嘗試'
     });
   }
 };

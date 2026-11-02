@@ -11,7 +11,8 @@ import {
   deleteAddonItem,
   submitReservationCheckout
 } from '../controllers/checkoutController.js';
-import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
+import { verifyToken, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
+import { promoValidateLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ const checkoutStaffAuth = [
 ];
 
 // Customer + Admin promo code validation
-router.post('/promo-codes/validate', verifyToken, validatePromoCode);
+router.post('/promo-codes/validate', verifyToken, requireRegisteredUser, promoValidateLimiter, validatePromoCode);
 
 // Promo code management & POS quick select
 router.get('/promo-codes', ...checkoutStaffAuth, getPromoCodes);

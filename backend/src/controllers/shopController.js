@@ -101,22 +101,12 @@ export const createProductOrder = async (req, res) => {
     const deadlineDays = globalSetting?.shop_deposit_deadline_days ?? 2;
     const paymentDeadline = new Date(Date.now() + deadlineDays * 24 * 60 * 60 * 1000);
 
-    // 防洗單機制：若選擇社群收款 (ctbc_pool)，檢查顧客尚未完成付款且佔用虛擬帳號的筆數上限 (最多 2 筆)
-    if (payment_method_code === 'ctbc_pool') {
-      const activePendingPoolOrdersCount = await prisma.productOrder.count({
-        where: {
-          user_id: userId,
-          order_status: { not: 'cancelled' },
-          payment_status: 'pending_payment',
-          assigned_pool_account: { not: null }
-        }
-      });
-
-      if (activePendingPoolOrdersCount >= 2) {
-        return res.status(400).json({
-          error: '您目前已有 2 筆待繳納訂金並佔用專屬收款帳號的訂單，請先完成現有訂單之匯款與回報，或聯繫門市人員協助！'
-        });
-      }
+    // 檢查付款方式是否存在且已啟用
+    const paymentMethod = await prisma.paymentMethodConfig.findUnique({
+      where: { code: payment_method_code }
+    });
+    if (!paymentMethod || !paymentMethod.is_enabled) {
+      return res.status(400).json({ error: '選擇的付款方式不存在或未啟用' });
     }
 
     const productIds = items.map(i => parseInt(i.product_id, 10)).filter(Boolean);
@@ -135,6 +125,10 @@ export const createProductOrder = async (req, res) => {
       const prod = productMap.get(pid);
       if (!prod) {
         return res.status(400).json({ error: `找不到商品 ID: ${item.product_id}` });
+      }
+
+      if (prod.visibility_status === 'HIDDEN' || prod.visibility_status === 'SOLD_OUT') {
+        return res.status(400).json({ error: `商品「${prod.name}」目前已下架或售完，無法預購` });
       }
 
       const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
@@ -226,12 +220,31 @@ export const createProductOrder = async (req, res) => {
 
     // Execute in transaction
     const order = await prisma.$transaction(async (tx) => {
+      // 交易內先以 FOR UPDATE 鎖定使用者資料列，確保同一會員高併發下單請求依序排隊
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+
       let assignedPoolAccount = null;
       let assignedPoolUrl = null;
 
-      // If CTBC one-time account pool selected, pull one AVAILABLE account from pool atomically with FOR UPDATE SKIP LOCKED.
-      // If none left, allow order creation and instruct customer to contact store for payment.
+      // 防洗單機制：若選擇社群收款 (ctbc_pool)，在交易內鎖定狀態下檢查顧客尚未完成付款且佔用虛擬帳號的筆數上限 (最多 2 筆)
       if (payment_method_code === 'ctbc_pool') {
+        const activePendingPoolOrdersCount = await tx.productOrder.count({
+          where: {
+            user_id: userId,
+            order_status: { not: 'cancelled' },
+            payment_status: 'pending_payment',
+            assigned_pool_account: { not: null }
+          }
+        });
+
+        if (activePendingPoolOrdersCount >= 2) {
+          const err = new Error('您目前已有 2 筆待繳納訂金並佔用專屬收款帳號的訂單，請先完成現有訂單之匯款與回報，或聯繫門市人員協助！');
+          err.isBusinessError = true;
+          throw err;
+        }
+
+        // If CTBC one-time account pool selected, pull one AVAILABLE account from pool atomically with FOR UPDATE SKIP LOCKED.
+        // If none left, allow order creation and instruct customer to contact store for payment.
         const allocated = await tx.$queryRaw`
           UPDATE "OneTimeAccountPool"
           SET "status" = 'ASSIGNED',
@@ -300,9 +313,11 @@ export const createProductOrder = async (req, res) => {
       order: sanitizedOrder
     });
   } catch (error) {
+    if (error.isBusinessError) {
+      return res.status(400).json({ error: error.message });
+    }
     console.error('createProductOrder error:', error);
-    const statusCode = error.message?.includes('配發完畢') ? 400 : 500;
-    res.status(statusCode).json({ error: error.message || '建立預購訂單失敗' });
+    return res.status(500).json({ error: '建立訂單失敗，請稍後再試' });
   }
 };
 

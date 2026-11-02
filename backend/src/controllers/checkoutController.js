@@ -262,10 +262,16 @@ export const evaluatePromoCode = async (txOrPrisma, {
 // POST /api/checkout/promo-codes/validate
 export const validatePromoCode = async (req, res) => {
   try {
+    const isAdmin = req.user?.role === 'admin' || req.user?.isVerifiedAdmin;
+    const is_pos = isAdmin ? (req.body.is_pos === true) : false;
+    const user_id = isAdmin ? (req.body.user_id || req.user?.id || null) : req.user.id;
+    const skip_usage_check = isAdmin ? (req.body.skip_usage_check === true) : false;
+
     const result = await evaluatePromoCode(prisma, {
       ...req.body,
-      user_id: req.user?.id || req.body.user_id || null,
-      is_pos: req.body.is_pos === true || req.user?.role === 'admin'
+      user_id,
+      is_pos,
+      skip_usage_check
     });
 
     if (!result.valid) {
@@ -281,9 +287,14 @@ export const validatePromoCode = async (req, res) => {
         description: result.promo.description,
         discount_type: result.promo.discount_type,
         discount_value: result.promo.discount_value,
-        max_discount_amount: result.promo.max_discount_amount,
-        target_scope: result.promo.target_scope,
-        channel: result.promo.channel
+        min_spend: result.promo.min_amount ?? 0,
+        min_amount: result.promo.min_amount ?? 0,
+        min_pax: result.promo.min_pax ?? 1,
+        min_hours: result.promo.min_hours ?? 1,
+        max_discount: result.promo.max_discount_amount ?? null,
+        max_discount_amount: result.promo.max_discount_amount ?? null,
+        applicable_type: result.promo.target_scope ?? 'all',
+        target_scope: result.promo.target_scope ?? 'all'
       },
       discount_amount: result.discount_amount
     });

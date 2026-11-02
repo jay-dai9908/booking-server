@@ -1,94 +1,114 @@
-import prisma from '../prismaClient.js';
+// In-memory rate limiters (no database writes, no IP bans, no lockdown mode)
 
-// Cache banned IPs in memory
-const bannedIPCache = new Set();
+export const checkBannedIP = (req, res, next) => next();
 
-const loadBannedIPs = async () => {
-  try {
-    const bans = await prisma.bannedIP.findMany({ select: { ip: true } });
-    bans.forEach(b => bannedIPCache.add(b.ip));
-    console.log(`Loaded ${bans.length} banned IPs into cache.`);
-  } catch (error) {
-    console.error('Failed to load banned IPs', error);
-  }
-};
-// Load on module initialization
-loadBannedIPs();
+/**
+ * 通用記憶體計數限流器工廠
+ */
+export const createMemoryLimiter = ({ windowMs, max, message }) => {
+  const store = new Map();
 
-export const checkBannedIP = async (req, res, next) => {
-  return next(); // Disabled to prevent false-positive lockouts on shared networks
-  const ip = req.ip || req.connection.remoteAddress;
-  if (bannedIPCache.has(ip)) {
-    return res.status(403).json({ error: 'Your IP has been banned due to suspicious activity.' });
-  }
-  next();
-};
-
-// In-memory store for rate limiting
-const rateLimits = new Map();
-
-// Helper to cleanup old records periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, record] of rateLimits.entries()) {
-    if (now > record.resetTime) {
-      rateLimits.delete(key);
-    }
-  }
-}, 60000);
-
-export const rateLimiter = ({ windowMs, max, reason }) => {
-  return async (req, res, next) => {
-    return next(); // Disabled to prevent false-positive lockouts on shared networks
-    const ip = req.ip || req.connection.remoteAddress;
-    
-    if (bannedIPCache.has(ip)) {
-       return res.status(403).json({ error: 'Your IP has been banned due to suspicious activity.' });
-    }
-
-    // Key is endpoint path + IP
-    const key = `${req.route ? req.route.path : req.originalUrl}-${ip}`;
+  const cleanup = setInterval(() => {
     const now = Date.now();
-    
-    let record = rateLimits.get(key);
-    
+    for (const [key, record] of store.entries()) {
+      if (now > record.resetTime) {
+        store.delete(key);
+      }
+    }
+  }, 60000);
+  if (cleanup.unref) cleanup.unref();
+
+  return (req, res, next) => {
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const key = `${req.baseUrl || ''}${req.path || ''}-${ip}`;
+    const now = Date.now();
+
+    let record = store.get(key);
     if (!record || now > record.resetTime) {
-      record = {
-        count: 1,
-        resetTime: now + windowMs
-      };
-      rateLimits.set(key, record);
+      record = { count: 1, resetTime: now + windowMs };
+      store.set(key, record);
     } else {
       record.count += 1;
     }
 
     if (record.count > max) {
-      // Exceeded limit, permanently ban IP
-      try {
-        await prisma.bannedIP.upsert({
-          where: { ip },
-          update: { reason, banned_at: new Date() },
-          create: { ip, reason }
-        });
-        bannedIPCache.add(ip);
-        console.warn(`[SECURITY] Banned IP ${ip}. Reason: ${reason}`);
-
-        // Check for lockdown trigger
-        if (bannedIPCache.size >= 3) {
-          await prisma.globalSetting.upsert({
-            where: { id: 1 },
-            update: { is_lockdown_mode: true },
-            create: { id: 1, is_lockdown_mode: true }
-          });
-          console.error('[SECURITY] SYSTEM LOCKDOWN INITIATED DUE TO MULTIPLE BANNED IPs');
-        }
-
-      } catch (err) {
-        console.error('Failed to ban IP', err);
-      }
-      return res.status(403).json({ error: 'Too many requests. Your IP has been banned.' });
+      return res.status(429).json({ error: message || '請求過於頻繁，請稍後再試' });
     }
 
     next();
   };
 };
+
+/**
+ * 1. 後台登入失敗限流：15 分鐘內最多 10 次失敗（只計 401，不計成功），超過回傳 429
+ */
+export const adminLoginLimiter = (() => {
+  const store = new Map();
+  const windowMs = 15 * 60 * 1000;
+  const maxFailures = 10;
+
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, record] of store.entries()) {
+      if (now > record.resetTime) {
+        store.delete(ip);
+      }
+    }
+  }, 60000);
+  if (cleanup.unref) cleanup.unref();
+
+  return (req, res, next) => {
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const now = Date.now();
+    const record = store.get(ip);
+
+    if (record && now <= record.resetTime && record.failures >= maxFailures) {
+      return res.status(429).json({ error: '登入嘗試失敗次數過多，請於 15 分鐘後再試' });
+    }
+
+    res.on('finish', () => {
+      if (res.statusCode === 401) {
+        const cur = store.get(ip);
+        if (!cur || Date.now() > cur.resetTime) {
+          store.set(ip, { failures: 1, resetTime: Date.now() + windowMs });
+        } else {
+          cur.failures += 1;
+        }
+      } else if (res.statusCode === 200) {
+        store.delete(ip);
+      }
+    });
+
+    next();
+  };
+})();
+
+/**
+ * 2. LINE callback：10 分鐘內最多 20 次，超過回傳 429
+ */
+export const lineCallbackLimiter = createMemoryLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: 'LINE 登入嘗試過於頻繁，請於 10 分鐘後再試'
+});
+
+/**
+ * 3. 建立預購單：10 分鐘內最多 10 次，超過回傳 429
+ */
+export const shopOrderLimiter = createMemoryLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: '下單頻率過高，請於 10 分鐘後再試'
+});
+
+/**
+ * 4. 驗證折扣碼：10 分鐘內最多 30 次，超過回傳 429
+ */
+export const promoValidateLimiter = createMemoryLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  message: '折扣碼驗證次數過多，請於 10 分鐘後再試'
+});
+
+// 舊相容相容函式
+export const rateLimiter = (options) => createMemoryLimiter(options);

@@ -306,8 +306,9 @@ export const createReservation = async (req, res) => {
   const { session_ids, pax, forceSplit } = req.body;
   const userId = req.user.id;
 
-  if (!Array.isArray(session_ids) || session_ids.length === 0 || !pax || pax <= 0) {
-    return res.status(400).json({ error: 'Valid session_ids array and pax are required.' });
+  const parsedPax = parseInt(pax, 10);
+  if (!Array.isArray(session_ids) || session_ids.length === 0 || !Number.isInteger(parsedPax) || parsedPax < 1) {
+    return res.status(400).json({ error: '人數必須為大於 0 的正整數，且必須選擇至少一個時段' });
   }
 
   try {
@@ -330,6 +331,18 @@ export const createReservation = async (req, res) => {
 
       if (requestedSessions.length !== session_ids.length) {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
+      }
+
+      // 檢查是否跨日期：一筆預約只能包含同一天的時段
+      const uniqueDates = new Set(
+        requestedSessions.map(s => {
+          return s.session_date instanceof Date
+            ? s.session_date.toISOString().slice(0, 10)
+            : String(s.session_date).slice(0, 10);
+        })
+      );
+      if (uniqueDates.size > 1) {
+        throw new Error('CROSS_DATE_SESSIONS');
       }
 
       const sessionDate = requestedSessions[0].session_date;
@@ -640,6 +653,9 @@ export const createReservation = async (req, res) => {
 
   } catch (error) {
     console.error('Reservation error:', error);
+    if (error.message === 'CROSS_DATE_SESSIONS') {
+      return res.status(400).json({ error: '一筆預約只能包含同一天的時段' });
+    }
     if (error.message === 'BLACKLISTED_USER') {
       return res.status(403).json({ error: '您的帳號目前無法使用線上預約服務，請直接聯繫門市人員。' });
     }
@@ -1426,8 +1442,9 @@ export const getSessionSeats = async (req, res) => {
 export const adminCreateReservation = async (req, res) => {
   const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, attendance, autoCheckIn } = req.body;
   
-  if (!Array.isArray(session_ids) || session_ids.length === 0 || !pax || pax <= 0) {
-    return res.status(400).json({ error: 'Valid session_ids array and pax are required.' });
+  const parsedPax = parseInt(pax, 10);
+  if (!Array.isArray(session_ids) || session_ids.length === 0 || !Number.isInteger(parsedPax) || parsedPax < 1) {
+    return res.status(400).json({ error: '人數必須為大於 0 的正整數，且必須選擇至少一個時段' });
   }
 
   if (!name) {
@@ -1467,6 +1484,18 @@ export const adminCreateReservation = async (req, res) => {
 
       if (requestedSessions.length !== session_ids.length) {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
+      }
+
+      // 檢查是否跨日期：一筆預約只能包含同一天的時段
+      const uniqueDates = new Set(
+        requestedSessions.map(s => {
+          return s.session_date instanceof Date
+            ? s.session_date.toISOString().slice(0, 10)
+            : String(s.session_date).slice(0, 10);
+        })
+      );
+      if (uniqueDates.size > 1) {
+        throw new Error('CROSS_DATE_SESSIONS');
       }
 
       const sessionDate = requestedSessions[0].session_date;
@@ -1646,6 +1675,9 @@ export const adminCreateReservation = async (req, res) => {
 
   } catch (error) {
     console.error('Manual Reservation error:', error);
+    if (error.message === 'CROSS_DATE_SESSIONS') {
+      return res.status(400).json({ error: '一筆預約只能包含同一天的時段' });
+    }
     if (error.message === 'SOME_SESSIONS_NOT_FOUND') {
       return res.status(404).json({ error: 'One or more sessions not found.' });
     }

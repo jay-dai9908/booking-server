@@ -1,12 +1,6 @@
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import '../src/loadEnv.js';
 import prisma from '../src/prismaClient.js';
 import { getTaipeiDateParts } from '../src/utils/dateUtils.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.join(__dirname, '../.env') });
 
 /**
  * 歷史 DailySetting 異常資料檢測腳本 (唯讀，絕不修改資料庫)

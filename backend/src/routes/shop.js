@@ -19,7 +19,8 @@ import {
   createAdminProduct,
   updateAdminProduct
 } from '../controllers/shopController.js';
-import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
+import { verifyToken, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
+import { shopOrderLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 const checkShopPermission = requireAnyPermission(['shop', 'reservations']);
@@ -29,9 +30,9 @@ router.get('/products', getPublicProducts);
 router.get('/payment-methods', getPublicPaymentMethods);
 
 // Customer routes
-router.post('/orders', verifyToken, createProductOrder);
-router.patch('/orders/:id/remittance', verifyToken, updateRemittanceLast5);
-router.get('/my-orders', verifyToken, getMyProductOrders);
+router.post('/orders', verifyToken, requireRegisteredUser, shopOrderLimiter, createProductOrder);
+router.patch('/orders/:id/remittance', verifyToken, requireRegisteredUser, updateRemittanceLast5);
+router.get('/my-orders', verifyToken, requireRegisteredUser, getMyProductOrders);
 
 // Admin routes
 router.get('/admin/orders', verifyToken, checkShopPermission, getAdminProductOrders);

@@ -14,28 +14,12 @@ export const getSuperAdminFingerprint = () => {
     ? String(process.env.ADMIN_PASSWORD).trim().replace(/^["']|["']$/g, '').replace(/[\r\n]/g, '')
     : '';
   if (!envAdminPassword) return '';
-  return crypto.createHash('sha256').update(envAdminPassword).digest('hex').slice(0, 16);
+  return crypto.createHmac('sha256', JWT_SECRET).update(envAdminPassword).digest('hex').slice(0, 16);
 };
 
 export const generateToken = (payload, options = {}) => {
   const expiresIn = options.expiresIn || '7d';
   return jwt.sign(payload, JWT_SECRET, { expiresIn });
-};
-
-export const verifyToken = (req, res, next) => {
-  const authHeader = req.headers?.authorization || '';
-  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
-  const token = req.cookies?.token || bearerToken;
-  if (!token) {
-    return res.status(401).json({ error: '登入時效已過或尚未登入，請重新使用 LINE 登入' });
-  }
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { id, role, isTemp, token_version, pwd_hash, ... }
-    next();
-  } catch (error) {
-    return res.status(401).json({ error: '登入憑證已過期，請重新登入' });
-  }
 };
 
 /**
@@ -44,17 +28,28 @@ export const verifyToken = (req, res, next) => {
 export const syncAndVerifyAdminUser = async (user) => {
   if (!user || user.role !== 'admin') return null;
 
-  // 1. 最高管理員 (無 staff id)
+  // 若已經完成驗證，直接回傳避免重複查詢資料庫
+  if (user.isVerifiedAdmin) {
+    return user;
+  }
+
+  // 1. 最高管理員 (無 staff id，需驗證以 HMAC-SHA256 產生的指紋)
   if (user.isSuperAdmin && !user.id) {
     const currentFp = getSuperAdminFingerprint();
-    if (!currentFp || user.pwd_hash !== currentFp) {
-      return null; // 密碼已被更改或無指紋，舊 Token 即刻失效
+    if (!currentFp || !user.pwd_hash) {
+      return null;
+    }
+    const bufA = Buffer.from(user.pwd_hash, 'utf8');
+    const bufB = Buffer.from(currentFp, 'utf8');
+    if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+      return null; // 密碼已被更換或指紋不符，舊 Token 即刻失效
     }
     return {
       role: 'admin',
       isSuperAdmin: true,
       name: user.name || '最高管理員',
-      permissions: ['all']
+      permissions: ['all'],
+      isVerifiedAdmin: true
     };
   }
 
@@ -79,11 +74,57 @@ export const syncAndVerifyAdminUser = async (user) => {
       isSuperAdmin: isSuper,
       name: staff.name,
       permissions: isSuper ? ['all'] : (staff.permissions || []),
-      token_version: staff.token_version
+      token_version: staff.token_version,
+      isVerifiedAdmin: true
     };
   }
 
   return null;
+};
+
+export const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers?.authorization || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const token = req.cookies?.token || bearerToken;
+  if (!token) {
+    return res.status(401).json({ error: '登入時效已過或尚未登入，請重新登入' });
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // 若 token 為管理員角色，即刻回資料庫或比對指紋驗證最新狀態
+    if (decoded.role === 'admin') {
+      const verifiedAdmin = await syncAndVerifyAdminUser(decoded);
+      if (!verifiedAdmin) {
+        res.clearCookie('token');
+        return res.status(401).json({ error: '登入憑證已失效或帳號已被停用，請重新登入' });
+      }
+      req.user = verifiedAdmin;
+      return next();
+    }
+
+    req.user = decoded; // { id, role, isTemp, ... }
+    next();
+  } catch (error) {
+    res.clearCookie('token');
+    return res.status(401).json({ error: '登入憑證已過期，請重新登入' });
+  }
+};
+
+/**
+ * 顧客專屬 API 驗證：必須是已註冊完成的正式會員（正整數 id，且非 isTemp），已驗證管理員一律放行
+ */
+export const requireRegisteredUser = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: '尚未登入，請先登入' });
+  }
+  if (req.user.isVerifiedAdmin || req.user.role === 'admin') {
+    return next();
+  }
+  if (req.user.isTemp === true || !Number.isInteger(req.user.id) || req.user.id <= 0) {
+    return res.status(401).json({ error: '尚未完成會員註冊或身分無效，請先完成註冊' });
+  }
+  next();
 };
 
 export const requireAdmin = async (req, res, next) => {
