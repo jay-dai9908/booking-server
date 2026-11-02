@@ -105,7 +105,9 @@ export const lineCallback = async (req, res) => {
     }
   } catch (error) {
     console.error('Line login error:', error.response?.data || error.message);
-    res.status(500).json({ 
+    const isLineClientError = error.response?.status === 400 || error.response?.data?.error === 'invalid_grant';
+    const statusCode = isLineClientError ? 400 : 500;
+    res.status(statusCode).json({ 
       error: 'LINE 登入驗證失敗，請重新嘗試'
     });
   }

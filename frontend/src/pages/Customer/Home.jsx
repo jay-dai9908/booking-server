@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../api/axios';
 import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
@@ -8,10 +8,13 @@ function Home({ userRole }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [authErrorMsg, setAuthErrorMsg] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const hasProcessedRef = useRef(false);
 
+  // 1. 一般常規訪問（無 OAuth code）：已登入顧客自動導向目標頁面
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
-    if (queryParams.has('code')) return; // Let OAuth callback effect handle redirect
+    if (queryParams.has('code')) return; // 由 OAuth 回調專用 Effect 處理
 
     if (userRole === 'customer') {
       let target = '/booking';
@@ -25,54 +28,123 @@ function Home({ userRole }) {
           target = savedRedirect;
         }
       } catch (e) {}
-      navigate(target);
+      navigate(target, { replace: true });
     } else if (userRole === 'temp_customer') {
-      navigate('/register');
+      navigate('/register', { replace: true });
     }
   }, [userRole, navigate, location.search]);
 
-  const isProcessing = React.useRef(false);
-
-  // Handle LINE OAuth Callback
+  // 2. 處理 LINE OAuth Callback (/?code=...&state=...)
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
     const code = queryParams.get('code');
     const oauthState = queryParams.get('state') || '';
 
-    if (code && !isProcessing.current) {
-      isProcessing.current = true;
+    if (!code) {
+      return;
+    }
 
-      // 嚴格校驗 state 是否與本地發起時一致且未逾期
-      const verifyResult = verifyAndConsumeLineOAuthState(oauthState);
-      if (!verifyResult.valid) {
-        window.history.replaceState({}, document.title, window.location.pathname);
-        setAuthErrorMsg(verifyResult.error || '登入狀態驗證失效，請重新嘗試登入。');
-        isProcessing.current = false;
-        return;
+    // 若使用者已確定為登入狀態 (customer)，直接導向目標頁面，不重複呼叫 callback API
+    if (userRole === 'customer') {
+      let target = '/booking';
+      try {
+        const savedRedirect =
+          sessionStorage.getItem('shiguang_post_login_redirect') ||
+          localStorage.getItem('shiguang_post_login_redirect');
+        if (savedRedirect) {
+          sessionStorage.removeItem('shiguang_post_login_redirect');
+          localStorage.removeItem('shiguang_post_login_redirect');
+          target = savedRedirect;
+        }
+      } catch (e) {}
+      navigate(target, { replace: true });
+      return;
+    }
+
+    if (userRole === 'temp_customer') {
+      navigate('/register', { replace: true });
+      return;
+    }
+
+    // 防止 React StrictMode 在開發環境下觸發兩次
+    if (hasProcessedRef.current) return;
+    hasProcessedRef.current = true;
+    setIsProcessing(true);
+    setAuthErrorMsg('');
+
+    // 15 秒處理逾時保護計時器
+    const timeoutTimer = setTimeout(() => {
+      console.warn('[Home] LINE login handling timed out after 15s');
+      navigate(location.pathname, { replace: true });
+      setIsProcessing(false);
+      setAuthErrorMsg('登入處理逾時，請重新登入。');
+    }, 15000);
+
+    const cleanupAndStopProcessing = (errorMsg) => {
+      clearTimeout(timeoutTimer);
+      // 清除網址上的 code 與 state
+      navigate(location.pathname, { replace: true });
+      setIsProcessing(false);
+      if (errorMsg) {
+        setAuthErrorMsg(errorMsg);
       }
+    };
 
-      const isPreorderLogin = oauthState.startsWith('preorder_') || verifyResult.returnPath === '/preorder';
-      if (isPreorderLogin) {
+    // 校驗 state
+    const verifyResult = verifyAndConsumeLineOAuthState(oauthState);
+    if (verifyResult.status === 'mismatch') {
+      cleanupAndStopProcessing('登入驗證失敗，請重新登入。');
+      return;
+    }
+
+    const isPreorderLogin = oauthState.startsWith('preorder_') || verifyResult.returnPath === '/preorder';
+    if (isPreorderLogin) {
+      try {
+        sessionStorage.setItem('shiguang_post_login_redirect', '/preorder');
+        localStorage.setItem('shiguang_post_login_redirect', '/preorder');
+      } catch (e) {}
+    }
+
+    // 發送授權碼至後端進行憑證交換
+    getBrowserClientInfoAsync()
+      .then(clientInfo => api.post('/auth/line/callback', { code, clientInfo }))
+      .then(res => {
+        clearTimeout(timeoutTimer);
         try {
-          sessionStorage.setItem('shiguang_post_login_redirect', '/preorder');
-          localStorage.setItem('shiguang_post_login_redirect', '/preorder');
+          sessionStorage.setItem('shiguang_line_fresh_login', '1');
+          if (res.data?.token) {
+            sessionStorage.setItem('shiguang_auth_token', res.data.token);
+          }
         } catch (e) {}
-      }
-      
-      // 立即清除 URL 上的 code 避免 React StrictMode 觸發兩次
-      window.history.replaceState({}, document.title, window.location.pathname);
-      getBrowserClientInfoAsync()
-        .then(clientInfo => api.post('/auth/line/callback', { code, clientInfo }))
-        .then(res => {
+
+        if (res.data?.isNewUser) {
+          window.location.href = '/register';
+        } else {
+          let target = verifyResult.returnPath || (isPreorderLogin ? '/preorder' : '/booking');
           try {
-            sessionStorage.setItem('shiguang_line_fresh_login', '1');
-            if (res.data?.token) {
-              sessionStorage.setItem('shiguang_auth_token', res.data.token);
+            const savedRedirect =
+              sessionStorage.getItem('shiguang_post_login_redirect') ||
+              localStorage.getItem('shiguang_post_login_redirect');
+            if (savedRedirect) {
+              sessionStorage.removeItem('shiguang_post_login_redirect');
+              localStorage.removeItem('shiguang_post_login_redirect');
+              target = savedRedirect;
             }
           } catch (e) {}
-          if (res.data.isNewUser) {
-            window.location.href = '/register'; // Full reload to update App state
-          } else {
+          window.location.href = target;
+        }
+      })
+      .catch(async (err) => {
+        console.error('[Home] LINE callback error, checking /auth/me insurance...', err);
+
+        // 保險機制：若 callback 失敗（例如授權碼已使用但本地已有有效 token），先呼叫一次 /auth/me 確認是否已登入
+        try {
+          const freshSession = sessionStorage.getItem('shiguang_line_fresh_login') === '1' ? '1' : '0';
+          const meRes = await api.get('/auth/me', {
+            params: { fresh_session: freshSession }
+          });
+          if (meRes.data?.role === 'customer') {
+            clearTimeout(timeoutTimer);
             let target = verifyResult.returnPath || (isPreorderLogin ? '/preorder' : '/booking');
             try {
               const savedRedirect =
@@ -85,35 +157,41 @@ function Home({ userRole }) {
               }
             } catch (e) {}
             window.location.href = target;
+            return;
+          } else if (meRes.data?.role === 'temp_customer') {
+            clearTimeout(timeoutTimer);
+            window.location.href = '/register';
+            return;
           }
-        })
-        .catch(err => {
-          console.error(err);
-          // 優先顯示 backend 傳來的 details (即 LINE API 原始錯誤)，若無再顯示 error
-          const details = err.response?.data?.details;
-          let errorMsg = err.response?.data?.error || err.message;
-          if (details && details.error_description) {
-            errorMsg = details.error_description;
-          } else if (details && details.message) {
-            errorMsg = details.message;
-          } else if (typeof details === 'string') {
-            errorMsg = details;
-          } else if (details) {
-            errorMsg = JSON.stringify(details);
-          }
-          setAuthErrorMsg(`登入失敗，請重試。\n錯誤原因: ${errorMsg}`);
-          isProcessing.current = false;
-        });
-    }
-  }, [location]);
+        } catch (meErr) {
+          // 未登入或 /auth/me 失敗
+        }
+
+        const details = err.response?.data?.details;
+        let errorMsg = err.response?.data?.error || err.message || '登入失敗，請重試。';
+        if (details && details.error_description) {
+          errorMsg = details.error_description;
+        } else if (details && details.message) {
+          errorMsg = details.message;
+        } else if (typeof details === 'string') {
+          errorMsg = details;
+        }
+        cleanupAndStopProcessing(`登入失敗，請重試。\n錯誤原因: ${errorMsg}`);
+      });
+
+    return () => {
+      clearTimeout(timeoutTimer);
+    };
+  }, [userRole, location.search, location.pathname, navigate]);
 
   const initiateLineLogin = () => {
+    hasProcessedRef.current = false;
     setAuthErrorMsg('');
     initiateLineOAuth({ returnPath: '/booking' });
   };
 
-  const isHandlingCallback = new URLSearchParams(location.search).has('code');
-  const showLoading = isHandlingCallback || isProcessing.current;
+  const hasCodeInUrl = new URLSearchParams(location.search).has('code');
+  const showLoading = isProcessing || (hasCodeInUrl && !authErrorMsg && userRole !== 'customer');
 
   if (showLoading) {
     return (
