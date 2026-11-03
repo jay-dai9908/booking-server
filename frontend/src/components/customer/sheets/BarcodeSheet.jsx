@@ -92,10 +92,10 @@ export default function BarcodeSheet({
         <Button
           variant="secondary"
           size="sm"
+          icon={<Copy className="w-4 h-4" />}
           onClick={handleCopy}
           className="w-full"
         >
-          <Copy className="w-4 h-4 mr-1" />
           {copyBtnText}
         </Button>
       </div>

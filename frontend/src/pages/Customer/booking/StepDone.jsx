@@ -103,10 +103,10 @@ export default function StepDone({ result }) {
             <Button
               variant="text"
               size="sm"
+              icon={<Copy className="w-4 h-4" />}
               onClick={handleCopyRef}
               className="text-sg-brown"
             >
-              <Copy className="w-4 h-4 mr-1" />
               複製
             </Button>
           </div>
@@ -144,10 +144,10 @@ export default function StepDone({ result }) {
         <Button
           variant="primary"
           size="md"
+          icon={<QrCode className="w-5 h-5" />}
           onClick={() => setShowBarcode(true)}
           className="w-full"
         >
-          <QrCode className="w-5 h-5 mr-1" />
           查看到店條碼
         </Button>
         <Button

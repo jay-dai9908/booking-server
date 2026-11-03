@@ -38,6 +38,7 @@ import {
   formatShortRef,
   formatPhone,
 } from '../../utils/customer/format';
+import { shortBoardName } from '../../utils/customer/pricing';
 
 const QUICK_TAGS = ['第一次玩', '有小孩同行', '生日慶祝', '希望坐一起'];
 
@@ -47,6 +48,26 @@ function parseReservationDate(datePart) {
   const clean = String(datePart).split('T')[0];
   const parts = clean.split('-').map(Number);
   return [parts[0] || new Date().getFullYear(), parts[1] || 1, parts[2] || 1];
+}
+
+function formatBoardTimeRange(e, resStartTime) {
+  let startT = '';
+  let endT = '';
+  if (Array.isArray(e.covered_sessions) && e.covered_sessions.length > 0) {
+    const firstCovered = e.covered_sessions[0];
+    const lastCovered = e.covered_sessions[e.covered_sessions.length - 1];
+    startT = firstCovered.includes('-') ? firstCovered.split('-')[0] : firstCovered;
+    endT = lastCovered.includes('-') ? lastCovered.split('-')[1] : lastCovered;
+  } else if (resStartTime && e.rental_hours) {
+    const [sh, sm] = resStartTime.split(':').map(Number);
+    startT = resStartTime;
+    const eh = sh + (e.rental_hours || 0);
+    endT = `${String(eh).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}`;
+  }
+  if (startT && endT) {
+    return `${startT} 到 ${endT}`;
+  }
+  return e.rental_hours ? `${e.rental_hours} 小時` : '';
 }
 
 // Pill status helper for reservations (Section 6.13)
@@ -461,19 +482,11 @@ export default function HistoryPage() {
                     {boards
                       .filter((e) => e.equipment_id !== 'bring_own')
                       .map((e, idx) => {
-                        const name = (e.equipment_name_snapshot || e.name || '智能板').replace(/\s*[（(][^)）]*[)）]\s*/g, '').trim();
-                        let span = `${e.rental_hours} 小時`;
-                        if (Array.isArray(e.covered_sessions) && e.covered_sessions.length > 0) {
-                          const [sh, sm] = (e.covered_sessions[0] || '12:00').split(':').map(Number);
-                          const eh = sh + (e.rental_hours || e.covered_sessions.length);
-                          const endT = `${String(eh).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}`;
-                          if (e.covered_sessions[0] !== r.start_time || endT !== r.end_time) {
-                            span = `${e.covered_sessions[0]} 到 ${endT}`;
-                          }
-                        }
+                        const name = shortBoardName(e.equipment_name_snapshot || e.name || '智能板');
+                        const timeSpan = formatBoardTimeRange(e, r.start_time || r.session?.start_time);
                         return (
                           <div key={idx}>
-                            {name} ×{e.quantity || 1}（{span}）
+                            {name} ×{e.quantity || 1}（{timeSpan}）
                           </div>
                         );
                       })}
@@ -493,10 +506,10 @@ export default function HistoryPage() {
                 <Button
                   variant="text"
                   size="sm"
+                  icon={<Pencil className="w-[15px] h-[15px]" />}
                   onClick={() => setEditingNote(true)}
                   className="text-sg-brown"
                 >
-                  <Pencil className="w-[15px] h-[15px] mr-1" />
                   編輯
                 </Button>
               )}
@@ -574,10 +587,10 @@ export default function HistoryPage() {
             <Button
               variant="secondary"
               size="sm"
+              icon={<Grid className="w-4 h-4" />}
               onClick={() => setActiveAddonRes(r)}
               className="w-full"
             >
-              <Grid className="w-4 h-4 mr-1" />
               {hasBoards ? '修改智能拼豆板' : '加租智能拼豆板'}
             </Button>
           )}
@@ -778,14 +791,24 @@ export default function HistoryPage() {
                           <div className="text-[13px] flex-1 text-sg-ink">
                             {!hasBoards ? (
                               '尚未加租智能拼豆板'
-                            ) : (
-                              <span>
-                                {boards
-                                  .filter((e) => e.equipment_id !== 'bring_own')
-                                  .map((e) => `${e.name || '智能板'} ×${e.quantity} · ${e.rental_hours} 小時`)
-                                  .join('、')}
-                              </span>
-                            )}
+                            ) : (() => {
+                              const filteredBoards = boards.filter((e) => e.equipment_id !== 'bring_own');
+                              const totalCount = filteredBoards.reduce((sum, e) => sum + (e.quantity || 1), 0);
+                              if (totalCount >= 3) {
+                                return <span>智能板 {totalCount} 台</span>;
+                              }
+                              return (
+                                <span>
+                                  {filteredBoards
+                                    .map((e) => {
+                                      const name = shortBoardName(e.equipment_name_snapshot || e.name || '智能板');
+                                      const timeSpan = formatBoardTimeRange(e, r.start_time || r.session?.start_time);
+                                      return `${name} ×${e.quantity || 1} · ${timeSpan}`;
+                                    })
+                                    .join('、')}
+                                </span>
+                              );
+                            })()}
                           </div>
                           <Button
                             variant="text"
@@ -802,6 +825,7 @@ export default function HistoryPage() {
                       <Button
                         variant={isNearest ? 'primary' : 'secondary'}
                         size="sm"
+                        icon={<QrCode className="w-4 h-4" />}
                         onClick={() =>
                           setActiveBarcodeData({
                             ref: r.booking_ref,
@@ -810,7 +834,6 @@ export default function HistoryPage() {
                         }
                         className="w-full mt-1"
                       >
-                        <QrCode className="w-4 h-4 mr-1" />
                         出示到店條碼
                       </Button>
                     </Card>
@@ -960,10 +983,10 @@ export default function HistoryPage() {
                           <Button
                             variant="text"
                             size="sm"
+                            icon={<Copy className="w-4 h-4" />}
                             onClick={() => handleCopyAccount(assignedAccount)}
                             className="text-sg-brown font-bold"
                           >
-                            <Copy className="w-4 h-4 mr-1" />
                             複製
                           </Button>
                         </div>
@@ -1014,10 +1037,10 @@ export default function HistoryPage() {
                           <Button
                             variant="secondary"
                             size="sm"
+                            icon={<MessageCircle className="w-4 h-4" />}
                             onClick={() => window.open(globalSettings.official_line_url, '_blank')}
                             className="w-full mt-1"
                           >
-                            <MessageCircle className="w-4 h-4 mr-1" />
                             傳 LINE 給我們對帳
                           </Button>
                         )}

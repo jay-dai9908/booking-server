@@ -78,7 +78,7 @@ export default function Button({
         <>
           {variant === 'line' && !icon && <LineIcon className="w-5 h-5 shrink-0" />}
           {icon && <span className="shrink-0">{icon}</span>}
-          <span>{children}</span>
+          <span className="inline-flex items-center gap-2">{children}</span>
         </>
       )}
     </button>

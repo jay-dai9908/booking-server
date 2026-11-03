@@ -483,10 +483,10 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                     <Button
                       variant="text"
                       size="sm"
+                      icon={<Copy className="w-4 h-4" />}
                       onClick={() => handleCopyAccount(assignedAccount)}
                       className="text-sg-brown font-bold"
                     >
-                      <Copy className="w-4 h-4 mr-1" />
                       複製
                     </Button>
                   </div>
@@ -540,10 +540,10 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
               <Button
                 variant="secondary"
                 size="sm"
+                icon={<MessageCircle className="w-4 h-4" />}
                 onClick={() => window.open(globalSettings.official_line_url, '_blank')}
                 className="w-full"
               >
-                <MessageCircle className="w-4 h-4 mr-1" />
                 傳 LINE 給我們對帳
               </Button>
             )}
