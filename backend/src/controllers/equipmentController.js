@@ -914,5 +914,4 @@ export const modifyBookingEquipment = async (req, res) => {
     }
     res.status(500).json({ error: '更新智能拼豆板失敗' });
   }
-  }
 };
