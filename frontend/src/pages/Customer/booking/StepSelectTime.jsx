@@ -63,6 +63,13 @@ export default function StepSelectTime({
     }
   }, [date]);
 
+  // Pricing values
+  const hourly = dayPricing?.hourly ?? 100;
+  const cap = dayPricing?.cap ?? 550;
+  const allowUnlimited = dayPricing?.allowUnlimited ?? true;
+  const dayType = dayPricing?.dayType ?? 'weekday';
+  const N = useMemo(() => unlimitedThresholdHours({ hourly, cap }), [hourly, cap]);
+
   // If selected date does not allow unlimited mode, fallback to timed
   useEffect(() => {
     if (!allowUnlimited && mode === 'unlimited') {
@@ -70,13 +77,6 @@ export default function StepSelectTime({
       toast.show('這天不開放當日不限時暢玩，已改成計時', { type: 'info' });
     }
   }, [allowUnlimited, mode, onChangeMode, toast]);
-
-  // Pricing values
-  const hourly = dayPricing?.hourly ?? 100;
-  const cap = dayPricing?.cap ?? 550;
-  const allowUnlimited = dayPricing?.allowUnlimited ?? true;
-  const dayType = dayPricing?.dayType ?? 'weekday';
-  const N = useMemo(() => unlimitedThresholdHours({ hourly, cap }), [hourly, cap]);
 
   // Today string
   const todayStr = useMemo(() => {
