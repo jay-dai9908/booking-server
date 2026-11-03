@@ -70,10 +70,7 @@ export default function StepPeopleAddons({
   }, [equipmentConfigs]);
 
   const isBoardVisible = (eq) => {
-    const eqId = eq.equipment_id || eq.id;
-    if (eqId === 'bring_own') return true;
-    if (eq.visibility_status) return eq.visibility_status !== 'HIDDEN';
-    return eq.is_active !== false && eq.status !== 'HIDDEN';
+    return eq.visibility_status !== 'HIDDEN';
   };
 
   const sortedEquipmentConfigs = useMemo(() => {
@@ -307,7 +304,7 @@ export default function StepPeopleAddons({
           <div className="grid gap-3">
             {sortedEquipmentConfigs.map((eq, idx) => {
               const eqId = eq.equipment_id || eq.id;
-              const isMaintenance = eq.visibility_status === 'MAINTENANCE' || eq.status === 'MAINTENANCE';
+              const isMaintenance = eq.visibility_status === 'MAINTENANCE';
               const maintenanceNote = eq.status_note
                 ? eq.status_note.replace(/^[\p{Extended_Pictographic}️\s]+/u, '')
                 : '維護中，暫停借用';

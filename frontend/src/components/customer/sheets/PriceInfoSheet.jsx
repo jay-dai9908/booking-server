@@ -47,10 +47,7 @@ export default function PriceInfoSheet({
 
   // Active boards (excluding bring_own)
   const isBoardActive = (b) => {
-    const id = b.id || b.equipment_id;
-    if (id === 'bring_own') return false;
-    if (b.visibility_status) return b.visibility_status === 'ACTIVE';
-    return b.is_active !== false && b.status !== 'HIDDEN';
+    return b.visibility_status === 'ACTIVE' && b.id !== 'bring_own';
   };
 
   const activeBoards = (effectiveConfigs || [])

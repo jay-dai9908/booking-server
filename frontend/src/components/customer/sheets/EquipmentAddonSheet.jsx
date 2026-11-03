@@ -183,12 +183,7 @@ export default function EquipmentAddonSheet({
 
   const sortedConfigs = useMemo(() => {
     return [...configs]
-      .filter((eq) => {
-        const eqId = eq.equipment_id || eq.id;
-        if (eqId === 'bring_own') return true;
-        if (eq.visibility_status) return eq.visibility_status !== 'HIDDEN';
-        return eq.is_active !== false && eq.status !== 'HIDDEN';
-      })
+      .filter((eq) => eq.visibility_status !== 'HIDDEN')
       .sort((a, b) => {
         const aId = a.equipment_id || a.id;
         const bId = b.equipment_id || b.id;
@@ -431,7 +426,7 @@ export default function EquipmentAddonSheet({
             <div className="grid gap-3">
               {sortedConfigs.map((eq) => {
                 const eqId = eq.equipment_id || eq.id;
-                const isMaintenance = eq.visibility_status === 'MAINTENANCE' || eq.status === 'MAINTENANCE';
+                const isMaintenance = eq.visibility_status === 'MAINTENANCE';
                 const maintenanceNote = eq.status_note
                   ? eq.status_note.replace(/^[\p{Extended_Pictographic}️\s]+/u, '')
                   : '維護中，暫停借用';

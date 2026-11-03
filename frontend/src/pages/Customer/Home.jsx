@@ -38,6 +38,7 @@ export default function Home({ userRole }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPriceInfoOpen, setIsPriceInfoOpen] = useState(false);
   const [equipmentConfigs, setEquipmentConfigs] = useState([]);
+  const [equipmentsLoaded, setEquipmentsLoaded] = useState(false);
   const hasProcessedRef = useRef(false);
 
   const todayStr = useMemo(() => getTodayString(), []);
@@ -219,7 +220,10 @@ export default function Home({ userRole }) {
       .then((res) => {
         setEquipmentConfigs(res.data?.equipments || []);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        setEquipmentsLoaded(true);
+      });
   }, [todayStr]);
 
   const initiateLineLogin = () => {
@@ -253,7 +257,7 @@ export default function Home({ userRole }) {
 
   // Min hourly rate for smart boards if discount disabled
   const minBoardRate = useMemo(() => {
-    const active = equipmentConfigs.filter((e) => e.is_active && e.equipment_id !== 'bring_own');
+    const active = equipmentConfigs.filter((e) => e.visibility_status === 'ACTIVE' && e.id !== 'bring_own');
     if (!active.length) return null;
     return Math.min(...active.map((e) => e.hourly_rate));
   }, [equipmentConfigs]);
@@ -268,8 +272,11 @@ export default function Home({ userRole }) {
     if (minBoardRate != null) {
       return `每小時 ${formatMoney(minBoardRate)} 起`;
     }
-    return <Skeleton className="h-4 w-28 rounded inline-block" />;
-  }, [hasPricing, discountTexts, minBoardRate]);
+    if (!equipmentsLoaded) {
+      return <Skeleton className="h-4 w-28 rounded inline-block" />;
+    }
+    return null;
+  }, [hasPricing, discountTexts, minBoardRate, equipmentsLoaded]);
 
   // 6.2 登入處理中
   if (showLoading) {
@@ -349,9 +356,11 @@ export default function Home({ userRole }) {
                 <div className="text-[14px] font-bold text-sg-ink">
                   智能拼豆板可加租
                 </div>
-                <div className="sg-small">
-                  {smartBoardSubtext}
-                </div>
+                {smartBoardSubtext && (
+                  <div className="sg-small">
+                    {smartBoardSubtext}
+                  </div>
+                )}
               </div>
             </div>
           </Card>
