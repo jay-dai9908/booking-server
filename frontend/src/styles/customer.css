@@ -1,0 +1,102 @@
+/* 拾光製所 顧客端樣式 */
+
+.sg-peg {
+  background-image: radial-gradient(circle, rgba(139, 91, 67, 0.16) 1.2px, transparent 1.7px);
+  background-size: 12px 12px;
+}
+
+.sg-small {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6F645B;
+}
+
+.sg-bead {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  width: var(--sg-bead-size, 10px);
+  height: var(--sg-bead-size, 10px);
+  border: var(--sg-bead-bw, 3px) solid var(--sg-bead-color, #C9BFB4);
+  background: transparent;
+}
+
+.sg-bead-empty {
+  --sg-bead-color: #E6DDD2;
+}
+
+.sg-range {
+  position: relative;
+  height: 26px;
+  margin: 2px 11px 0;
+  touch-action: none;
+}
+
+.sg-range-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 11px;
+  height: 4px;
+  border-radius: 2px;
+  background: #E6DDD2;
+}
+
+.sg-range-fill {
+  position: absolute;
+  top: 9px;
+  height: 8px;
+  border-radius: 4px;
+  background: #8B5B43;
+}
+
+.sg-range-handle {
+  position: absolute;
+  top: 2px;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  background: #FFFDF9;
+  border: 6px solid #8B5B43;
+  box-shadow: 0 1px 4px rgba(62, 51, 43, 0.25);
+}
+
+.sg-range-handle::before {
+  content: "";
+  position: absolute;
+  inset: -11px;
+}
+
+.sg-ticks {
+  position: relative;
+  height: 14px;
+  margin: 0 11px;
+}
+
+.sg-ticks span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: Nunito, "Noto Sans TC", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  color: #C9BFB4;
+}
+
+.sg-ticks span.sg-tick-in {
+  color: #3E332B;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sg-bead,
+  .animate-bead-bounce,
+  .animate-sheet-up,
+  .animate-fade-in {
+    animation: none !important;
+    transition: none !important;
+  }
+}
