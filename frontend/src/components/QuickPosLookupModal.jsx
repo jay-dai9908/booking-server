@@ -16,7 +16,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
-import { formatBookingRef } from './CustomerReservationDetailsModal';
+import { formatBookingRef } from '../utils/customer/format';
 
 export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) {
   const navigate = useNavigate();
