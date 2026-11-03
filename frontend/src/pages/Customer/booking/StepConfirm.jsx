@@ -321,7 +321,7 @@ export default function StepConfirm({
       </div>
 
       {/* 5. Bottom bar */}
-      <div className="sticky bottom-0 z-40">
+      <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
         <BottomActionBar
           summary={summaryNode}
           price={priceCalculation.total}

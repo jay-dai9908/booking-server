@@ -391,7 +391,7 @@ export default function StepPeopleAddons({
       )}
 
       {/* Bottom bar */}
-      <div className="sticky bottom-0 z-40">
+      <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
         <BottomActionBar
           summary={actionSummary}
           price={totalPrice}

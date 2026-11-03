@@ -447,7 +447,7 @@ export default function StepSelectTime({
 
       {/* Bottom bar & Bottom tabs */}
       {(canProceed || userRole === 'customer') && (
-        <div className="sticky bottom-0 z-40">
+        <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
           {canProceed && (
             <BottomActionBar
               summary={actionSummary}
