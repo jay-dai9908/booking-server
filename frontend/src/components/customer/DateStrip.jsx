@@ -81,6 +81,8 @@ const DateStrip = React.forwardRef(function DateStrip({
   return (
     <div
       ref={containerRef}
+      role="region"
+      aria-label="選擇日期"
       onScroll={handleScroll}
       className={`flex gap-[6px] overflow-x-auto overscroll-x-contain snap-x snap-mandatory -mr-4 pr-4 min-h-[58px] flex-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(90deg,#000_82%,transparent)] [-webkit-mask-image:linear-gradient(90deg,#000_82%,transparent)] ${className}`}
     >
