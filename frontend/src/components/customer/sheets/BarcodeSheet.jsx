@@ -13,13 +13,20 @@ import { formatBookingRef } from '../../../utils/customer/format';
 export default function BarcodeSheet({
   isOpen,
   onClose,
-  bookingRef = '',
-  summaryText = '',
-  isPass = false,
-  passCode = '',
-  passName = '',
+  data,
+  bookingRef: bookingRefProp = '',
+  summaryText: summaryTextProp = '',
+  isPass: isPassProp = false,
+  passCode: passCodeProp = '',
+  passName: passNameProp = '',
 }) {
   const toast = useToast();
+
+  const bookingRef = data?.ref || data?.bookingRef || bookingRefProp;
+  const summaryText = data?.summary || data?.summaryText || summaryTextProp;
+  const isPass = data?.isPass !== undefined ? data.isPass : isPassProp;
+  const passCode = data?.passCode || passCodeProp;
+  const passName = data?.passName || passNameProp;
 
   const rawCode = isPass ? passCode : bookingRef;
   const formattedCode = isPass ? passCode : formatBookingRef(bookingRef);

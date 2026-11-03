@@ -5,7 +5,7 @@ import { Card, Divider } from '../../../components/customer/Card';
 import Button from '../../../components/customer/Button';
 import BarcodeSheet from '../../../components/customer/sheets/BarcodeSheet';
 import { useToast } from '../../../components/customer/Toast';
-import { formatBookingRef, formatDateShort, weekdayChar } from '../../../utils/customer/format';
+import { formatBookingRef, formatDateShort, weekdayChar, formatYMD } from '../../../utils/customer/format';
 import { getGoogleCalendarUrl, downloadIcsFile } from '../../../utils/calendarHelper';
 
 export default function StepDone({ result }) {
@@ -35,7 +35,7 @@ export default function StepDone({ result }) {
     .join('、');
 
   // Formatted date string
-  const cleanDateStr = String(dateStr).split('T')[0];
+  const cleanDateStr = formatYMD(dateStr);
   const dateParts = cleanDateStr ? cleanDateStr.split('-') : [];
   const monthDay = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : '';
   const weekday = cleanDateStr ? `週${weekdayChar(cleanDateStr)}` : '';

@@ -8,26 +8,30 @@ export default function Stepper({
   onChange,
   onMinus,
   onPlus,
+  disabledMinus,
+  disabledPlus,
   emphasis = false,
   label = '數量',
   className = '',
 }) {
-  const canMinus = value > min;
-  const canPlus = value < max;
+  const numericValue = Number(value) || 0;
+  const canMinus = (disabledMinus !== undefined ? !disabledMinus : true) && numericValue > min;
+  const canPlus = (disabledPlus !== undefined ? !disabledPlus : true) && numericValue < max;
 
   const handleMinus = () => {
     if (canMinus) {
       if (onMinus) onMinus();
-      else onChange?.(value - 1);
+      else onChange?.(numericValue - 1);
     }
   };
 
   const handlePlus = () => {
     if (canPlus) {
       if (onPlus) onPlus();
-      else onChange?.(value + 1);
+      else onChange?.(numericValue + 1);
     }
   };
+
 
   return (
     <div className={`flex items-center gap-[6px] select-none ${className}`}>

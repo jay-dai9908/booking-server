@@ -9,7 +9,7 @@ import { ErrorBanner, SoftBox } from '../Banners';
 import Bead, { BeadLoader } from '../Bead';
 import { useToast } from '../Toast';
 import api from '../../../api/axios';
-import { formatMoney, formatMinus, formatDateShort, formatBookingRef } from '../../../utils/customer/format';
+import { formatMoney, formatMinus, formatDateShort, formatBookingRef, formatYMD } from '../../../utils/customer/format';
 import {
   buildDiscountConfig,
   shortBoardName,
@@ -114,12 +114,13 @@ export default function EquipmentAddonSheet({
     setLoading(true);
     setErrorMessage('');
 
-    const dateStr = String(reservation.session_date || reservation.session?.session_date || '').split('T')[0];
+    const dateStr = formatYMD(reservation.session_date || reservation.session?.session_date);
     const sessionStarts = hourStartTimes.join(',');
     const url = `/equipment/availability?date=${dateStr}&sessions=${sessionStarts}&per_session=1&exclude_booking_ref=${reservation.booking_ref}`;
 
     api.get(url)
       .then((res) => {
+        const data = res.data || {};
         const equipments = data.equipments || [];
         setConfigs(equipments);
         setAvailBySession(Object.fromEntries(equipments.map((e) => [e.id || e.equipment_id, e.available_by_session || {}])));
@@ -141,7 +142,13 @@ export default function EquipmentAddonSheet({
               to = Math.min(H, from + e.covered_sessions.length);
             }
           } else if (e.rental_hours) {
-            to = Math.min(H, e.rental_hours);
+            let startIdx = 0;
+            if (e.start_time) {
+              const foundIdx = hourStartTimes.indexOf(e.start_time);
+              if (foundIdx >= 0) startIdx = foundIdx;
+            }
+            from = startIdx;
+            to = Math.min(H, from + e.rental_hours);
           }
 
           for (let i = 0; i < e.quantity; i++) {
@@ -403,7 +410,7 @@ export default function EquipmentAddonSheet({
 
   return (
     <BottomSheet isOpen={isOpen} onClose={handleClose} title={sheetTitle}>
-      <div className="grid gap-3">
+      <div className="grid gap-3 min-w-0">
         <div className="sg-small -mt-1">{subTitle}</div>
 
         {isLockedForReduction && (

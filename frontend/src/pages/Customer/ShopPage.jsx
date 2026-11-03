@@ -94,7 +94,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
   // Checkout form state
   const [deliveryMethod, setDeliveryMethod] = useState('store_pickup'); // 'store_pickup' | 'delivery'
   const [shippingAddress, setShippingAddress] = useState({ name: '', phone: '', address: '' });
-  const [selectedPaymentCode, setSelectedPaymentCode] = useState('ctbc_pool');
+  const [selectedPaymentCode, setSelectedPaymentCode] = useState('');
   const [selectedBankInfo, setSelectedBankInfo] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -321,7 +321,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
   }, [products, cart, bundleProduct, beadsProduct, beadColorSelections]);
 
   // Shipping fee
-  const shippingFee = deliveryMethod === 'delivery' ? 60 : 0;
+  const shippingFee = deliveryMethod === 'delivery' ? (globalSettings?.shop_shipping_fee ?? 60) : 0;
   const finalTotalAmount = totalAmount + shippingFee;
   const finalDepositAmount = depositTotal + (deliveryMethod === 'delivery' ? shippingFee : 0);
 
@@ -345,6 +345,13 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
 
   // Submit Order
   const handleSubmitOrder = async () => {
+    if (deliveryMethod === 'delivery') {
+      if (!shippingAddress.name?.trim() || !shippingAddress.phone?.trim() || !shippingAddress.address?.trim()) {
+        toast.show('請填寫完整宅配收件人資訊', { type: 'error' });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       const beadEntries = Object.entries(beadColorSelections)
@@ -663,7 +670,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                     }`}
                   >
                     <b className="block text-[13px] text-sg-ink">宅配</b>
-                    <span className="text-[12px] text-sg-muted">+ NT$60</span>
+                    <span className="text-[12px] text-sg-muted">+ NT${globalSettings?.shop_shipping_fee ?? 60}</span>
                   </button>
                 </div>
 
@@ -784,7 +791,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                                     : 'border-sg-line'
                                 }`}
                               />
-                              <span>{b.bank_name} ({b.bank_code})</span>
+                              <span>{b.bank_name} ({b.bank_code}) {b.account}</span>
                             </label>
                           );
                         })}

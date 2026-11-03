@@ -15,7 +15,7 @@ export default function SplitSeatSheet({
 }) {
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title="同行的人可能會分開坐">
-      <div className="grid gap-3">
+      <div className="grid gap-3 min-w-0">
         <p className="text-[14px] leading-[1.5] text-sg-ink">
           這段時間已經沒有相鄰的座位，同行的人會由現場人員安排分開入座。
         </p>

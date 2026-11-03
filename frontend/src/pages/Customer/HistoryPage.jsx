@@ -37,17 +37,18 @@ import {
   formatBookingRef,
   formatShortRef,
   formatPhone,
+  formatYMD,
+  toDateObj,
 } from '../../utils/customer/format';
 import { shortBoardName } from '../../utils/customer/pricing';
 
 const QUICK_TAGS = ['第一次玩', '有小孩同行', '生日慶祝', '希望坐一起'];
 
-// Helper to parse datePart safely handling ISO strings (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ)
+// Helper to parse datePart safely handling ISO strings and Date objects
 function parseReservationDate(datePart) {
   if (!datePart) return [new Date().getFullYear(), 1, 1];
-  const clean = String(datePart).split('T')[0];
-  const parts = clean.split('-').map(Number);
-  return [parts[0] || new Date().getFullYear(), parts[1] || 1, parts[2] || 1];
+  const d = toDateObj(datePart);
+  return [d.getFullYear(), d.getMonth() + 1, d.getDate()];
 }
 
 function formatBoardTimeRange(e, resStartTime) {
@@ -58,9 +59,10 @@ function formatBoardTimeRange(e, resStartTime) {
     const lastCovered = e.covered_sessions[e.covered_sessions.length - 1];
     startT = firstCovered.includes('-') ? firstCovered.split('-')[0] : firstCovered;
     endT = lastCovered.includes('-') ? lastCovered.split('-')[1] : lastCovered;
-  } else if (resStartTime && e.rental_hours) {
-    const [sh, sm] = resStartTime.split(':').map(Number);
-    startT = resStartTime;
+  } else if ((e.start_time || resStartTime) && e.rental_hours) {
+    const baseStart = e.start_time || resStartTime;
+    const [sh, sm] = baseStart.split(':').map(Number);
+    startT = baseStart;
     const eh = sh + (e.rental_hours || 0);
     endT = `${String(eh).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}`;
   }
@@ -429,7 +431,7 @@ export default function HistoryPage() {
   if (detailRef && currentDetailRes) {
     const r = currentDetailRes;
     const pill = getReservationStatusPill(r);
-    const cleanDateStr = String(r.session_date).split('T')[0];
+    const cleanDateStr = formatYMD(r.session_date || r.session?.session_date);
     const dateParts = cleanDateStr ? cleanDateStr.split('-') : [];
     const monthDay = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : cleanDateStr;
     const weekday = cleanDateStr ? `週${weekdayChar(cleanDateStr)}` : '';
@@ -740,17 +742,18 @@ export default function HistoryPage() {
                 {/* Upcoming bookings */}
                 {upcomingList.map((r, idx) => {
                   const pill = getReservationStatusPill(r);
-                  const cleanResDate = String(r.session_date).split('T')[0];
+                  const cleanResDate = formatYMD(r.session_date || r.session?.session_date);
                   const resParts = cleanResDate ? cleanResDate.split('-') : [];
                   const monthDay = resParts.length === 3 ? `${resParts[1]}/${resParts[2]}` : cleanResDate;
                   const weekday = cleanResDate ? `週${weekdayChar(cleanResDate)}` : '';
+                  const dateShort = formatDateShort(cleanResDate);
                   const timeDesc = `${r.start_time} 到 ${r.end_time} · ${r.pax} 位 · ${formatMoney(r.total_amount)}`;
                   const boards = r.equipments || [];
                   const hasBoards = boards.some((e) => e.equipment_id !== 'bring_own');
 
                   // Check if can add/modify smart board
                   const now = new Date();
-                  const [y, m, d] = parseReservationDate(r.session_date);
+                  const [y, m, d] = parseReservationDate(r.session_date || r.session?.session_date);
                   const [eH, eM] = (r.end_time || '23:59').split(':').map(Number);
                   const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
                   const canAddon = now.getTime() < endDt.getTime() - 120 * 60 * 1000;
@@ -860,7 +863,7 @@ export default function HistoryPage() {
 
                     {filteredPastList.slice(0, pastLimit).map((r) => {
                       const pill = getReservationStatusPill(r);
-                      const cleanPastDate = String(r.session_date).split('T')[0];
+                      const cleanPastDate = formatYMD(r.session_date || r.session?.session_date);
                       const dateShort = formatDateShort(cleanPastDate);
                       const timeDesc = `${r.start_time} 到 ${r.end_time} · ${r.pax} 位`;
 

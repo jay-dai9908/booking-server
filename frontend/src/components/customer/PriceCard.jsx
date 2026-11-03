@@ -12,10 +12,12 @@ export default function PriceCard({
   selectedDateStr: selectedDateStrProp = '',
   selectedDayPricing: selectedDayPricingProp,
   onOpenPriceInfo,
+  onOpenDetail,
   className = '',
   selectedDate,
   dayPricing,
 }) {
+  const handleOpenInfo = onOpenPriceInfo || onOpenDetail;
   const todayStr = todayStrProp || selectedDate || '';
   const todayPricing = todayPricingProp || dayPricing;
   const selectedDateStr = selectedDateStrProp || selectedDate || '';
@@ -49,10 +51,10 @@ export default function PriceCard({
           >
             {dayLabel} · {typeLabel}
           </span>
-          {onOpenPriceInfo && (
+          {handleOpenInfo && (
             <button
               type="button"
-              onClick={onOpenPriceInfo}
+              onClick={handleOpenInfo}
               aria-label="價格說明"
               className="-mr-2 h-11 w-11 grid place-items-center rounded-full text-sg-muted hover:text-sg-ink transition active:scale-[0.98]"
             >

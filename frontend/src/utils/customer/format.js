@@ -91,3 +91,17 @@ export const formatShortRef = (ref) => {
   if (parts.length >= 2) return `${parts[0]}-${parts[1]}`;
   return full;
 };
+
+export function formatYMD(date) {
+  if (!date) return '';
+  if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date)) {
+    return date.slice(0, 10);
+  }
+  const d = toDateObj(date);
+  if (isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+

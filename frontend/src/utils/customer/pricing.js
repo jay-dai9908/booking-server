@@ -1,13 +1,13 @@
 import { calculateEquipmentChargeableHours } from '../equipmentPricing.js';
 import { boardDiscountTexts } from './discountText.js';
+import { toDateObj } from './format.js';
 
 export function parseYMD(dateStr) {
   if (!dateStr) return new Date();
   if (dateStr instanceof Date) return dateStr;
-  const clean = String(dateStr).split('T')[0];
-  const [y, m, d] = clean.split('-').map(Number);
-  return new Date(y, m - 1, d);
+  return toDateObj(dateStr);
 }
+
 
 export function getDayPricing(dateStr, global, daily) {
   const dow = parseYMD(dateStr).getDay();

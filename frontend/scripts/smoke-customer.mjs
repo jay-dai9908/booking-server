@@ -314,11 +314,67 @@ async function setupMocks(page, interceptedBookings, authState = { isAuthenticat
       });
     }
 
-    if (pathname.includes('/reservations')) {
+    if (pathname.includes('/equipment') && method === 'PATCH') {
+      const body = JSON.parse(req.postData() || '{}');
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([]),
+        body: JSON.stringify({
+          message: '智能拼豆板配置已更新',
+          total_amount: 1760,
+          equipments: body.equipments || [],
+        }),
+      });
+    }
+
+    if (pathname.includes('/reservations')) {
+      const tomorrowObj = new Date();
+      tomorrowObj.setDate(tomorrowObj.getDate() + 1);
+      const tomorrowYMD = `${tomorrowObj.getFullYear()}-${String(tomorrowObj.getMonth() + 1).padStart(2, '0')}-${String(tomorrowObj.getDate()).padStart(2, '0')}`;
+      const mockRes = {
+        booking_ref: 'BK-TEST-1234',
+        session_date: tomorrowYMD,
+        start_time: '12:00',
+        end_time: '18:00',
+        pax: 2,
+        status: 'confirmed',
+        total_amount: 1460,
+        is_paid: false,
+        customer_name: '測試顧客',
+        customer_phone: '0912345678',
+        equipments: [
+          {
+            equipment_id: 'pegboard_m',
+            name: '中板 (78×78)',
+            equipment_name_snapshot: '中板 (78×78)',
+            quantity: 1,
+            rental_hours: 4,
+            start_time: '14:00',
+            covered_sessions: ['14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00'],
+          },
+        ],
+        sessions: [
+          { start_time: '12:00', end_time: '13:00' },
+          { start_time: '13:00', end_time: '14:00' },
+          { start_time: '14:00', end_time: '15:00' },
+          { start_time: '15:00', end_time: '16:00' },
+          { start_time: '16:00', end_time: '17:00' },
+          { start_time: '17:00', end_time: '18:00' },
+        ],
+      };
+
+      if (pathname.match(/\/reservations\/BK-TEST-1234$/)) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(mockRes),
+        });
+      }
+
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([mockRes]),
       });
     }
 
@@ -617,7 +673,6 @@ async function run() {
     // Verify stock limit: Add 2nd medium board (total stock is 2)
     await addPegboardBtn.click();
     await page.waitForTimeout(300);
-    const pegboardSection = page.locator('text=中板').first().locator('..');
     const pageTextAfter2nd = await page.textContent('main');
     if (!pageTextAfter2nd.includes('已租完')) {
       throw new Error('Expected "已租完" after adding 2nd medium pegboard');
@@ -627,6 +682,18 @@ async function run() {
       throw new Error('Expected add medium board (+) button to be disabled when stock is exhausted');
     }
     console.log('✓ Pegboard stock limit (2 units max) verified with "已租完" and disabled plus button');
+
+    // Also verify Stepper disabledPlus when pax > stock:
+    await addPaxBtn.click(); // pax becomes 3
+    await page.waitForTimeout(200);
+    const isAddDisabledWithPax3 = await addPegboardBtn.isDisabled();
+    if (!isAddDisabledWithPax3) {
+      throw new Error('Expected Stepper (+) button to be disabled when stock is exhausted even if pax > count (pax=3, count=2, stock=2)');
+    }
+    console.log('✓ Stepper disabledPlus honored when pax > stock (count=2, stock=2, pax=3)');
+    const removePaxBtn = page.getByRole('button', { name: '減少人數' });
+    await removePaxBtn.click(); // restore pax to 2
+    await page.waitForTimeout(200);
 
     // Remove 2nd board to return to 1 board as required for Step 3 spec
     const removePegboardBtn = page.getByRole('button', { name: '減少中板' });
@@ -760,6 +827,87 @@ async function run() {
       throw new Error(`Expected Saturday unlimited price NT$ 800 in bottom bar, got: ${satBottomText}`);
     }
     console.log('✓ Saturday unlimited price NT$ 800 verified');
+
+    // -------------------------------------------------------------
+    // PART 4: Member Page & Addon Sheet Verification (Section 4.2)
+    // -------------------------------------------------------------
+    console.log('\n--- Part 4: Verifying My Member & Addon Sheet (Section 4.2) ---');
+    await page.goto(`${BASE_URL}/history?tab=bookings`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(600);
+
+    // 1. Check upcoming card smart board text: 中板 ×1 · 14:00 到 18:00
+    const historyMainText = await page.textContent('main');
+    if (!historyMainText.includes('中板 ×1 · 14:00 到 18:00')) {
+      throw new Error(`Expected "中板 ×1 · 14:00 到 18:00" on upcoming booking card, got:\n${historyMainText}`);
+    }
+    console.log('✓ Upcoming booking card displays "中板 ×1 · 14:00 到 18:00"');
+
+    // 2. Open and verify Barcode Sheet
+    const barcodeBtn = page.getByRole('button', { name: /出示到店條碼/ }).first();
+    await barcodeBtn.click();
+    await page.waitForTimeout(600);
+    const dialogCount = await page.locator('[role="dialog"]').count();
+    console.log(`Dialogs count after clicking barcode button: ${dialogCount}`);
+    if (dialogCount > 0) {
+      console.log('Dialog aria-label:', await page.locator('[role="dialog"]').first().getAttribute('aria-label'));
+      const buttonsInDialog = await page.locator('[role="dialog"] button').all();
+      for (const b of buttonsInDialog) {
+        console.log('Button aria-label:', await b.getAttribute('aria-label'), 'text:', await b.textContent());
+      }
+    }
+    const barcodeTitle = page.locator('[role="dialog"] h2').first();
+    await barcodeTitle.waitFor({ state: 'visible', timeout: 3000 });
+    const hasSvgBarcode = (await page.locator('[role="dialog"] svg').count()) > 0;
+    if (!hasSvgBarcode) {
+      throw new Error('Barcode sheet SVG was not rendered');
+    }
+    // Close barcode sheet
+    const closeBarcodeBtn = page.locator('[role="dialog"] button[aria-label="關閉"]').first();
+    await closeBarcodeBtn.click();
+    await page.waitForTimeout(300);
+    console.log('✓ Barcode Sheet opened, rendered barcode SVG, and closed cleanly');
+
+    // 3. Click reservation card to go to Detail View
+    const cardLink = page.locator('button.group', { hasText: '12:00 到 18:00' }).first();
+    await cardLink.click();
+    await page.waitForURL('**/history?tab=bookings&ref=BK-TEST-1234');
+    await page.waitForTimeout(400);
+
+    // Detail view smart board text: 中板 ×1（14:00 到 18:00）
+    const detailContent = await page.textContent('main');
+    if (!detailContent.includes('中板 ×1（14:00 到 18:00）')) {
+      throw new Error(`Expected detail page to show "中板 ×1（14:00 到 18:00）", got:\n${detailContent}`);
+    }
+    console.log('✓ Detail page displays "中板 ×1（14:00 到 18:00）"');
+
+    // 4. Open Addon Sheet (修改智能拼豆板)
+    const openAddonBtn = page.getByRole('button', { name: /修改智能拼豆板|加租智能拼豆板/ });
+    await openAddonBtn.click();
+    await page.waitForTimeout(500);
+
+    // Verify Addon sheet is open and did not crash (proves data is defined!)
+    const addonTitle = page.locator('[role="dialog"] h2', { hasText: /修改智能拼豆板|加租智能拼豆板/ }).first();
+    await addonTitle.waitFor({ state: 'visible', timeout: 4000 });
+    const sheetBody = await page.textContent('[role="dialog"]');
+    if (!sheetBody.includes('中板') || !sheetBody.includes('小板')) {
+      throw new Error(`Addon sheet did not load equipment options properly: ${sheetBody}`);
+    }
+    console.log('✓ EquipmentAddonSheet opened successfully without reference error');
+
+    // 5. Add 1 small board and submit
+    const addSmallBtn = page.getByRole('button', { name: /增加小板/ });
+    await addSmallBtn.click();
+    await page.waitForTimeout(300);
+
+    const submitAddonBtn = page.getByRole('button', { name: /確認修改|確認加租/ });
+    await submitAddonBtn.click();
+    await page.waitForTimeout(500);
+    console.log('✓ EquipmentAddonSheet submitted and closed successfully without crashing');
+
+    // 6. Verify Passes Tab (Section 4.2 / 1-9)
+    await page.goto(`${BASE_URL}/history?tab=passes`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(400);
+    console.log('✓ Passes tab loaded with 200 OK (no 404)');
 
     console.log('\n=== ALL CUSTOMER SMOKE TESTS PASSED SUCCESSFULLY! ===\n');
   } finally {

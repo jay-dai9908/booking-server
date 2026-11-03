@@ -20,7 +20,7 @@ export default function ConfirmSheet({
 }) {
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title={title}>
-      <div className="grid gap-3">
+      <div className="grid gap-3 min-w-0">
         {summary && (
           <div className="text-[14px] font-bold text-sg-ink">
             {summary}
