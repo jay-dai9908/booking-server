@@ -1,4 +1,5 @@
 import { cnNum } from './format.js';
+export { buildDiscountConfig } from './pricing.js';
 
 export function boardDiscountTexts(cfg) {
   if (!cfg || !cfg.enabled) return null;

@@ -1,7 +1,8 @@
 import React from 'react';
 import BottomSheet from '../BottomSheet';
 import Button from '../Button';
-import { boardDiscountTexts, buildDiscountConfig } from '../../../utils/customer/discountText';
+import { boardDiscountTexts } from '../../../utils/customer/discountText';
+import { buildDiscountConfig, getDayPricing } from '../../../utils/customer/pricing';
 import { formatMoney } from '../../../utils/customer/format';
 
 /**
