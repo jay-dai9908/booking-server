@@ -670,7 +670,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                     }`}
                   >
                     <b className="block text-[13px] text-sg-ink">宅配</b>
-                    <span className="text-[12px] text-sg-muted">+ NT${globalSettings?.shop_shipping_fee ?? 60}</span>
+                    <span className="text-[12px] text-sg-muted">+ {formatMoney(globalSettings?.shop_shipping_fee ?? 60)}</span>
                   </button>
                 </div>
 

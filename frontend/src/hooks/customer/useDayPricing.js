@@ -43,7 +43,7 @@ export function useDayPricing(dateStr, globalSettings) {
   }, [dateStr]);
 
   const dayPricing = useMemo(() => {
-    if (!dateStr || !globalSettings) return null;
+    if (!dateStr || !globalSettings || globalSettings.weekday_hourly_price == null) return null;
     return getDayPricing(dateStr, globalSettings, daily);
   }, [dateStr, globalSettings, daily]);
 

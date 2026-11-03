@@ -7,6 +7,7 @@ import MonthCalendar from '../../../components/customer/MonthCalendar';
 import PlanCards from '../../../components/customer/PlanCards';
 import SlotGrid, { SlotCell } from '../../../components/customer/SlotGrid';
 import HourChips from '../../../components/customer/HourChips';
+import Button from '../../../components/customer/Button';
 import Pill from '../../../components/customer/Pill';
 import Skeleton from '../../../components/customer/Skeleton';
 import EmptyState from '../../../components/customer/EmptyState';
@@ -43,6 +44,10 @@ export default function StepSelectTime({
   pax = 1,
   globalSettings,
   dayPricing,
+  hasPricing = true,
+  globalLoading = false,
+  globalError = null,
+  onReloadPricing,
   sessions = [],
   sessionsLoading = false,
   sessionsByDate = {},
@@ -64,8 +69,8 @@ export default function StepSelectTime({
   }, [date]);
 
   // Pricing values
-  const hourly = dayPricing?.hourly ?? 100;
-  const cap = dayPricing?.cap ?? 550;
+  const hourly = dayPricing?.hourly;
+  const cap = dayPricing?.cap;
   const allowUnlimited = dayPricing?.allowUnlimited ?? true;
   const dayType = dayPricing?.dayType ?? 'weekday';
   const N = useMemo(() => unlimitedThresholdHours({ hourly, cap }), [hourly, cap]);
@@ -251,7 +256,7 @@ export default function StepSelectTime({
   const unlimitedRuleLine1 = useMemo(() => {
     const dayPrefix = isSelectedDateToday ? '今天' : '這天';
     const typeLabel = dayType === 'special' ? '' : dayType === 'weekend' ? '假日' : '平日';
-    return `${dayPrefix}${typeLabel}每小時 NT$${hourly}，玩滿 ${N} 小時才會超過不限時價 NT$${cap}`;
+    return `${dayPrefix}${typeLabel}每小時 ${formatMoney(hourly)}，玩滿 ${N} 小時才會超過不限時價 ${formatMoney(cap)}`;
   }, [isSelectedDateToday, dayType, hourly, N, cap]);
 
   // Unlimited availability pill status
@@ -314,16 +319,35 @@ export default function StepSelectTime({
         />
       ) : (
         <>
-          <PlanCards
-            mode={mode}
-            onChangeMode={handleModeChange}
-            hourlyPrice={hourly}
-            unlimitedPrice={cap}
-            allowUnlimited={allowUnlimited}
-            dateStr={date}
-            dayPricing={dayPricing}
-            onOpenPriceInfo={() => setIsPriceInfoOpen(true)}
-          />
+          {globalError && !hasPricing ? (
+            <EmptyState
+              title="暫時抓不到價格"
+              description="請檢查網路後重新整理"
+              action={<Button size="sm" onClick={onReloadPricing}>重新整理</Button>}
+            />
+          ) : !hasPricing || !dayPricing ? (
+            <div className="grid gap-2 w-full">
+              <div className="grid grid-cols-2 gap-2">
+                <Skeleton className="min-h-[96px] rounded-[16px]" />
+                <Skeleton className="min-h-[96px] rounded-[16px]" />
+              </div>
+              <div className="flex justify-between items-center text-[12px] px-1">
+                <Skeleton className="h-4 w-28 rounded" />
+                <Skeleton className="h-4 w-16 rounded" />
+              </div>
+            </div>
+          ) : (
+            <PlanCards
+              mode={mode}
+              onChangeMode={handleModeChange}
+              hourlyPrice={hourly}
+              unlimitedPrice={cap}
+              allowUnlimited={allowUnlimited}
+              dateStr={date}
+              dayPricing={dayPricing}
+              onOpenPriceInfo={() => setIsPriceInfoOpen(true)}
+            />
+          )}
 
           {/* 5. Timed Mode content */}
           {mode === 'timed' && (
@@ -369,7 +393,7 @@ export default function StepSelectTime({
 
               {seatCalc.isCapped && seatCalc.capSaving > 0 && (
                 <SaveBanner
-                  message={`已達當日不限時暢玩價：每人最高只收 NT$${cap}`}
+                  message={`已達當日不限時暢玩價：每人最高只收 ${formatMoney(cap)}`}
                 />
               )}
             </div>
@@ -446,9 +470,9 @@ export default function StepSelectTime({
       )}
 
       {/* Bottom bar & Bottom tabs */}
-      {(canProceed || userRole === 'customer') && (
+      {((canProceed && hasPricing && !!dayPricing) || userRole === 'customer') && (
         <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
-          {canProceed && (
+          {canProceed && hasPricing && !!dayPricing && (
             <BottomActionBar
               summary={actionSummary}
               price={finalPrice}
@@ -474,6 +498,8 @@ export default function StepSelectTime({
         dayPricing={dayPricing}
         dateStr={date}
         equipmentConfigs={equipmentConfigs}
+        error={globalError}
+        onReload={onReloadPricing}
       />
     </>
   );

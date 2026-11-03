@@ -4,17 +4,6 @@ import api from '../../api/axios';
 const CACHE_KEY = 'shiguang_customer_settings_v2';
 
 export const DEFAULT_GLOBAL_SETTINGS = {
-  weekday_hourly_price: 100,
-  weekday_unlimited_price: 550,
-  weekend_hourly_price: 150,
-  weekend_unlimited_price: 800,
-  equipment_discount_enabled: true,
-  equipment_discount_buy_hours: 3,
-  equipment_discount_free_hours: 1,
-  equipment_discount_stackable: true,
-  equipment_discount2_enabled: false,
-  equipment_discount2_buy_hours: 8,
-  equipment_discount2_free_hours: 4,
   show_announcement: false,
   announcement_text: '',
   show_line_button: true,
@@ -69,5 +58,7 @@ export function useGlobalSettings() {
     fetchSettings();
   }, [fetchSettings]);
 
-  return { settings, loading, error, reload: fetchSettings };
+  const hasPricing = Boolean(settings && settings.weekday_hourly_price != null);
+
+  return { settings, loading, error, reload: fetchSettings, hasPricing };
 }

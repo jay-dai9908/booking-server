@@ -8,6 +8,7 @@ import { Card } from '../../components/customer/Card';
 import Pill from '../../components/customer/Pill';
 import Button from '../../components/customer/Button';
 import Skeleton from '../../components/customer/Skeleton';
+import EmptyState from '../../components/customer/EmptyState';
 import { AnnouncementBar, ErrorBanner } from '../../components/customer/Banners';
 import { BeadLoader } from '../../components/customer/Bead';
 import PriceInfoSheet from '../../components/customer/sheets/PriceInfoSheet';
@@ -20,6 +21,7 @@ import { useSessions } from '../../hooks/customer/useSessions';
 import { buildDiscountConfig } from '../../utils/customer/pricing';
 import { boardDiscountTexts } from '../../utils/customer/discountText';
 import { dayState } from '../../utils/customer/availability';
+import { formatMoney } from '../../utils/customer/format';
 
 function getTodayString() {
   const now = new Date();
@@ -39,7 +41,13 @@ export default function Home({ userRole }) {
   const hasProcessedRef = useRef(false);
 
   const todayStr = useMemo(() => getTodayString(), []);
-  const { settings: globalSettings, loading: globalLoading } = useGlobalSettings();
+  const {
+    settings: globalSettings,
+    loading: globalLoading,
+    error: globalError,
+    reload: reloadGlobalSettings,
+    hasPricing,
+  } = useGlobalSettings();
   const { dayPricing } = useDayPricing(todayStr, globalSettings);
   const { sessions } = useSessions(todayStr, { autoRefresh: true });
 
@@ -241,16 +249,27 @@ export default function Home({ userRole }) {
 
   // Discount text
   const discountConfig = useMemo(() => buildDiscountConfig(globalSettings || {}), [globalSettings]);
-  const discountTexts = useMemo(() => boardDiscountTexts(discountConfig), [discountConfig]);
+  const discountTexts = useMemo(() => (hasPricing ? boardDiscountTexts(discountConfig) : null), [hasPricing, discountConfig]);
 
   // Min hourly rate for smart boards if discount disabled
   const minBoardRate = useMemo(() => {
     const active = equipmentConfigs.filter((e) => e.is_active && e.equipment_id !== 'bring_own');
-    if (!active.length) return 100;
+    if (!active.length) return null;
     return Math.min(...active.map((e) => e.hourly_rate));
   }, [equipmentConfigs]);
 
-  const smartBoardSubtext = discountTexts ? discountTexts.home : `每小時 NT$${minBoardRate} 起`;
+  const smartBoardSubtext = useMemo(() => {
+    if (!hasPricing) {
+      return <Skeleton className="h-4 w-32 rounded inline-block" />;
+    }
+    if (discountTexts) {
+      return discountTexts.home;
+    }
+    if (minBoardRate != null) {
+      return `每小時 ${formatMoney(minBoardRate)} 起`;
+    }
+    return <Skeleton className="h-4 w-28 rounded inline-block" />;
+  }, [hasPricing, discountTexts, minBoardRate]);
 
   // 6.2 登入處理中
   if (showLoading) {
@@ -297,7 +316,13 @@ export default function Home({ userRole }) {
             <AnnouncementBar text={globalSettings.announcement_text} />
           )}
 
-          {globalLoading ? (
+          {globalError && !hasPricing ? (
+            <EmptyState
+              title="暫時抓不到價格"
+              description="請檢查網路後重新整理"
+              action={<Button size="sm" onClick={reloadGlobalSettings}>重新整理</Button>}
+            />
+          ) : !hasPricing || !dayPricing ? (
             <Skeleton className="h-[150px] w-full" />
           ) : (
             <PriceCard
@@ -370,6 +395,8 @@ export default function Home({ userRole }) {
         dayPricing={dayPricing}
         dateStr={todayStr}
         equipmentConfigs={equipmentConfigs}
+        error={globalError}
+        onReload={reloadGlobalSettings}
       />
     </CustomerLayout>
   );

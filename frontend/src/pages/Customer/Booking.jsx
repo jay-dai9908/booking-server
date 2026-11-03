@@ -55,7 +55,13 @@ export default function Booking() {
   const step = searchParams.get('step') || '1';
 
   // Global settings & Customer profile
-  const { settings: globalSettings } = useGlobalSettings();
+  const {
+    settings: globalSettings,
+    loading: globalLoading,
+    error: globalError,
+    reload: reloadGlobalSettings,
+    hasPricing,
+  } = useGlobalSettings();
   const { user } = useCustomerProfile();
   const userRole = user?.role || 'customer';
 
@@ -251,6 +257,10 @@ export default function Booking() {
           pax={pax}
           globalSettings={globalSettings}
           dayPricing={dayPricing}
+          hasPricing={hasPricing}
+          globalLoading={globalLoading}
+          globalError={globalError}
+          onReloadPricing={reloadGlobalSettings}
           sessions={sessions}
           sessionsLoading={sessionsLoading}
           sessionsByDate={sessionsByDate}
@@ -271,6 +281,10 @@ export default function Booking() {
           onChangeUnits={setUnits}
           globalSettings={globalSettings}
           dayPricing={dayPricing}
+          hasPricing={hasPricing}
+          globalLoading={globalLoading}
+          globalError={globalError}
+          onReloadPricing={reloadGlobalSettings}
           equipmentConfigs={equipmentConfigs}
           availBySession={availBySession}
           onBack={() => navigate('/booking?step=1')}
@@ -291,6 +305,10 @@ export default function Booking() {
           onChangePromo={setPromo}
           globalSettings={globalSettings}
           dayPricing={dayPricing}
+          hasPricing={hasPricing}
+          globalLoading={globalLoading}
+          globalError={globalError}
+          onReloadPricing={reloadGlobalSettings}
           equipmentConfigs={equipmentConfigs}
           onBack={() => navigate('/booking?step=2')}
           onBookingSuccess={handleBookingSuccess}

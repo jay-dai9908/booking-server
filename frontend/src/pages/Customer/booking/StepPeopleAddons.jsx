@@ -3,6 +3,7 @@ import StepIndicator from '../../../components/customer/StepIndicator';
 import { Card, Divider } from '../../../components/customer/Card';
 import Stepper from '../../../components/customer/Stepper';
 import Button from '../../../components/customer/Button';
+import EmptyState from '../../../components/customer/EmptyState';
 import { BoardTimeBox } from '../../../components/customer/RangeSlider';
 import { SoftBox } from '../../../components/customer/Banners';
 import BottomActionBar from '../../../components/customer/BottomActionBar';
@@ -32,6 +33,10 @@ export default function StepPeopleAddons({
   onChangeUnits,
   globalSettings,
   dayPricing,
+  hasPricing = true,
+  globalLoading = false,
+  globalError = null,
+  onReloadPricing,
   equipmentConfigs = [],
   availBySession = {},
   onBack,
@@ -53,7 +58,7 @@ export default function StepPeopleAddons({
   const allowExceedPax = !!globalSettings?.allow_exceed_pax;
   const showLiveStock = globalSettings?.show_equipment_live_stock !== false;
   const discountConfig = useMemo(() => buildDiscountConfig(globalSettings || {}), [globalSettings]);
-  const discountTexts = useMemo(() => boardDiscountTexts(discountConfig), [discountConfig]);
+  const discountTexts = useMemo(() => (hasPricing ? boardDiscountTexts(discountConfig) : null), [hasPricing, discountConfig]);
 
   const configsMap = useMemo(() => {
     const map = {};
@@ -188,11 +193,12 @@ export default function StepPeopleAddons({
   };
 
   // Calculate pricing
-  const hourly = dayPricing?.hourly ?? 100;
-  const cap = dayPricing?.cap ?? 550;
+  const hourly = dayPricing?.hourly;
+  const cap = dayPricing?.cap;
   const allowUnlimited = dayPricing?.allowUnlimited ?? true;
 
   const seatCalc = useMemo(() => {
+    if (!dayPricing) return { raw: 0, total: 0, capSaving: 0, isCapped: false };
     return seatPrice({
       pax,
       hours: H,
@@ -201,7 +207,7 @@ export default function StepPeopleAddons({
       allowUnlimited,
       mode,
     });
-  }, [pax, H, hourly, cap, allowUnlimited, mode]);
+  }, [dayPricing, pax, H, hourly, cap, allowUnlimited, mode]);
 
   const groups = useMemo(() => {
     return groupUnits(units, boundaryTime);
@@ -261,8 +267,16 @@ export default function StepPeopleAddons({
         </Button>
       </div>
 
-      {/* 3. People Card */}
-      <Card>
+      {globalError && !hasPricing ? (
+        <EmptyState
+          title="暫時抓不到價格"
+          description="請檢查網路後重新整理"
+          action={<Button size="sm" onClick={onReloadPricing}>重新整理</Button>}
+        />
+      ) : (
+        <>
+          {/* 3. People Card */}
+          <Card>
         <div className="flex items-center justify-between">
           <div>
             <div className="text-[15px] font-bold">人數</div>
@@ -389,13 +403,16 @@ export default function StepPeopleAddons({
           )}
         </Card>
       )}
+        </>
+      )}
 
       {/* Bottom bar */}
       <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
         <BottomActionBar
           summary={actionSummary}
-          price={totalPrice}
+          price={hasPricing && dayPricing ? totalPrice : null}
           actionLabel="下一步"
+          disabled={!hasPricing || !dayPricing}
           onAction={onNext}
           hasTabBarBelow={false}
         />

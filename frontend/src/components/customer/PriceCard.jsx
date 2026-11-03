@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Clock, Sparkles, ChevronRight, Info } from 'lucide-react';
 import Button from './Button.jsx';
+import Skeleton from './Skeleton.jsx';
 import { formatMoney, formatDateShort } from '../../utils/customer/format.js';
 import { DAY_TYPE_LABEL } from '../../utils/customer/pricing.js';
 
@@ -31,8 +32,8 @@ export default function PriceCard({
     const dayLabel = selectedDateStr ? formatDateShort(selectedDateStr) : '';
     const typeLabel = DAY_TYPE_LABEL[selectedDayPricing?.dayType || 'weekday'] || '平日';
 
-    const hourly = selectedDayPricing?.hourly ?? globalSettings?.weekday_hourly_price ?? 100;
-    const unlimited = selectedDayPricing?.cap ?? globalSettings?.weekday_unlimited_price ?? 550;
+    const hourly = selectedDayPricing?.hourly ?? globalSettings?.weekday_hourly_price;
+    const unlimited = selectedDayPricing?.cap ?? globalSettings?.weekday_unlimited_price;
     const allowUnlimited = selectedDayPricing?.allowUnlimited !== false;
 
     return (
@@ -71,7 +72,7 @@ export default function PriceCard({
               計時
             </span>
             <span className="font-num font-extrabold text-[26px] leading-[1.15] text-sg-brown mt-[2px]">
-              {formatMoney(hourly)}
+              {hourly != null ? formatMoney(hourly) : <Skeleton className="h-7 w-20 inline-block my-1 rounded" />}
             </span>
             <span className="text-[12px] text-sg-muted">每小時</span>
           </div>
@@ -87,7 +88,7 @@ export default function PriceCard({
                 !allowUnlimited ? 'text-sg-full' : 'text-sg-brown'
               }`}
             >
-              {!allowUnlimited ? '—' : formatMoney(unlimited)}
+              {!allowUnlimited ? '—' : unlimited != null ? formatMoney(unlimited) : <Skeleton className="h-7 w-20 inline-block my-1 rounded" />}
             </span>
             <span className="text-[12px] text-sg-muted">
               {!allowUnlimited ? '這天不開放' : '每人，中途可離場'}
@@ -108,23 +109,23 @@ export default function PriceCard({
   let toggleText = isTodayWeekend ? '看平日價格' : '看假日價格';
   let isPinkHeader = isTodayWeekend || isTodaySpecial;
 
-  let hourly = todayPricing?.hourly ?? globalSettings?.weekday_hourly_price ?? 100;
-  let unlimited = todayPricing?.cap ?? globalSettings?.weekday_unlimited_price ?? 550;
+  let hourly = todayPricing?.hourly ?? globalSettings?.weekday_hourly_price;
+  let unlimited = todayPricing?.cap ?? globalSettings?.weekday_unlimited_price;
   let allowUnlimited = todayPricing?.allowUnlimited !== false;
 
   if (viewOverride === 'weekend') {
     titleText = '假日（六、日）';
     toggleText = '看今天價格';
     isPinkHeader = true;
-    hourly = globalSettings?.weekend_hourly_price ?? 150;
-    unlimited = globalSettings?.weekend_unlimited_price ?? 800;
+    hourly = globalSettings?.weekend_hourly_price;
+    unlimited = globalSettings?.weekend_unlimited_price;
     allowUnlimited = true;
   } else if (viewOverride === 'weekday') {
     titleText = '平日（一到五）';
     toggleText = '看今天價格';
     isPinkHeader = false;
-    hourly = globalSettings?.weekday_hourly_price ?? 100;
-    unlimited = globalSettings?.weekday_unlimited_price ?? 550;
+    hourly = globalSettings?.weekday_hourly_price;
+    unlimited = globalSettings?.weekday_unlimited_price;
     allowUnlimited = true;
   }
 
@@ -172,7 +173,7 @@ export default function PriceCard({
             計時
           </span>
           <span className="font-num font-extrabold text-[26px] leading-[1.15] text-sg-brown mt-[2px]">
-            {formatMoney(hourly)}
+            {hourly != null ? formatMoney(hourly) : <Skeleton className="h-7 w-20 inline-block my-1 rounded" />}
           </span>
           <span className="text-[12px] text-sg-muted">每小時</span>
         </div>
@@ -188,7 +189,7 @@ export default function PriceCard({
               !allowUnlimited ? 'text-sg-full' : 'text-sg-brown'
             }`}
           >
-            {!allowUnlimited ? '—' : formatMoney(unlimited)}
+            {!allowUnlimited ? '—' : unlimited != null ? formatMoney(unlimited) : <Skeleton className="h-7 w-20 inline-block my-1 rounded" />}
           </span>
           <span className="text-[12px] text-sg-muted">
             {!allowUnlimited ? '這天不開放' : '每人，中途可離場'}

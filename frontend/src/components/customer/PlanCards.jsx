@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, Info } from 'lucide-react';
 import Button from './Button.jsx';
+import Skeleton from './Skeleton.jsx';
 import { useToast } from './Toast.jsx';
 import { formatMoney, formatDateShort } from '../../utils/customer/format.js';
 import { DAY_PRICE_LABEL } from '../../utils/customer/pricing.js';
@@ -9,8 +10,8 @@ export default function PlanCards({
   mode = 'timed', // 'timed' | 'unlimited'
   onSelectMode,
   onChangeMode,
-  hourlyPrice = 100,
-  unlimitedPrice = 550,
+  hourlyPrice,
+  unlimitedPrice,
   allowUnlimited = true,
   dateStr = '',
   dayPricing,
@@ -71,7 +72,7 @@ export default function PlanCards({
               isTimed ? 'text-sg-brown' : 'text-sg-ink'
             }`}
           >
-            {formatMoney(hourlyPrice)}
+            {hourlyPrice != null ? formatMoney(hourlyPrice) : <Skeleton className="h-7 w-20 inline-block my-1 rounded" />}
           </span>
           <span className="text-[11.5px] text-sg-muted">
             每小時
@@ -116,7 +117,7 @@ export default function PlanCards({
                 : 'text-sg-ink'
             }`}
           >
-            {!allowUnlimited ? '—' : formatMoney(unlimitedPrice)}
+            {!allowUnlimited ? '—' : unlimitedPrice != null ? formatMoney(unlimitedPrice) : <Skeleton className="h-7 w-20 inline-block my-1 rounded" />}
           </span>
           <span className="text-[11.5px] text-sg-muted">
             每人

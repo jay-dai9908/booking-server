@@ -4,6 +4,9 @@ import { Card, KV, Divider } from '../../../components/customer/Card';
 import PriceLines from '../../../components/customer/PriceLines';
 import Button from '../../../components/customer/Button';
 import Pill from '../../../components/customer/Pill';
+import Skeleton from '../../../components/customer/Skeleton';
+import EmptyState from '../../../components/customer/EmptyState';
+import { ErrorBanner } from '../../../components/customer/Banners';
 import BottomActionBar from '../../../components/customer/BottomActionBar';
 import SplitSeatSheet from '../../../components/customer/sheets/SplitSeatSheet';
 import { BeadLoader } from '../../../components/customer/Bead';
@@ -35,6 +38,10 @@ export default function StepConfirm({
   onChangePromo,
   globalSettings,
   dayPricing,
+  hasPricing = true,
+  globalLoading = false,
+  globalError = null,
+  onReloadPricing,
   equipmentConfigs = [],
   onBack,
   onBookingSuccess,
@@ -65,12 +72,15 @@ export default function StepConfirm({
 
   // Pricing calculations
   const priceCalculation = useMemo(() => {
+    if (!dayPricing) {
+      return { lines: [], seat: { raw: 0, total: 0, capSaving: 0 }, equipmentTotal: 0, promoAmount: 0, total: 0, saving: 0 };
+    }
     return buildPriceLines({
       pax,
       hours: H,
       startTime,
       endTime,
-      day: dayPricing || { hourly: 100, cap: 550, allowUnlimited: true, dayType: 'weekday' },
+      day: dayPricing,
       mode,
       units,
       configs: configsMap,
@@ -98,7 +108,7 @@ export default function StepConfirm({
         base_amount: priceCalculation.seat.raw,
         seating_amount: priceCalculation.seat.total,
         equipment_amount: priceCalculation.equipmentTotal,
-        hourly_price: dayPricing?.hourly || 100,
+        hourly_price: dayPricing?.hourly,
       };
 
       const res = await api.post('/checkout/promo-codes/validate', payload);
@@ -210,7 +220,7 @@ export default function StepConfirm({
       <span>現場付款</span>
       {savingAmount > 0 && (
         <span className="font-bold text-sg-sage-ink ml-1">
-          · 共省 <span className="font-num">NT${savingAmount.toLocaleString()}</span>
+          · 共省 <span className="font-num">{formatMoney(savingAmount)}</span>
         </span>
       )}
     </div>
@@ -221,15 +231,38 @@ export default function StepConfirm({
       {/* 1. Step Indicator */}
       <StepIndicator currentStep="確認" />
 
-      {/* 2. Detail Card */}
-      <Card gap={8}>
-        <KV label="日期" value={<b>{dateLineText}</b>} />
-        <KV label="時段" value={<b className="font-num">{timeLineText}</b>} />
-        <KV label="人數" value={<b>{pax} 位</b>} />
+      {globalError && !hasPricing ? (
+        <EmptyState
+          title="暫時抓不到價格"
+          description="請檢查網路後重新整理"
+          action={<Button size="sm" onClick={onReloadPricing}>重新整理</Button>}
+        />
+      ) : (
+        <>
+          {globalError && (
+            <ErrorBanner
+              message="最新價格更新失敗，請檢查網路後重新整理"
+              action={<Button size="sm" onClick={onReloadPricing}>重新整理</Button>}
+            />
+          )}
 
-        <Divider className="my-1" />
+          {/* 2. Detail Card */}
+          <Card gap={8}>
+            <KV label="日期" value={<b>{dateLineText}</b>} />
+            <KV label="時段" value={<b className="font-num">{timeLineText}</b>} />
+            <KV label="人數" value={<b>{pax} 位</b>} />
 
-        <PriceLines lines={priceCalculation.lines} />
+            <Divider className="my-1" />
+
+            {(!hasPricing || !dayPricing) ? (
+              <div className="grid gap-2 py-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+            ) : (
+              <PriceLines lines={priceCalculation.lines} />
+            )}
 
         <Divider className="my-1" />
 
@@ -319,15 +352,17 @@ export default function StepConfirm({
       <div className="sg-small px-1">
         座位保留 15 分鐘，遲到請先傳 LINE 告訴我們；費用在現場報到後付款。
       </div>
+        </>
+      )}
 
       {/* 5. Bottom bar */}
       <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
         <BottomActionBar
           summary={summaryNode}
-          price={priceCalculation.total}
+          price={hasPricing && dayPricing ? priceCalculation.total : null}
           actionLabel="送出預約"
           loading={submitting}
-          disabled={submitting}
+          disabled={submitting || !hasPricing || !dayPricing || globalLoading || Boolean(globalError)}
           onAction={() => executeBooking(false)}
           hasTabBarBelow={false}
         />

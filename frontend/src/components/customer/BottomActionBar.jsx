@@ -1,5 +1,6 @@
 import React from 'react';
 import Button from './Button';
+import Skeleton from './Skeleton';
 import { formatMoney, formatMoneyBig } from '../../utils/customer/format';
 
 /**
@@ -34,12 +35,18 @@ export default function BottomActionBar({
           </div>
         )}
         <div className="font-num font-extrabold text-[22px] leading-[1.1] text-sg-brown tabular-nums flex items-baseline">
-          {strikePrice != null && strikePrice > price && (
-            <span className="font-num font-semibold text-[14px] text-sg-muted line-through mr-1">
-              {formatMoney(strikePrice)}
-            </span>
+          {price == null ? (
+            <Skeleton className="h-[22px] w-24 my-1" />
+          ) : (
+            <>
+              {strikePrice != null && strikePrice > price && (
+                <span className="font-num font-semibold text-[14px] text-sg-muted line-through mr-1">
+                  {formatMoney(strikePrice)}
+                </span>
+              )}
+              <span>{formatMoneyBig(price)}</span>
+            </>
           )}
-          <span>{formatMoneyBig(price)}</span>
         </div>
       </div>
 

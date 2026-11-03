@@ -1,6 +1,6 @@
 import { calculateEquipmentChargeableHours } from '../equipmentPricing.js';
 import { boardDiscountTexts } from './discountText.js';
-import { toDateObj } from './format.js';
+import { toDateObj, formatMoney } from './format.js';
 
 export function parseYMD(dateStr) {
   if (!dateStr) return new Date();
@@ -149,7 +149,7 @@ export function buildPriceLines({ pax, hours, startTime, endTime, day, mode, uni
   } else {
     lines.push({ label: `入場 ${pax} 位 × ${hours} 小時`, amount: seat.raw });
     if (seat.capSaving > 0) {
-      lines.push({ label: `時數封頂（當日不限時暢玩 NT$${day.cap.toLocaleString()}）`, amount: -seat.capSaving, tone: 'save' });
+      lines.push({ label: `時數封頂（當日不限時暢玩 ${formatMoney(day.cap)}）`, amount: -seat.capSaving, tone: 'save' });
     }
   }
 
@@ -162,10 +162,10 @@ export function buildPriceLines({ pax, hours, startTime, endTime, day, mode, uni
     const p = equipmentUnitPrice(cfg, group.hours, discountCfg);
     lines.push({ label: `智能拼豆板 ${shortBoardName(cfg.name)} ×${group.qty} · ${group.start} 到 ${group.end}`, amount: p.raw * group.qty });
     if (p.discountSaving > 0 && texts) {
-      lines.push({ label: texts.lineLabel(p.freeHours), amount: -p.discountSaving * group.qty, tone: 'save' });
+      lines.push({ label: texts.lineLabel(group.hours, p.freeHours), amount: -p.discountSaving * group.qty, tone: 'save' });
     }
     if (p.capSaving > 0) {
-      lines.push({ label: `智能板單日上限（每台 NT$${cfg.daily_cap.toLocaleString()}）`, amount: -p.capSaving * group.qty, tone: 'save' });
+      lines.push({ label: `智能板單日上限（每台 ${formatMoney(cfg.daily_cap)}）`, amount: -p.capSaving * group.qty, tone: 'save' });
     }
     equipmentTotal += p.price * group.qty;
     equipmentSaving += (p.discountSaving + p.capSaving) * group.qty;

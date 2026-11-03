@@ -245,8 +245,10 @@ const discountCfg = buildDiscountConfig(globalSettings);
   });
   const texts = boardDiscountTexts(cfg);
   assert.strictEqual(texts.deal, '買三送一');
+  assert.strictEqual(texts.deals, '買三送一');
   assert.strictEqual(texts.rule, '租滿 4 小時自動折抵 1 小時（買三送一）');
   assert.strictEqual(texts.home, '租借時段買三送一');
+  assert.strictEqual(texts.lineLabel(4, 1), '智能板買三送一（折抵 1 小時）');
   console.log('✓ Scenario 10 passed');
 }
 
@@ -326,6 +328,111 @@ const discountCfg = buildDiscountConfig(globalSettings);
   assert.deepStrictEqual(gapNext, { start: 5, end: 5 }); // resets to clicked slot
 
   console.log('✓ tapSlot selection tests passed');
+}
+
+// 情境 14: 智能板兩段優惠（買三送一、買八送四）
+{
+  const cfg = buildDiscountConfig({
+    equipment_discount_enabled: true,
+    equipment_discount_buy_hours: 3,
+    equipment_discount_free_hours: 1,
+    equipment_discount_stackable: true,
+    equipment_discount2_enabled: true,
+    equipment_discount2_buy_hours: 8,
+    equipment_discount2_free_hours: 4,
+  });
+  const texts = boardDiscountTexts(cfg);
+  assert.strictEqual(texts.deals, '買三送一、買八送四');
+  assert.strictEqual(texts.home, '租借時段買三送一、買八送四');
+  assert.strictEqual(texts.rule, '租滿 4 小時自動折抵 1 小時（買三送一）；租滿 12 小時折抵 4 小時');
+
+  // 1. 中板 5 小時 -> 實收 4，折抵 1 小時，折扣行「智能板買三送一（折抵 1 小時）」，折扣金額 120
+  const p5 = equipmentUnitPrice(configs.medium, 5, cfg);
+  assert.strictEqual(p5.chargeable, 4);
+  assert.strictEqual(p5.freeHours, 1);
+  assert.strictEqual(texts.lineLabel(5, p5.freeHours), '智能板買三送一（折抵 1 小時）');
+  assert.strictEqual(p5.discountSaving, 120);
+
+  // 2. 中板 8 小時 -> 實收 6，折抵 2 小時，折扣行「智能板買三送一（折抵 2 小時）」，折扣金額 240
+  const p8 = equipmentUnitPrice(configs.medium, 8, cfg);
+  assert.strictEqual(p8.chargeable, 6);
+  assert.strictEqual(p8.freeHours, 2);
+  assert.strictEqual(texts.lineLabel(8, p8.freeHours), '智能板買三送一（折抵 2 小時）');
+  assert.strictEqual(p8.discountSaving, 240);
+
+  // 3. 中板 11 小時 -> 實收 8，折抵 3 小時，折扣行「智能板買八送四（折抵 3 小時）」，折扣金額 360
+  const p11 = equipmentUnitPrice(configs.medium, 11, cfg);
+  assert.strictEqual(p11.chargeable, 8);
+  assert.strictEqual(p11.freeHours, 3);
+  assert.strictEqual(texts.lineLabel(11, p11.freeHours), '智能板買八送四（折抵 3 小時）');
+  assert.strictEqual(p11.discountSaving, 360);
+
+  // 4. 中板 12 小時 -> 實收 8，折抵 4 小時，折扣行「智能板買八送四（折抵 4 小時）」，折扣金額 480
+  const p12 = equipmentUnitPrice(configs.medium, 12, cfg);
+  assert.strictEqual(p12.chargeable, 8);
+  assert.strictEqual(p12.freeHours, 4);
+  assert.strictEqual(texts.lineLabel(12, p12.freeHours), '智能板買八送四（折抵 4 小時）');
+  assert.strictEqual(p12.discountSaving, 480);
+
+  // 5. 兩段組合測試：16 小時 (12 + 4) -> 實收 11，折抵 5 小時，折扣行「智能板買三送一＋買八送四（折抵 5 小時）」
+  const p16 = equipmentUnitPrice(configs.medium, 16, cfg);
+  assert.strictEqual(p16.chargeable, 11);
+  assert.strictEqual(p16.freeHours, 5);
+  assert.strictEqual(texts.lineLabel(16, p16.freeHours), '智能板買三送一＋買八送四（折抵 5 小時）');
+
+  // 測試 buildPriceLines 折扣行標籤
+  const bookingSessions11 = Array.from({ length: 11 }, (_, i) => ({
+    start_time: `${10 + i}:00`,
+    end_time: `${11 + i}:00`,
+  }));
+  const day = getDayPricing('2026-11-05', globalSettings, null);
+  const linesRes = buildPriceLines({
+    pax: 1,
+    hours: 11,
+    day,
+    mode: 'timed',
+    units: [{ uid: 'u1', equipment_id: 'medium', from: 0, to: 11, start: '10:00', end: '21:00' }],
+    configs,
+    discountCfg: cfg,
+    bookingSessions: bookingSessions11,
+  });
+  const discountLine = linesRes.lines.find((l) => l.amount < 0 && l.label.includes('智能板'));
+  assert.strictEqual(discountLine?.label, '智能板買八送四（折抵 3 小時）');
+  assert.strictEqual(discountLine?.amount, -360);
+
+  console.log('✓ Scenario 14 (Multi-tier discount tests & section 5.2) passed');
+}
+
+// 情境 15: 只開第二段（買八送四）、沒開第一段
+{
+  const cfg = buildDiscountConfig({
+    equipment_discount_enabled: false,
+    equipment_discount2_enabled: true,
+    equipment_discount2_buy_hours: 8,
+    equipment_discount2_free_hours: 4,
+  });
+  const texts = boardDiscountTexts(cfg);
+  assert.ok(texts !== null);
+  assert.strictEqual(texts.deals, '買八送四');
+  assert.strictEqual(texts.home, '租借時段買八送四');
+  assert.strictEqual(texts.rule, '租滿 12 小時自動折抵 4 小時（買八送四）');
+  assert.strictEqual(texts.lineLabel(12, 4), '智能板買八送四（折抵 4 小時）');
+  console.log('✓ Scenario 15 (Only tier 2 enabled) passed');
+}
+
+// 情境 16: 兩段都關閉（後台兩段都沒開）
+{
+  const cfg = buildDiscountConfig({
+    equipment_discount_enabled: false,
+    equipment_discount2_enabled: false,
+  });
+  const texts = boardDiscountTexts(cfg);
+  assert.strictEqual(texts, null);
+  const p12 = equipmentUnitPrice(configs.medium, 12, cfg);
+  assert.strictEqual(p12.chargeable, 12);
+  assert.strictEqual(p12.freeHours, 0);
+  assert.strictEqual(p12.discountSaving, 0);
+  console.log('✓ Scenario 16 (Both tiers disabled returns null) passed');
 }
 
 console.log('=== ALL TESTS PASSED SUCCESSFULLY! ===');

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import CustomerLayout from '../../components/customer/CustomerLayout';
 import AppBar from '../../components/customer/AppBar';
 import Pill from '../../components/customer/Pill';
@@ -18,6 +18,7 @@ import { useDayPricing } from '../../hooks/customer/useDayPricing';
 import { useSessions, useSessionRange, BOOKING_LOOKAHEAD_DAYS } from '../../hooks/customer/useSessions';
 import { slotState, meterBeads, dayState } from '../../utils/customer/availability';
 import { parseYMD } from '../../utils/customer/pricing';
+import api from '../../api/axios';
 
 function getTodayString() {
   const now = new Date();
@@ -45,10 +46,26 @@ export default function Preview() {
   const [calendarMonth, setCalendarMonth] = useState(() => parseYMD(todayStr));
   const [isPriceInfoOpen, setIsPriceInfoOpen] = useState(false);
 
-  const { settings: globalSettings } = useGlobalSettings();
+  const {
+    settings: globalSettings,
+    loading: globalLoading,
+    error: globalError,
+    reload: reloadGlobalSettings,
+    hasPricing,
+  } = useGlobalSettings();
   const { dayPricing } = useDayPricing(date, globalSettings);
   const { sessions, loading: sessionsLoading } = useSessions(date, { autoRefresh: true });
   const { sessionsByDate } = useSessionRange(todayStr, lookaheadEndStr);
+
+  const [equipmentConfigs, setEquipmentConfigs] = useState([]);
+
+  useEffect(() => {
+    api.get(`/equipment/availability?date=${date}`)
+      .then((res) => {
+        setEquipmentConfigs(res.data?.equipments || []);
+      })
+      .catch(() => {});
+  }, [date]);
 
   const isPreviewEnabled = globalSettings?.enable_preview_page !== false;
   const previewDisabledText = globalSettings?.preview_disabled_text || '時段預覽暫停開放';
@@ -129,13 +146,23 @@ export default function Preview() {
               )}
 
               {/* 3. Compact PriceCard */}
-              <PriceCard
-                variant="compact"
-                selectedDate={date}
-                dayPricing={dayPricing}
-                globalSettings={globalSettings}
-                onOpenPriceInfo={() => setIsPriceInfoOpen(true)}
-              />
+              {globalError && !hasPricing ? (
+                <EmptyState
+                  title="暫時抓不到價格"
+                  description="請檢查網路後重新整理"
+                  action={<Button size="sm" onClick={reloadGlobalSettings}>重新整理</Button>}
+                />
+              ) : !hasPricing || !dayPricing ? (
+                <Skeleton className="h-[96px] w-full rounded-[18px]" />
+              ) : (
+                <PriceCard
+                  variant="compact"
+                  selectedDate={date}
+                  dayPricing={dayPricing}
+                  globalSettings={globalSettings}
+                  onOpenPriceInfo={() => setIsPriceInfoOpen(true)}
+                />
+              )}
 
               {/* 4. SlotGrid (readOnly) */}
               {isClosed ? (
@@ -187,6 +214,9 @@ export default function Preview() {
         globalSettings={globalSettings}
         dayPricing={dayPricing}
         dateStr={date}
+        equipmentConfigs={equipmentConfigs}
+        error={globalError}
+        onReload={reloadGlobalSettings}
       />
     </CustomerLayout>
   );

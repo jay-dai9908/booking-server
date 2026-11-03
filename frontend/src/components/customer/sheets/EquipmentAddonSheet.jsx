@@ -315,14 +315,14 @@ export default function EquipmentAddonSheet({
 
       if (p.discountSaving > 0 && discountTexts) {
         detailLines.push({
-          label: discountTexts.lineLabel(p.freeHours),
+          label: discountTexts.lineLabel(group.hours, p.freeHours),
           amount: -p.discountSaving * group.qty,
           tone: 'save',
         });
       }
       if (p.capSaving > 0) {
         detailLines.push({
-          label: `智能板單日上限（每台 NT$${cfg.daily_cap.toLocaleString()}）`,
+          label: `智能板單日上限（每台 ${formatMoney(cfg.daily_cap)}）`,
           amount: -p.capSaving * group.qty,
           tone: 'save',
         });
