@@ -15,7 +15,11 @@ export default function MonthBar({
   canNextMonth: canNextMonthProp,
   className = '',
 }) {
-  const currentMonthStr = calendarMonth || (selectedDate ? String(selectedDate).substring(0, 7) : '');
+  const currentMonthStr = calendarMonth instanceof Date
+    ? `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}`
+    : calendarMonth
+    ? String(calendarMonth).substring(0, 7)
+    : (selectedDate ? String(selectedDate).substring(0, 7) : '');
   const monthTitle = monthTitleProp || (currentMonthStr ? formatMonthTitle(currentMonthStr) : '');
 
   const handlePrev = () => {

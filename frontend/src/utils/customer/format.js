@@ -8,7 +8,7 @@ export function toDateObj(date) {
   if (typeof date === 'string') {
     if (date.includes('-')) {
       const parts = date.split('T')[0].split('-').map(Number);
-      return new Date(parts[0], parts[1] - 1, parts[2]);
+      return new Date(parts[0], parts[1] - 1, parts[2] || 1);
     }
   }
   return new Date(date);

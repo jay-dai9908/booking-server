@@ -16,15 +16,16 @@ const STATE_NAMES = {
   closed: '沒有開放',
 };
 
-export default function DateStrip({
+const DateStrip = React.forwardRef(function DateStrip({
   dates: datesProp, // array of { dateStr: 'YYYY-MM-DD', state: 'ok'|'low'|'full'|'closed' }
   selectedDate = '',
   onSelectDate,
   onVisibleMonthChange,
   sessionsByDate,
   className = '',
-}) {
+}, ref) {
   const containerRef = useRef(null);
+  React.useImperativeHandle(ref, () => containerRef.current);
 
   const dates = useMemo(() => {
     if (datesProp && datesProp.length > 0) return datesProp;
@@ -139,4 +140,6 @@ export default function DateStrip({
       })}
     </div>
   );
-}
+});
+
+export default DateStrip;
