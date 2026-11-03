@@ -49,7 +49,7 @@ export default function PriceInfoSheet({
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title="價格說明">
-      <div className="grid gap-[10px]">
+      <div className="grid gap-[10px] min-w-0">
         {isSpecial && (
           <div className="grid gap-[2px] rounded-[12px] bg-sg-brown-soft p-[10px]">
             <div className="text-[13px] font-bold text-sg-brown">

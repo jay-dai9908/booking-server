@@ -144,7 +144,7 @@ export default function BeadPickerSheet({
         )
       }
     >
-      <div className="flex flex-col h-full min-h-0">
+      <div className="flex flex-col h-full min-h-0 min-w-0">
         <div className="sg-small -mt-3 mb-2">{subtitle}</div>
 
         {/* Search bar */}

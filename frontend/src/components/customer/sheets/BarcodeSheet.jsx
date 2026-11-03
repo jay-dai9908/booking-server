@@ -61,7 +61,7 @@ export default function BarcodeSheet({
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title={title}>
-      <div className="grid justify-items-center text-center gap-[14px] pb-[10px]">
+      <div className="grid justify-items-center text-center gap-[14px] pb-[10px] min-w-0 w-full">
         {subtitle && (
           <div className="text-[13px] text-sg-muted -mt-1">
             {subtitle}

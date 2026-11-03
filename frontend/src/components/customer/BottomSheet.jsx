@@ -117,7 +117,7 @@ export default function BottomSheet({
 
         {/* Content */}
         <div
-          className={`flex-1 overflow-y-auto overscroll-contain px-4 py-3 grid ${
+          className={`flex-1 overflow-y-auto overscroll-contain px-4 py-3 grid grid-cols-[minmax(0,1fr)] min-w-0 ${
             gap === 2 ? 'gap-2' : gap === 3 ? 'gap-3' : 'gap-[10px]'
           }`}
         >
