@@ -130,15 +130,49 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
       setProducts(Array.isArray(prodRes.data) ? prodRes.data : []);
       if (payRes.data) {
         setPaymentConfig(payRes.data);
-        if (payRes.data.payment_methods?.length > 0) {
-          const ctbc = payRes.data.payment_methods.find((m) => m.code === 'ctbc_pool');
-          setSelectedPaymentCode(ctbc ? 'ctbc_pool' : payRes.data.payment_methods[0].code);
+        const methods = payRes.data.payment_methods || [];
+        const isCtbcAvailable = (payRes.data.ctbc_pool_available_count || 0) > 0;
+        const availableMethods = methods.filter((m) => {
+          if (m.code === 'ctbc_pool') return isCtbcAvailable;
+          return true;
+        });
+        const defaultMethod = availableMethods[0] || methods[0];
+        if (defaultMethod) {
+          setSelectedPaymentCode(defaultMethod.code);
+          const rawAccounts = defaultMethod.bank_accounts_json;
+          const bankAccounts = Array.isArray(rawAccounts)
+            ? rawAccounts
+            : typeof rawAccounts === 'string'
+            ? JSON.parse(rawAccounts || '[]')
+            : [];
+          if (bankAccounts.length > 0) {
+            const b = bankAccounts[0];
+            setSelectedBankInfo(`${b.bank_name} (${b.bank_code}) ${b.account}`);
+          } else {
+            setSelectedBankInfo('');
+          }
         }
       }
     } catch (err) {
       console.error('Failed to load shop data', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSelectPaymentMethod = (m) => {
+    setSelectedPaymentCode(m.code);
+    const rawAccounts = m.bank_accounts_json;
+    const bankAccounts = Array.isArray(rawAccounts)
+      ? rawAccounts
+      : typeof rawAccounts === 'string'
+      ? JSON.parse(rawAccounts || '[]')
+      : [];
+    if (bankAccounts.length > 0) {
+      const b = bankAccounts[0];
+      setSelectedBankInfo(`${b.bank_name} (${b.bank_code}) ${b.account}`);
+    } else {
+      setSelectedBankInfo('');
     }
   };
 
@@ -313,26 +347,32 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
   const handleSubmitOrder = async () => {
     setIsSubmitting(true);
     try {
-      // Build order items
-      const items = itemsBreakdown.map((item) => ({
-        product_id: item.product.id,
-        quantity: item.qty,
-        selected_colors: item.isBeads ? beadColorSelections : undefined,
-      }));
+      const beadEntries = Object.entries(beadColorSelections)
+        .filter(([, q]) => Number(q) > 0)
+        .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+      const beadColorNote = beadEntries.map(([code, q]) => `${code}×${q}包`).join('、');
+      const hasBeads = itemsBreakdown.some((i) => i.isBeads);
+      const hasBundleInCart = !!(bundleProduct && cart[bundleProduct.id] > 0);
 
-      // Beads color note string
-      const beadEntries = Object.entries(beadColorSelections).filter(([, q]) => Number(q) > 0);
-      const generatedColorNote = beadEntries.map(([code, q]) => `${code}×${q}包`).join('、');
+      const combinedCustomerNote = [
+        hasBeads && beadColorNote ? `【融合豆色號明細】：${beadColorNote}` : '',
+        customerNote.trim() ? `【一般備註】：${customerNote.trim()}` : '',
+      ].filter(Boolean).join('\n');
 
       const payload = {
-        items,
-        delivery_method: deliveryMethod === 'delivery' ? 'DELIVERY' : 'STORE_PICKUP',
-        shipping_address: deliveryMethod === 'delivery' ? shippingAddress : null,
+        items: itemsBreakdown.map((item) => ({
+          product_id: item.product.id,
+          quantity: item.qty,
+          customization_note: item.isBeads ? beadColorNote : null,
+          color_breakdown: item.isBeads && beadEntries.length > 0 ? beadColorSelections : null,
+        })),
         payment_method_code: selectedPaymentCode,
-        selected_bank_info: selectedBankInfo || undefined,
-        wish_note: wishNote.trim() || undefined,
-        customer_note: customerNote.trim() || undefined,
-        bead_color_note: generatedColorNote || undefined,
+        selected_bank_info: selectedBankInfo || null,
+        delivery_method: deliveryMethod === 'delivery' ? 'shipping' : 'store_pickup',
+        shipping_info: deliveryMethod === 'delivery' ? shippingAddress : null, // { name, phone, address }
+        wish_note: hasBundleInCart && wishNote.trim() ? wishNote.trim() : null,
+        customer_note: combinedCustomerNote || null,
+        remittance_last5: null,
       };
 
       const res = await api.post('/shop/orders', payload);
@@ -669,43 +709,88 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                 const isPool = m.code === 'ctbc_pool';
                 const isPoolExhausted = isPool && paymentConfig?.ctbc_pool_available_count === 0;
                 const isSelected = selectedPaymentCode === m.code;
+                const rawAccounts = m.bank_accounts_json;
+                const bankAccounts = Array.isArray(rawAccounts)
+                  ? rawAccounts
+                  : typeof rawAccounts === 'string'
+                  ? JSON.parse(rawAccounts || '[]')
+                  : [];
+                const hasMultipleBanks = bankAccounts.length > 1;
 
                 return (
-                  <label
-                    key={m.code}
-                    className={`flex items-center gap-[10px] rounded-[14px] border-[1.5px] bg-sg-paper px-3 py-[9px] cursor-pointer transition select-none ${
-                      isSelected
-                        ? 'border-sg-brown bg-sg-selected'
-                        : 'border-sg-line'
-                    } ${isPoolExhausted ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <input
-                      type="radio"
-                      name="payment_method"
-                      value={m.code}
-                      disabled={isPoolExhausted}
-                      checked={isSelected}
-                      onChange={() => setSelectedPaymentCode(m.code)}
-                      className="sr-only"
-                    />
-                    <div
-                      className={`w-[18px] h-[18px] rounded-full border-2 transition grid place-items-center shrink-0 ${
+                  <div key={m.code} className="grid gap-1.5">
+                    <label
+                      className={`flex items-center gap-[10px] rounded-[14px] border-[1.5px] bg-sg-paper px-3 py-[9px] cursor-pointer transition select-none ${
                         isSelected
-                          ? 'border-[5px] border-sg-brown bg-white'
+                          ? 'border-sg-brown bg-sg-selected'
                           : 'border-sg-line'
-                      }`}
-                    />
-                    <div className="flex-1 text-[13px] leading-[1.4]">
-                      <b>{isPool ? '中信專屬轉帳帳號' : m.name}</b>
-                      {isPool && (
-                        <div className="sg-small">
-                          {isPoolExhausted
-                            ? '目前帳號已發完，請選其他方式'
-                            : '送出後給你一組中信專用轉帳帳號，對帳最快'}
-                        </div>
-                      )}
-                    </div>
-                  </label>
+                      } ${isPoolExhausted ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <input
+                        type="radio"
+                        name="payment_method"
+                        value={m.code}
+                        disabled={isPoolExhausted}
+                        checked={isSelected}
+                        onChange={() => handleSelectPaymentMethod(m)}
+                        className="sr-only"
+                      />
+                      <div
+                        className={`w-[18px] h-[18px] rounded-full border-2 transition grid place-items-center shrink-0 ${
+                          isSelected
+                            ? 'border-[5px] border-sg-brown bg-white'
+                            : 'border-sg-line'
+                        }`}
+                      />
+                      <div className="flex-1 text-[13px] leading-[1.4]">
+                        <b>{isPool ? '中信專屬轉帳帳號' : m.name}</b>
+                        {isPool && (
+                          <div className="sg-small">
+                            {isPoolExhausted
+                              ? '目前帳號已發完，請選其他方式'
+                              : '送出後給你一組中信專用轉帳帳號，對帳最快'}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+
+                    {isSelected && hasMultipleBanks && (
+                      <div className="pl-7 pr-2 grid gap-1.5">
+                        <div className="text-[12px] font-bold text-sg-muted">請選擇匯款銀行：</div>
+                        {bankAccounts.map((b, bIdx) => {
+                          const bankStr = `${b.bank_name} (${b.bank_code}) ${b.account}`;
+                          const isBankSelected = selectedBankInfo === bankStr;
+                          return (
+                            <label
+                              key={bIdx}
+                              className={`flex items-center gap-2 px-3 py-2 rounded-[10px] border text-[13px] cursor-pointer transition ${
+                                isBankSelected
+                                  ? 'border-sg-brown bg-sg-paper font-bold text-sg-ink shadow-sm'
+                                  : 'border-sg-line bg-sg-bg text-sg-muted hover:text-sg-ink'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="selected_bank"
+                                value={bankStr}
+                                checked={isBankSelected}
+                                onChange={() => setSelectedBankInfo(bankStr)}
+                                className="sr-only"
+                              />
+                              <div
+                                className={`w-3.5 h-3.5 rounded-full border transition grid place-items-center shrink-0 ${
+                                  isBankSelected
+                                    ? 'border-[4px] border-sg-brown bg-white'
+                                    : 'border-sg-line'
+                                }`}
+                              />
+                              <span>{b.bank_name} ({b.bank_code})</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
