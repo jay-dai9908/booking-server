@@ -146,7 +146,7 @@ export default function PriceCard({
         }`}
       >
         <span
-          className={`text-[12.5px] font-bold ${
+          className={`text-[12.5px] font-bold min-w-0 truncate ${
             isPinkHeader ? 'text-sg-peach-ink' : 'text-sg-brown'
           }`}
         >
@@ -155,10 +155,10 @@ export default function PriceCard({
         <Button
           variant="text"
           onClick={handleToggle}
-          className="text-[12px] h-8 -mr-1"
+          className="text-[12px] h-8 -mr-1 whitespace-nowrap shrink-0"
         >
           <span>{toggleText}</span>
-          <ChevronRight className="w-[14px] h-[14px] -ml-1" strokeWidth={2} />
+          <ChevronRight className="w-[14px] h-[14px] -ml-1 shrink-0" strokeWidth={2} />
         </Button>
       </div>
 
