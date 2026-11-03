@@ -76,6 +76,18 @@ export default function Preview() {
           right={<Pill variant="full">未登入</Pill>}
         />
       }
+      bottom={
+        <div className="bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))]">
+          <Button
+            variant="line"
+            size="md"
+            onClick={handleLogin}
+            className="w-full"
+          >
+            使用 LINE 登入預約
+          </Button>
+        </div>
+      }
     >
       <div className="flex flex-col min-h-[calc(100dvh-53px)]">
         <div className="grid gap-3 flex-1 pb-4">
@@ -144,9 +156,12 @@ export default function Preview() {
                     const beads = meterBeads(s.remaining_capacity, s.max_capacity);
                     return (
                       <SlotCell
-                        key={s.session_id || s.start_time}
+                        key={s.session_id || s.id || s.start_time}
+                        session={s}
                         startTime={s.start_time}
                         endTime={s.end_time}
+                        remaining={s.remaining_capacity}
+                        maxCapacity={s.max_capacity}
                         state={state}
                         beads={beads}
                         isSelected={false}
@@ -163,18 +178,6 @@ export default function Preview() {
               )}
             </>
           )}
-        </div>
-
-        {/* 5. Fixed Bottom Area */}
-        <div className="sticky bottom-0 z-40 bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))]">
-          <Button
-            variant="line"
-            size="md"
-            onClick={handleLogin}
-            className="w-full"
-          >
-            使用 LINE 登入預約
-          </Button>
         </div>
       </div>
 

@@ -5,16 +5,19 @@ export default function Field({
   required = false,
   error = '',
   hint = '',
+  helper = '',
   id,
   className = '',
-  as = 'input',
+  as,
+  isTextarea = false,
   children,
   ...props
 }) {
+  const effectiveHint = error ? '' : (hint || helper);
   const inputId = id || (label ? `field_${label.replace(/\s+/g, '_')}` : undefined);
   const hintId = inputId ? `${inputId}_hint` : undefined;
 
-  const Component = as;
+  const Component = as || (isTextarea || props.rows ? 'textarea' : 'input');
 
   return (
     <div className={`grid gap-[5px] w-full ${className}`}>

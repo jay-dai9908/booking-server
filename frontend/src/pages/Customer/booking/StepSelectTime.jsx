@@ -63,6 +63,14 @@ export default function StepSelectTime({
     }
   }, [date]);
 
+  // If selected date does not allow unlimited mode, fallback to timed
+  useEffect(() => {
+    if (!allowUnlimited && mode === 'unlimited') {
+      onChangeMode('timed');
+      toast.show('這天不開放當日不限時暢玩，已改成計時', { type: 'info' });
+    }
+  }, [allowUnlimited, mode, onChangeMode, toast]);
+
   // Pricing values
   const hourly = dayPricing?.hourly ?? 100;
   const cap = dayPricing?.cap ?? 550;
@@ -268,7 +276,7 @@ export default function StepSelectTime({
       )}
 
       {/* 2. Step Indicator */}
-      <StepIndicator currentStep={2} />
+      <StepIndicator currentStep="時段" />
 
       {/* 3. Month & Date Selection */}
       <MonthBar
@@ -312,20 +320,10 @@ export default function StepSelectTime({
             hourlyPrice={hourly}
             unlimitedPrice={cap}
             allowUnlimited={allowUnlimited}
+            dateStr={date}
+            dayPricing={dayPricing}
+            onOpenPriceInfo={() => setIsPriceInfoOpen(true)}
           />
-
-          <div className="flex justify-between items-center sg-small -mt-1">
-            <div className={dayType === 'weekend' ? 'font-bold text-sg-peach-ink' : ''}>
-              {formatDateShort(date)} · {DAY_PRICE_LABEL[dayType]}
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsPriceInfoOpen(true)}
-              className="text-[12px] font-bold text-sg-brown hover:underline"
-            >
-              價格說明
-            </button>
-          </div>
 
           {/* 5. Timed Mode content */}
           {mode === 'timed' && (
@@ -348,9 +346,12 @@ export default function StepSelectTime({
                     const beads = meterBeads(s.remaining_capacity, s.max_capacity);
                     return (
                       <SlotCell
-                        key={s.session_id || s.start_time}
+                        key={s.session_id || s.id || s.start_time}
+                        session={s}
                         startTime={s.start_time}
                         endTime={s.end_time}
+                        remaining={s.remaining_capacity}
+                        maxCapacity={s.max_capacity}
                         state={state}
                         beads={beads}
                         isSelected={isSelected}
@@ -445,16 +446,18 @@ export default function StepSelectTime({
       )}
 
       {/* Bottom bar & Bottom tabs */}
-      {canProceed && (
+      {(canProceed || userRole === 'customer') && (
         <div className="sticky bottom-0 z-40">
-          <BottomActionBar
-            summary={actionSummary}
-            price={finalPrice}
-            strikePrice={strikePrice}
-            actionLabel="下一步"
-            onAction={onNext}
-            hasTabBarBelow={userRole === 'customer'}
-          />
+          {canProceed && (
+            <BottomActionBar
+              summary={actionSummary}
+              price={finalPrice}
+              strikePrice={strikePrice}
+              actionLabel="下一步"
+              onAction={onNext}
+              hasTabBarBelow={userRole === 'customer'}
+            />
+          )}
           {userRole === 'customer' && (
             <BottomTabBar
               shopEnabled={globalSettings?.shop_enabled !== false && globalSettings?.show_shop_button !== false}

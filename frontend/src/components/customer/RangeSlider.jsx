@@ -119,6 +119,7 @@ export function RangeSlider({
         className="sg-range"
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
       >
         {/* Clickable Track */}
         <div
@@ -190,25 +191,65 @@ export function BoardTimeBox({
   unit, // { uid, equipment_id, from, to }
   config,
   boardIndex = 1,
-  totalHours = 6,
-  boundaryTimes = [],
+  totalHours: totalHoursProp,
+  boundaryTimes: boundaryTimesProp,
   onChange,
   onCommit,
   className = '',
+  // Direct props support
+  label,
+  from: fromProp,
+  to: toProp,
+  minHours: minHoursProp,
+  bookingSessions = [],
 }) {
-  const minHours = Math.min(config?.min_contiguous_hours || 2, totalHours);
-  const hours = unit.to - unit.from;
-  const startTime = boundaryTimes[unit.from] || '';
-  const endTime = boundaryTimes[unit.to] || '';
+  let boundaryTimes = boundaryTimesProp;
+  if ((!boundaryTimes || boundaryTimes.length === 0) && Array.isArray(bookingSessions) && bookingSessions.length > 0) {
+    boundaryTimes = [
+      ...bookingSessions.map((s) => s.start_time),
+      bookingSessions[bookingSessions.length - 1]?.end_time,
+    ];
+  }
+  if (!boundaryTimes) boundaryTimes = [];
+
+  const totalHours = totalHoursProp ?? (boundaryTimes.length > 1 ? boundaryTimes.length - 1 : (bookingSessions.length || 6));
+  const from = unit?.from ?? fromProp ?? 0;
+  const to = unit?.to ?? toProp ?? totalHours;
+  const minHours = minHoursProp ?? Math.min(config?.min_contiguous_hours || 2, totalHours);
+  const hours = to - from;
+  const startTime = boundaryTimes[from] || '';
+  const endTime = boundaryTimes[to] || '';
 
   const isFullSpan = totalHours <= minHours;
+
+  const fireChange = (val) => {
+    if (!onChange) return;
+    if (onChange.length >= 2) {
+      onChange(val.from, val.to);
+    } else {
+      onChange(val);
+    }
+  };
+
+  const fireCommit = (val) => {
+    if (!onCommit) return;
+    if (onCommit.length >= 2) {
+      onCommit(val.from, val.to);
+    } else {
+      onCommit(val);
+    }
+  };
+
+  const titleText = label || (
+    <>
+      第 <span className="font-num font-bold">{boardIndex}</span> 台使用時間
+    </>
+  );
 
   return (
     <div className={`grid gap-[6px] rounded-[12px] bg-sg-bg p-[10px] w-full ${className}`}>
       <div className="flex justify-between items-center text-[12px]">
-        <span className="text-sg-muted">
-          第 <span className="font-num font-bold">{boardIndex}</span> 台使用時間
-        </span>
+        <span className="text-sg-muted">{titleText}</span>
         <span className="font-num font-bold text-sg-ink">
           {startTime} 到 {endTime} · {hours} 小時
         </span>
@@ -223,12 +264,12 @@ export function BoardTimeBox({
           <RangeSlider
             totalHours={totalHours}
             minHours={minHours}
-            from={unit.from}
-            to={unit.to}
+            from={from}
+            to={to}
             boardIndex={boardIndex}
             boundaryTimes={boundaryTimes}
-            onChange={(val) => onChange && onChange(val)}
-            onCommit={(val) => onCommit && onCommit(val)}
+            onChange={fireChange}
+            onCommit={fireCommit}
           />
           <div className="sg-small mt-1">
             拖曳兩端的圓點調整，至少 {minHours} 小時；其他時間用傳統板

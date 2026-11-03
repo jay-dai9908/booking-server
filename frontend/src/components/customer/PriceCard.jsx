@@ -6,14 +6,21 @@ import { DAY_TYPE_LABEL } from '../../utils/customer/pricing.js';
 
 export default function PriceCard({
   variant = 'full', // 'full' | 'compact'
-  todayStr = '',
-  todayPricing,
+  todayStr: todayStrProp = '',
+  todayPricing: todayPricingProp,
   globalSettings,
-  selectedDateStr = '',
-  selectedDayPricing,
+  selectedDateStr: selectedDateStrProp = '',
+  selectedDayPricing: selectedDayPricingProp,
   onOpenPriceInfo,
   className = '',
+  selectedDate,
+  dayPricing,
 }) {
+  const todayStr = todayStrProp || selectedDate || '';
+  const todayPricing = todayPricingProp || dayPricing;
+  const selectedDateStr = selectedDateStrProp || selectedDate || '';
+  const selectedDayPricing = selectedDayPricingProp || dayPricing;
+
   const [viewOverride, setViewOverride] = useState(null); // 'weekend' | 'weekday' | null
 
   if (variant === 'compact') {

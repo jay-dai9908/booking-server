@@ -2,6 +2,7 @@ import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import api from './api/axios';
 import { getBrowserClientInfo, getBrowserClientInfoAsync } from './utils/clientInfo';
+import { ToastProvider } from './components/customer/Toast';
 
 // Customer Entry Page (Eagerly loaded for instant LINE WebView startup)
 import Home from './pages/Customer/Home';
@@ -91,67 +92,69 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Suspense fallback={<div className="flex h-screen items-center justify-center text-gray-500">載入頁面中...</div>}>
-        <Routes>
-        {/* Customer Routes */}
-        <Route path="/" element={<Home userRole={userRole} />} />
-        <Route path="/preview" element={<Preview />} />
-        <Route 
-          path="/register" 
-          element={userRole === 'temp_customer' ? <Register setUserRole={setUserRole} /> : <Navigate to="/" />} 
-        />
-        <Route 
-          path="/booking" 
-          element={userRole === 'customer' ? <Booking /> : <Navigate to="/" />} 
-        />
-        <Route 
-          path="/history" 
-          element={userRole === 'customer' ? <HistoryPage /> : <Navigate to="/" />} 
-        />
-        <Route 
-          path="/shop" 
-          element={<ShopPage userRole={userRole} isLineEntry={false} />} 
-        />
-        <Route 
-          path="/preorder" 
-          element={<ShopPage userRole={userRole} isLineEntry={true} />} 
-        />
-        <Route 
-          path="/shop/order" 
-          element={<ShopPage userRole={userRole} isLineEntry={true} />} 
-        />
+    <ToastProvider>
+      <BrowserRouter>
+        <Suspense fallback={<div className="flex h-screen items-center justify-center text-gray-500">載入頁面中...</div>}>
+          <Routes>
+          {/* Customer Routes */}
+          <Route path="/" element={<Home userRole={userRole} />} />
+          <Route path="/preview" element={<Preview />} />
+          <Route 
+            path="/register" 
+            element={userRole === 'temp_customer' ? <Register setUserRole={setUserRole} /> : <Navigate to="/" />} 
+          />
+          <Route 
+            path="/booking" 
+            element={userRole === 'customer' ? <Booking /> : <Navigate to="/" />} 
+          />
+          <Route 
+            path="/history" 
+            element={userRole === 'customer' ? <HistoryPage /> : <Navigate to="/" />} 
+          />
+          <Route 
+            path="/shop" 
+            element={<ShopPage userRole={userRole} isLineEntry={false} />} 
+          />
+          <Route 
+            path="/preorder" 
+            element={<ShopPage userRole={userRole} isLineEntry={true} />} 
+          />
+          <Route 
+            path="/shop/order" 
+            element={<ShopPage userRole={userRole} isLineEntry={true} />} 
+          />
 
-        {/* Admin Login */}
-        <Route 
-          path="/admin/login" 
-          element={userRole === 'admin' ? <Navigate to="/admin/seating" /> : <AdminLogin setUserRole={setUserRole} />} 
-        />
+          {/* Admin Login */}
+          <Route 
+            path="/admin/login" 
+            element={userRole === 'admin' ? <Navigate to="/admin/seating" /> : <AdminLogin setUserRole={setUserRole} />} 
+          />
 
-        {/* Admin Nested Routes */}
-        <Route 
-          path="/admin" 
-          element={userRole === 'admin' ? <AdminLayout initialAdminInfo={initialAdminInfo} /> : <Navigate to="/admin/login" />}
-        >
-          <Route index element={<Navigate to="seating" replace />} />
-          <Route path="sessions" element={<SessionsPage />} />
-          <Route path="reservations" element={<ReservationsPage />} />
-          <Route path="shop" element={<ShopAdminPage />} />
-          <Route path="members" element={<MembersPage />} />
-          <Route path="weekly" element={<WeeklyPage />} />
-          <Route path="seating" element={<SeatingPage />} />
-          <Route path="equipment" element={<EquipmentPage />} />
-          <Route path="coupons" element={<CouponsPage />} />
-          <Route path="accounting" element={<AccountingPage />} />
-          <Route path="staff" element={<StaffPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-        </Route>
+          {/* Admin Nested Routes */}
+          <Route 
+            path="/admin" 
+            element={userRole === 'admin' ? <AdminLayout initialAdminInfo={initialAdminInfo} /> : <Navigate to="/admin/login" />}
+          >
+            <Route index element={<Navigate to="seating" replace />} />
+            <Route path="sessions" element={<SessionsPage />} />
+            <Route path="reservations" element={<ReservationsPage />} />
+            <Route path="shop" element={<ShopAdminPage />} />
+            <Route path="members" element={<MembersPage />} />
+            <Route path="weekly" element={<WeeklyPage />} />
+            <Route path="seating" element={<SeatingPage />} />
+            <Route path="equipment" element={<EquipmentPage />} />
+            <Route path="coupons" element={<CouponsPage />} />
+            <Route path="accounting" element={<AccountingPage />} />
+            <Route path="staff" element={<StaffPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
 
-        {/* Catch old dashboard link */}
-        <Route path="/admin/dashboard" element={<Navigate to="/admin/seating" replace />} />
-      </Routes>
-      </Suspense>
-    </BrowserRouter>
+          {/* Catch old dashboard link */}
+          <Route path="/admin/dashboard" element={<Navigate to="/admin/seating" replace />} />
+        </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </ToastProvider>
   );
 }
 

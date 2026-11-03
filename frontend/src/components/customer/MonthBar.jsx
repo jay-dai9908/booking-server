@@ -1,24 +1,56 @@
 import React from 'react';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { formatMonthTitle } from '../../utils/customer/format.js';
 
 export default function MonthBar({
-  monthTitle = '',
+  monthTitle: monthTitleProp = '',
+  calendarMonth = '',
+  selectedDate = '',
   isExpanded = false,
   onToggleExpand,
   onPrevMonth,
   onNextMonth,
-  canPrevMonth = false,
-  canNextMonth = true,
+  onChangeCalendarMonth,
+  canPrevMonth: canPrevMonthProp,
+  canNextMonth: canNextMonthProp,
   className = '',
 }) {
+  const currentMonthStr = calendarMonth || (selectedDate ? String(selectedDate).substring(0, 7) : '');
+  const monthTitle = monthTitleProp || (currentMonthStr ? formatMonthTitle(currentMonthStr) : '');
+
+  const handlePrev = () => {
+    if (onPrevMonth) {
+      onPrevMonth();
+    } else if (onChangeCalendarMonth && currentMonthStr) {
+      const [y, m] = currentMonthStr.split('-').map(Number);
+      const d = new Date(y, m - 2, 1);
+      const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      onChangeCalendarMonth(newMonth);
+    }
+  };
+
+  const handleNext = () => {
+    if (onNextMonth) {
+      onNextMonth();
+    } else if (onChangeCalendarMonth && currentMonthStr) {
+      const [y, m] = currentMonthStr.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      onChangeCalendarMonth(newMonth);
+    }
+  };
+
+  const canPrev = canPrevMonthProp ?? true;
+  const canNext = canNextMonthProp ?? true;
+
   return (
     <div className={`flex items-center justify-between -mb-1 select-none ${className}`}>
       <div className="flex items-center gap-1">
         {isExpanded && (
           <button
             type="button"
-            disabled={!canPrevMonth}
-            onClick={onPrevMonth}
+            disabled={!canPrev}
+            onClick={handlePrev}
             aria-label="上個月"
             className="w-11 h-11 grid place-items-center rounded-full text-sg-ink disabled:text-sg-full disabled:cursor-not-allowed hover:bg-sg-brown-soft/40 transition active:scale-[0.98]"
           >
@@ -31,8 +63,8 @@ export default function MonthBar({
         {isExpanded && (
           <button
             type="button"
-            disabled={!canNextMonth}
-            onClick={onNextMonth}
+            disabled={!canNext}
+            onClick={handleNext}
             aria-label="下個月"
             className="w-11 h-11 grid place-items-center rounded-full text-sg-ink disabled:text-sg-full disabled:cursor-not-allowed hover:bg-sg-brown-soft/40 transition active:scale-[0.98]"
           >

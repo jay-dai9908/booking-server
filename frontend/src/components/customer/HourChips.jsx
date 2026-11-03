@@ -15,10 +15,11 @@ export default function HourChips({
         </h3>
       )}
       <div className="grid grid-cols-4 gap-[6px]" role="radiogroup">
-        {options.map((opt) => {
-          const isSelected = selectedValue === opt.time || selectedValue === opt.index || selectedValue === opt.endIndex;
-          const isClosing = opt.isClosing;
-          const isEnabled = opt.enabled !== false;
+        {options.map((opt, oIdx) => {
+          const val = opt.value ?? opt.index ?? opt.endIndex ?? opt.time;
+          const isSelected = selectedValue === val || selectedValue === opt.time || selectedValue === opt.index || selectedValue === opt.endIndex;
+          const isClosing = opt.isClosing || opt.isWide;
+          const isEnabled = opt.enabled !== false && !opt.disabled;
 
           let btnClass = 'bg-sg-paper border-sg-line text-sg-ink hover:border-sg-brown/50';
           if (!isEnabled) {
@@ -27,20 +28,25 @@ export default function HourChips({
             btnClass = 'bg-sg-brown border-sg-brown text-white';
           }
 
+          const handleClick = () => {
+            if (!isEnabled || !onSelect) return;
+            onSelect(val !== undefined ? val : opt);
+          };
+
           return (
             <button
-              key={opt.time + (opt.endIndex ?? '')}
+              key={opt.time ? `${opt.time}_${oIdx}` : oIdx}
               type="button"
               role="radio"
               aria-checked={isSelected}
               disabled={!isEnabled}
               aria-disabled={!isEnabled ? 'true' : undefined}
-              onClick={() => isEnabled && onSelect(opt)}
+              onClick={handleClick}
               className={`min-h-[44px] grid place-items-center rounded-[10px] border select-none transition ${
                 isClosing ? 'col-span-2' : ''
               } ${btnClass} ${isEnabled ? 'active:scale-[0.98]' : ''}`}
             >
-              {isClosing ? (
+              {isClosing && !opt.time?.includes('玩到打烊') ? (
                 <span className="font-body text-[13px] font-bold">
                   玩到打烊 <span className="font-num">{opt.time}</span>
                 </span>

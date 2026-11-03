@@ -12,9 +12,9 @@ export default function BrandLogo({ size = 'mark', className = '' }) {
   }
 
   let sizeClasses = 'h-16 w-16'; // sm: 64px
-  if (size === 'lg' || size === 132) sizeClasses = 'h-[132px] w-[132px]';
-  else if (size === 'md' || size === 112) sizeClasses = 'h-[112px] w-[112px]';
-  else if (size === 'sm' || size === 64) sizeClasses = 'h-16 w-16';
+  if (size === 'lg' || size === 132 || size === 'home') sizeClasses = 'h-[132px] w-[132px]';
+  else if (size === 'md' || size === 112 || size === 'login') sizeClasses = 'h-[112px] w-[112px]';
+  else if (size === 'sm' || size === 64 || size === 'register') sizeClasses = 'h-16 w-16';
 
   return (
     <img

@@ -41,6 +41,14 @@ import {
 
 const QUICK_TAGS = ['第一次玩', '有小孩同行', '生日慶祝', '希望坐一起'];
 
+// Helper to parse datePart safely handling ISO strings (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ)
+function parseReservationDate(datePart) {
+  if (!datePart) return [new Date().getFullYear(), 1, 1];
+  const clean = String(datePart).split('T')[0];
+  const parts = clean.split('-').map(Number);
+  return [parts[0] || new Date().getFullYear(), parts[1] || 1, parts[2] || 1];
+}
+
 // Pill status helper for reservations (Section 6.13)
 function getReservationStatusPill(r) {
   if (r.status === 'cancelled') {
@@ -49,7 +57,7 @@ function getReservationStatusPill(r) {
 
   const now = new Date();
   const datePart = r.session_date || r.session?.session_date || '';
-  const [y, m, d] = datePart.split('-').map(Number);
+  const [y, m, d] = parseReservationDate(datePart);
   const [eH, eM] = (r.end_time || r.session?.end_time || '23:59').split(':').map(Number);
   const [sH, sM] = (r.start_time || r.session?.start_time || '00:00').split(':').map(Number);
   const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
@@ -89,13 +97,13 @@ function getReservationStatusPill(r) {
 // Order status helper (Section 6.15)
 function getOrderStatusInfo(o) {
   if (o.order_status === 'cancelled') {
-    return { pill: { variant: 'full', text: '已取消' }, step: 0 };
+    return { pill: { variant: 'full', text: '已取消' }, step: 'none' };
   }
   if (o.payment_status === 'refunded') {
-    return { pill: { variant: 'full', text: '已退款' }, step: 0 };
+    return { pill: { variant: 'full', text: '已退款' }, step: 'none' };
   }
   if (o.order_status === 'picked_up') {
-    return { pill: { variant: 'full', text: '已取貨' }, step: 4 };
+    return { pill: { variant: 'full', text: '已取貨' }, step: 'all' };
   }
   if (o.order_status === 'arrived') {
     return { pill: { variant: 'peach', text: '已到貨，可取貨' }, step: 3 };
@@ -239,7 +247,7 @@ export default function HistoryPage() {
         continue;
       }
       const datePart = r.session_date || r.session?.session_date || '';
-      const [y, m, d] = datePart.split('-').map(Number);
+      const [y, m, d] = parseReservationDate(datePart);
       const [eH, eM] = (r.end_time || r.session?.end_time || '23:59').split(':').map(Number);
       const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
 
@@ -284,7 +292,7 @@ export default function HistoryPage() {
     if (currentDetailRes.status === 'cancelled') return false;
     const now = new Date();
     const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
-    const [y, m, d] = datePart.split('-').map(Number);
+    const [y, m, d] = parseReservationDate(datePart);
     const [eH, eM] = (currentDetailRes.end_time || currentDetailRes.session?.end_time || '23:59').split(':').map(Number);
     const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
     const twoHoursBeforeEnd = new Date(endDt.getTime() - 120 * 60 * 1000);
@@ -296,7 +304,7 @@ export default function HistoryPage() {
     if (!currentDetailRes) return false;
     const now = new Date();
     const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
-    const [y, m, d] = datePart.split('-').map(Number);
+    const [y, m, d] = parseReservationDate(datePart);
     const [eH, eM] = (currentDetailRes.end_time || currentDetailRes.session?.end_time || '23:59').split(':').map(Number);
     const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
     return now.getTime() >= endDt.getTime();
@@ -310,7 +318,7 @@ export default function HistoryPage() {
     if (currentDetailRes.attendance === 'checked_in') return false;
     const now = new Date();
     const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
-    const [y, m, d] = datePart.split('-').map(Number);
+    const [y, m, d] = parseReservationDate(datePart);
     const [sH, sM] = (currentDetailRes.start_time || currentDetailRes.session?.start_time || '00:00').split(':').map(Number);
     const startDt = new Date(y, m - 1, d, sH, sM, 0, 0);
     return now.getTime() < startDt.getTime();
@@ -395,8 +403,10 @@ export default function HistoryPage() {
   if (detailRef && currentDetailRes) {
     const r = currentDetailRes;
     const pill = getReservationStatusPill(r);
-    const dateFormatted = formatDateShort(r.session_date);
-    const weekday = weekdayChar(r.session_date);
+    const cleanDateStr = String(r.session_date).split('T')[0];
+    const dateParts = cleanDateStr ? cleanDateStr.split('-') : [];
+    const monthDay = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : cleanDateStr;
+    const weekday = cleanDateStr ? `週${weekdayChar(cleanDateStr)}` : '';
     const timeRange = `${r.start_time} 到 ${r.end_time}${r.is_unlimited ? '（不限時）' : ''}`;
     const amountLabel = r.is_paid ? '金額（已付款）' : '預估金額';
     const contactInfo = `${r.customer_name || user?.name || ''} · ${formatPhone(r.customer_phone || user?.phone || '')}`;
@@ -405,7 +415,7 @@ export default function HistoryPage() {
     const boards = r.equipments || [];
     const hasBoards = boards.some((e) => e.equipment_id !== 'bring_own');
 
-    const cancelSummary = `${formatDateShort(r.session_date)} ${weekday} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`;
+    const cancelSummary = `${cleanDateStr ? formatDateShort(cleanDateStr) : ''} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`;
 
     return (
       <CustomerLayout
@@ -427,7 +437,7 @@ export default function HistoryPage() {
 
             <div className="flex items-baseline my-1">
               <span className="font-num font-extrabold text-[26px] leading-[1.2] text-sg-ink mr-2">
-                {dateFormatted}
+                {monthDay}
               </span>
               <span className="font-body text-[15px] font-bold text-sg-ink">
                 {weekday}
@@ -445,11 +455,23 @@ export default function HistoryPage() {
                   <div className="text-right">
                     {boards
                       .filter((e) => e.equipment_id !== 'bring_own')
-                      .map((e, idx) => (
-                        <div key={idx}>
-                          {e.name || '智能板'} ×{e.quantity}（{e.rental_hours} 小時）
-                        </div>
-                      ))}
+                      .map((e, idx) => {
+                        const name = (e.equipment_name_snapshot || e.name || '智能板').replace(/\s*[（(][^)）]*[)）]\s*/g, '').trim();
+                        let span = `${e.rental_hours} 小時`;
+                        if (Array.isArray(e.covered_sessions) && e.covered_sessions.length > 0) {
+                          const [sh, sm] = (e.covered_sessions[0] || '12:00').split(':').map(Number);
+                          const eh = sh + (e.rental_hours || e.covered_sessions.length);
+                          const endT = `${String(eh).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}`;
+                          if (e.covered_sessions[0] !== r.start_time || endT !== r.end_time) {
+                            span = `${e.covered_sessions[0]} 到 ${endT}`;
+                          }
+                        }
+                        return (
+                          <div key={idx}>
+                            {name} ×{e.quantity || 1}（{span}）
+                          </div>
+                        );
+                      })}
                   </div>
                 )
               }
@@ -700,15 +722,17 @@ export default function HistoryPage() {
                 {/* Upcoming bookings */}
                 {upcomingList.map((r, idx) => {
                   const pill = getReservationStatusPill(r);
-                  const dateShort = formatDateShort(r.session_date);
-                  const weekday = weekdayChar(r.session_date);
+                  const cleanResDate = String(r.session_date).split('T')[0];
+                  const resParts = cleanResDate ? cleanResDate.split('-') : [];
+                  const monthDay = resParts.length === 3 ? `${resParts[1]}/${resParts[2]}` : cleanResDate;
+                  const weekday = cleanResDate ? `週${weekdayChar(cleanResDate)}` : '';
                   const timeDesc = `${r.start_time} 到 ${r.end_time} · ${r.pax} 位 · ${formatMoney(r.total_amount)}`;
                   const boards = r.equipments || [];
                   const hasBoards = boards.some((e) => e.equipment_id !== 'bring_own');
 
                   // Check if can add/modify smart board
                   const now = new Date();
-                  const [y, m, d] = (r.session_date || '').split('-').map(Number);
+                  const [y, m, d] = parseReservationDate(r.session_date);
                   const [eH, eM] = (r.end_time || '23:59').split(':').map(Number);
                   const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
                   const canAddon = now.getTime() < endDt.getTime() - 120 * 60 * 1000;
@@ -731,7 +755,7 @@ export default function HistoryPage() {
                       >
                         <div className="flex items-baseline">
                           <span className="font-num font-extrabold text-[26px] leading-[1.2] text-sg-ink mr-2 group-hover:text-sg-brown transition">
-                            {dateShort}
+                            {monthDay}
                           </span>
                           <span className="font-body text-[15px] font-bold text-sg-ink">
                             {weekday}
@@ -808,8 +832,8 @@ export default function HistoryPage() {
 
                     {filteredPastList.slice(0, pastLimit).map((r) => {
                       const pill = getReservationStatusPill(r);
-                      const dateShort = formatDateShort(r.session_date);
-                      const weekday = weekdayChar(r.session_date);
+                      const cleanPastDate = String(r.session_date).split('T')[0];
+                      const dateShort = formatDateShort(cleanPastDate);
                       const timeDesc = `${r.start_time} 到 ${r.end_time} · ${r.pax} 位`;
 
                       return (
@@ -821,7 +845,7 @@ export default function HistoryPage() {
                         >
                           <div className="flex justify-between items-center">
                             <span className="font-num font-bold text-[14px] text-sg-ink">
-                              {dateShort} {weekday}
+                              {dateShort}
                             </span>
                             <Pill variant={pill.variant}>{pill.text}</Pill>
                           </div>

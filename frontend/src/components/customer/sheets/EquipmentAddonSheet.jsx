@@ -100,7 +100,8 @@ export default function EquipmentAddonSheet({
     const now = new Date();
     const datePart = reservation.session_date || reservation.session?.session_date;
     if (!datePart) return false;
-    const [y, m, d] = datePart.split('-').map(Number);
+    const cleanDate = String(datePart).split('T')[0];
+    const [y, m, d] = cleanDate.split('-').map(Number);
     const [sH, sM] = (reservation.start_time || reservation.session?.start_time || '00:00').split(':').map(Number);
     const startDt = new Date(y, m - 1, d, sH, sM, 0, 0);
     return now.getTime() >= startDt.getTime() - 60 * 60 * 1000;
@@ -113,7 +114,7 @@ export default function EquipmentAddonSheet({
     setLoading(true);
     setErrorMessage('');
 
-    const dateStr = reservation.session_date || reservation.session?.session_date;
+    const dateStr = String(reservation.session_date || reservation.session?.session_date || '').split('T')[0];
     const sessionStarts = hourStartTimes.join(',');
     const url = `/equipment/availability?date=${dateStr}&sessions=${sessionStarts}&per_session=1&exclude_booking_ref=${reservation.booking_ref}`;
 
@@ -167,9 +168,27 @@ export default function EquipmentAddonSheet({
   const configsMap = useMemo(() => {
     const map = {};
     configs.forEach((c) => {
-      map[c.equipment_id] = c;
+      const eqId = c.equipment_id || c.id;
+      if (eqId) map[eqId] = c;
     });
     return map;
+  }, [configs]);
+
+  const sortedConfigs = useMemo(() => {
+    return [...configs]
+      .filter((eq) => {
+        const eqId = eq.equipment_id || eq.id;
+        if (eqId === 'bring_own') return true;
+        if (eq.visibility_status) return eq.visibility_status !== 'HIDDEN';
+        return eq.is_active !== false && eq.status !== 'HIDDEN';
+      })
+      .sort((a, b) => {
+        const aId = a.equipment_id || a.id;
+        const bId = b.equipment_id || b.id;
+        if (aId === 'bring_own') return 1;
+        if (bId === 'bring_own') return -1;
+        return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      });
   }, [configs]);
 
   // Current count per equipment_id
@@ -189,7 +208,8 @@ export default function EquipmentAddonSheet({
 
   // Add / remove unit
   const handleAddUnit = (eq) => {
-    if (!allowExceedPax && eq.equipment_id !== 'bring_own' && nonBringOwnTotal >= pax) {
+    const eqId = eq.equipment_id || eq.id;
+    if (!allowExceedPax && eqId !== 'bring_own' && nonBringOwnTotal >= pax) {
       toast.show(`最多只能租借 ${pax} 台`, { type: 'info' });
       return;
     }
@@ -200,7 +220,8 @@ export default function EquipmentAddonSheet({
     const now = new Date();
     const datePart = reservation.session_date || reservation.session?.session_date;
     if (datePart) {
-      const [y, m, d] = datePart.split('-').map(Number);
+      const cleanDate = String(datePart).split('T')[0];
+      const [y, m, d] = cleanDate.split('-').map(Number);
       const [curH] = [now.getHours()];
       const isToday = now.getFullYear() === y && now.getMonth() === m - 1 && now.getDate() === d;
       if (isToday) {
@@ -216,7 +237,7 @@ export default function EquipmentAddonSheet({
 
     const candidate = {
       uid: Math.random().toString(36).substring(2, 9),
-      equipment_id: eq.equipment_id,
+      equipment_id: eqId,
       from,
       to: H,
     };
@@ -388,99 +409,99 @@ export default function EquipmentAddonSheet({
           <>
             {/* Equipment list */}
             <div className="grid gap-3">
-              {configs
-                .filter((eq) => eq.is_active && eq.status !== 'HIDDEN')
-                .map((eq) => {
-                  const isMaintenance = eq.status === 'MAINTENANCE';
-                  const maintenanceNote = eq.status_note
-                    ? eq.status_note.replace(/^[\p{Extended_Pictographic}️\s]+/u, '')
-                    : '維護中，暫停借用';
-                  const eqUnits = units.filter((u) => u.equipment_id === eq.equipment_id);
-                  const count = eqUnits.length;
-                  const isBringOwn = eq.equipment_id === 'bring_own';
+              {sortedConfigs.map((eq) => {
+                const eqId = eq.equipment_id || eq.id;
+                const isMaintenance = eq.visibility_status === 'MAINTENANCE' || eq.status === 'MAINTENANCE';
+                const maintenanceNote = eq.status_note
+                  ? eq.status_note.replace(/^[\p{Extended_Pictographic}️\s]+/u, '')
+                  : '維護中，暫停借用';
+                const eqUnits = units.filter((u) => u.equipment_id === eqId);
+                const count = eqUnits.length;
+                const isBringOwn = eqId === 'bring_own';
 
-                  // Live stock calculation: min remaining in bookingSessions minus current count
-                  let stockRemaining = 99;
-                  if (!isBringOwn && availBySession[eq.equipment_id]) {
-                    const hoursAvail = hourStartTimes.map(
-                      (t) => availBySession[eq.equipment_id][t] ?? 0
-                    );
-                    stockRemaining = Math.max(0, Math.min(...hoursAvail) - count);
-                  }
+                // Live stock calculation: min remaining in bookingSessions minus current count
+                let stockRemaining = 99;
+                if (!isBringOwn && availBySession[eqId]) {
+                  const hoursAvail = hourStartTimes.map(
+                    (t) => availBySession[eqId][t] ?? 0
+                  );
+                  stockRemaining = Math.max(0, Math.min(...hoursAvail) - count);
+                }
 
-                  let stockText = '';
-                  if (!isBringOwn && showLiveStock) {
-                    stockText = stockRemaining <= 0 ? ' · 已租完' : ` · 剩 ${stockRemaining} 台`;
-                  }
+                let stockText = '';
+                if (!isBringOwn && showLiveStock) {
+                  stockText = stockRemaining <= 0 ? ' · 已租完' : ` · 剩 ${stockRemaining} 台`;
+                }
 
-                  const nameParts = eq.name.match(/^(.*?)(?:\s*[（(]([^）)]+)[）)])?$/);
-                  const displayName = nameParts ? nameParts[1].trim() : eq.name;
-                  const sizePart = nameParts && nameParts[2] ? nameParts[2].trim() : '';
+                const nameParts = eq.name.match(/^(.*?)(?:\s*[（(]([^）)]+)[）)])?$/);
+                const displayName = nameParts ? nameParts[1].trim() : eq.name;
+                const sizePart = nameParts && nameParts[2] ? nameParts[2].trim() : '';
 
-                  const canAdd =
-                    !isMaintenance &&
-                    (allowExceedPax || isBringOwn || nonBringOwnTotal < pax) &&
-                    (isBringOwn || stockRemaining > 0);
+                const canAdd =
+                  !isMaintenance &&
+                  (allowExceedPax || isBringOwn || nonBringOwnTotal < pax) &&
+                  (isBringOwn || stockRemaining > 0);
 
-                  const canMinus = isLockedForReduction
-                    ? count > (oldQtys[eq.equipment_id] || 0)
-                    : count > 0;
+                const canMinus = isLockedForReduction
+                  ? count > (oldQtys[eqId] || 0)
+                  : count > 0;
 
-                  return (
-                    <div key={eq.equipment_id} className="grid gap-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-[14px]">
-                            <span className="font-bold">{displayName}</span>
-                            {sizePart && (
-                              <span className="font-num sg-small ml-1.5">{sizePart}</span>
-                            )}
-                          </div>
-                          <div className="sg-small">
-                            {isMaintenance ? (
-                              <span className="text-sg-full">{maintenanceNote}</span>
-                            ) : (
-                              <>
-                                <span>{formatMoney(eq.hourly_rate)} / 小時</span>
-                                {stockText && (
-                                  <span className={stockRemaining > 0 && stockRemaining <= 2 ? 'text-sg-honey-ink font-bold' : ''}>
-                                    {stockText}
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </div>
+                return (
+                  <div key={eqId} className="grid gap-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[14px]">
+                          <span className="font-bold">{displayName}</span>
+                          {sizePart && (
+                            <span className="font-num sg-small ml-1.5">{sizePart}</span>
+                          )}
                         </div>
-
-                        <Stepper
-                          value={count}
-                          min={0}
-                          max={isBringOwn ? 99 : allowExceedPax ? 99 : pax}
-                          disabledMinus={!canMinus}
-                          disabledPlus={!canAdd}
-                          onMinus={() => handleRemoveUnit(eq.equipment_id)}
-                          onPlus={() => handleAddUnit(eq)}
-                          label={displayName}
-                        />
+                        <div className="sg-small">
+                          {isMaintenance ? (
+                            <span className="text-sg-full">{maintenanceNote}</span>
+                          ) : (
+                            <>
+                              <span>{formatMoney(eq.hourly_rate)} / 小時</span>
+                              {stockText && (
+                                <span className={stockRemaining > 0 && stockRemaining <= 2 ? 'text-sg-honey-ink font-bold' : ''}>
+                                  {stockText}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
 
-                      {/* Render BoardTimeBox for each rented unit */}
-                      {eqUnits.map((u, uIdx) => (
-                        <BoardTimeBox
-                          key={u.uid}
-                          label={`第 ${uIdx + 1} 台使用時間`}
-                          from={u.from}
-                          to={u.to}
-                          minHours={Math.min(eq.min_contiguous_hours || 2, H)}
-                          bookingSessions={bookingSessions}
-                          onChange={(newFrom, newTo) => handleUnitChange(u.uid, newFrom, newTo)}
-                        />
-                      ))}
-
-                      <Divider />
+                      <Stepper
+                        value={count}
+                        min={0}
+                        max={isBringOwn ? 99 : allowExceedPax ? 99 : pax}
+                        disabledMinus={!canMinus}
+                        disabledPlus={!canAdd}
+                        onMinus={() => handleRemoveUnit(eqId)}
+                        onPlus={() => handleAddUnit(eq)}
+                        label={displayName}
+                      />
                     </div>
-                  );
-                })}
+
+                    {/* Render BoardTimeBox for each rented unit */}
+                    {eqUnits.map((u, uIdx) => (
+                      <BoardTimeBox
+                        key={u.uid}
+                        unit={u}
+                        config={eq}
+                        boardIndex={uIdx + 1}
+                        totalHours={H}
+                        boundaryTimes={[...bookingSessions.map((s) => s.start_time), bookingSessions[H - 1]?.end_time]}
+                        bookingSessions={bookingSessions}
+                        onChange={(newFrom, newTo) => handleUnitChange(u.uid, newFrom, newTo)}
+                      />
+                    ))}
+
+                    <Divider />
+                  </div>
+                );
+              })}
             </div>
 
             {/* Discount rule banner */}

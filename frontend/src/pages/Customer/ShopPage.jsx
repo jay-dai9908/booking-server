@@ -545,6 +545,17 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
             onBack={() => navigate('/shop')}
           />
         }
+        bottom={
+          <BottomActionBar
+            summary={summaryPrefix}
+            price={finalDepositAmount}
+            actionLabel="送出預購"
+            loading={isSubmitting}
+            disabled={isSubmitting || totalItemsCount === 0}
+            onAction={handleSubmitOrder}
+            hasTabBarBelow={false}
+          />
+        }
       >
         <div className="grid gap-[10px] pb-8">
           {/* 1. Items Card */}
@@ -722,19 +733,6 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
             placeholder="其他需要備註的需求"
           />
         </div>
-
-        {/* Bottom bar */}
-        <div className="sticky bottom-0 z-40">
-          <BottomActionBar
-            summary={summaryPrefix}
-            price={finalDepositAmount}
-            actionLabel="送出預購"
-            loading={isSubmitting}
-            disabled={isSubmitting || totalItemsCount === 0}
-            onAction={handleSubmitOrder}
-            hasTabBarBelow={false}
-          />
-        </div>
       </CustomerLayout>
     );
   }
@@ -754,10 +752,23 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
         />
       }
       bottom={
-        isLoggedInCustomer && (
-          <BottomTabBar
-            shopEnabled={globalSettings?.shop_enabled !== false && globalSettings?.show_shop_button !== false}
-          />
+        (totalItemsCount > 0 || isLoggedInCustomer) && (
+          <div>
+            {totalItemsCount > 0 && (
+              <BottomActionBar
+                summary={summaryBottomText}
+                price={totalAmount}
+                actionLabel="去結帳"
+                onAction={handleGoToCheckout}
+                hasTabBarBelow={isLoggedInCustomer}
+              />
+            )}
+            {isLoggedInCustomer && (
+              <BottomTabBar
+                shopEnabled={globalSettings?.shop_enabled !== false && globalSettings?.show_shop_button !== false}
+              />
+            )}
+          </div>
         )
       }
     >
@@ -964,19 +975,6 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
           </>
         )}
       </div>
-
-      {/* Bottom Action Bar for cart */}
-      {totalItemsCount > 0 && (
-        <div className="sticky bottom-0 z-40">
-          <BottomActionBar
-            summary={summaryBottomText}
-            price={totalAmount}
-            actionLabel="去結帳"
-            onAction={handleGoToCheckout}
-            hasTabBarBelow={isLoggedInCustomer}
-          />
-        </div>
-      )}
 
       {/* Bead Picker Sheet */}
       {beadsProduct && (

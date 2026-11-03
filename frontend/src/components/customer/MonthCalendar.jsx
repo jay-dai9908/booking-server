@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { dayState } from '../../utils/customer/availability.js';
 
 const STATE_BARS = {
   ok: 'bg-sg-sage',
@@ -9,13 +10,29 @@ const STATE_BARS = {
 const WEEKDAY_HEADERS = ['日', '一', '二', '三', '四', '五', '六'];
 
 export default function MonthCalendar({
-  year,
-  month, // 1-10
-  dayStateMap = {}, // { 'YYYY-MM-DD': 'ok'|'low'|'full'|'closed'|'past' }
+  year: yearProp,
+  month: monthProp, // 1-12
+  currentMonth, // 'YYYY-MM'
+  dayStateMap: dayStateMapProp,
+  sessionsByDate,
   selectedDate = '',
   onSelectDate,
   className = '',
 }) {
+  const parsedCurrent = currentMonth ? currentMonth.split('-').map(Number) : null;
+  const year = yearProp ?? (parsedCurrent ? parsedCurrent[0] : new Date().getFullYear());
+  const month = monthProp ?? (parsedCurrent ? parsedCurrent[1] : new Date().getMonth() + 1);
+
+  const dayStateMap = useMemo(() => {
+    if (dayStateMapProp) return dayStateMapProp;
+    if (!sessionsByDate) return {};
+    const map = {};
+    for (const [k, v] of Object.entries(sessionsByDate)) {
+      map[k] = dayState(v);
+    }
+    return map;
+  }, [dayStateMapProp, sessionsByDate]);
+
   const firstDayOfWeek = new Date(year, month - 1, 1).getDay(); // 0 is Sunday
   const daysInMonth = new Date(year, month, 0).getDate();
 

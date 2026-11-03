@@ -35,9 +35,10 @@ export default function StepDone({ result }) {
     .join('、');
 
   // Formatted date string
-  const dateParts = dateStr ? dateStr.split('-') : [];
+  const cleanDateStr = String(dateStr).split('T')[0];
+  const dateParts = cleanDateStr ? cleanDateStr.split('-') : [];
   const monthDay = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : '';
-  const weekday = dateStr ? weekdayChar(dateStr) : '';
+  const weekday = cleanDateStr ? `週${weekdayChar(cleanDateStr)}` : '';
 
   // Summary line: e.g. "12:00 到 18:00 · 2 位 · 中板 ×1"
   let summaryDetails = isUnlimited
@@ -57,7 +58,7 @@ export default function StepDone({ result }) {
     }
   };
 
-  const barcodeSummaryText = `${dateStr ? formatDateShort(dateStr) : ''} ${weekday} ${startTime} 到 ${endTime} · ${pax} 位`;
+  const barcodeSummaryText = `${cleanDateStr ? formatDateShort(cleanDateStr) : ''} ${startTime} 到 ${endTime} · ${pax} 位`;
 
   return (
     <div className="flex flex-col min-h-[100dvh]">

@@ -2,8 +2,8 @@ import React from 'react';
 import BottomSheet from '../BottomSheet';
 import Button from '../Button';
 import { boardDiscountTexts } from '../../../utils/customer/discountText';
-import { buildDiscountConfig, getDayPricing } from '../../../utils/customer/pricing';
-import { formatMoney } from '../../../utils/customer/format';
+import { buildDiscountConfig, shortBoardName } from '../../../utils/customer/pricing';
+import { formatMoney, formatDateShort } from '../../../utils/customer/format';
 
 /**
  * PriceInfoSheet (Section 6.11)
@@ -27,9 +27,16 @@ export default function PriceInfoSheet({
   const discountTexts = boardDiscountTexts(discountCfg);
 
   // Active boards (excluding bring_own)
+  const isBoardActive = (b) => {
+    const id = b.id || b.equipment_id;
+    if (id === 'bring_own') return false;
+    if (b.visibility_status) return b.visibility_status === 'ACTIVE';
+    return b.is_active !== false && b.status !== 'HIDDEN';
+  };
+
   const activeBoards = (equipmentConfigs || [])
-    .filter((b) => b.is_active && b.equipment_id !== 'bring_own')
-    .map((b) => `${b.name} ${formatMoney(b.hourly_rate)}`)
+    .filter(isBoardActive)
+    .map((b) => `${shortBoardName(b.name)} ${formatMoney(b.hourly_rate)}`)
     .join('、');
 
   let smartBoardLine = activeBoards ? `智能拼豆板：${activeBoards} / 小時` : '智能拼豆板可現場選租';
@@ -38,6 +45,7 @@ export default function PriceInfoSheet({
   }
 
   const isSpecial = dayPricing?.dayType === 'special';
+  const specialTitle = dateStr ? `${formatDateShort(dateStr)}特別價` : (dayPricing?.specialLabel || '特別價');
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title="價格說明">
@@ -45,7 +53,7 @@ export default function PriceInfoSheet({
         {isSpecial && (
           <div className="grid gap-[2px] rounded-[12px] bg-sg-brown-soft p-[10px]">
             <div className="text-[13px] font-bold text-sg-brown">
-              {dayPricing.specialLabel || '特別價'}
+              {specialTitle}
             </div>
             <div className="flex items-baseline">
               <span className="font-num font-extrabold text-[18px] text-sg-brown">

@@ -2,7 +2,10 @@ import { calculateEquipmentChargeableHours } from '../equipmentPricing.js';
 import { boardDiscountTexts } from './discountText.js';
 
 export function parseYMD(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!dateStr) return new Date();
+  if (dateStr instanceof Date) return dateStr;
+  const clean = String(dateStr).split('T')[0];
+  const [y, m, d] = clean.split('-').map(Number);
   return new Date(y, m - 1, d);
 }
 
@@ -57,9 +60,9 @@ export function buildDiscountConfig(s) {
 
 export function equipmentUnitPrice(config, hours, discountConfig) {
   const chargeable = calculateEquipmentChargeableHours(hours, discountConfig);
-  const raw = config.hourly_rate * hours;
-  const afterDiscount = config.hourly_rate * chargeable;
-  const price = config.daily_cap > 0 ? Math.min(afterDiscount, config.daily_cap) : afterDiscount;
+  const raw = (config?.hourly_rate ?? 0) * hours;
+  const afterDiscount = (config?.hourly_rate ?? 0) * chargeable;
+  const price = (config?.daily_cap > 0) ? Math.min(afterDiscount, config.daily_cap) : afterDiscount;
   return {
     hours,
     chargeable,
@@ -74,20 +77,25 @@ export function equipmentUnitPrice(config, hours, discountConfig) {
 export const shortBoardName = (name) => (name || '').replace(/\s*[（(][^)）]*[)）]\s*/g, '').trim();
 
 export function groupUnits(units = [], bookingSessions = []) {
-  const H = bookingSessions.length;
-  const boundaryTime = (k) => {
-    if (k < H) return bookingSessions[k]?.start_time;
-    if (H > 0) return bookingSessions[H - 1]?.end_time;
-    return '';
-  };
+  const H = Array.isArray(bookingSessions) ? bookingSessions.length : 0;
+  const boundaryTime = typeof bookingSessions === 'function'
+    ? bookingSessions
+    : (k) => {
+        if (Array.isArray(bookingSessions)) {
+          if (k < H) return bookingSessions[k]?.start_time;
+          if (H > 0) return bookingSessions[H - 1]?.end_time;
+        }
+        return '';
+      };
   return Object.values(units.reduce((acc, u) => {
     const start = u.start || (typeof u.from === 'number' ? boundaryTime(u.from) : '');
     const end = u.end || (typeof u.to === 'number' ? boundaryTime(u.to) : '');
-    const key = `${u.equipment_id}|${u.from}|${u.to}|${start}|${end}`;
+    const hours = u.hours ?? ((typeof u.to === 'number' && typeof u.from === 'number') ? (u.to - u.from) : 0);
+    const key = `${u.equipment_id}|${u.from}|${u.to}|${start}|${end}|${hours}`;
     acc[key] ??= {
       equipment_id: u.equipment_id,
       qty: 0,
-      hours: u.to - u.from,
+      hours,
       start,
       end,
       from: u.from,

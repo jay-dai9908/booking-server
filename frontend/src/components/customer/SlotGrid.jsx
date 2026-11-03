@@ -4,12 +4,23 @@ import { meterBeads } from '../../utils/customer/availability.js';
 
 export function SlotCell({
   session,
-  state = 'ok', // 'ok' | 'low' | 'full' | 'past'
+  startTime,
+  endTime,
+  remaining,
+  maxCapacity,
+  state: stateProp,
+  beads: beadsProp,
   isSelected = false,
   readOnly = false,
   onClick,
   className = '',
 }) {
+  const st = session?.start_time ?? startTime ?? '';
+  const et = session?.end_time ?? endTime ?? '';
+  const rem = session?.remaining_capacity ?? remaining ?? 0;
+  const maxCap = session?.max_capacity ?? maxCapacity ?? 10;
+  const state = stateProp ?? 'ok';
+
   const isPast = state === 'past';
   const isFull = state === 'full';
   const isMuted = isPast || isFull;
@@ -18,7 +29,7 @@ export function SlotCell({
   let startColor = 'text-sg-ink';
   let endColor = 'text-sg-muted';
   let statusColor = state === 'low' ? 'text-sg-honey-ink font-bold' : 'text-sg-muted';
-  let statusText = `剩 ${session.remaining_capacity}`;
+  let statusText = `剩 ${rem}`;
 
   if (isFull) {
     statusText = '額滿';
@@ -42,23 +53,23 @@ export function SlotCell({
     statusText = '已選';
   }
 
-  const beadCount = meterBeads(session.remaining_capacity, session.max_capacity);
+  const beadCount = beadsProp ?? meterBeads(rem, maxCap);
 
   const ariaLabel = isSelected
-    ? `${session.start_time} 到 ${session.end_time}，已選取`
+    ? `${st} 到 ${et}，已選取`
     : isFull
-    ? `${session.start_time} 到 ${session.end_time}，已額滿`
+    ? `${st} 到 ${et}，已額滿`
     : isPast
-    ? `${session.start_time} 到 ${session.end_time}，已過`
-    : `${session.start_time} 到 ${session.end_time}，剩 ${session.remaining_capacity} 位`;
+    ? `${st} 到 ${et}，已過`
+    : `${st} 到 ${et}，剩 ${rem} 位`;
 
   const content = (
     <>
       <span className={`sg-slot-start font-num font-extrabold text-[16px] leading-[1.15] ${startColor}`}>
-        {session.start_time}
+        {st}
       </span>
       <span className={`sg-slot-end font-num font-semibold text-[12px] leading-[1.2] -mt-[2px] ${endColor}`}>
-        到 {session.end_time}
+        到 {et}
       </span>
       <BeadMeter
         count={beadCount}

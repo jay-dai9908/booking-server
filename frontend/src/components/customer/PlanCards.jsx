@@ -1,12 +1,14 @@
 import React from 'react';
 import { Check, Info } from 'lucide-react';
 import Button from './Button.jsx';
+import { useToast } from './Toast.jsx';
 import { formatMoney, formatDateShort } from '../../utils/customer/format.js';
 import { DAY_PRICE_LABEL } from '../../utils/customer/pricing.js';
 
 export default function PlanCards({
   mode = 'timed', // 'timed' | 'unlimited'
   onSelectMode,
+  onChangeMode,
   hourlyPrice = 100,
   unlimitedPrice = 550,
   allowUnlimited = true,
@@ -16,6 +18,8 @@ export default function PlanCards({
   onShowToast,
   className = '',
 }) {
+  const toast = useToast();
+  const selectMode = onSelectMode || onChangeMode || (() => {});
   const isTimed = mode === 'timed';
   const isUnlimited = mode === 'unlimited';
 
@@ -28,10 +32,12 @@ export default function PlanCards({
     if (!allowUnlimited) {
       if (onShowToast) {
         onShowToast('這天不開放當日不限時暢玩');
+      } else if (toast?.show) {
+        toast.show('這天不開放當日不限時暢玩', { type: 'info' });
       }
       return;
     }
-    onSelectMode('unlimited');
+    selectMode('unlimited');
   };
 
   return (
@@ -42,7 +48,7 @@ export default function PlanCards({
           type="button"
           role="radio"
           aria-checked={isTimed}
-          onClick={() => onSelectMode('timed')}
+          onClick={() => selectMode('timed')}
           className={`relative grid rounded-[16px] border-[1.5px] bg-sg-paper pt-[10px] px-3 pb-[11px] text-left transition select-none ${
             isTimed
               ? 'border-2 border-sg-brown bg-sg-selected shadow-sg-pop p-[calc(10px-0.5px)_calc(12px-0.5px)_calc(11px-0.5px)]'

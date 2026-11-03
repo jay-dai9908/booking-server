@@ -55,7 +55,8 @@ export default function StepConfirm({
   const configsMap = useMemo(() => {
     const map = {};
     equipmentConfigs.forEach((c) => {
-      map[c.equipment_id] = c;
+      const eqId = c.equipment_id || c.id;
+      if (eqId) map[eqId] = c;
     });
     return map;
   }, [equipmentConfigs]);
@@ -75,8 +76,9 @@ export default function StepConfirm({
       configs: configsMap,
       discountCfg,
       promo,
+      bookingSessions,
     });
-  }, [pax, H, startTime, endTime, dayPricing, mode, units, configsMap, discountCfg, promo]);
+  }, [pax, H, startTime, endTime, dayPricing, mode, units, configsMap, discountCfg, promo, bookingSessions]);
 
   // Validate Promo Code
   const handleApplyPromo = async () => {
@@ -136,7 +138,7 @@ export default function StepConfirm({
   const executeBooking = async (forceSplit = false) => {
     setSubmitting(true);
     try {
-      const sessionIds = bookingSessions.map((s) => s.session_id).filter(Boolean);
+      const sessionIds = bookingSessions.map((s) => s.id || s.session_id).filter(Boolean);
       const payloadEquipments = units.map((u) => {
         const cfg = configsMap[u.equipment_id] || {};
         return {
@@ -195,7 +197,7 @@ export default function StepConfirm({
       : dayPricing?.dayType === 'weekend'
       ? '（假日）'
       : '（平日）';
-  const dateLineText = `${formatDateShort(date)} ${weekdayChar(date)}${dayTypeSuffix}`;
+  const dateLineText = `${formatDateShort(date)}${dayTypeSuffix}`;
   const timeLineText =
     mode === 'unlimited'
       ? `${startTime} 到 ${endTime}，當日不限時暢玩`
@@ -208,7 +210,7 @@ export default function StepConfirm({
       <span>現場付款</span>
       {savingAmount > 0 && (
         <span className="font-bold text-sg-sage-ink ml-1">
-          · 共省 NT${savingAmount.toLocaleString()}
+          · 共省 <span className="font-num">NT${savingAmount.toLocaleString()}</span>
         </span>
       )}
     </div>
@@ -217,7 +219,7 @@ export default function StepConfirm({
   return (
     <>
       {/* 1. Step Indicator */}
-      <StepIndicator currentStep={4} />
+      <StepIndicator currentStep="確認" />
 
       {/* 2. Detail Card */}
       <Card gap={8}>

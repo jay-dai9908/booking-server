@@ -2,21 +2,40 @@ import React from 'react';
 
 export default function StepIndicator({
   steps = ['日期', '時段', '人數', '確認'],
-  currentStep = 1, // 0-indexed or matching steps
+  currentStep = 1, // 0-indexed, step name, 'all', or 'none' / -1
   className = '',
 }) {
-  const currentIndex = typeof currentStep === 'number' ? currentStep : steps.indexOf(currentStep);
+  const isAll = currentStep === 'all';
+  const isNone = currentStep === 'none' || currentStep < 0;
+
+  let currentIndex = -1;
+  if (!isNone) {
+    if (typeof currentStep === 'number') {
+      currentIndex = Math.min(steps.length - 1, Math.max(0, currentStep));
+    } else if (typeof currentStep === 'string' && !isAll) {
+      const found = steps.indexOf(currentStep);
+      currentIndex = found >= 0 ? found : 0;
+    } else if (isAll) {
+      currentIndex = steps.length;
+    }
+  }
+
+  const ariaText = isNone
+    ? '已取消'
+    : isAll
+    ? '已完成全部步驟'
+    : `步驟 ${currentIndex + 1}／${steps.length}：${steps[currentIndex] || ''}`;
 
   return (
     <div
       role="group"
-      aria-label={`步驟 ${currentIndex + 1}／${steps.length}：${steps[currentIndex] || ''}`}
+      aria-label={ariaText}
       className={`flex items-center justify-between w-full px-2 py-1 select-none ${className}`}
     >
       {steps.map((label, idx) => {
-        const isCurrent = idx === currentIndex;
-        const isCompleted = idx < currentIndex;
-        const isLineActive = idx > 0 && (idx <= currentIndex);
+        const isCurrent = !isAll && !isNone && idx === currentIndex;
+        const isCompleted = isAll ? true : (!isNone && idx < currentIndex);
+        const isLineActive = !isNone && (idx <= currentIndex);
 
         let dotRingColor = '#E6DDD2'; // sg-line
         let dotShadow = 'none';

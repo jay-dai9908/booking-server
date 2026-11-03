@@ -1,5 +1,6 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { weekdayChar } from '../../utils/customer/format.js';
+import { dayState } from '../../utils/customer/availability.js';
 
 const STATE_COLORS = {
   ok: 'bg-sg-sage',
@@ -16,18 +17,50 @@ const STATE_NAMES = {
 };
 
 export default function DateStrip({
-  dates = [], // array of { dateStr: 'YYYY-MM-DD', state: 'ok'|'low'|'full'|'closed' }
+  dates: datesProp, // array of { dateStr: 'YYYY-MM-DD', state: 'ok'|'low'|'full'|'closed' }
   selectedDate = '',
   onSelectDate,
   onVisibleMonthChange,
+  sessionsByDate,
   className = '',
 }) {
   const containerRef = useRef(null);
 
+  const dates = useMemo(() => {
+    if (datesProp && datesProp.length > 0) return datesProp;
+    if (!sessionsByDate) return [];
+    const keys = Object.keys(sessionsByDate).sort();
+    if (keys.length === 0) return [];
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const startStr = keys[0] < todayStr ? todayStr : keys[0];
+    const lastStr = keys[keys.length - 1];
+
+    const result = [];
+    const [sy, sm, sd] = startStr.split('-').map(Number);
+    const [ey, em, ed] = lastStr.split('-').map(Number);
+    let cur = new Date(sy, sm - 1, sd);
+    const end = new Date(ey, em - 1, ed);
+    let count = 0;
+    while (cur <= end && count < 90) {
+      const y = cur.getFullYear();
+      const m = String(cur.getMonth() + 1).padStart(2, '0');
+      const d = String(cur.getDate()).padStart(2, '0');
+      const dStr = `${y}-${m}-${d}`;
+      const daySessions = sessionsByDate[dStr] || [];
+      const state = dayState(daySessions);
+      result.push({ dateStr: dStr, state });
+      cur.setDate(cur.getDate() + 1);
+      count++;
+    }
+    return result;
+  }, [datesProp, sessionsByDate]);
+
   // Scroll selected date into view smoothly
   useEffect(() => {
     if (!containerRef.current || !selectedDate) return;
-    const index = dates.findIndex((d) => d.dateStr === selectedDate);
+    const cleanDate = String(selectedDate).split('T')[0];
+    const index = dates.findIndex((d) => d.dateStr === cleanDate);
     if (index !== -1) {
       // 50 = 44px item width + 6px gap
       const left = Math.max(0, index * 50 - 16);
@@ -51,10 +84,12 @@ export default function DateStrip({
       className={`flex gap-[6px] overflow-x-auto overscroll-x-contain snap-x snap-mandatory -mr-4 pr-4 min-h-[58px] flex-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(90deg,#000_82%,transparent)] [-webkit-mask-image:linear-gradient(90deg,#000_82%,transparent)] ${className}`}
     >
       {dates.map((item) => {
-        const isSelected = item.dateStr === selectedDate;
-        const [y, m, d] = item.dateStr.split('-').map(Number);
+        const cleanItemDate = String(item.dateStr).split('T')[0];
+        const cleanSelectedDate = String(selectedDate).split('T')[0];
+        const isSelected = cleanItemDate === cleanSelectedDate;
+        const [y, m, d] = cleanItemDate.split('-').map(Number);
         const dayNum = d;
-        const wk = weekdayChar(item.dateStr);
+        const wk = weekdayChar(cleanItemDate);
         const isClosed = item.state === 'closed';
         const isFull = item.state === 'full';
 
