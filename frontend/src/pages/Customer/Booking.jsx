@@ -159,8 +159,9 @@ export default function Booking() {
     const sessionStarts = bookingSessions.map((s) => s.start_time).join(',');
     api.get(`/equipment/availability?date=${date}&sessions=${sessionStarts}&per_session=1`)
       .then((res) => {
-        setEquipmentConfigs(res.data?.equipments || []);
-        setAvailBySession(res.data?.available_by_session || {});
+        const equipments = res.data?.equipments || [];
+        setEquipmentConfigs(equipments);
+        setAvailBySession(Object.fromEntries(equipments.map((e) => [e.id, e.available_by_session || {}])));
       })
       .catch((err) => {
         console.error('Failed to fetch equipment availability', err);

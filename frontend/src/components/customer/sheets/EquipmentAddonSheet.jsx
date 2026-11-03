@@ -77,7 +77,7 @@ export default function EquipmentAddonSheet({
   const H = bookingSessions.length;
   const hourStartTimes = useMemo(() => bookingSessions.map((s) => s.start_time), [bookingSessions]);
   const boundaryTime = useCallback(
-    (k) => (k < H ? bookingSessions[k].start_time : bookingSessions[H - 1].end_time),
+    (k) => (H === 0 ? '' : k < H ? bookingSessions[k].start_time : bookingSessions[H - 1].end_time),
     [bookingSessions, H]
   );
 
@@ -120,9 +120,9 @@ export default function EquipmentAddonSheet({
 
     api.get(url)
       .then((res) => {
-        const data = res.data;
-        setConfigs(data.equipments || []);
-        setAvailBySession(data.available_by_session || {});
+        const equipments = data.equipments || [];
+        setConfigs(equipments);
+        setAvailBySession(Object.fromEntries(equipments.map((e) => [e.id || e.equipment_id, e.available_by_session || {}])));
         setAllowExceedPax(!!data.allow_exceed_pax);
         setShowLiveStock(data.show_equipment_live_stock !== false);
         setDiscountConfig(buildDiscountConfig(data));
@@ -346,6 +346,17 @@ export default function EquipmentAddonSheet({
     return units.length !== (reservation?.equipments || []).reduce((a, b) => a + b.quantity, 0);
   }, [oldQtys, currentQtys, units, reservation]);
 
+  const handleClose = useCallback(() => {
+    setUnits([]);
+    onClose?.();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setUnits([]);
+    }
+  }, [isOpen]);
+
   const handleSubmit = async () => {
     if (!reservation) return;
     setSubmitting(true);
@@ -368,7 +379,7 @@ export default function EquipmentAddonSheet({
       });
 
       toast.show('已更新智能拼豆板', { type: 'success' });
-      onClose();
+      handleClose();
       if (onSuccess) onSuccess();
     } catch (err) {
       console.error('Failed to update equipment', err);
@@ -388,8 +399,10 @@ export default function EquipmentAddonSheet({
   const maxBoardsDesc = allowExceedPax ? '' : `，最多可租 ${pax} 台`;
   const subTitle = `${dateStrShort} ${timeDesc} · ${pax} 位${maxBoardsDesc}`;
 
+  if (!reservation) return null;
+
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} title={sheetTitle}>
+    <BottomSheet isOpen={isOpen} onClose={handleClose} title={sheetTitle}>
       <div className="grid gap-3">
         <div className="sg-small -mt-1">{subTitle}</div>
 
