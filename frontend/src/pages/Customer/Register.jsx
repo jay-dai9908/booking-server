@@ -1,20 +1,75 @@
 import React, { useState } from 'react';
+import { Check } from 'lucide-react';
+import CustomerLayout from '../../components/customer/CustomerLayout';
+import BrandLogo from '../../components/customer/BrandLogo';
+import Field from '../../components/customer/Field';
+import Button from '../../components/customer/Button';
+import { ErrorBanner } from '../../components/customer/Banners';
 import api from '../../api/axios';
 import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
 
-function Register({ setUserRole }) {
+function formatPhoneInput(digits) {
+  // Format as 4-3-3: 0912 345 678
+  const clean = digits.replace(/\D/g, '').slice(0, 10);
+  if (clean.length <= 4) return clean;
+  if (clean.length <= 7) return `${clean.slice(0, 4)} ${clean.slice(4)}`;
+  return `${clean.slice(0, 4)} ${clean.slice(4, 7)} ${clean.slice(7)}`;
+}
+
+export default function Register({ setUserRole }) {
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [error, setError] = useState('');
+  const [phoneDisplay, setPhoneDisplay] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [backendError, setBackendError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const rawPhone = phoneDisplay.replace(/\D/g, '');
+
+  const validatePhone = (digits) => {
+    if (!digits) return '';
+    if (!/^09\d{8}$/.test(digits)) {
+      return '請輸入 09 開頭的 10 位手機號碼';
+    }
+    return '';
+  };
+
+  const handlePhoneChange = (e) => {
+    const formatted = formatPhoneInput(e.target.value);
+    setPhoneDisplay(formatted);
+    const digits = formatted.replace(/\D/g, '');
+    if (phoneError && (/^09\d{8}$/.test(digits) || !digits)) {
+      setPhoneError('');
+    }
+  };
+
+  const handlePhoneBlur = () => {
+    if (rawPhone) {
+      setPhoneError(validatePhone(rawPhone));
+    }
+  };
+
+  const isFormValid = name.trim().length > 0 && /^09\d{8}$/.test(rawPhone);
+
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    const err = validatePhone(rawPhone);
+    if (err) {
+      setPhoneError(err);
+      return;
+    }
+    if (!name.trim()) return;
+
     setIsSubmitting(true);
-    setError('');
+    setBackendError('');
+
     try {
       const clientInfo = await getBrowserClientInfoAsync();
-      const res = await api.post('/auth/register', { name, phone, clientInfo });
+      const res = await api.post('/auth/register', {
+        name: name.trim(),
+        phone: rawPhone,
+        clientInfo,
+      });
+
       let target = '/booking';
       try {
         sessionStorage.setItem('shiguang_line_fresh_login', '1');
@@ -29,67 +84,86 @@ function Register({ setUserRole }) {
           localStorage.removeItem('shiguang_post_login_redirect');
           target = savedRedirect;
         }
-      } catch (e) {}
-      setUserRole('customer');
+      } catch (err) {}
+
+      if (setUserRole) setUserRole('customer');
       window.location.href = target;
     } catch (err) {
-      setError(err.response?.data?.error || '註冊失敗');
+      console.error('Registration failed', err);
+      setBackendError(err.response?.data?.error || err.response?.data?.message || '註冊失敗，請重試');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-wood-bg p-4 transition-colors duration-300">
-      <div className="bg-wood-card p-10 sm:p-12 rounded-[24px] shadow-warm max-w-md w-full relative overflow-hidden">
-        <div className="mb-8 text-center">
-          <img src="/logo.png" alt="拾光製所 Logo" className="w-16 h-16 object-cover rounded-full mx-auto mb-4 shadow-sm ring-4 ring-wood-bg" />
-          <h2 className="text-2xl font-bold text-wood-textMain mb-2">會員資料綁定</h2>
-          <p className="text-wood-textMuted text-sm font-medium">歡迎新朋友！請填寫以下資訊完成綁定。</p>
+    <CustomerLayout bare>
+      <div className="flex flex-col min-h-[100dvh]">
+        {/* 1. Brand Area */}
+        <div className="sg-peg border-b border-sg-line grid justify-items-center gap-2 text-center px-5 pt-[max(26px,calc(env(safe-area-inset-top)+18px))] pb-[18px]">
+          <BrandLogo size="nav" className="w-16 h-16" />
+          <h1 className="font-display text-[24px] leading-[1.35] font-bold text-sg-ink">
+            歡迎第一次來
+          </h1>
+          <p className="text-[13px] text-sg-muted">
+            留下稱呼和手機，就能開始預約
+          </p>
         </div>
-        
-        {error && <div className="bg-red-50 text-red-500 p-3 rounded-lg mb-4 text-sm font-medium">{error}</div>}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-wood-textMuted font-medium mb-2 text-sm">
-              👤 預約人姓名或稱呼 <span className="text-red-500 font-bold">* 必填</span>
-            </label>
-            <input 
-              type="text" 
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-3 border border-wood-border rounded-xl focus:ring-2 focus:ring-wood-primary/50 outline-none bg-wood-bg/50 text-wood-textMain font-medium transition-colors"
-              placeholder="例：林曉婷 或 Luca"
-            />
+        {/* 2. Form Area */}
+        <form onSubmit={handleSubmit} className="grid gap-4 px-4 pt-[18px] pb-5 flex-1">
+          {/* Connection status bar */}
+          <div className="flex items-center gap-[10px] rounded-[14px] border border-sg-line bg-sg-paper px-3 py-[10px]">
+            <span className="flex-1 text-[14px] font-bold text-sg-ink">
+              已連結 LINE 帳號
+            </span>
+            <Check className="w-[18px] h-[18px] text-sg-sage-ink stroke-[2.5]" />
           </div>
-          <div>
-            <label className="block text-wood-textMuted font-medium mb-2 text-sm">
-              📱 手機號碼 <span className="text-red-500 font-bold">* 必填</span>
-            </label>
-            <input 
-              type="tel" 
-              required
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="w-full px-4 py-3 border border-wood-border rounded-xl focus:ring-2 focus:ring-wood-primary/50 outline-none bg-wood-bg/50 text-wood-textMain font-medium transition-colors"
-              placeholder="例：0912345678"
-            />
-          </div>
-          <button 
-            type="submit"
-            disabled={isSubmitting}
-            className={`w-full bg-wood-primary hover:bg-wood-primaryHover text-white font-bold py-4 px-4 rounded-xl transition-all duration-300 mt-6 shadow-warm transform hover:-translate-y-1 flex items-center justify-center gap-2 ${
-              isSubmitting ? 'opacity-70 cursor-not-allowed' : ''
-            }`}
-          >
-            {isSubmitting ? '🔄 與系統同步最新資料中...' : '完成註冊並前往預約'}
-          </button>
+
+          {/* Name Field */}
+          <Field
+            label="怎麼稱呼你"
+            required
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="例如：小美"
+            autoComplete="nickname"
+            maxLength={20}
+          />
+
+          {/* Phone Field */}
+          <Field
+            label="手機號碼"
+            required
+            type="tel"
+            inputMode="numeric"
+            value={phoneDisplay}
+            onChange={handlePhoneChange}
+            onBlur={handlePhoneBlur}
+            placeholder="0912 345 678"
+            autoComplete="tel-national"
+            helper="用於到店核對預約和臨時通知"
+            error={phoneError}
+          />
+
+          {backendError && <ErrorBanner message={backendError} />}
         </form>
+
+        {/* 3. Fixed Bottom Area */}
+        <div className="sticky bottom-0 z-40 bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))]">
+          <Button
+            variant="primary"
+            size="md"
+            loading={isSubmitting}
+            disabled={!isFormValid || isSubmitting}
+            onClick={handleSubmit}
+            className="w-full"
+          >
+            完成綁定，開始預約
+          </Button>
+        </div>
       </div>
-    </div>
+    </CustomerLayout>
   );
 }
-
-export default Register;
