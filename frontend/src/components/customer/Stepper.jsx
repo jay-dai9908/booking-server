@@ -6,6 +6,8 @@ export default function Stepper({
   min = 0,
   max = 999,
   onChange,
+  onMinus,
+  onPlus,
   emphasis = false,
   label = '數量',
   className = '',
@@ -14,11 +16,17 @@ export default function Stepper({
   const canPlus = value < max;
 
   const handleMinus = () => {
-    if (canMinus) onChange(value - 1);
+    if (canMinus) {
+      if (onMinus) onMinus();
+      else onChange?.(value - 1);
+    }
   };
 
   const handlePlus = () => {
-    if (canPlus) onChange(value + 1);
+    if (canPlus) {
+      if (onPlus) onPlus();
+      else onChange?.(value + 1);
+    }
   };
 
   return (
