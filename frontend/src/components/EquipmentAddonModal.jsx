@@ -26,7 +26,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
   const oldQtys = React.useMemo(() => {
     const map = {};
     (reservation.equipments || []).forEach(e => {
-      map[e.equipment_id] = e.quantity;
+      map[e.equipment_id] = (map[e.equipment_id] || 0) + e.quantity;
     });
     return map;
   }, [reservation]);
@@ -89,7 +89,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
       // Initialize selections with existing equipment
       const initial = {};
       (reservation.equipments || []).forEach(e => {
-        initial[e.equipment_id] = e.quantity;
+        initial[e.equipment_id] = (initial[e.equipment_id] || 0) + e.quantity;
       });
       setSelections(initial);
     } catch (err) {
@@ -134,13 +134,39 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
     setSubmitting(true);
     setErrorMessage('');
 
-    const equipmentsPayload = Object.entries(selections)
-      .filter(([_, qty]) => qty > 0)
-      .map(([equipment_id, quantity]) => ({
-        equipment_id,
-        quantity,
-        rental_hours: rentalHours
-      }));
+    const equipmentsPayload = [];
+    for (const [equipment_id, quantity] of Object.entries(selections)) {
+      if (quantity <= 0) continue;
+      const oldQty = oldQtys[equipment_id] || 0;
+      if (quantity === oldQty) {
+        const origItems = (reservation.equipments || []).filter(e => e.equipment_id === equipment_id);
+        if (origItems.length > 0) {
+          for (const item of origItems) {
+            const start_time = (item.covered_sessions && item.covered_sessions[0])
+              ? item.covered_sessions[0].split('-')[0]
+              : undefined;
+            equipmentsPayload.push({
+              equipment_id: item.equipment_id,
+              quantity: item.quantity,
+              rental_hours: item.rental_hours,
+              ...(start_time ? { start_time } : {})
+            });
+          }
+        } else {
+          equipmentsPayload.push({
+            equipment_id,
+            quantity,
+            rental_hours: rentalHours
+          });
+        }
+      } else {
+        equipmentsPayload.push({
+          equipment_id,
+          quantity,
+          rental_hours: rentalHours
+        });
+      }
+    }
 
     try {
       const res = await api.patch(`/reservations/${reservation.booking_ref}/equipment`, {

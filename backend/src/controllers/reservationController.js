@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
+import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { evaluatePromoCode } from './checkoutController.js';
 import {
   sendBookingConfirmationNotification,
@@ -444,6 +445,8 @@ export const createReservation = async (req, res) => {
           where: { booking_ref: { in: activeBookingRefs } }
         });
 
+        const requestUsage = {};
+
         for (const eq of equipments) {
           const qty = parseInt(eq.quantity, 10) || 0;
           if (qty <= 0) continue;
@@ -456,18 +459,15 @@ export const createReservation = async (req, res) => {
           }
 
           const minHours = config.min_contiguous_hours || 2;
-          const rentalHours = totalHours < minHours 
-            ? totalHours 
-            : Math.max(minHours, Math.min(totalHours, parseInt(eq.rental_hours, 10) || totalHours));
-
-          // Accurately cover ONLY the first rentalHours sessions
-          const eqCoveredSessions = sortedReqSessions.slice(0, rentalHours).map(s => `${s.start_time}-${s.end_time}`);
+          const { rentalHours, windowSessions, coveredSessions: eqCoveredSessions } =
+            resolveEquipmentWindow(sortedReqSessions, eq, minHours);
 
           // Real-time stock verification across each covered session
           if (eq.equipment_id !== 'bring_own') {
             const totalStock = config.total_stock || 0;
-            for (const sess of sortedReqSessions.slice(0, rentalHours)) {
+            for (const sess of windowSessions) {
               const sessTimeStr = `${sess.start_time}-${sess.end_time}`;
+              const usageKey = `${eq.equipment_id}|${sess.start_time}`;
               let bookedInThisSession = 0;
               for (const be of bookedEquipments) {
                 if (be.equipment_id !== eq.equipment_id) continue;
@@ -483,9 +483,13 @@ export const createReservation = async (req, res) => {
                 }
               }
 
-              if (bookedInThisSession + qty > totalStock) {
-                throw new Error(`EQUIPMENT_OUT_OF_STOCK:智能拼豆板「${config.name}」在 ${sess.start_time} 時段庫存不足（僅剩 ${Math.max(0, totalStock - bookedInThisSession)} 台）`);
+              if (bookedInThisSession + (requestUsage[usageKey] || 0) + qty > totalStock) {
+                throw new Error(`EQUIPMENT_OUT_OF_STOCK:智能拼豆板「${config.name}」在 ${sess.start_time} 時段庫存不足（僅剩 ${Math.max(0, totalStock - bookedInThisSession - (requestUsage[usageKey] || 0))} 台）`);
               }
+            }
+            for (const sess of windowSessions) {
+              const usageKey = `${eq.equipment_id}|${sess.start_time}`;
+              requestUsage[usageKey] = (requestUsage[usageKey] || 0) + qty;
             }
           }
 
@@ -628,8 +632,15 @@ export const createReservation = async (req, res) => {
                 select: { id: true, name: true }
               });
               const eqMap = Object.fromEntries(eqConfigs.map(c => [c.id, c.name]));
-              equipmentSummary = equipments
-                .map(e => `${eqMap[e.equipment_id] || e.name || e.equipment_id}×${e.quantity}`)
+              const qtyByEq = {};
+              for (const e of equipments) {
+                const q = parseInt(e.quantity, 10) || 0;
+                if (q > 0) {
+                  qtyByEq[e.equipment_id] = (qtyByEq[e.equipment_id] || 0) + q;
+                }
+              }
+              equipmentSummary = Object.entries(qtyByEq)
+                .map(([eqId, qty]) => `${eqMap[eqId] || eqId}×${qty}`)
                 .join(' + ');
             }
 
@@ -654,6 +665,9 @@ export const createReservation = async (req, res) => {
 
   } catch (error) {
     console.error('Reservation error:', error);
+    if (error.message && error.message.startsWith('EQUIPMENT_WINDOW_INVALID:')) {
+      return res.status(400).json({ error: error.message.replace('EQUIPMENT_WINDOW_INVALID:', '') });
+    }
     if (error.message === 'CROSS_DATE_SESSIONS') {
       return res.status(400).json({ error: '一筆預約只能包含同一天的時段' });
     }
