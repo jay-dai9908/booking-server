@@ -183,7 +183,7 @@ export default function HistoryPage() {
   const fetchPasses = async () => {
     try {
       setLoadingPasses(true);
-      const res = await api.get('/members/my-passes');
+      const res = await api.get('/passes/my');
       setPasses(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Failed to fetch passes', err);
