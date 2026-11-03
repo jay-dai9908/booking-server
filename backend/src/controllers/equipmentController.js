@@ -815,6 +815,7 @@ export const modifyBookingEquipment = async (req, res) => {
       enabled: globalSetting ? globalSetting.equipment_discount_enabled !== false : true,
       buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
       free_hours: globalSetting?.equipment_discount_free_hours ?? 1,
+      stackable: globalSetting ? globalSetting.equipment_discount_stackable !== false : true,
       tier2_enabled: !!globalSetting?.equipment_discount2_enabled,
       tier2_buy_hours: globalSetting?.equipment_discount2_buy_hours ?? 8,
       tier2_free_hours: globalSetting?.equipment_discount2_free_hours ?? 4
