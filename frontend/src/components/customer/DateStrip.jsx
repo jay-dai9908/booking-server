@@ -48,7 +48,7 @@ export default function DateStrip({
       const d = String(cur.getDate()).padStart(2, '0');
       const dStr = `${y}-${m}-${d}`;
       const daySessions = sessionsByDate[dStr] || [];
-      const state = dayState(daySessions);
+      const state = dayState(dStr, daySessions);
       result.push({ dateStr: dStr, state });
       cur.setDate(cur.getDate() + 1);
       count++;

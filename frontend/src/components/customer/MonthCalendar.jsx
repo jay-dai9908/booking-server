@@ -19,7 +19,9 @@ export default function MonthCalendar({
   onSelectDate,
   className = '',
 }) {
-  const parsedCurrent = currentMonth ? currentMonth.split('-').map(Number) : null;
+  const parsedCurrent = currentMonth instanceof Date
+    ? [currentMonth.getFullYear(), currentMonth.getMonth() + 1]
+    : currentMonth ? String(currentMonth).split('-').map(Number) : null;
   const year = yearProp ?? (parsedCurrent ? parsedCurrent[0] : new Date().getFullYear());
   const month = monthProp ?? (parsedCurrent ? parsedCurrent[1] : new Date().getMonth() + 1);
 
@@ -28,7 +30,7 @@ export default function MonthCalendar({
     if (!sessionsByDate) return {};
     const map = {};
     for (const [k, v] of Object.entries(sessionsByDate)) {
-      map[k] = dayState(v);
+      map[k] = dayState(k, v);
     }
     return map;
   }, [dayStateMapProp, sessionsByDate]);

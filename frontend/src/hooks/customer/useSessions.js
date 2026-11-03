@@ -110,10 +110,8 @@ export function useSessionRange(startDate, endDate) {
       const raw = Array.isArray(res.data) ? res.data : [];
       const grouped = {};
       for (const s of raw) {
-        if (!grouped[s.session_date]) {
-          grouped[s.session_date] = [];
-        }
-        grouped[s.session_date].push(s);
+        const k = String(s.session_date).slice(0, 10);
+        (grouped[k] ||= []).push(s);
       }
       setSessionsByDate(grouped);
       setError(null);

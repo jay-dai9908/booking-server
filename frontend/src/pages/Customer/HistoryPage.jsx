@@ -260,15 +260,19 @@ export default function HistoryPage() {
 
     // Sort upcoming by start date/time ascending
     up.sort((a, b) => {
-      const aTime = `${a.session_date || ''} ${a.start_time || ''}`;
-      const bTime = `${b.session_date || ''} ${b.start_time || ''}`;
+      const aDate = String(a.session_date || a.session?.session_date || '').slice(0, 10);
+      const bDate = String(b.session_date || b.session?.session_date || '').slice(0, 10);
+      const aTime = `${aDate} ${a.start_time || ''}`;
+      const bTime = `${bDate} ${b.start_time || ''}`;
       return aTime.localeCompare(bTime);
     });
 
     // Sort past by start date/time descending
     past.sort((a, b) => {
-      const aTime = `${a.session_date || ''} ${a.start_time || ''}`;
-      const bTime = `${b.session_date || ''} ${b.start_time || ''}`;
+      const aDate = String(a.session_date || a.session?.session_date || '').slice(0, 10);
+      const bDate = String(b.session_date || b.session?.session_date || '').slice(0, 10);
+      const aTime = `${aDate} ${a.start_time || ''}`;
+      const bTime = `${bDate} ${b.start_time || ''}`;
       return bTime.localeCompare(aTime);
     });
 
@@ -281,7 +285,8 @@ export default function HistoryPage() {
     if (!q) return pastList;
     return pastList.filter((r) => {
       const refMatch = (r.booking_ref || '').toLowerCase().includes(q);
-      const dateMatch = (r.session_date || '').includes(q);
+      const cleanDate = String(r.session_date || r.session?.session_date || '').slice(0, 10);
+      const dateMatch = cleanDate.includes(q);
       return refMatch || dateMatch;
     });
   }, [pastList, resSearch]);
