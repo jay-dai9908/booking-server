@@ -1,95 +1,172 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft,
-  ChevronRight,
-  CalendarClock,
-  History,
-  Search,
-  RefreshCw,
-  ShoppingBag,
-  Ticket,
+  Calendar,
+  Grid,
   QrCode,
-  Sparkles,
+  Search,
+  ExternalLink,
+  LogOut,
+  Pencil,
   Clock,
   Copy,
-  Check,
   MessageCircle,
-  ExternalLink,
-  Gift,
-  ShieldCheck
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import CustomerLayout from '../../components/customer/CustomerLayout';
+import AppBar from '../../components/customer/AppBar';
+import BottomTabBar from '../../components/customer/BottomTabBar';
+import Button from '../../components/customer/Button';
+import Pill from '../../components/customer/Pill';
+import { Card, KV, Divider } from '../../components/customer/Card';
+import { SoftBox, ErrorBanner } from '../../components/customer/Banners';
+import StepIndicator from '../../components/customer/StepIndicator';
+import EmptyState from '../../components/customer/EmptyState';
+import { BeadLoader } from '../../components/customer/Bead';
+import BarcodeSheet from '../../components/customer/sheets/BarcodeSheet';
+import EquipmentAddonSheet from '../../components/customer/sheets/EquipmentAddonSheet';
+import ConfirmSheet from '../../components/customer/sheets/ConfirmSheet';
+import { useToast } from '../../components/customer/Toast';
+import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
+import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
 import api from '../../api/axios';
-import { format } from 'date-fns';
-import CustomerReservationDetailsModal, { getReservationStatusUI, formatBookingRef } from '../../components/CustomerReservationDetailsModal';
-import EquipmentAddonModal from '../../components/EquipmentAddonModal';
-import BarcodeModal from '../../components/BarcodeModal';
+import {
+  formatDateShort,
+  formatDateFull,
+  weekdayChar,
+  formatMoney,
+  formatBookingRef,
+  formatShortRef,
+  formatPhone,
+} from '../../utils/customer/format';
+
+const QUICK_TAGS = ['第一次玩', '有小孩同行', '生日慶祝', '希望坐一起'];
+
+// Pill status helper for reservations (Section 6.13)
+function getReservationStatusPill(r) {
+  if (r.status === 'cancelled') {
+    return { variant: 'full', text: '已取消' };
+  }
+
+  const now = new Date();
+  const datePart = r.session_date || r.session?.session_date || '';
+  const [y, m, d] = datePart.split('-').map(Number);
+  const [eH, eM] = (r.end_time || r.session?.end_time || '23:59').split(':').map(Number);
+  const [sH, sM] = (r.start_time || r.session?.start_time || '00:00').split(':').map(Number);
+  const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
+  const startDt = new Date(y, m - 1, d, sH, sM, 0, 0);
+
+  const isCheckedIn = r.attendance === 'checked_in';
+  const hasEnded = now.getTime() >= endDt.getTime();
+
+  if (isCheckedIn && hasEnded) {
+    return { variant: 'full', text: '已完成' };
+  }
+  if (isCheckedIn && !hasEnded) {
+    return { variant: 'ok', text: '已報到' };
+  }
+
+  // Not checked in, and 15 mins past start or ended
+  const startPlus15 = new Date(startDt.getTime() + 15 * 60 * 1000);
+  if (!isCheckedIn && (now.getTime() >= startPlus15.getTime() || hasEnded)) {
+    return { variant: 'full', text: '預約未到' };
+  }
+
+  // Check days difference
+  const today = new Date();
+  const todayMid = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const resMid = new Date(y, m - 1, d);
+  const diffDays = Math.round((resMid.getTime() - todayMid.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    return { variant: 'brand', text: '已預約 · 今天' };
+  }
+  if (diffDays === 1) {
+    return { variant: 'brand', text: '已預約 · 明天' };
+  }
+  return { variant: 'brand', text: `已預約 · 還有 ${diffDays} 天` };
+}
+
+// Order status helper (Section 6.15)
+function getOrderStatusInfo(o) {
+  if (o.order_status === 'cancelled') {
+    return { pill: { variant: 'full', text: '已取消' }, step: 0 };
+  }
+  if (o.payment_status === 'refunded') {
+    return { pill: { variant: 'full', text: '已退款' }, step: 0 };
+  }
+  if (o.order_status === 'picked_up') {
+    return { pill: { variant: 'full', text: '已取貨' }, step: 4 };
+  }
+  if (o.order_status === 'arrived') {
+    return { pill: { variant: 'peach', text: '已到貨，可取貨' }, step: 3 };
+  }
+  if (o.payment_status === 'deposit_verified' || o.payment_status === 'fully_paid') {
+    return { pill: { variant: 'brand', text: '備貨中' }, step: 2 };
+  }
+  if (o.payment_status === 'reported_pending_verify') {
+    return { pill: { variant: 'low', text: '待確認入帳' }, step: 1 };
+  }
+  return { pill: { variant: 'low', text: '待付訂金' }, step: 1 };
+}
 
 export default function HistoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const toast = useToast();
 
-  // 3 Primary Tabs: 'reservations' | 'shop' | 'passes'
-  const [mainTab, setMainTab] = useState('reservations');
+  const activeTab = searchParams.get('tab') || 'bookings';
+  const detailRef = searchParams.get('ref') || null;
 
-  // Reservation state
+  const { settings: globalSettings } = useGlobalSettings();
+  const { user } = useCustomerProfile();
+
+  // Reservations state
   const [reservations, setReservations] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [activeReservationTab, setActiveReservationTab] = useState('upcoming'); // 'upcoming' or 'past'
-  const [selectedReservation, setSelectedReservation] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [addonReservation, setAddonReservation] = useState(null);
-  const [noticeModal, setNoticeModal] = useState(null);
+  const [loadingReservations, setLoadingReservations] = useState(true);
+  const [resSearch, setResSearch] = useState('');
+  const [pastLimit, setPastLimit] = useState(10);
 
-  // Preorders state
-  const [preorders, setPreorders] = useState([]);
-  const [shopPaymentConfig, setShopPaymentConfig] = useState(null);
+  // Detail view state
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  // Sheet states
+  const [activeBarcodeData, setActiveBarcodeData] = useState(null);
+  const [activeAddonRes, setActiveAddonRes] = useState(null);
+
+  // Orders state
+  const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
-  const [remittanceInputs, setRemittanceInputs] = useState({}); // { [orderId]: string }
-  const [remittanceSuccess, setRemittanceSuccess] = useState({});
+  const [remittanceInputs, setRemittanceInputs] = useState({});
+  const [editingRemittance, setEditingRemittance] = useState({});
+  const [reportingRemittance, setReportingRemittance] = useState({});
 
   // Passes state
   const [passes, setPasses] = useState([]);
   const [loadingPasses, setLoadingPasses] = useState(false);
 
-  // Barcode / QR modal state
-  const [barcodeModalData, setBarcodeModalData] = useState(null);
-  const [copiedAccount, setCopiedAccount] = useState({});
-
-  useEffect(() => {
-    fetchReservations();
-  }, []);
-
-  useEffect(() => {
-    if (mainTab === 'shop' && preorders.length === 0) {
-      fetchPreorders();
-    } else if (mainTab === 'passes' && passes.length === 0) {
-      fetchPasses();
-    }
-  }, [mainTab]);
-
   const fetchReservations = async () => {
     try {
-      setLoading(true);
+      setLoadingReservations(true);
       const res = await api.get('/reservations/my');
-      setReservations(Object.values(res.data));
+      setReservations(Object.values(res.data || {}));
     } catch (err) {
       console.error('Failed to fetch reservations', err);
     } finally {
-      setLoading(false);
+      setLoadingReservations(false);
     }
   };
 
-  const fetchPreorders = async () => {
+  const fetchOrders = async () => {
     try {
       setLoadingOrders(true);
-      const [ordersRes, payRes] = await Promise.all([
-        api.get('/shop/my-orders'),
-        api.get('/shop/payment-methods').catch(() => ({ data: null }))
-      ]);
-      setPreorders(Array.isArray(ordersRes.data) ? ordersRes.data : []);
-      if (payRes.data) setShopPaymentConfig(payRes.data);
+      const res = await api.get('/shop/my-orders');
+      setOrders(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      console.error('Failed to fetch preorders', err);
+      console.error('Failed to fetch orders', err);
     } finally {
       setLoadingOrders(false);
     }
@@ -98,7 +175,7 @@ export default function HistoryPage() {
   const fetchPasses = async () => {
     try {
       setLoadingPasses(true);
-      const res = await api.get('/passes/my');
+      const res = await api.get('/members/my-passes');
       setPasses(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Failed to fetch passes', err);
@@ -107,812 +184,1021 @@ export default function HistoryPage() {
     }
   };
 
-  const handleRemittanceSubmit = async (orderId) => {
-    const val = (remittanceInputs[orderId] || '').trim();
-    if (!val) return;
+  useEffect(() => {
+    fetchReservations();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'orders' && orders.length === 0) {
+      fetchOrders();
+    } else if (activeTab === 'passes' && passes.length === 0) {
+      fetchPasses();
+    }
+  }, [activeTab]);
+
+  // Tab switch
+  const handleTabChange = (tab) => {
+    setSearchParams({ tab }, { replace: true });
+  };
+
+  // Logout handler
+  const handleLogout = async () => {
     try {
-      await api.patch(`/shop/orders/${orderId}/remittance`, { remittance_last5: val });
-      setRemittanceSuccess(prev => ({ ...prev, [orderId]: true }));
-      fetchPreorders();
+      await api.post('/auth/logout');
+    } catch (e) {}
+    try {
+      sessionStorage.clear();
+      localStorage.removeItem('shiguang_auth_token');
+    } catch (e) {}
+    window.location.href = '/';
+  };
+
+  // Find detail reservation if ?ref= is present
+  const currentDetailRes = useMemo(() => {
+    if (!detailRef) return null;
+    return reservations.find((r) => r.booking_ref === detailRef) || null;
+  }, [detailRef, reservations]);
+
+  // When detail reservation opens, initialize note draft
+  useEffect(() => {
+    if (currentDetailRes) {
+      setNoteDraft(currentDetailRes.customer_note || '');
+      setEditingNote(false);
+    }
+  }, [currentDetailRes]);
+
+  // Filter reservations into upcoming and past
+  const { upcomingList, pastList } = useMemo(() => {
+    const now = new Date();
+    const up = [];
+    const past = [];
+
+    for (const r of reservations) {
+      if (r.status === 'cancelled') {
+        past.push(r);
+        continue;
+      }
+      const datePart = r.session_date || r.session?.session_date || '';
+      const [y, m, d] = datePart.split('-').map(Number);
+      const [eH, eM] = (r.end_time || r.session?.end_time || '23:59').split(':').map(Number);
+      const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
+
+      if (now.getTime() < endDt.getTime()) {
+        up.push(r);
+      } else {
+        past.push(r);
+      }
+    }
+
+    // Sort upcoming by start date/time ascending
+    up.sort((a, b) => {
+      const aTime = `${a.session_date || ''} ${a.start_time || ''}`;
+      const bTime = `${b.session_date || ''} ${b.start_time || ''}`;
+      return aTime.localeCompare(bTime);
+    });
+
+    // Sort past by start date/time descending
+    past.sort((a, b) => {
+      const aTime = `${a.session_date || ''} ${a.start_time || ''}`;
+      const bTime = `${b.session_date || ''} ${b.start_time || ''}`;
+      return bTime.localeCompare(aTime);
+    });
+
+    return { upcomingList: up, pastList: past };
+  }, [reservations]);
+
+  // Filter past list by search query if > 10 items
+  const filteredPastList = useMemo(() => {
+    const q = resSearch.trim().toLowerCase();
+    if (!q) return pastList;
+    return pastList.filter((r) => {
+      const refMatch = (r.booking_ref || '').toLowerCase().includes(q);
+      const dateMatch = (r.session_date || '').includes(q);
+      return refMatch || dateMatch;
+    });
+  }, [pastList, resSearch]);
+
+  // Check if detail reservation can be modified for smart boards
+  const canModifyAddon = useMemo(() => {
+    if (!currentDetailRes) return false;
+    if (currentDetailRes.status === 'cancelled') return false;
+    const now = new Date();
+    const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
+    const [y, m, d] = datePart.split('-').map(Number);
+    const [eH, eM] = (currentDetailRes.end_time || currentDetailRes.session?.end_time || '23:59').split(':').map(Number);
+    const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
+    const twoHoursBeforeEnd = new Date(endDt.getTime() - 120 * 60 * 1000);
+    return now.getTime() < twoHoursBeforeEnd.getTime();
+  }, [currentDetailRes]);
+
+  // Check if reservation is ended
+  const isDetailEnded = useMemo(() => {
+    if (!currentDetailRes) return false;
+    const now = new Date();
+    const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
+    const [y, m, d] = datePart.split('-').map(Number);
+    const [eH, eM] = (currentDetailRes.end_time || currentDetailRes.session?.end_time || '23:59').split(':').map(Number);
+    const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
+    return now.getTime() >= endDt.getTime();
+  }, [currentDetailRes]);
+
+  // Check cancellation eligibility
+  const canCancel = useMemo(() => {
+    if (!currentDetailRes) return false;
+    if (currentDetailRes.status === 'cancelled') return false;
+    if (currentDetailRes.is_paid) return false;
+    if (currentDetailRes.attendance === 'checked_in') return false;
+    const now = new Date();
+    const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
+    const [y, m, d] = datePart.split('-').map(Number);
+    const [sH, sM] = (currentDetailRes.start_time || currentDetailRes.session?.start_time || '00:00').split(':').map(Number);
+    const startDt = new Date(y, m - 1, d, sH, sM, 0, 0);
+    return now.getTime() < startDt.getTime();
+  }, [currentDetailRes]);
+
+  // Save Note in Detail View
+  const handleSaveNote = async () => {
+    if (!currentDetailRes) return;
+    setSavingNote(true);
+    try {
+      await api.patch(`/reservations/${currentDetailRes.booking_ref}/notes`, {
+        customer_note: noteDraft.trim() || null,
+      });
+      toast.show('已更新備註', { type: 'success' });
+      setEditingNote(false);
+      fetchReservations();
     } catch (err) {
-      alert('回報末五碼失敗：' + (err.response?.data?.error || err.message));
+      console.error('Failed to update note', err);
+      toast.show('更新失敗，請稍後再試', { type: 'error' });
+    } finally {
+      setSavingNote(false);
     }
   };
 
-  const isPast = (dateStr, timeStr) => {
-    if (!timeStr) return true;
-    const [hours, minutes] = timeStr.split(':');
-    const d = new Date(dateStr);
-    d.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
-    return d < new Date();
+  // Cancel Reservation
+  const handleCancelBooking = async () => {
+    if (!currentDetailRes) return;
+    setCancelling(true);
+    try {
+      await api.delete(`/reservations/${currentDetailRes.booking_ref}`);
+      toast.show('已取消預約', { type: 'success' });
+      setShowCancelConfirm(false);
+      fetchReservations();
+      navigate('/history?tab=bookings', { replace: true });
+    } catch (err) {
+      console.error('Failed to cancel reservation', err);
+      const msg = err.response?.data?.message || err.response?.data?.error || '取消失敗，請洽門市';
+      toast.show(msg, { type: 'error' });
+    } finally {
+      setCancelling(false);
+    }
   };
 
-  // Format and split reservations
-  const formattedReservations = reservations.map(r => ({
-    ...r,
-    start_time: r.start_time || r.session?.start_time,
-    end_time: r.end_time || r.session?.end_time,
-    session_date: r.session_date || r.session?.session_date
-  }));
+  // Submit Remittance
+  const handleReportRemittance = async (orderId) => {
+    const code = (remittanceInputs[orderId] || '').trim();
+    if (!/^\d{5}$/.test(code)) {
+      toast.show('請輸入 5 位數字帳號末五碼', { type: 'error' });
+      return;
+    }
+    setReportingRemittance((prev) => ({ ...prev, [orderId]: true }));
+    try {
+      await api.patch(`/shop/orders/${orderId}/remittance`, { remittance_last5: code });
+      toast.show('已回報末五碼', { type: 'success' });
+      setEditingRemittance((prev) => ({ ...prev, [orderId]: false }));
+      fetchOrders();
+    } catch (err) {
+      console.error('Failed to report remittance', err);
+      toast.show('回報失敗，請稍後再試', { type: 'error' });
+    } finally {
+      setReportingRemittance((prev) => ({ ...prev, [orderId]: false }));
+    }
+  };
 
-  const upcomingReservations = formattedReservations.filter(r => !isPast(r.session_date, r.start_time));
-  const pastReservations = formattedReservations.filter(r => isPast(r.session_date, r.start_time));
+  // Copy account number
+  const handleCopyAccount = async (account) => {
+    const unspaced = account.replace(/\s+/g, '');
+    try {
+      await navigator.clipboard.writeText(unspaced);
+      toast.show('已複製帳號', { type: 'success' });
+    } catch (e) {
+      toast.show(unspaced, { type: 'info' });
+    }
+  };
 
-  const baseList = activeReservationTab === 'upcoming' ? upcomingReservations : pastReservations;
+  // Customer display name
+  const customerName = user?.name ? (user.name.length > 8 ? `${user.name.slice(0, 8)}…` : user.name) : '';
 
-  const displayReservations = baseList.filter(r => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.toLowerCase().trim();
-    const shortRef = formatBookingRef(r.booking_ref).toLowerCase();
-    const fullRef = (r.booking_ref || '').toLowerCase();
-    const dateStr = format(new Date(r.session_date), 'yyyy/MM/dd yyyy-MM-dd').toLowerCase();
-    const nameStr = (r.user?.name || '').toLowerCase();
-    return shortRef.includes(term) || fullRef.includes(term) || dateStr.includes(term) || nameStr.includes(term);
-  });
+  // -------------------------------------------------------------
+  // RENDER: DETAIL VIEW (?ref=...)
+  // -------------------------------------------------------------
+  if (detailRef && currentDetailRes) {
+    const r = currentDetailRes;
+    const pill = getReservationStatusPill(r);
+    const dateFormatted = formatDateShort(r.session_date);
+    const weekday = weekdayChar(r.session_date);
+    const timeRange = `${r.start_time} 到 ${r.end_time}${r.is_unlimited ? '（不限時）' : ''}`;
+    const amountLabel = r.is_paid ? '金額（已付款）' : '預估金額';
+    const contactInfo = `${r.customer_name || user?.name || ''} · ${formatPhone(r.customer_phone || user?.phone || '')}`;
 
+    // Equipment lines
+    const boards = r.equipments || [];
+    const hasBoards = boards.some((e) => e.equipment_id !== 'bring_own');
+
+    const cancelSummary = `${formatDateShort(r.session_date)} ${weekday} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`;
+
+    return (
+      <CustomerLayout
+        header={
+          <AppBar
+            variant="back"
+            title="預約詳情"
+            onBack={() => navigate('/history?tab=bookings')}
+          />
+        }
+      >
+        <div className="grid gap-3 pb-8">
+          {/* 1. Info Card */}
+          <Card gap={8}>
+            <div className="flex justify-between items-center">
+              <Pill variant={pill.variant}>{pill.text}</Pill>
+              <span className="font-num sg-small">{formatBookingRef(r.booking_ref)}</span>
+            </div>
+
+            <div className="flex items-baseline my-1">
+              <span className="font-num font-extrabold text-[26px] leading-[1.2] text-sg-ink mr-2">
+                {dateFormatted}
+              </span>
+              <span className="font-body text-[15px] font-bold text-sg-ink">
+                {weekday}
+              </span>
+            </div>
+
+            <KV label="時段" value={<b>{timeRange}</b>} />
+            <KV label="人數" value={<b>{r.pax} 位</b>} />
+            <KV
+              label="智能拼豆板"
+              value={
+                !hasBoards ? (
+                  '尚未加租'
+                ) : (
+                  <div className="text-right">
+                    {boards
+                      .filter((e) => e.equipment_id !== 'bring_own')
+                      .map((e, idx) => (
+                        <div key={idx}>
+                          {e.name || '智能板'} ×{e.quantity}（{e.rental_hours} 小時）
+                        </div>
+                      ))}
+                  </div>
+                )
+              }
+            />
+            <KV label={amountLabel} value={<b className="font-num">{formatMoney(r.total_amount)}</b>} />
+            <KV label="聯絡人" value={contactInfo} />
+          </Card>
+
+          {/* 2. Note Card */}
+          <Card gap={6}>
+            <div className="flex justify-between items-center">
+              <div className="text-[14px] font-bold">備註</div>
+              {!editingNote && (
+                <Button
+                  variant="text"
+                  size="sm"
+                  onClick={() => setEditingNote(true)}
+                  className="text-sg-brown"
+                >
+                  <Pencil className="w-[15px] h-[15px] mr-1" />
+                  編輯
+                </Button>
+              )}
+            </div>
+
+            {editingNote ? (
+              <div className="grid gap-2">
+                <div className="flex flex-wrap gap-[6px]">
+                  {QUICK_TAGS.map((tag) => {
+                    const isTagActive = (noteDraft || '').includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          let current = (noteDraft || '').trim();
+                          if (current.includes(tag)) {
+                            const regex = new RegExp(`(^|，|\\s*)${tag}(，|\\s*|$)`, 'g');
+                            current = current.replace(regex, '，').replace(/^，|，$/g, '').replace(/，{2,}/g, '，').trim();
+                          } else {
+                            current = current ? `${current}，${tag}` : tag;
+                          }
+                          setNoteDraft(current);
+                        }}
+                        className={`min-h-[32px] px-[10px] py-[3px] rounded-full text-[12px] font-bold transition select-none ${
+                          isTagActive
+                            ? 'bg-sg-brown-soft text-sg-brown'
+                            : 'bg-sg-full-soft text-sg-muted hover:text-sg-ink'
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <textarea
+                  rows={2}
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  placeholder="也可以直接打字寫其他需求"
+                  maxLength={120}
+                  className="w-full rounded-[10px] border-[1.5px] border-sg-line bg-sg-paper px-[10px] py-2 text-[16px] text-sg-ink placeholder:text-sg-full focus:border-sg-brown focus:outline-none resize-none"
+                />
+
+                <div className="flex gap-2 justify-end mt-1">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={savingNote}
+                    onClick={() => setEditingNote(false)}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={savingNote}
+                    disabled={savingNote}
+                    onClick={handleSaveNote}
+                  >
+                    儲存
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-[13px] text-sg-muted">
+                {r.customer_note || '沒有備註'}
+              </div>
+            )}
+          </Card>
+
+          {/* 3. Addon Smart Board Button */}
+          {canModifyAddon && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setActiveAddonRes(r)}
+              className="w-full"
+            >
+              <Grid className="w-4 h-4 mr-1" />
+              {hasBoards ? '修改智能拼豆板' : '加租智能拼豆板'}
+            </Button>
+          )}
+          {!isDetailEnded && !canModifyAddon && (
+            <div className="sg-small text-center">
+              距離結束不到 2 小時，智能板請洽現場
+            </div>
+          )}
+
+          {/* 4. Cancellation Area */}
+          <div className="grid gap-[2px] text-center mt-2">
+            {canCancel && (
+              <>
+                <Button
+                  variant="dangerText"
+                  onClick={() => setShowCancelConfirm(true)}
+                  className="justify-self-center"
+                >
+                  取消這筆預約
+                </Button>
+                <div className="sg-small">
+                  開始前都可以線上取消；已付款請洽門市
+                </div>
+              </>
+            )}
+            {r.is_paid && !canCancel && r.status !== 'cancelled' && (
+              <div className="sg-small">
+                已付款的預約請洽門市取消
+              </div>
+            )}
+            {!canCancel && !r.is_paid && r.status !== 'cancelled' && !isDetailEnded && (
+              <div className="sg-small">
+                預約已開始，如需協助請洽門市
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Cancellation Confirm Sheet */}
+        <ConfirmSheet
+          isOpen={showCancelConfirm}
+          onClose={() => setShowCancelConfirm(false)}
+          onConfirm={handleCancelBooking}
+          loading={cancelling}
+          title="確定取消這筆預約？"
+          summary={cancelSummary}
+          description="取消後名額會釋出，需要的話請重新預約。"
+          confirmText="確定取消"
+          cancelText="先不要"
+          confirmVariant="danger"
+        />
+
+        {/* Equipment Addon Sheet */}
+        <EquipmentAddonSheet
+          isOpen={!!activeAddonRes}
+          onClose={() => setActiveAddonRes(null)}
+          reservation={activeAddonRes}
+          onSuccess={fetchReservations}
+        />
+      </CustomerLayout>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // RENDER: MEMBER CENTER LIST VIEWS
+  // -------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#F7F4F0] flex flex-col text-[#3E332B] pb-16">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-[#F7F4F0]/95 backdrop-blur-md border-b border-[#EBE5DF]">
-        <div className="flex items-center justify-between px-4 h-14 sm:h-16 max-w-3xl mx-auto w-full relative">
-          <button 
-            onClick={() => navigate('/booking')} 
-            className="flex items-center text-[#8C8279] hover:text-[#3E332B] font-bold text-xs sm:text-sm transition-colors z-10 shrink-0 py-1"
-          >
-            <ChevronLeft className="w-4 h-4 mr-0.5" />
-            <span>手作預約</span>
-          </button>
-
-          <h1 className="text-base sm:text-lg font-bold text-[#3E332B] absolute inset-0 flex items-center justify-center pointer-events-none px-16 text-center truncate">
-            我的紀錄與到店條碼
-          </h1>
-
+    <CustomerLayout
+      header={
+        <AppBar
+          variant="brand"
+          title="我的會員"
+          right={customerName && <span className="sg-small truncate max-w-[8em]">{customerName}</span>}
+        />
+      }
+      bottom={
+        <BottomTabBar
+          shopEnabled={globalSettings?.shop_enabled !== false && globalSettings?.show_shop_button !== false}
+        />
+      }
+    >
+      <div className="grid gap-3 pb-8">
+        {/* 1. Segment Switch */}
+        <div
+          role="tablist"
+          className="grid grid-cols-3 gap-[3px] rounded-[14px] bg-sg-brown-soft p-[3px] select-none"
+        >
           <button
-            onClick={() => {
-              if (mainTab === 'reservations') fetchReservations();
-              if (mainTab === 'shop') fetchPreorders();
-              if (mainTab === 'passes') fetchPasses();
-            }}
-            className="p-2 text-[#8B5B43] hover:bg-[#FAF7F2] rounded-xl transition shrink-0 z-10"
-            title="重新整理"
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'bookings'}
+            onClick={() => handleTabChange('bookings')}
+            className={`min-h-[40px] rounded-[11px] text-[13px] font-bold transition ${
+              activeTab === 'bookings'
+                ? 'bg-sg-paper text-sg-ink shadow-[0_1px_3px_rgba(62,51,43,0.10)]'
+                : 'text-sg-muted hover:text-sg-ink'
+            }`}
           >
-            <RefreshCw className="w-4 h-4" />
+            手作預約
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'orders'}
+            onClick={() => handleTabChange('orders')}
+            className={`min-h-[40px] rounded-[11px] text-[13px] font-bold transition ${
+              activeTab === 'orders'
+                ? 'bg-sg-paper text-sg-ink shadow-[0_1px_3px_rgba(62,51,43,0.10)]'
+                : 'text-sg-muted hover:text-sg-ink'
+            }`}
+          >
+            商品預購
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'passes'}
+            onClick={() => handleTabChange('passes')}
+            className={`min-h-[40px] rounded-[11px] text-[13px] font-bold transition ${
+              activeTab === 'passes'
+                ? 'bg-sg-paper text-sg-ink shadow-[0_1px_3px_rgba(62,51,43,0.10)]'
+                : 'text-sg-muted hover:text-sg-ink'
+            }`}
+          >
+            卡券
           </button>
         </div>
-      </header>
 
-      {/* Primary 3 Navigation Tabs */}
-      <div className="px-4 pt-4 max-w-3xl mx-auto w-full">
-        <div className="grid grid-cols-3 bg-[#EBE5DF] p-1 rounded-2xl gap-1 text-xs sm:text-sm font-bold text-center">
+        {/* -------------------------------------------------------- */}
+        {/* TAB 1: BOOKINGS */}
+        {/* -------------------------------------------------------- */}
+        {activeTab === 'bookings' && (
+          <div className="grid gap-3">
+            {loadingReservations ? (
+              <div className="py-12 flex justify-center">
+                <BeadLoader />
+              </div>
+            ) : reservations.length === 0 ? (
+              <EmptyState
+                title="還沒有預約"
+                description="選一個時段，來拼一段屬於你的時光"
+                actionLabel="去預約"
+                onAction={() => navigate('/booking')}
+              />
+            ) : (
+              <>
+                {/* Upcoming bookings */}
+                {upcomingList.map((r, idx) => {
+                  const pill = getReservationStatusPill(r);
+                  const dateShort = formatDateShort(r.session_date);
+                  const weekday = weekdayChar(r.session_date);
+                  const timeDesc = `${r.start_time} 到 ${r.end_time} · ${r.pax} 位 · ${formatMoney(r.total_amount)}`;
+                  const boards = r.equipments || [];
+                  const hasBoards = boards.some((e) => e.equipment_id !== 'bring_own');
+
+                  // Check if can add/modify smart board
+                  const now = new Date();
+                  const [y, m, d] = (r.session_date || '').split('-').map(Number);
+                  const [eH, eM] = (r.end_time || '23:59').split(':').map(Number);
+                  const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
+                  const canAddon = now.getTime() < endDt.getTime() - 120 * 60 * 1000;
+
+                  const isNearest = idx === 0;
+
+                  return (
+                    <Card key={r.booking_ref} gap={10}>
+                      {/* Top row */}
+                      <div className="flex justify-between items-center">
+                        <Pill variant={pill.variant}>{pill.text}</Pill>
+                        <span className="font-num sg-small">{formatShortRef(r.booking_ref)}</span>
+                      </div>
+
+                      {/* Date & Time button */}
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/history?tab=bookings&ref=${r.booking_ref}`)}
+                        className="text-left group"
+                      >
+                        <div className="flex items-baseline">
+                          <span className="font-num font-extrabold text-[26px] leading-[1.2] text-sg-ink mr-2 group-hover:text-sg-brown transition">
+                            {dateShort}
+                          </span>
+                          <span className="font-body text-[15px] font-bold text-sg-ink">
+                            {weekday}
+                          </span>
+                        </div>
+                        <div className="text-[14px] text-sg-muted mt-[2px]">
+                          {timeDesc}
+                        </div>
+                      </button>
+
+                      {/* Smart board row */}
+                      {canAddon && (
+                        <div className="flex items-center gap-2 rounded-[12px] bg-sg-bg p-[10px]">
+                          <Grid className="w-[18px] h-[18px] text-sg-muted shrink-0" />
+                          <div className="text-[13px] flex-1 text-sg-ink">
+                            {!hasBoards ? (
+                              '尚未加租智能拼豆板'
+                            ) : (
+                              <span>
+                                {boards
+                                  .filter((e) => e.equipment_id !== 'bring_own')
+                                  .map((e) => `${e.name || '智能板'} ×${e.quantity} · ${e.rental_hours} 小時`)
+                                  .join('、')}
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            variant="text"
+                            size="sm"
+                            onClick={() => setActiveAddonRes(r)}
+                            className="text-sg-brown font-bold"
+                          >
+                            {hasBoards ? '修改' : '加租'}
+                          </Button>
+                        </div>
+                      )}
+
+                      {/* Barcode button */}
+                      <Button
+                        variant={isNearest ? 'primary' : 'secondary'}
+                        size="sm"
+                        onClick={() =>
+                          setActiveBarcodeData({
+                            ref: r.booking_ref,
+                            summary: `${dateShort} ${weekday} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`,
+                          })
+                        }
+                        className="w-full mt-1"
+                      >
+                        <QrCode className="w-4 h-4 mr-1" />
+                        出示到店條碼
+                      </Button>
+                    </Card>
+                  );
+                })}
+
+                {/* Past Bookings */}
+                {pastList.length > 0 && (
+                  <div className="grid gap-2 mt-4">
+                    <div className="sg-small px-1">過去的預約</div>
+
+                    {reservations.length > 10 && (
+                      <div className="flex items-center gap-2 rounded-[12px] border border-sg-line bg-sg-paper px-3 py-2">
+                        <Search className="w-4 h-4 text-sg-muted shrink-0" />
+                        <input
+                          type="text"
+                          value={resSearch}
+                          onChange={(e) => setResSearch(e.target.value)}
+                          placeholder="搜尋日期或預約編號"
+                          className="w-full bg-transparent text-[14px] text-sg-ink placeholder:text-sg-full focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    {filteredPastList.slice(0, pastLimit).map((r) => {
+                      const pill = getReservationStatusPill(r);
+                      const dateShort = formatDateShort(r.session_date);
+                      const weekday = weekdayChar(r.session_date);
+                      const timeDesc = `${r.start_time} 到 ${r.end_time} · ${r.pax} 位`;
+
+                      return (
+                        <Card
+                          key={r.booking_ref}
+                          gap={4}
+                          className="opacity-[.85] cursor-pointer hover:border-sg-brown transition"
+                          onClick={() => navigate(`/history?tab=bookings&ref=${r.booking_ref}`)}
+                        >
+                          <div className="flex justify-between items-center">
+                            <span className="font-num font-bold text-[14px] text-sg-ink">
+                              {dateShort} {weekday}
+                            </span>
+                            <Pill variant={pill.variant}>{pill.text}</Pill>
+                          </div>
+                          <div className="sg-small">{timeDesc}</div>
+                        </Card>
+                      );
+                    })}
+
+                    {filteredPastList.length > pastLimit && (
+                      <Button
+                        variant="text"
+                        size="sm"
+                        onClick={() => setPastLimit((prev) => prev + 10)}
+                        className="justify-self-center text-sg-brown font-bold"
+                      >
+                        看更多
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* -------------------------------------------------------- */}
+        {/* TAB 2: ORDERS */}
+        {/* -------------------------------------------------------- */}
+        {activeTab === 'orders' && (
+          <div className="grid gap-3">
+            {loadingOrders ? (
+              <div className="py-12 flex justify-center">
+                <BeadLoader />
+              </div>
+            ) : orders.length === 0 ? (
+              <EmptyState
+                title="還沒有預購"
+                actionLabel="去逛商城"
+                onAction={() => navigate('/shop')}
+              />
+            ) : (
+              orders.map((o) => {
+                const statusInfo = getOrderStatusInfo(o);
+                const firstItem = (o.items && o.items[0]) || {};
+                const otherCount = (o.items?.length || 1) - 1;
+                const itemSummary = firstItem.product_name
+                  ? `${firstItem.product_name}${otherCount > 0 ? ` 等 ${otherCount + 1} 項` : ''}`
+                  : '預購商品';
+                const totalAmount = o.total_amount || 0;
+                const depositRequired = o.deposit_required || 0;
+                const paidAmount = o.paid_amount || 0;
+                const depositRemain = Math.max(0, depositRequired - paidAmount);
+
+                const isPendingPayment =
+                  o.payment_status === 'pending_payment' ||
+                  o.payment_status === 'reported_pending_verify';
+                const isTransfer = o.payment_method !== 'ONSITE';
+
+                const deadlineStr = o.payment_deadline ? formatDateShort(o.payment_deadline) : '';
+
+                // Account info
+                const assignedAccount = o.assigned_pool_account || o.assigned_account || '9012 3456 7890 12';
+                const hasReportedLast5 = !!o.remittance_last5;
+                const isEditingLast5 = editingRemittance[o.id];
+
+                return (
+                  <Card key={o.id} gap={10}>
+                    {/* 1. Header */}
+                    <div className="flex justify-between items-center">
+                      <span className="font-num sg-small">{o.order_number || o.id}</span>
+                      <Pill variant={statusInfo.pill.variant}>{statusInfo.pill.text}</Pill>
+                    </div>
+
+                    {/* 2. Product name & summary */}
+                    <div>
+                      <div className="text-[15px] font-bold text-sg-ink">
+                        {itemSummary}
+                      </div>
+                      <div className="sg-small mt-0.5">
+                        ×{o.items?.reduce((a, b) => a + (b.quantity || 1), 0) || 1} · 總額 {formatMoney(totalAmount)} · 訂金 {formatMoney(depositRequired)}
+                        {o.shipping_method === 'DELIVERY' && ' · 宅配'}
+                      </div>
+                    </div>
+
+                    {/* 3. StepIndicator */}
+                    <StepIndicator
+                      steps={['已下單', '付訂金', '已到貨', '已取貨']}
+                      currentStep={statusInfo.step}
+                      className="my-1"
+                    />
+
+                    {/* 4. Payment Box */}
+                    {isPendingPayment && isTransfer && (
+                      <div className="grid gap-[6px] rounded-[12px] bg-sg-bg px-3 py-[10px]">
+                        <div className="text-[13px] font-bold text-sg-ink">
+                          {deadlineStr ? `請在 ${deadlineStr} 前匯款 ${formatMoney(depositRemain)}` : `請盡快匯款 ${formatMoney(depositRemain)}`}
+                        </div>
+
+                        {/* Account row */}
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <div className="sg-small">中國信託 822</div>
+                            <div className="font-num text-[14px] font-bold text-sg-ink tracking-wide">
+                              {assignedAccount}
+                            </div>
+                          </div>
+                          <Button
+                            variant="text"
+                            size="sm"
+                            onClick={() => handleCopyAccount(assignedAccount)}
+                            className="text-sg-brown font-bold"
+                          >
+                            <Copy className="w-4 h-4 mr-1" />
+                            複製
+                          </Button>
+                        </div>
+
+                        {/* Last 5 digits row */}
+                        {hasReportedLast5 && !isEditingLast5 ? (
+                          <div className="flex items-center justify-between text-[12px] text-sg-sage-ink font-bold pt-1">
+                            <span>已回報末五碼 {o.remittance_last5}，等待店家確認</span>
+                            <Button
+                              variant="text"
+                              size="sm"
+                              onClick={() => setEditingRemittance((prev) => ({ ...prev, [o.id]: true }))}
+                              className="text-[12px] text-sg-muted"
+                            >
+                              修改
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-[6px] pt-1">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={5}
+                              value={remittanceInputs[o.id] || ''}
+                              onChange={(e) =>
+                                setRemittanceInputs((prev) => ({
+                                  ...prev,
+                                  [o.id]: e.target.value.replace(/\D/g, '').slice(0, 5),
+                                }))
+                              }
+                              placeholder="匯款帳號末五碼"
+                              className="flex-1 min-w-0 rounded-[10px] border-[1.5px] border-sg-line bg-sg-paper px-3 py-[6px] text-[16px] text-sg-ink placeholder:text-sg-full focus:border-sg-brown focus:outline-none"
+                            />
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              loading={reportingRemittance[o.id]}
+                              onClick={() => handleReportRemittance(o.id)}
+                              className="min-h-[44px] px-4"
+                            >
+                              回報
+                            </Button>
+                          </div>
+                        )}
+
+                        {/* LINE verify button */}
+                        {globalSettings?.official_line_url && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => window.open(globalSettings.official_line_url, '_blank')}
+                            className="w-full mt-1"
+                          >
+                            <MessageCircle className="w-4 h-4 mr-1" />
+                            傳 LINE 給我們對帳
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 5. Estimated Arrival */}
+                    {o.estimated_arrival && (
+                      <div className="flex items-center gap-[6px] sg-small">
+                        <Clock className="w-[15px] h-[15px] text-sg-muted shrink-0" />
+                        <span>{o.estimated_arrival}</span>
+                      </div>
+                    )}
+
+                    {/* 6. Wish notes */}
+                    {o.wish_note && (
+                      <div className="sg-small">
+                        許願款式：{o.wish_note}
+                      </div>
+                    )}
+                    {o.wish_reply && (
+                      <SoftBox>
+                        店家回覆：{o.wish_reply}
+                      </SoftBox>
+                    )}
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* -------------------------------------------------------- */}
+        {/* TAB 3: PASSES */}
+        {/* -------------------------------------------------------- */}
+        {activeTab === 'passes' && (
+          <div className="grid gap-3">
+            {loadingPasses ? (
+              <div className="py-12 flex justify-center">
+                <BeadLoader />
+              </div>
+            ) : passes.length === 0 ? (
+              <EmptyState
+                title="還沒有卡券"
+                description="購買套裝或參加活動送的卡券會出現在這裡"
+              />
+            ) : (
+              passes.map((p) => {
+                const isActive = p.status === 'ACTIVE';
+                const isPunchCard = p.pass_type === 'PUNCH_CARD';
+                const totalQuota = p.total_quota || 0;
+                const remainingQuota = p.remaining_quota || 0;
+
+                // Status pill calculation (Section 6.16)
+                let pillVariant = 'full';
+                let pillText = '已用完';
+                if (isActive) {
+                  const now = new Date();
+                  if (p.expires_at) {
+                    const expDt = new Date(p.expires_at);
+                    const diffDays = Math.ceil((expDt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                    if (diffDays <= 14 && diffDays >= 0) {
+                      pillVariant = 'low';
+                      pillText = `剩 ${diffDays} 天`;
+                    } else {
+                      pillVariant = 'ok';
+                      pillText = '可使用';
+                    }
+                  } else {
+                    pillVariant = 'ok';
+                    pillText = '可使用';
+                  }
+                } else if (p.status === 'EXPIRED') {
+                  pillText = '已過期';
+                } else if (p.status === 'REVOKED') {
+                  pillText = '已停用';
+                }
+
+                // Details string joined by ·
+                const details = [];
+                if (!p.expires_at) {
+                  details.push('無使用期限');
+                } else if (p.pass_type === 'MONTHLY_PASS' || p.pass_type === 'TIME_PASS') {
+                  details.push(`${formatDateFull(p.created_at)} 到 ${formatDateShort(p.expires_at)}`);
+                } else {
+                  details.push(`有效至 ${formatDateFull(p.expires_at)}`);
+                }
+
+                if (p.order_product_name) {
+                  const prefix = /^[0-9A-Za-z]/.test(p.order_product_name) ? '購買 ' : '購買';
+                  details.push(`${prefix}${p.order_product_name}贈送`);
+                } else if (p.order_ref) {
+                  details.push('購買商品贈送');
+                }
+
+                if (p.day_restriction === 'WEEKDAY_ONLY') details.push('僅限平日');
+                if (p.day_restriction === 'WEEKEND_ONLY') details.push('僅限假日');
+                if (p.pass_type === 'DISCOUNT_VOUCHER') details.push('結帳時出示條碼使用');
+
+                const detailsText = details.join(' · ');
+
+                return (
+                  <Card key={p.id} gap={8} className={!isActive ? 'gap-1 opacity-75' : ''}>
+                    {/* Top row */}
+                    <div className="flex justify-between items-center">
+                      <b className="text-[15px] text-sg-ink">{p.plan_name_snapshot || p.name || '卡券'}</b>
+                      <Pill variant={pillVariant}>{pillText}</Pill>
+                    </div>
+
+                    {/* Punch card beads row */}
+                    {isPunchCard && totalQuota <= 20 && totalQuota > 0 && (
+                      <div className="flex items-center gap-[6px] my-1 flex-wrap">
+                        {Array.from({ length: totalQuota }).map((_, i) => (
+                          <span
+                            key={i}
+                            className={`sg-bead ${i < remainingQuota ? '' : 'sg-bead-empty'}`}
+                            style={{
+                              '--sg-bead-size': '18px',
+                              '--sg-bead-bw': '5px',
+                              '--sg-bead-color': i < remainingQuota ? '#8B5B43' : '#E6DDD2',
+                            }}
+                          />
+                        ))}
+                        <span className="sg-small ml-[6px]">
+                          剩 <b className="font-num text-[15px] text-sg-ink">{remainingQuota}</b> / {totalQuota} 次
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Punch card text fallback */}
+                    {isPunchCard && totalQuota > 20 && (
+                      <div className="sg-small">
+                        剩 <b className="font-num text-[15px] text-sg-ink">{remainingQuota}</b> / {totalQuota} 次
+                      </div>
+                    )}
+
+                    {/* Details line */}
+                    <div className="sg-small">{detailsText}</div>
+
+                    {/* Active barcode button */}
+                    {isActive && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          setActiveBarcodeData({
+                            ref: p.pass_code,
+                            isPass: true,
+                            passCode: p.pass_code,
+                            passName: p.plan_name_snapshot || '卡券',
+                          })
+                        }
+                        className="w-full mt-1"
+                      >
+                        <QrCode className="w-4 h-4 mr-1" />
+                        出示卡券條碼
+                      </Button>
+                    )}
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* 6. Page bottom buttons (all 3 tabs) */}
+        <div className="flex items-center justify-center gap-1 sg-small text-sg-muted mt-4">
+          {globalSettings?.show_line_button !== false && globalSettings?.official_line_url && (
+            <>
+              <a
+                href={globalSettings.official_line_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sg-brown font-bold hover:underline inline-flex items-center gap-1"
+              >
+                加入官方 LINE
+                <ExternalLink className="w-[14px] h-[14px]" />
+              </a>
+              <span>·</span>
+            </>
+          )}
           <button
             type="button"
-            onClick={() => setMainTab('reservations')}
-            className={`py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 ${
-              mainTab === 'reservations'
-                ? 'bg-white text-[#8B5B43] shadow-xs'
-                : 'text-[#8C8279] hover:text-[#3E332B]'
-            }`}
+            onClick={handleLogout}
+            className="text-sg-brown font-bold hover:underline inline-flex items-center gap-1"
           >
-            <CalendarClock className="w-4 h-4" />
-            <span>手作預約</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMainTab('shop')}
-            className={`py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 ${
-              mainTab === 'shop'
-                ? 'bg-white text-[#8B5B43] shadow-xs'
-                : 'text-[#8C8279] hover:text-[#3E332B]'
-            }`}
-          >
-            <ShoppingBag className="w-4 h-4" />
-            <span>商品預購</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMainTab('passes')}
-            className={`py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 ${
-              mainTab === 'passes'
-                ? 'bg-white text-[#8B5B43] shadow-xs'
-                : 'text-[#8C8279] hover:text-[#3E332B]'
-            }`}
-          >
-            <Ticket className="w-4 h-4" />
-            <span>我的卡券</span>
+            登出
+            <LogOut className="w-[14px] h-[14px]" />
           </button>
         </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* TAB 1: RESERVATIONS */}
-      {/* ========================================================= */}
-      {mainTab === 'reservations' && (
-        <div className="flex-1 flex flex-col">
-          {/* Subtabs: Upcoming vs Past */}
-          <div className="px-4 pt-3 pb-2 max-w-3xl mx-auto w-full">
-            <div className="flex bg-[#F0EBE5] p-1 rounded-xl text-xs font-bold">
-              <button
-                onClick={() => setActiveReservationTab('upcoming')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  activeReservationTab === 'upcoming'
-                    ? 'bg-white text-[#8B5B43] shadow-2xs'
-                    : 'text-[#8C8279]'
-                }`}
-              >
-                即將到來 ({upcomingReservations.length})
-              </button>
-              <button
-                onClick={() => setActiveReservationTab('past')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  activeReservationTab === 'past'
-                    ? 'bg-white text-[#8B5B43] shadow-2xs'
-                    : 'text-[#8C8279]'
-                }`}
-              >
-                歷史紀錄 ({pastReservations.length})
-              </button>
-            </div>
-          </div>
+      {/* Barcode Sheet */}
+      <BarcodeSheet
+        isOpen={!!activeBarcodeData}
+        onClose={() => setActiveBarcodeData(null)}
+        bookingRef={activeBarcodeData?.ref}
+        summaryText={activeBarcodeData?.summary}
+        isPass={activeBarcodeData?.isPass}
+        passCode={activeBarcodeData?.passCode}
+        passName={activeBarcodeData?.passName}
+      />
 
-          {/* Search Bar */}
-          <div className="px-4 pb-3 max-w-3xl mx-auto w-full">
-            <div className="relative">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="🔍 篩選預約單號 (BK-XXXX)、日期..."
-                className="w-full pl-9 pr-8 py-2 bg-white border border-[#E5DFD7] rounded-xl text-xs text-[#2C241E] outline-none shadow-2xs"
-              />
-              {searchTerm && (
-                <button
-                  onClick={() => setSearchTerm('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Reservation List */}
-          <main className="flex-1 px-4 pb-8 max-w-3xl mx-auto w-full">
-            {loading ? (
-              <div className="flex justify-center items-center py-20">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#8B5B43]"></div>
-              </div>
-            ) : displayReservations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center px-4 space-y-4">
-                <div className="w-14 h-14 bg-[#F4EFE6] rounded-2xl flex items-center justify-center text-2xl">
-                  📅
-                </div>
-                <p className="text-xs sm:text-sm text-[#8C8279] font-medium whitespace-pre-line">
-                  {searchTerm ? '查無符合條件的預約紀錄' : '目前尚無此分類之預約紀錄'}
-                </p>
-                <button
-                  onClick={() => navigate('/booking')}
-                  className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-full font-bold text-xs shadow-xs transition"
-                >
-                  前往線上預約
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {displayReservations.sort((a, b) => new Date(b.session_date) - new Date(a.session_date)).map((r, i) => {
-                  const statusUI = getReservationStatusUI(r);
-                  const now = new Date();
-                  const isCancelled = r.status === 'cancelled';
-                  const sessionCount = r.session_count || (r.sessions ? r.sessions.length : 1);
-
-                  const [endH, endM] = (r.end_time || '00:00').split(':').map(Number);
-                  const bookingEndTime = new Date(r.session_date);
-                  bookingEndTime.setHours(endH, endM, 0, 0);
-
-                  const [startH, startM] = (r.start_time || '00:00').split(':').map(Number);
-                  const bookingStartTime = new Date(r.session_date);
-                  bookingStartTime.setHours(startH, startM, 0, 0);
-
-                  const isExpired = now >= bookingEndTime;
-                  const effectiveStart = new Date(Math.max(now.getTime(), bookingStartTime.getTime()));
-                  const remainingMinutes = (bookingEndTime.getTime() - effectiveStart.getTime()) / (60 * 1000);
-
-                  const totalBoards = (r.equipments || []).reduce((sum, e) => sum + e.quantity, 0);
-                  const remainingPax = Math.max(0, r.pax - totalBoards);
-
-                  let equipmentLabel = '未加購 (全員使用免費一般板)';
-                  if (r.equipments && r.equipments.length > 0) {
-                    const parts = r.equipments.map(e => `${e.equipment_name_snapshot} ×${e.quantity}`);
-                    equipmentLabel = `${parts.join('、')} (${r.equipments[0].rental_hours}hr)${remainingPax > 0 ? ` ｜ 尚有 ${remainingPax} 人可追加` : ''}`;
-                  }
-
-                  const timeRangeStr = r.time_blocks 
-                    ? r.time_blocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ')
-                    : `${r.start_time} - ${r.end_time}`;
-
-                  return (
-                    <div 
-                      key={i}
-                      onClick={() => setSelectedReservation(r)}
-                      className="group flex flex-col bg-white p-5 rounded-2xl border border-transparent hover:border-[#EBE5DF] shadow-xs hover:shadow-md transition cursor-pointer space-y-3"
-                    >
-                      <div className="flex justify-between items-start gap-2">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="font-bold text-[#3E332B] text-base sm:text-lg">
-                              {format(new Date(r.session_date), 'yyyy/MM/dd')}
-                            </span>
-                            <span className="font-mono text-xs font-bold text-[#8B5B43] bg-[#F4EFE6] px-2 py-0.5 rounded-md border border-[#E8DEC8]">
-                              #{formatBookingRef(r.booking_ref)}
-                            </span>
-                          </div>
-                          <span className="text-xs font-semibold text-[#8C8279] bg-[#F4EFE6] px-2 py-0.5 rounded-md inline-block">
-                            {timeRangeStr}
-                          </span>
-                        </div>
-                        <div className="flex flex-col items-end gap-1.5 shrink-0">
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                            {statusUI.icon} {statusUI.text}
-                          </span>
-
-                          {/* Barcode Modal Button */}
-                          {!isCancelled && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setBarcodeModalData({
-                                  code: r.booking_ref,
-                                  title: '門市預約報到掃碼憑證',
-                                  subtitle: '到店請出示此條碼給門市櫃檯人員掃描核銷',
-                                  details: [
-                                    { label: '預約單號', value: formatBookingRef(r.booking_ref) },
-                                    { label: '預約日期', value: format(new Date(r.session_date), 'yyyy/MM/dd') },
-                                    { label: '預約時段', value: timeRangeStr },
-                                    { label: '預約人數', value: `${r.pax} 位` }
-                                  ]
-                                });
-                              }}
-                              className="px-2.5 py-1 bg-[#1A1512] hover:bg-[#3E332B] text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition shadow-2xs"
-                            >
-                              <QrCode className="w-3.5 h-3.5" />
-                              <span>到店條碼</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Pegboard Info Bar */}
-                      <div className="bg-[#FAF7F2] rounded-xl p-3 border border-[#E8DEC8]/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-bold text-[#4A3F35] shrink-0">⚙️ 智能拼豆板：</span>
-                          <span className={`px-2 py-0.5 rounded-md font-bold ${totalBoards > 0 ? 'bg-[#EDE6DD] text-[#4A3F35]' : 'text-[#8C8279]'}`}>
-                            {equipmentLabel}
-                          </span>
-                        </div>
-
-                        {!isCancelled && !isExpired && (
-                          <div className="self-end sm:self-auto shrink-0">
-                            {remainingMinutes >= 120 && sessionCount >= 2 && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setAddonReservation(r);
-                                }}
-                                className="bg-[#8B5B43] hover:bg-[#724a35] text-white text-xs px-3 py-1 rounded-full font-bold shadow-2xs transition flex items-center gap-1"
-                              >
-                                {totalBoards > 0 ? '✏️ 追加/修改智能板' : '➕ 補預約智能板'}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between border-t border-[#F4EFE6] pt-2.5 mt-1 text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-[#8C8279]">{r.pax} 人</span>
-                          {r.is_unlimited && (
-                            <span className="text-[10px] font-bold text-[#A67C52] bg-[#F4EFE6] px-2 py-0.5 rounded-full border border-[#D5CFC9]">
-                              ✨ 不限時
-                            </span>
-                          )}
-                          {r.total_amount != null && (
-                            <span className="font-bold text-[#3E332B] ml-2">
-                              總額 NT$ {r.total_amount}
-                            </span>
-                          )}
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-[#8C8279] opacity-70 group-hover:opacity-100 group-hover:text-[#8B5B43] transition transform group-hover:translate-x-1" />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </main>
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* TAB 2: PREORDER SHOP ORDERS */}
-      {/* ========================================================= */}
-      {mainTab === 'shop' && (
-        <main className="flex-1 px-4 py-4 max-w-3xl mx-auto w-full space-y-4">
-          {loadingOrders ? (
-            <div className="flex justify-center items-center py-20">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#8B5B43]"></div>
-            </div>
-          ) : preorders.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center px-4 space-y-4">
-              <div className="w-14 h-14 bg-[#F4EFE6] rounded-2xl flex items-center justify-center text-3xl">
-                🛍️
-              </div>
-              <p className="text-xs sm:text-sm text-[#8C8279] font-medium">
-                您尚未在拾光製所預購任何商品或套裝喔！
-              </p>
-              <button
-                type="button"
-                onClick={() => navigate('/preorder')}
-                className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-full font-bold text-xs shadow-xs transition"
-              >
-                前往 221 色套裝預購商城
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {preorders.map((order) => {
-                const isPaidDeposit = order.payment_status === 'deposit_verified' || order.payment_status === 'fully_paid';
-                const isReported = order.payment_status === 'reported_pending_verify';
-
-                return (
-                  <div
-                    key={order.id}
-                    className="bg-white rounded-2xl p-5 border border-[#E8DEC8] shadow-xs space-y-4"
-                  >
-                    {/* Header: Ref & Status */}
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="font-mono font-black text-[#3E332B] text-base">
-                            #{order.order_ref}
-                          </span>
-                          <span className="text-[11px] text-[#8C8279]">
-                            {format(new Date(order.created_at), 'yyyy/MM/dd HH:mm')}
-                          </span>
-                        </div>
-                        <span className="text-xs text-[#6D5D52] font-bold">
-                          {order.delivery_method === 'shipping' ? '🚚 宅配寄送' : '🏪 門市自取'}
-                          {order.estimated_arrival && ` · ${order.estimated_arrival}`}
-                        </span>
-                      </div>
-
-                      {/* Status Badges */}
-                      <div className="flex flex-col items-end gap-1">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                            order.order_status === 'arrived'
-                              ? 'bg-rose-100 text-rose-800'
-                              : order.order_status === 'picked_up'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {order.order_status === 'arrived'
-                            ? '📢 商品已到貨可取件'
-                            : order.order_status === 'picked_up'
-                            ? '✅ 已取貨完成'
-                            : '📦 備貨／預購登記中'}
-                        </span>
-
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                            isPaidDeposit
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : isReported
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : 'bg-amber-50 text-amber-700 border border-amber-200'
-                          }`}
-                        >
-                          {order.payment_status === 'fully_paid'
-                            ? '已全額結清'
-                            : order.payment_status === 'deposit_verified'
-                            ? '已收訂金 (尾款取貨付)'
-                            : isReported
-                            ? '已回報末五碼 (待對帳)'
-                            : '待繳納訂金'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Items List */}
-                    <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8]/60 space-y-2 text-xs">
-                      {order.items?.map((item) => (
-                        <div key={item.id} className="flex justify-between items-center py-0.5">
-                          <span className="font-bold text-[#3E332B]">
-                            {item.product_name_snapshot}
-                            <span className="text-[#8C8279] font-normal ml-2">x {item.quantity}</span>
-                          </span>
-                          <span className="font-mono font-bold text-[#8B5B43]">
-                            NT$ {item.subtotal?.toLocaleString()}
-                          </span>
-                        </div>
-                      ))}
-
-                      <div className="pt-2 border-t border-[#E8DEC8] flex justify-between items-baseline font-bold">
-                        <span className="text-[#6D5D52]">總金額 / 應付訂金</span>
-                        <div className="text-right">
-                          <span className="font-mono text-sm text-[#3E332B] mr-2">
-                            總額 NT$ {order.total_amount?.toLocaleString()}
-                          </span>
-                          <span className="text-emerald-800 text-xs">
-                            (訂金 NT$ {order.deposit_required?.toLocaleString()})
-                          </span>
-                        </div>
-                      </div>
-
-                      {order.balance_amount > 0 && (
-                        <div className="flex justify-between text-xs text-[#8B5B43] font-bold">
-                          <span>門市取貨待付尾款</span>
-                          <span>NT$ {order.balance_amount?.toLocaleString()}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* CTBC One-Time Account Details or Contact Store if Pool Empty */}
-                    {order.payment_method_code === 'ctbc_pool' && (
-                      order.assigned_pool_account ? (
-                        <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200 space-y-2 text-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-emerald-900">
-                              🏦 專屬中信一次性收款帳號：
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard?.writeText(order.assigned_pool_account);
-                                setCopiedAccount(prev => ({ ...prev, [order.id]: true }));
-                                setTimeout(() => setCopiedAccount(prev => ({ ...prev, [order.id]: false })), 2000);
-                              }}
-                              className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
-                            >
-                              {copiedAccount[order.id] ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{copiedAccount[order.id] ? '已複製' : '複製帳號'}</span>
-                            </button>
-                          </div>
-                          <div className="font-mono font-black text-sm text-emerald-800">
-                            {order.assigned_pool_account}
-                          </div>
-                        </div>
-                      ) : !isPaidDeposit ? (
-                        <div className="bg-amber-50/80 p-3.5 rounded-xl border border-amber-200 text-xs font-bold text-amber-900">
-                          💬 請聯繫店家進行付款
-                        </div>
-                      ) : null
-                    )}
-
-                    {/* Multi-Bank or Other Payment Method Account Details (Shown only after order submitted) */}
-                    {order.payment_method_code !== 'ctbc_pool' && !isPaidDeposit && (() => {
-                      const matchedMethod = shopPaymentConfig?.payment_methods?.find(
-                        m => m.code === order.payment_method_code
-                      );
-                      if (!matchedMethod) return null;
-                      return (
-                        <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8] space-y-2.5 text-xs">
-                          <div className="font-bold text-[#3E332B]">
-                            💳 付款方式：{matchedMethod.name}
-                          </div>
-                          {matchedMethod.display_instructions && (
-                            <div className="text-[#6D5D52] leading-relaxed whitespace-pre-line">
-                              {matchedMethod.display_instructions}
-                            </div>
-                          )}
-                          {Array.isArray(matchedMethod.bank_accounts_json) && matchedMethod.bank_accounts_json.length > 0 && (
-                            <div className="space-y-1.5 pt-1">
-                              <span className="font-bold text-[#6D5D52] block">匯款收款銀行帳戶：</span>
-                              {matchedMethod.bank_accounts_json.map((acc, idx) => {
-                                const copyKey = `${order.id}_bank_${idx}`;
-                                return (
-                                  <div
-                                    key={idx}
-                                    className="bg-white p-2.5 rounded-lg border border-[#E8DEC8] flex flex-wrap items-center justify-between gap-2"
-                                  >
-                                    <div>
-                                      <div className="font-bold text-[#3E332B]">
-                                        {acc.bank_name} ({acc.bank_code})
-                                        {acc.holder ? ` · 戶名：${acc.holder}` : ''}
-                                      </div>
-                                      <div className="font-mono font-black text-sm text-[#8B5B43] tracking-wider">
-                                        {acc.account}
-                                      </div>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        navigator.clipboard?.writeText(acc.account);
-                                        setCopiedAccount(prev => ({ ...prev, [copyKey]: true }));
-                                        setTimeout(() => setCopiedAccount(prev => ({ ...prev, [copyKey]: false })), 2000);
-                                      }}
-                                      className="px-2.5 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
-                                    >
-                                      {copiedAccount[copyKey] ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                                      <span>{copiedAccount[copyKey] ? '已複製' : '複製帳號'}</span>
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* Remittance Last 5 Digits Input if not verified */}
-                    {!isPaidDeposit && (
-                      <div className="p-3 bg-white rounded-xl border border-[#E8DEC8] flex items-center gap-2 text-xs">
-                        <span className="font-bold text-[#6D5D52] shrink-0">匯款末五碼：</span>
-                        <input
-                          type="text"
-                          maxLength="5"
-                          value={remittanceInputs[order.id] !== undefined ? remittanceInputs[order.id] : (order.remittance_last5 || '')}
-                          onChange={e => {
-                            const val = e.target.value.replace(/\D/g, '');
-                            setRemittanceInputs(prev => ({ ...prev, [order.id]: val }));
-                          }}
-                          placeholder="例如 58291"
-                          className="flex-1 px-2.5 py-1 border border-[#E8DEC8] rounded-lg text-xs font-mono font-bold outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleRemittanceSubmit(order.id)}
-                          className="px-3 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition shrink-0"
-                        >
-                          {remittanceSuccess[order.id] ? '✅ 已更新' : (order.remittance_last5 ? '修改末五碼' : '回報末五碼')}
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Customer Wish Note Display */}
-                    {order.wish_note && (
-                      <div className="text-xs text-[#6D5D52]">
-                        <strong className="text-[#8B5B43]">🎁 您的許願款式：</strong> {order.wish_note}
-                      </div>
-                    )}
-
-                    {/* STRICT REQUIREMENT: Wish Reply Warm Dialog Box (No LINE pushed, shown directly in order!) */}
-                    {order.wish_reply && (
-                      <div className="bg-[#FAF7F2] p-4 rounded-2xl border-l-4 border-[#8B5B43] space-y-1.5 shadow-2xs">
-                        <span className="text-xs font-black text-[#8B5B43] flex items-center gap-1.5">
-                          <Sparkles className="w-4 h-4" />
-                          <span>店家許願回覆：</span>
-                        </span>
-                        <p className="text-xs text-[#3E332B] font-bold leading-relaxed pl-5">
-                          {order.wish_reply}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </main>
-      )}
-
-      {/* ========================================================= */}
-      {/* TAB 3: MEMBER PASSES & CARDS */}
-      {/* ========================================================= */}
-      {mainTab === 'passes' && (
-        <main className="flex-1 px-4 py-4 max-w-3xl mx-auto w-full space-y-4">
-          {loadingPasses ? (
-            <div className="flex justify-center items-center py-20">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#8B5B43]"></div>
-            </div>
-          ) : passes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center px-4 space-y-4">
-              <div className="w-14 h-14 bg-[#F4EFE6] rounded-2xl flex items-center justify-center text-3xl">
-                🎟️
-              </div>
-              <p className="text-xs sm:text-sm text-[#8C8279] font-medium">
-                您目前尚未持有任何會員集次卡、月卡或代燙卡。
-              </p>
-              <p className="text-xs text-[#A8A19A]">
-                💡 預購「221 色拼豆全配套裝」到店取貨即可免費獲得「中板內免費代燙 5 件集次卡」！
-              </p>
-              <button
-                type="button"
-                onClick={() => navigate('/shop')}
-                className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-full font-bold text-xs shadow-xs transition"
-              >
-                探索 221 色套裝預購
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {passes.map((pass) => {
-                const isExhausted = pass.status === 'EXHAUSTED';
-                const isExpired = pass.status === 'EXPIRED';
-                const isActive = pass.status === 'ACTIVE';
-
-                return (
-                  <div
-                    key={pass.id}
-                    className="bg-white rounded-2xl p-5 border border-[#E8DEC8] shadow-xs space-y-4 relative overflow-hidden"
-                  >
-                    {/* Top Type Tag */}
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <h3 className="font-extrabold text-base text-[#3E332B]">
-                            {pass.plan_name_snapshot}
-                          </h3>
-                        </div>
-                        <span className="font-mono text-xs text-[#8B5B43] bg-[#FAF7F2] px-2 py-0.5 rounded border border-[#E8DEC8]">
-                          #{pass.pass_code}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-col items-end gap-1.5 shrink-0">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                            isActive
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : isExhausted
-                              ? 'bg-slate-100 text-slate-600'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {isActive ? '✅ 可使用' : isExhausted ? '已用畢' : '已過期'}
-                        </span>
-
-                        {/* Barcode Modal Button for this Pass */}
-                        {isActive && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setBarcodeModalData({
-                                code: pass.pass_code,
-                                title: pass.plan_name_snapshot,
-                                subtitle: '到店請出示此條碼給門市櫃檯人員掃描核銷',
-                                details: [
-                                  { label: '卡券名稱', value: pass.plan_name_snapshot },
-                                  { label: '專屬條碼', value: pass.pass_code },
-                                  {
-                                    label: '剩餘次數/額度',
-                                    value: pass.remaining_quota !== null ? `${pass.remaining_quota} 次` : '不限次暢玩',
-                                    color: 'text-emerald-700 font-extrabold'
-                                  },
-                                  {
-                                    label: '平假日限制',
-                                    value: pass.day_restriction === 'WEEKDAY_ONLY' ? '僅限平日' : pass.day_restriction === 'WEEKEND_ONLY' ? '僅限假日' : '平假日皆可'
-                                  },
-                                  {
-                                    label: '有效期限',
-                                    value: pass.expires_at ? format(new Date(pass.expires_at), 'yyyy/MM/dd') : '永久有效'
-                                  }
-                                ]
-                              });
-                            }}
-                            className="px-3 py-1 bg-[#1A1512] hover:bg-[#3E332B] text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-2xs"
-                          >
-                            <QrCode className="w-3.5 h-3.5" />
-                            <span>到店掃碼</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Quota Progress Bar if Punch Card */}
-                    {pass.total_quota !== null && (
-                      <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8]/60 space-y-2">
-                        <div className="flex justify-between text-xs font-bold">
-                          <span className="text-[#6D5D52]">剩餘使用次數</span>
-                          <span className="font-mono text-emerald-800 text-sm">
-                            {pass.remaining_quota} / {pass.total_quota} 次
-                          </span>
-                        </div>
-                        <div className="w-full bg-[#E5DFD7] h-2 rounded-full overflow-hidden">
-                          <div
-                            className="bg-[#8B5B43] h-full rounded-full transition-all duration-300"
-                            style={{
-                              width: `${Math.max(0, Math.min(100, (pass.remaining_quota / pass.total_quota) * 100))}%`
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Expiration & Rules */}
-                    <div className="flex items-center justify-between text-xs text-[#8C8279] pt-1">
-                      <span>
-                        {pass.expires_at
-                          ? `有效期限至：${format(new Date(pass.expires_at), 'yyyy/MM/dd')}`
-                          : '無有效期限限制'}
-                      </span>
-                      <span>
-                        {pass.day_restriction === 'WEEKDAY_ONLY'
-                          ? '僅限平日'
-                          : pass.day_restriction === 'WEEKEND_ONLY'
-                          ? '僅限假日'
-                          : '平假日皆可'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </main>
-      )}
-
-      {/* ========================================================= */}
-      {/* MODALS */}
-      {/* ========================================================= */}
-      {/* 1. Barcode / QR Code Modal */}
-      {barcodeModalData && (
-        <BarcodeModal
-          isOpen={!!barcodeModalData}
-          onClose={() => setBarcodeModalData(null)}
-          code={barcodeModalData.code}
-          title={barcodeModalData.title}
-          subtitle={barcodeModalData.subtitle}
-          details={barcodeModalData.details}
-        />
-      )}
-
-      {/* 2. Notice Alert Modal */}
-      {noticeModal && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setNoticeModal(null)} />
-          <div className="bg-white rounded-[24px] shadow-xl w-full max-w-sm overflow-hidden relative z-10 p-6 text-center space-y-4 animate-in zoom-in-95 duration-200">
-            <div className="w-12 h-12 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center mx-auto text-2xl">
-              ⚠️
-            </div>
-            <h3 className="text-lg font-bold text-[#3E332B]">{noticeModal.title}</h3>
-            <p className="text-sm text-[#7A7067] leading-relaxed">{noticeModal.message}</p>
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={() => setNoticeModal(null)}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full font-bold text-sm transition-colors"
-              >
-                我知道了
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 3. Equipment Retroactive Add-on Modal */}
-      {addonReservation && (
-        <EquipmentAddonModal
-          reservation={addonReservation}
-          isOpen={!!addonReservation}
-          onClose={() => setAddonReservation(null)}
-          onSuccess={() => {
-            fetchReservations();
-          }}
-        />
-      )}
-
-      {/* 4. Reservation Detail Modal */}
-      {selectedReservation && (
-        <CustomerReservationDetailsModal 
-          reservation={selectedReservation} 
-          onClose={() => setSelectedReservation(null)} 
-          onUpdate={(updates) => {
-            if (updates && typeof updates === 'object') {
-              setSelectedReservation(prev => (prev ? { ...prev, ...updates } : prev));
-            }
-            fetchReservations();
-          }}
-          onOpenEquipmentAddon={() => {
-            const target = selectedReservation;
-            setSelectedReservation(null);
-            setAddonReservation(target);
-          }}
-        />
-      )}
-    </div>
+      {/* Equipment Addon Sheet */}
+      <EquipmentAddonSheet
+        isOpen={!!activeAddonRes}
+        onClose={() => setActiveAddonRes(null)}
+        reservation={activeAddonRes}
+        onSuccess={fetchReservations}
+      />
+    </CustomerLayout>
   );
 }

@@ -8,7 +8,7 @@ import { Divider } from '../Card';
 import { ErrorBanner, SoftBox } from '../Banners';
 import Bead, { BeadLoader } from '../Bead';
 import { useToast } from '../Toast';
-import api from '../../api/axios';
+import api from '../../../api/axios';
 import { formatMoney, formatMinus, formatDateShort, formatBookingRef } from '../../../utils/customer/format';
 import {
   buildDiscountConfig,
