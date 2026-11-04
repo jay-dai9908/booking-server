@@ -61,7 +61,7 @@ export default function SendLineMessageModal({
     if (tmplKey === 'retain') {
       setTitle('預約時段保留提醒');
       setContent(
-        `親愛的 ${userName} 您好，提醒您於 ${dateStr} ${timeRange ? timeRange + ' ' : ''}預約了【拾光製所】手作體驗！名額將為您保留 15 分鐘，若會晚到或需調整行程請隨時告訴我們喔✨`
+        `親愛的 ${userName} 您好，提醒您於 ${dateStr} ${timeRange ? timeRange + ' ' : ''}預約了【拾光製所】手作體驗！名額將為您保留 15 分鐘，若會晚到或需調整行程請隨時告訴我們喔。`
       );
     } else if (tmplKey === 'artwork') {
       setTitle('手作作品溫馨通知');
@@ -193,7 +193,7 @@ export default function SendLineMessageModal({
                 )}
                 {isManual && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                    ⚠️ 尚未綁定 LINE
+                    尚未綁定 LINE
                   </span>
                 )}
               </div>
@@ -238,7 +238,7 @@ export default function SendLineMessageModal({
                 }`}
               >
                 <Clock className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">⏰ 座位保留提醒</span>
+                <span className="truncate">座位保留提醒</span>
               </button>
 
               <button
@@ -251,7 +251,7 @@ export default function SendLineMessageModal({
                 }`}
               >
                 <Palette className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">🎨 作品取件通知</span>
+                <span className="truncate">作品取件通知</span>
               </button>
 
               <button
@@ -264,7 +264,7 @@ export default function SendLineMessageModal({
                 }`}
               >
                 <CreditCard className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">💳 款項確認提醒</span>
+                <span className="truncate">款項確認提醒</span>
               </button>
 
               <button
@@ -277,7 +277,7 @@ export default function SendLineMessageModal({
                 }`}
               >
                 <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">✨ 專屬自由輸入</span>
+                <span className="truncate">專屬自由輸入</span>
               </button>
             </div>
           </div>
@@ -295,7 +295,7 @@ export default function SendLineMessageModal({
                     : 'bg-white text-[#6D5D52] border-[#E8DEC8] hover:bg-[#F2ECE4]'
                 }`}
               >
-                📇 拾光品牌通知卡 (Flex)
+                拾光品牌通知卡 (Flex)
               </button>
               <button
                 type="button"
@@ -306,7 +306,7 @@ export default function SendLineMessageModal({
                     : 'bg-white text-[#6D5D52] border-[#E8DEC8] hover:bg-[#F2ECE4]'
                 }`}
               >
-                💬 一般純文字訊息
+                一般純文字訊息
               </button>
             </div>
           </div>
@@ -351,7 +351,7 @@ export default function SendLineMessageModal({
           {/* Real-time Preview Area */}
           <div className="border border-dashed border-[#E8DEC8] rounded-2xl p-4 bg-[#FAF8F5]">
             <span className="text-[11px] font-bold text-[#8C8279] uppercase tracking-wider block mb-2">
-              📱 顧客手機 LINE 預覽模擬效果：
+              顧客手機 LINE 預覽模擬效果：
             </span>
 
             {messageType === 'flex' ? (
@@ -456,7 +456,7 @@ export default function SendLineMessageModal({
             ) : (
               <>
                 <Send className="w-4 h-4" />
-                <span>🚀 立即發送至顧客 LINE</span>
+                <span>立即發送至顧客 LINE</span>
               </>
             )}
           </button>

@@ -679,6 +679,10 @@ export const modifyBookingEquipment = async (req, res) => {
       return res.status(403).json({ error: '無權限修改此預約' });
     }
 
+    if (!isAdmin && firstRes.attendance === 'checked_in') {
+      return res.status(409).json({ error: '已報到的預約請洽櫃檯修改' });
+    }
+
     if (firstRes.status === 'cancelled') {
       return res.status(400).json({ error: '預約已結束或已取消，無法異動智能板', code: 'ORDER_EXPIRED' });
     }

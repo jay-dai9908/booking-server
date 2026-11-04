@@ -138,13 +138,14 @@ const groupReservations = (reservations) => {
 // Helper: 針對目標時段尋找可用的座位交集
 const getIntersectionAvailableSeats = (blocks, targetSessionIds, excludeRef = null) => {
   const occupiedSeats = new Set();
+  const safeTargetSessionIds = Array.isArray(targetSessionIds) ? targetSessionIds : [];
   
   for (const block of blocks) {
     if (excludeRef && block.booking_ref === excludeRef) continue;
     
     // 遍歷與目標時段有交集的各時段，加入該時段實際佔用的座位
     const intersectingSessions = block.original_sessions && block.original_sessions.length > 0
-      ? block.original_sessions.filter(os => targetSessionIds.includes(os.session_id))
+      ? block.original_sessions.filter(os => safeTargetSessionIds.includes(os.session_id))
       : [];
 
     if (intersectingSessions.length > 0) {
@@ -153,7 +154,7 @@ const getIntersectionAvailableSeats = (blocks, targetSessionIds, excludeRef = nu
           os.assigned_seats.forEach(seat => occupiedSeats.add(seat));
         }
       }
-    } else if (block.session_ids.some(sid => targetSessionIds.includes(sid))) {
+    } else if (safeTargetSessionIds.length === 0 || block.session_ids.some(sid => safeTargetSessionIds.includes(sid))) {
       if (Array.isArray(block.assigned_seats)) {
         block.assigned_seats.forEach(seat => occupiedSeats.add(seat));
       }
@@ -163,14 +164,16 @@ const getIntersectionAvailableSeats = (blocks, targetSessionIds, excludeRef = nu
   return SEATS.filter(s => !occupiedSeats.has(s));
 };
 
+import { allocateWithLayout } from '../services/seating/allocator.js';
+
 /**
- * 核心演算法：多時段一致性排位與智能挪位 (Continuous Block Allocation & Local Reshuffle)
+ * 舊版核心演算法：多時段一致性排位與智能挪位 (Continuous Block Allocation & Local Reshuffle)
  * @param {Array} currentReservations - 該日期所有的訂單 (尚未包含新進訂單)
  * @param {Object} newReservationBlock - 本次預約的訂單區塊 { booking_ref: 'NEW_RES', pax, session_ids: [...] }
  * @param {boolean} forceSplit - 是否允許強行拆桌
  * @returns {Object} { success: boolean, updates: Array, error: string } 
  */
-export const allocateSeats = (currentReservations, newReservationBlock = null, forceSplit = false) => {
+export const legacyAllocateSeats = (currentReservations, newReservationBlock = null, forceSplit = false) => {
   const blocks = groupReservations(currentReservations);
   let initialAvailable = [];
   
@@ -303,3 +306,14 @@ export const allocateSeats = (currentReservations, newReservationBlock = null, f
     updates: [{ booking_ref: newReservationBlock.booking_ref, assigned_seats: forcedAssigned }]
   };
 };
+
+/**
+ * 統一對外入口：若 ctx.enabled 且有版面則使用新排位器，否則使用傳統寫死代號排位器
+ */
+export const allocateSeats = (currentReservations, newReservationBlock = null, forceSplit = false, ctx = null) => {
+  if (ctx && ctx.enabled && ctx.layout) {
+    return allocateWithLayout(currentReservations, newReservationBlock, forceSplit, ctx);
+  }
+  return legacyAllocateSeats(currentReservations, newReservationBlock, forceSplit);
+};
+

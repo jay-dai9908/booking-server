@@ -1,646 +1,1021 @@
-import React, { useState, useEffect } from 'react';
-import { BarChart3, FileText, AlertTriangle, Download, Calendar, DollarSign, Users, ShoppingCart } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays, startOfDay, endOfDay } from 'date-fns';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  DollarSign,
+  FileText,
+  AlertTriangle,
+  Printer,
+  RotateCcw,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  HelpCircle,
+  Search,
+  Calendar,
+  Filter,
+  Eye,
+  Check,
+  ChevronRight,
+  ChevronDown
+} from 'lucide-react';
 import api from '../../api/axios';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import SegmentedTabs from '../../components/admin/SegmentedTabs';
+import StatusPill from '../../components/admin/StatusPill';
+import ResponsivePanel from '../../components/admin/ResponsivePanel';
+import ReasonChips from '../../components/admin/ReasonChips';
+import MoneyInput from '../../components/admin/MoneyInput';
+import ConfirmPanel from '../../components/admin/ConfirmPanel';
+import Button from '../../components/customer/Button';
+import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
 import ReservationDetailsModal from '../../components/ReservationDetailsModal';
+import { printJobOnThisDevice } from '../../utils/sunmiPrinter';
+import { buildClosingSlip, commandsToPreviewHtml } from '@shared/receipts.js';
+import { toTaipeiDateString } from '@shared/time.js';
 
 export default function AccountingPage() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [dateMode, setDateMode] = useState('today');
-  const [baseDate, setBaseDate] = useState(new Date());
-  const [startDate, setStartDate] = useState(format(startOfDay(new Date()), 'yyyy-MM-dd'));
-  const [endDate, setEndDate] = useState(format(endOfDay(new Date()), 'yyyy-MM-dd'));
+  const [activeTab, setActiveTab] = useState('payments');
 
+  // Today string in Asia/Taipei
+  const todayStr = useMemo(() => {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+  }, []);
+
+  // Shared state
+  const [dateFrom, setDateFrom] = useState(todayStr);
+  const [dateTo, setDateTo] = useState(todayStr);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedStaff, setSelectedStaff] = useState('');
+
+  // Tab 1: Payments list state
+  const [payments, setPayments] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [ledger, setLedger] = useState([]);
-  const [unpaid, setUnpaid] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [paymentKindFilter, setPaymentKindFilter] = useState('all');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
+  const [loadingPayments, setLoadingPayments] = useState(false);
 
-  const [selectedReservationRef, setSelectedReservationRef] = useState(null);
+  // Tab 2: Audit events state
+  const [events, setEvents] = useState([]);
+  const [eventCategoryFilter, setEventCategoryFilter] = useState('all');
+  const [selectedEventDetail, setSelectedEventDetail] = useState(null);
+  const [loadingEvents, setLoadingEvents] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, [startDate, endDate, activeTab]);
+  // Tab 3: Print jobs state
+  const [printJobs, setPrintJobs] = useState([]);
+  const [printStatusFilter, setPrintStatusFilter] = useState('all');
+  const [loadingPrintJobs, setLoadingPrintJobs] = useState(false);
 
-  const fetchData = async () => {
-    setIsLoading(true);
+  // Tab 4: Closing state
+  const [closingPreview, setClosingPreview] = useState(null);
+  const [closingsList, setClosingsList] = useState([]);
+  const [countedCash, setCountedCash] = useState(0);
+  const [closingFloat, setClosingFloat] = useState(2000);
+  const [closingNote, setClosingNote] = useState('');
+  const [closingSubmitting, setClosingSubmitting] = useState(false);
+  const [showClosingPreviewModal, setShowClosingPreviewModal] = useState(false);
+  const [closingSlipHtml, setClosingSlipHtml] = useState('');
+
+  // Tab 5: Unpaid follow-up state
+  const [unpaidList, setUnpaidList] = useState([]);
+  const [loadingUnpaid, setLoadingUnpaid] = useState(false);
+
+  // Void payment modal state
+  const [voidPaymentTarget, setVoidPaymentTarget] = useState(null);
+  const [voidReason, setVoidReason] = useState('收錯付款方式');
+  const [voidLoading, setVoidLoading] = useState(false);
+
+  // Modals
+  const [checkoutBookingRef, setCheckoutBookingRef] = useState(null);
+  const [detailsReservation, setDetailsReservation] = useState(null);
+
+  // Toast
+  const [toastMsg, setToastMsg] = useState(null);
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  // Fetch Payments & Summary
+  const fetchPayments = async () => {
     try {
-      if (activeTab === 'dashboard') {
-        const res = await api.get(`/accounting/summary?start_date=${startDate}&end_date=${endDate}`);
-        setSummary(res.data);
-      } else if (activeTab === 'ledger') {
-        const res = await api.get(`/accounting/ledger?start_date=${startDate}&end_date=${endDate}`);
-        setLedger(res.data);
-      } else if (activeTab === 'unpaid') {
-        const res = await api.get(`/accounting/unpaid`);
-        setUnpaid(res.data);
-      }
+      setLoadingPayments(true);
+      const [sumRes, payRes] = await Promise.all([
+        api.get('/accounting/summary', { params: { start_date: dateFrom, end_date: dateTo } }),
+        api.get('/accounting/payments', {
+          params: {
+            date_from: dateFrom,
+            date_to: dateTo,
+            kind: paymentKindFilter !== 'all' ? paymentKindFilter : undefined,
+            method: paymentMethodFilter !== 'all' ? paymentMethodFilter : undefined,
+            staff: selectedStaff || undefined,
+            q: searchTerm || undefined
+          }
+        })
+      ]);
+      setSummary(sumRes.data);
+      setPayments(payRes.data?.payments || []);
     } catch (err) {
       console.error(err);
-      alert('無法取得帳務資料');
     } finally {
-      setIsLoading(false);
+      setLoadingPayments(false);
     }
   };
 
-  const formatPaymentMethod = (method) => {
-    switch (method) {
+  // Fetch Events
+  const fetchEvents = async () => {
+    try {
+      setLoadingEvents(true);
+      const res = await api.get('/accounting/events', {
+        params: {
+          date_from: dateFrom,
+          date_to: dateTo,
+          category: eventCategoryFilter !== 'all' ? eventCategoryFilter : undefined,
+          staff: selectedStaff || undefined,
+          q: searchTerm || undefined
+        }
+      });
+      setEvents(res.data?.events || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingEvents(false);
+    }
+  };
+
+  // Fetch Print Jobs
+  const fetchPrintJobs = async () => {
+    try {
+      setLoadingPrintJobs(true);
+      const res = await api.get('/accounting/print-jobs', {
+        params: {
+          date: dateFrom,
+          status: printStatusFilter !== 'all' ? printStatusFilter : undefined
+        }
+      });
+      setPrintJobs(res.data?.print_jobs || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingPrintJobs(false);
+    }
+  };
+
+  // Fetch Closing Preview & History
+  const fetchClosing = async () => {
+    try {
+      const [prevRes, listRes] = await Promise.all([
+        api.get('/accounting/closing/preview', { params: { date: dateFrom } }),
+        api.get('/accounting/closings', { params: { date: dateFrom } })
+      ]);
+      setClosingPreview(prevRes.data);
+      setClosingFloat(prevRes.data?.float_amount ?? 2000);
+      setCountedCash(prevRes.data?.expected_cash ?? 0);
+      setClosingsList(listRes.data?.closings || []);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Fetch Unpaid
+  const fetchUnpaid = async () => {
+    try {
+      setLoadingUnpaid(true);
+      const res = await api.get('/accounting/unpaid');
+      setUnpaidList(res.data?.reservations || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingUnpaid(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'payments') fetchPayments();
+    else if (activeTab === 'events') fetchEvents();
+    else if (activeTab === 'print-jobs') fetchPrintJobs();
+    else if (activeTab === 'closing') fetchClosing();
+    else if (activeTab === 'unpaid') fetchUnpaid();
+  }, [activeTab, dateFrom, dateTo, paymentKindFilter, paymentMethodFilter, eventCategoryFilter, printStatusFilter, selectedStaff]);
+
+  // Void payment
+  const handleConfirmVoid = async () => {
+    if (!voidPaymentTarget) return;
+    try {
+      setVoidLoading(true);
+      await api.post(`/billing/payments/${voidPaymentTarget.id}/void`, {
+        reason: voidReason
+      });
+      setVoidPaymentTarget(null);
+      fetchPayments();
+      showToast(`已作廢收款 ${voidPaymentTarget.payment_no}`);
+    } catch (err) {
+      showToast(err.response?.data?.error || '作廢失敗');
+    } finally {
+      setVoidLoading(false);
+    }
+  };
+
+  // Reprint payment
+  const handleReprintPayment = async (pay) => {
+    try {
+      const res = await api.post('/print/jobs', {
+        type: 'receipt',
+        payment_id: pay.id,
+        booking_ref: pay.booking_ref,
+        is_reprint: true
+      });
+      if (res.data?.job) {
+        await printJobOnThisDevice(res.data.job);
+      }
+      showToast('補印收據已送出');
+    } catch (err) {
+      showToast(err.response?.data?.error || '補印失敗');
+    }
+  };
+
+  // Submit daily closing
+  const handleSubmitClosing = async () => {
+    try {
+      setClosingSubmitting(true);
+      const res = await api.post('/accounting/closing', {
+        date: dateFrom,
+        float_amount: closingFloat,
+        counted_cash: countedCash,
+        note: closingNote,
+        print: true
+      });
+      fetchClosing();
+      showToast('完成交班日結！');
+    } catch (err) {
+      showToast(err.response?.data?.error || '日結交班失敗');
+    } finally {
+      setClosingSubmitting(false);
+    }
+  };
+
+  // Preview closing slip
+  const handlePreviewClosingSlip = () => {
+    if (!closingPreview) return;
+    try {
+      const diff = (countedCash || 0) - (closingPreview.expected_cash || 0);
+      const cmds = buildClosingSlip(
+        dateFrom,
+        {
+          float_amount: closingFloat,
+          expected_cash: closingPreview.expected_cash,
+          counted_cash: countedCash,
+          difference: diff
+        },
+        {
+          net_revenue: closingPreview.net_revenue,
+          by_method: closingPreview.by_method,
+          refunds: closingPreview.refunds,
+          void_count: closingPreview.voids?.count,
+          void_amount: closingPreview.voids?.amount,
+          unpaid_count: closingPreview.unpaid?.count,
+          unpaid_amount: closingPreview.unpaid?.amount
+        }
+      );
+      setClosingSlipHtml(commandsToPreviewHtml(cmds));
+      setShowClosingPreviewModal(true);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Format payment method
+  const getMethodLabel = (m) => {
+    switch (m) {
       case 'cash': return '現金';
       case 'line_pay': return 'LINE Pay';
-      case 'transfer': return '轉帳';
-      default: return method || '未註記';
+      case 'jkopay': return '街口支付';
+      case 'card': return '刷卡';
+      case 'transfer': return '銀行轉帳';
+      case 'pass': return '卡券折抵';
+      case 'other': return '其他';
+      default: return m || '其他';
     }
-  };
-
-  const handleExportCSV = () => {
-    if (ledger.length === 0) {
-      alert('沒有資料可匯出');
-      return;
-    }
-    
-    // Create CSV content
-    const headers = ['預約日期', '入帳時間', '訂單編號', '顧客姓名', '聯絡電話', '付款方式', '周邊加購', '優惠折抵', '結帳金額'];
-    const rows = ledger.map(item => [
-      format(new Date(item.session.session_date), 'yyyy-MM-dd'),
-      item.paid_at ? format(new Date(item.paid_at), 'yyyy-MM-dd HH:mm:ss') : '',
-      item.booking_ref,
-      `"${(item.user?.name || '').replace(/"/g, '""')}"`,
-      item.user?.phone || '',
-      formatPaymentMethod(item.payment_method),
-      item.addons_amount || 0,
-      item.discount_amount || 0,
-      item.total_amount || 0
-    ]);
-    
-    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
-      + headers.join(',') + '\n' 
-      + rows.map(e => e.join(',')).join('\n');
-      
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `帳務報表_${startDate}_至_${endDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleDateShortcut = (mode, referenceDate = new Date()) => {
-    setDateMode(mode);
-    setBaseDate(referenceDate);
-    switch (mode) {
-      case 'today':
-        setStartDate(format(startOfDay(referenceDate), 'yyyy-MM-dd'));
-        setEndDate(format(endOfDay(referenceDate), 'yyyy-MM-dd'));
-        break;
-      case 'week':
-        setStartDate(format(startOfWeek(referenceDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'));
-        setEndDate(format(endOfWeek(referenceDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'));
-        break;
-      case 'month':
-        setStartDate(format(startOfMonth(referenceDate), 'yyyy-MM-dd'));
-        setEndDate(format(endOfMonth(referenceDate), 'yyyy-MM-dd'));
-        break;
-      default:
-        break;
-    }
-  };
-
-  const handlePrevPeriod = () => {
-    let newDate = new Date(baseDate);
-    if (dateMode === 'today') newDate = subDays(newDate, 1);
-    else if (dateMode === 'week') newDate = subDays(newDate, 7);
-    else if (dateMode === 'month') newDate = new Date(newDate.getFullYear(), newDate.getMonth() - 1, 1);
-    else return;
-    handleDateShortcut(dateMode, newDate);
-  };
-
-  const handleNextPeriod = () => {
-    let newDate = new Date(baseDate);
-    if (dateMode === 'today') newDate = new Date(newDate.getTime() + 86400000);
-    else if (dateMode === 'week') newDate = new Date(newDate.getTime() + 7 * 86400000);
-    else if (dateMode === 'month') newDate = new Date(newDate.getFullYear(), newDate.getMonth() + 1, 1);
-    else return;
-    handleDateShortcut(dateMode, newDate);
   };
 
   return (
-    <div className="p-4 md:p-8 space-y-8 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">帳務管理</h1>
-        <p className="text-gray-500 mt-1 text-sm">檢視營業額、匯出帳務報表、以及追蹤未收款項。</p>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl max-w-fit">
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
-            activeTab === 'dashboard' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          營收儀表板
-        </button>
-        <button
-          onClick={() => setActiveTab('ledger')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
-            activeTab === 'ledger' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          流水帳明細
-        </button>
-        <button
-          onClick={() => setActiveTab('unpaid')}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
-            activeTab === 'unpaid' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200'
-          }`}
-        >
-          <AlertTriangle className="w-4 h-4" />
-          待收帳款
-        </button>
-      </div>
-
-      {/* Date Filters (Only for Dashboard and Ledger) */}
-      {activeTab !== 'unpaid' && (
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-gray-400" />
-            <span className="text-sm font-bold text-gray-700">期間設定</span>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => handleDateShortcut('today')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'today' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>今日</button>
-            <button onClick={() => handleDateShortcut('week')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'week' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>本週</button>
-            <button onClick={() => handleDateShortcut('month')} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${dateMode === 'month' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}>本月</button>
-          </div>
-          <div className="h-6 w-px bg-gray-200 hidden md:block"></div>
-          <div className="flex items-center gap-2">
-            <button onClick={handlePrevPeriod} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M15.293 4.293a1 1 0 010 1.414L10.414 10l4.879 4.293a1 1 0 11-1.414 1.414l-5-5a1 1 0 010-1.414l5-5a1 1 0 011.414 0z" clipRule="evenodd" />
-              </svg>
-            </button>
-            <input 
-              type="date" 
-              value={startDate} 
-              onChange={(e) => { setStartDate(e.target.value); setDateMode('custom'); }}
-              className="text-sm border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-            />
-            <span className="text-gray-400 text-sm">至</span>
-            <input 
-              type="date" 
-              value={endDate} 
-              onChange={(e) => { setEndDate(e.target.value); setDateMode('custom'); }}
-              className="text-sm border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-            />
-            <button onClick={handleNextPeriod} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M4.707 15.707a1 1 0 010-1.414L9.586 10 4.707 5.707a1 1 0 011.414-1.414l5 5a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0z" clipRule="evenodd" />
-              </svg>
-            </button>
-          </div>
-          {activeTab === 'ledger' && (
-            <button 
-              onClick={handleExportCSV}
-              className="ml-auto flex items-center gap-2 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-sm font-bold transition-colors border border-indigo-200"
-            >
-              <Download className="w-4 h-4" />
-              匯出 CSV
-            </button>
-          )}
+    <div className="space-y-4 max-w-7xl mx-auto pb-12">
+      {/* Toast */}
+      {toastMsg && (
+        <div className="fixed top-4 right-4 z-50 bg-sg-ink text-white px-4 py-2.5 rounded-2xl shadow-lg text-[13px] font-bold animate-fade-in">
+          {toastMsg}
         </div>
       )}
 
-      {/* Content Area */}
-      {isLoading ? (
-        <div className="flex justify-center p-12">
-          <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
+        <div>
+          <h1 className="text-[18px] font-bold text-sg-ink">帳務管理</h1>
+          <p className="text-[12px] text-sg-muted">
+            收支結算、日結交班、異動審計與列印佇列監控
+          </p>
         </div>
-      ) : (
-        <>
-          {activeTab === 'dashboard' && summary && (
 
-            <>
-            {/* Summary Stat Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
-              {/* Expected Revenue */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-[#8B5B43]">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium text-sm">預期總收益</h3>
-                  <div className="p-2 bg-amber-50 rounded-lg text-[#8B5B43]"><DollarSign className="w-5 h-5"/></div>
-                </div>
-                <div className="text-3xl font-black text-gray-900">
-                  NT$ {(summary.expectedRevenue || 0).toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-400 mt-2 font-medium">
-                  共 {summary.totalOrders || 0} 筆確認預約 ({summary.totalExpectedPax || 0} 人)
-                </div>
+        <div className="flex items-center gap-2">
+          <SegmentedTabs
+            tabs={[
+              { id: 'payments', label: '收款明細' },
+              { id: 'events', label: '異動紀錄' },
+              { id: 'print-jobs', label: '列印紀錄' },
+              { id: 'closing', label: '日結' },
+              { id: 'unpaid', label: `未結追蹤 ${summary?.unpaid?.count ? `(${summary.unpaid.count})` : ''}` }
+            ]}
+            activeTab={activeTab}
+            onChange={setActiveTab}
+          />
+
+          {activeTab === 'closing' && (
+            <Button variant="secondary" size="sm" onClick={handlePreviewClosingSlip}>
+              <Printer className="w-4 h-4 mr-1 text-sg-muted" />
+              列印日結單
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Date & Search Filter Bar (for tabs 1, 2, 3) */}
+      {activeTab !== 'unpaid' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-3 rounded-2xl border border-sg-line text-[12px]">
+          <div className="flex items-center gap-2">
+            <span className="text-sg-muted">日期區間：</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="px-2.5 py-1 rounded-xl border border-sg-line text-[12px]"
+            />
+            <span className="text-sg-muted">至</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="px-2.5 py-1 rounded-xl border border-sg-line text-[12px]"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom(todayStr);
+                setDateTo(todayStr);
+              }}
+              className="text-sg-brown font-bold hover:underline px-1"
+            >
+              今天
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-sg-muted absolute left-2.5 top-2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (activeTab === 'payments') fetchPayments();
+                    else if (activeTab === 'events') fetchEvents();
+                  }
+                }}
+                placeholder="搜尋單號、姓名、收款號"
+                className="pl-8 pr-3 py-1 rounded-xl border border-sg-line text-[12px] w-48"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 1: PAYMENTS LIST (收款明細) */}
+      {activeTab === 'payments' && (
+        <div className="space-y-4">
+          {/* Summary Cards */}
+          {summary && (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
+                <span className="text-sg-muted text-[11px] block">實收淨額</span>
+                <span className="text-[18px] font-bold text-sg-ink font-num">
+                  NT${summary.net_revenue}
+                </span>
               </div>
-
-              {/* Actual Paid Revenue */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-emerald-500">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium text-sm">總實收金額 (已結帳)</h3>
-                  <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600"><DollarSign className="w-5 h-5"/></div>
-                </div>
-                <div className="text-3xl font-black text-emerald-600">
-                  NT$ {(summary.totalRevenue || 0).toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-400 mt-2 font-medium">
-                  {summary.paidCount || 0} 筆已完成付款 ({summary.paidPax || 0} 人)
-                </div>
+              <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
+                <span className="text-sg-muted text-[11px] block">現金實收</span>
+                <span className="text-[18px] font-bold text-sg-ink font-num">
+                  NT${summary.by_method?.cash?.amount || 0}
+                </span>
               </div>
-
-              {/* Pending / Unpaid Revenue */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-blue-500">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium text-sm">待結帳金額</h3>
-                  <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><ShoppingCart className="w-5 h-5"/></div>
-                </div>
-                <div className="text-3xl font-black text-gray-900">
-                  NT$ {(summary.pendingRevenue || 0).toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-400 mt-2 font-medium">
-                  {summary.unpaidCount || 0} 筆預約尚未付款
-                </div>
+              <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
+                <span className="text-sg-muted text-[11px] block">LINE Pay</span>
+                <span className="text-[18px] font-bold text-sg-ink font-num">
+                  NT${summary.by_method?.line_pay?.amount || 0}
+                </span>
               </div>
-
-              {/* Avg Price */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 border-l-4 border-l-purple-500">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium text-sm">預估平均客單價</h3>
-                  <div className="p-2 bg-purple-50 rounded-lg text-purple-600"><BarChart3 className="w-5 h-5"/></div>
-                </div>
-                <div className="text-3xl font-black text-gray-900">
-                  NT$ {(summary.avgPrice || 0).toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-400 mt-2 font-medium">
-                  依預期總收益與人數推算
-                </div>
+              <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
+                <span className="text-sg-muted text-[11px] block">退款合計</span>
+                <span className="text-[18px] font-bold text-sg-danger font-num">
+                  -NT${summary.total_refunds || 0}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
+                <span className="text-sg-muted text-[11px] block">卡券折抵額</span>
+                <span className="text-[18px] font-bold text-sg-brown font-num">
+                  NT${summary.pass_value || 0}
+                </span>
               </div>
             </div>
+          )}
 
-            {/* Revenue Trend Chart */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mt-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
-                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-indigo-600" />
-                  營收與預期收益趨勢
-                </h3>
-                <div className="flex items-center gap-4 text-xs font-semibold">
-                  <span className="flex items-center gap-1.5 text-[#8B5B43]">
-                    <span className="w-3 h-1 bg-[#8B5B43] rounded-full inline-block"></span>
-                    預期收益
-                  </span>
-                  <span className="flex items-center gap-1.5 text-emerald-600">
-                    <span className="w-3 h-1 bg-emerald-500 rounded-full inline-block"></span>
-                    實收金額
-                  </span>
-                </div>
-              </div>
-              <div className="h-[300px] w-full">
-                {summary.dailyData && summary.dailyData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={summary.dailyData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                      <XAxis 
-                        dataKey="date" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fill: '#6b7280', fontSize: 12 }} 
-                        dy={10}
-                      />
-                      <YAxis 
-                        width={85}
-                        domain={[
-                          dataMin => Math.max(0, Math.floor((dataMin - 500) / 100) * 100), 
-                          dataMax => Math.ceil((dataMax + 500) / 100) * 100
-                        ]}
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fill: '#6b7280', fontSize: 12 }} 
-                        tickFormatter={(value) => `NT$ ${value}`}
-                        dx={-5}
-                      />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        formatter={(value, name) => [`NT$ ${value.toLocaleString()}`, name === 'expected' ? '預期收益' : '實收金額']}
-                        labelStyle={{ color: '#4b5563', fontWeight: 'bold', marginBottom: '4px' }}
-                      />
-                      <Line 
-                        type="monotone" 
-                        name="expected"
-                        dataKey="expected" 
-                        stroke="#8B5B43" 
-                        strokeWidth={2}
-                        strokeDasharray="4 4"
-                        dot={{ r: 3, strokeWidth: 2, fill: '#8B5B43' }}
-                        activeDot={{ r: 5, strokeWidth: 0, fill: '#8B5B43' }}
-                        animationDuration={1000}
-                      />
-                      <Line 
-                        type="monotone" 
-                        name="revenue"
-                        dataKey="revenue" 
-                        stroke="#10b981" 
-                        strokeWidth={3}
-                        dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
-                        activeDot={{ r: 6, strokeWidth: 0, fill: '#10b981' }}
-                        animationDuration={1000}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+          {/* Filter Bar */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px] text-sg-muted">種類：</span>
+            {['all', 'charge', 'supplement', 'refund', 'waive'].map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setPaymentKindFilter(k)}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border ${
+                  paymentKindFilter === k
+                    ? 'bg-sg-brown text-white border-sg-brown'
+                    : 'bg-white text-sg-ink border-sg-line'
+                }`}
+              >
+                {k === 'all' ? '全部種類' : k === 'charge' ? '收款' : k === 'supplement' ? '補收' : k === 'refund' ? '退款' : '免收'}
+              </button>
+            ))}
+
+            <span className="text-[12px] text-sg-muted ml-3">方式：</span>
+            {['all', 'cash', 'line_pay', 'card', 'transfer', 'pass'].map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setPaymentMethodFilter(m)}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border ${
+                  paymentMethodFilter === m
+                    ? 'bg-sg-brown text-white border-sg-brown'
+                    : 'bg-white text-sg-ink border-sg-line'
+                }`}
+              >
+                {m === 'all' ? '全部方式' : getMethodLabel(m)}
+              </button>
+            ))}
+          </div>
+
+          {/* Table */}
+          <div className="bg-white rounded-3xl border border-sg-line overflow-hidden shadow-xs">
+            <table className="w-full text-left border-collapse text-[13px]">
+              <thead>
+                <tr className="bg-sg-paper/80 border-b border-sg-line text-[12px] text-sg-muted">
+                  <th className="py-2.5 px-3 font-semibold">時間</th>
+                  <th className="py-2.5 px-3 font-semibold">收款編號</th>
+                  <th className="py-2.5 px-3 font-semibold">預約單號</th>
+                  <th className="py-2.5 px-2 font-semibold">顧客</th>
+                  <th className="py-2.5 px-2 font-semibold">種類</th>
+                  <th className="py-2.5 px-2 font-semibold">方式</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">金額</th>
+                  <th className="py-2.5 px-3 font-semibold">經手店員</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-sg-line">
+                {loadingPayments ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-sg-muted">載入明細中...</td>
+                  </tr>
+                ) : payments.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-sg-muted">尚無符合條件的收款紀錄</td>
+                  </tr>
                 ) : (
-                  <div className="h-full flex items-center justify-center text-gray-400">
-                    這段期間尚未有營收或預約資料
-                  </div>
-                )}
-              </div>
-            </div>
+                  payments.map((p) => {
+                    const isVoided = p.status === 'voided';
+                    const timeStr = new Date(p.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-            {/* Daily / Period Bookings Expected Breakdown */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 mt-6 overflow-hidden">
-              <div className="px-6 py-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50/50">
-                <div>
-                  <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-[#8B5B43]" />
-                    {startDate === endDate ? `${startDate} 當日預約預期收益明細` : `${startDate} 至 ${endDate} 期間預約預期收益明細`}
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    點擊任一訂單可開啟詳細資訊查看或進行結帳操作。
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs bg-amber-50 text-[#8B5B43] border border-[#E8DEC8] px-2.5 py-1 rounded-lg font-bold">
-                    預期總計：NT$ {(summary.expectedRevenue || 0).toLocaleString()}
-                  </span>
-                  <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-lg font-bold">
-                    實收：NT$ {(summary.totalRevenue || 0).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left whitespace-nowrap">
-                  <thead>
-                    <tr className="bg-gray-50/70 text-gray-500 text-xs font-semibold uppercase tracking-wider border-b border-gray-200">
-                      <th className="px-6 py-3.5">預約時段</th>
-                      <th className="px-6 py-3.5">顧客姓名 / 電話</th>
-                      <th className="px-6 py-3.5 text-center">人數</th>
-                      <th className="px-6 py-3.5">預估 / 實收金額</th>
-                      <th className="px-6 py-3.5">結帳狀態</th>
-                      <th className="px-6 py-3.5 text-right">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 text-sm">
-                    {!summary.bookingsBreakdown || summary.bookingsBreakdown.length === 0 ? (
-                      <tr>
-                        <td colSpan="6" className="px-6 py-12 text-center text-gray-400">
-                          此日期區間內尚無任何預約訂單
+                    return (
+                      <tr
+                        key={p.id}
+                        className={`transition ${isVoided ? 'bg-sg-paper/50 opacity-60 line-through' : 'hover:bg-sg-paper/30'}`}
+                      >
+                        <td className="py-3 px-3 font-mono text-[12px] text-sg-muted">{timeStr}</td>
+                        <td className="py-3 px-3 font-mono font-bold text-sg-ink text-[12px]">{p.payment_no}</td>
+                        <td className="py-3 px-3 font-mono text-[12px] text-sg-brown font-bold">{p.booking_ref}</td>
+                        <td className="py-3 px-2 font-bold text-sg-ink">
+                          {p.breakdown_json?.customer_name || '現場顧客'}
                         </td>
-                      </tr>
-                    ) : (
-                      summary.bookingsBreakdown.map((item) => (
-                        <tr 
-                          key={item.booking_ref} 
-                          onClick={() => setSelectedReservationRef(item.booking_ref)}
-                          className="hover:bg-amber-50/20 cursor-pointer transition-colors"
-                        >
-                          <td className="px-6 py-4">
-                            <div className="font-semibold text-gray-800">
-                              {item.start_time} - {item.end_time}
-                            </div>
-                            <div className="text-xs text-gray-400">
-                              {format(new Date(item.session_date), 'yyyy/MM/dd')}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-medium text-gray-900">{item.name}</div>
-                            <div className="text-xs text-gray-500">{item.phone}</div>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <div className="inline-flex items-center gap-1">
-                              <span className="font-bold text-gray-800">{item.pax} 人</span>
-                              {item.is_unlimited && (
-                                <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-bold">
-                                  不限時
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="font-bold text-gray-900 text-base">
-                              NT$ {(item.amount || 0).toLocaleString()}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            {item.is_paid ? (
-                              <div className="flex flex-col gap-1 items-start">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  已結帳 {item.payment_method ? `(${formatPaymentMethod(item.payment_method)})` : ''}
-                                </span>
-                                {((item.discount_amount > 0) || (item.addons_amount > 0)) && (
-                                  <span className="text-[10px] text-gray-500 font-medium">
-                                    {item.addons_amount > 0 && `+加購$${item.addons_amount} `}
-                                    {item.discount_amount > 0 && `-折抵$${item.discount_amount}`}
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                                待結帳
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 text-right">
+                        <td className="py-3 px-2">
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                            p.kind === 'refund' ? 'bg-sg-danger-soft text-sg-danger' :
+                            p.kind === 'supplement' ? 'bg-sg-honey-soft text-sg-honey' :
+                            p.kind === 'waive' ? 'bg-sg-paper text-sg-muted' :
+                            'bg-sg-sage-soft text-sg-sage-ink'
+                          }`}>
+                            {p.kind === 'refund' ? '退款' : p.kind === 'supplement' ? '補收' : p.kind === 'waive' ? '免收' : '收款'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-2 text-[12px] text-sg-ink">
+                          {getMethodLabel(p.method)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-bold text-sg-ink font-num">
+                          {p.kind === 'refund' ? `-NT$${p.amount}` : `NT$${p.amount}`}
+                        </td>
+                        <td className="py-3 px-3 text-[12px]">
+                          <span className="font-bold text-sg-ink">{p.staff_name || '門市人員'}</span>
+                          {p.device_label && (
+                            <span className="block text-[10px] text-sg-muted">{p.device_label}</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-right space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => handleReprintPayment(p)}
+                            className="text-sg-brown font-bold text-[12px] hover:underline"
+                          >
+                            補印
+                          </button>
+                          {!isVoided && (
                             <button
                               type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedReservationRef(item.booking_ref);
+                              onClick={() => {
+                                setVoidPaymentTarget(p);
+                                setVoidReason('收錯付款方式');
                               }}
-                              className="text-xs font-semibold text-[#8B5B43] hover:text-[#724833] bg-[#FAF7F2] hover:bg-amber-100/50 border border-[#E8DEC8] px-3 py-1.5 rounded-lg transition-colors"
+                              className="text-sg-danger font-bold text-[12px] hover:underline"
                             >
-                              查看詳情 / 結帳
+                              作廢
                             </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            </>
-          )}
-
-          {activeTab === 'ledger' && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden animate-fade-in">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left whitespace-nowrap">
-                  <thead>
-                    <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
-                      <th className="px-6 py-4 font-medium">預約日期</th>
-                      <th className="px-6 py-4 font-medium">入帳時間</th>
-                      <th className="px-6 py-4 font-medium">顧客</th>
-                      <th className="px-6 py-4 font-medium">付款方式</th>
-                      <th className="px-6 py-4 font-medium">加購 / 折扣</th>
-                      <th className="px-6 py-4 font-medium">實收金額</th>
-                      <th className="px-6 py-4 font-medium text-right">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {ledger.length === 0 ? (
-                      <tr><td colSpan="7" className="text-center py-16 text-gray-400">此期間無入帳紀錄</td></tr>
-                    ) : (
-                      ledger.map((item) => (
-                        <tr key={item.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4">
-                            <span className="font-medium text-gray-900">{format(new Date(item.session.session_date), 'yyyy-MM-dd')}</span>
-                          </td>
-                          <td className="px-6 py-4 text-gray-500 text-sm">
-                            {item.paid_at ? format(new Date(item.paid_at), 'yyyy-MM-dd HH:mm:ss') : '-'}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-bold text-gray-900">{item.user?.name}</div>
-                            <div className="text-sm text-gray-500">{item.user?.phone}</div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-100 text-gray-800 border border-gray-200">
-                              {formatPaymentMethod(item.payment_method)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-xs">
-                            <div className="space-y-0.5">
-                              {item.addons_amount > 0 ? (
-                                <div className="text-amber-700 font-medium">加購 +NT$ {item.addons_amount}</div>
-                              ) : null}
-                              {item.discount_amount > 0 ? (
-                                <div className="text-rose-600 font-medium">折抵 -NT$ {item.discount_amount} {item.promo_code ? `(${item.promo_code})` : ''}</div>
-                              ) : null}
-                              {(!item.addons_amount && !item.discount_amount) && (
-                                <span className="text-gray-400">-</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">NT$ {item.total_amount || 0}</span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <button 
-                              onClick={() => setSelectedReservationRef(item.booking_ref)}
-                              className="text-indigo-600 hover:text-indigo-900 text-sm font-bold bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                              詳情
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'unpaid' && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden animate-fade-in">
-              <div className="p-6 bg-red-50 border-b border-red-100">
-                <h2 className="text-red-800 font-bold flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5" />
-                  待收帳款 (已入座未結帳)
-                </h2>
-                <p className="text-red-600 text-sm mt-1">此列表顯示「已經報到入座 (2026-06-28 起至今日)」，但「尚未標記為已付款」的訂單，方便您進行帳務追蹤與防呆。</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left whitespace-nowrap">
-                  <thead>
-                    <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
-                      <th className="px-6 py-4 font-medium">預約日期</th>
-                      <th className="px-6 py-4 font-medium">顧客</th>
-                      <th className="px-6 py-4 font-medium">聯絡電話</th>
-                      <th className="px-6 py-4 font-medium">預估金額</th>
-                      <th className="px-6 py-4 font-medium text-right">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {unpaid.length === 0 ? (
-                      <tr><td colSpan="5" className="text-center py-16 text-gray-400">目前沒有未收款項的訂單</td></tr>
-                    ) : (
-                      unpaid.map((item) => (
-                        <tr key={item.id} className="hover:bg-red-50/50">
-                          <td className="px-6 py-4">
-                            <span className="font-bold text-gray-900">{format(new Date(item.session.session_date), 'yyyy-MM-dd')}</span>
-                          </td>
-                          <td className="px-6 py-4 font-bold text-gray-900">{item.user?.name}</td>
-                          <td className="px-6 py-4 text-gray-500">{item.user?.phone}</td>
-                          <td className="px-6 py-4">
-                            {item.total_amount ? (
-                              <span className="font-bold text-gray-700">NT$ {item.total_amount}</span>
-                            ) : (
-                              <span className="text-gray-400 text-sm">-</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <button 
-                              onClick={() => setSelectedReservationRef(item.booking_ref)}
-                              className="text-red-600 hover:text-red-900 text-sm font-bold bg-red-50 hover:bg-red-100 border border-red-200 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                              前往結帳
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
-      {/* Reservation Details Modal wrapper */}
-      {selectedReservationRef && (
-        <ReservationDetailsWrapper 
-          bookingRef={selectedReservationRef}
-          onClose={() => {
-            setSelectedReservationRef(null);
-            fetchData(); // Refresh data after modal closes in case payment status changed
-          }} 
+      {/* TAB 2: AUDIT EVENTS (異動紀錄) */}
+      {activeTab === 'events' && (
+        <div className="space-y-4">
+          {/* Category Chips */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { key: 'all', label: '全部' },
+              { key: 'charge', label: '收款' },
+              { key: 'void', label: '作廢' },
+              { key: 'refund', label: '退款' },
+              { key: 'amount_change', label: '改金額' },
+              { key: 'print', label: '列印' },
+              { key: 'more', label: '更多 (免收/卡券/交班)' }
+            ].map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setEventCategoryFilter(c.key)}
+                className={`px-3 py-1 rounded-2xl text-[12px] font-bold border transition ${
+                  eventCategoryFilter === c.key
+                    ? 'bg-sg-brown text-white border-sg-brown'
+                    : 'bg-white text-sg-ink border-sg-line'
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Table */}
+          <div className="bg-white rounded-3xl border border-sg-line overflow-hidden shadow-xs">
+            <table className="w-full text-left border-collapse text-[13px]">
+              <thead>
+                <tr className="bg-sg-paper/80 border-b border-sg-line text-[12px] text-sg-muted">
+                  <th className="py-2.5 px-3 font-semibold">時間</th>
+                  <th className="py-2.5 px-3 font-semibold">誰</th>
+                  <th className="py-2.5 px-3 font-semibold">訂單</th>
+                  <th className="py-2.5 px-3 font-semibold">做了什麼</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">類別</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-sg-line">
+                {loadingEvents ? (
+                  <tr>
+                    <td colSpan={5} className="py-12 text-center text-sg-muted">載入異動紀錄中...</td>
+                  </tr>
+                ) : events.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-12 text-center text-sg-muted">尚無符合的異動紀錄</td>
+                  </tr>
+                ) : (
+                  events.map((ev) => {
+                    const isSensitive = ev.category === 'void' || ev.category === 'refund' || ev.category === 'amount_change';
+                    const timeStr = new Date(ev.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+                    return (
+                      <tr
+                        key={ev.id}
+                        onClick={() => setSelectedEventDetail(ev)}
+                        className={`cursor-pointer transition ${
+                          isSensitive ? 'bg-sg-honey-soft/30 hover:bg-sg-honey-soft/50' : 'hover:bg-sg-paper/30'
+                        }`}
+                      >
+                        <td className="py-3 px-3 font-mono text-[12px] text-sg-muted">{timeStr}</td>
+                        <td className="py-3 px-3 text-[12px]">
+                          <span className="font-bold text-sg-ink block">{ev.staff_name || '門市人員'}</span>
+                          <span className="text-[10px] text-sg-muted">{ev.device_label || '裝置'}</span>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[12px] text-sg-brown font-bold">
+                          {ev.booking_ref || '-'}
+                        </td>
+                        <td className="py-3 px-3 text-[13px] text-sg-ink font-medium">
+                          {ev.summary}
+                          {ev.reason && (
+                            <span className="text-[11px] text-sg-muted block">原因：{ev.reason}</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                            ev.category === 'void' ? 'bg-sg-danger-soft text-sg-danger' :
+                            ev.category === 'refund' ? 'bg-sg-peach-soft text-sg-peach' :
+                            'bg-sg-paper text-sg-muted'
+                          }`}>
+                            {ev.category}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-[11px] text-sg-muted text-center">
+            每一筆都記錄改之前和改之後的內容，不能刪除；作廢、退款、改金額一定要填原因。
+          </p>
+        </div>
+      )}
+
+      {/* TAB 3: PRINT JOBS (列印紀錄) */}
+      {activeTab === 'print-jobs' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-3xl border border-sg-line overflow-hidden shadow-xs">
+            <table className="w-full text-left border-collapse text-[13px]">
+              <thead>
+                <tr className="bg-sg-paper/80 border-b border-sg-line text-[12px] text-sg-muted">
+                  <th className="py-2.5 px-3 font-semibold">編號</th>
+                  <th className="py-2.5 px-3 font-semibold">標題</th>
+                  <th className="py-2.5 px-3 font-semibold">來源裝置</th>
+                  <th className="py-2.5 px-3 font-semibold">狀態</th>
+                  <th className="py-2.5 px-3 font-semibold">送出時間</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-sg-line">
+                {loadingPrintJobs ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-sg-muted">載入列印紀錄中...</td>
+                  </tr>
+                ) : printJobs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-sg-muted">尚無列印工作紀錄</td>
+                  </tr>
+                ) : (
+                  printJobs.map((job) => {
+                    const timeStr = new Date(job.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+                    return (
+                      <tr key={job.id} className="hover:bg-sg-paper/30 transition">
+                        <td className="py-3 px-3 font-mono font-bold text-sg-ink text-[12px]">#{job.id}</td>
+                        <td className="py-3 px-3 font-bold text-sg-ink text-[13px]">{job.title || job.type}</td>
+                        <td className="py-3 px-3 text-[12px] text-sg-muted">{job.source_device || '門市端'}</td>
+                        <td className="py-3 px-3">
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                            job.status === 'succeeded' ? 'bg-sg-sage-soft text-sg-sage-ink' :
+                            job.status === 'failed' ? 'bg-sg-danger-soft text-sg-danger' :
+                            job.status === 'claimed' ? 'bg-sg-honey-soft text-sg-honey' :
+                            'bg-sg-paper text-sg-muted'
+                          }`}>
+                            {job.status === 'succeeded' ? '已印出' : job.status === 'failed' ? '失敗' : job.status === 'claimed' ? '列印中' : '排隊中'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[12px] text-sg-muted">{timeStr}</td>
+                        <td className="py-3 px-3 text-right">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await printJobOnThisDevice(job);
+                              showToast('已觸發本機列印');
+                            }}
+                            className="text-sg-brown font-bold text-[12px] hover:underline"
+                          >
+                            本機印
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: CLOSING (日結) */}
+      {activeTab === 'closing' && closingPreview && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Left: Financial summary */}
+            <div className="bg-white p-5 rounded-3xl border border-sg-line shadow-xs space-y-4">
+              <div>
+                <span className="text-sg-muted text-[12px] block">今日實收淨額</span>
+                <span className="text-[28px] font-bold text-sg-ink font-num">
+                  NT${closingPreview.net_revenue}
+                </span>
+              </div>
+
+              <div className="divide-y divide-sg-line text-[13px] pt-2">
+                <div className="py-2 flex justify-between">
+                  <span className="text-sg-ink">現金收款（{closingPreview.by_method?.cash?.count || 0} 筆）</span>
+                  <span className="font-num font-bold">NT${closingPreview.by_method?.cash?.amount || 0}</span>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <span className="text-sg-ink">LINE Pay（{closingPreview.by_method?.line_pay?.count || 0} 筆）</span>
+                  <span className="font-num font-bold">NT${closingPreview.by_method?.line_pay?.amount || 0}</span>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <span className="text-sg-ink">銀行轉帳（{closingPreview.by_method?.transfer?.count || 0} 筆）</span>
+                  <span className="font-num font-bold">NT${closingPreview.by_method?.transfer?.amount || 0}</span>
+                </div>
+                {closingPreview.refunds?.cash?.amount > 0 && (
+                  <div className="py-2 flex justify-between text-sg-danger">
+                    <span>退款（{closingPreview.refunds?.cash?.count || 0} 筆）</span>
+                    <span className="font-num font-bold">-NT${closingPreview.refunds?.cash?.amount || 0}</span>
+                  </div>
+                )}
+                <div className="py-2 flex justify-between text-sg-muted">
+                  <span>卡券折抵（{closingPreview.passes?.count || 0} 筆，不計入）</span>
+                  <span className="font-num">NT${closingPreview.passes?.amount || 0}</span>
+                </div>
+                <div className="py-2 flex justify-between text-sg-muted">
+                  <span>作廢（{closingPreview.voids?.count || 0} 筆，不計入）</span>
+                  <span className="font-num">NT${closingPreview.voids?.amount || 0}</span>
+                </div>
+                <div className="py-2 flex justify-between text-sg-honey font-bold">
+                  <span>未結（{closingPreview.unpaid?.count || 0} 筆）</span>
+                  <span className="font-num">NT${closingPreview.unpaid?.amount || 0}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Cash Float & Count verification */}
+            <div className="bg-white p-5 rounded-3xl border border-sg-line shadow-xs space-y-4">
+              <h3 className="text-[16px] font-bold text-sg-ink">交班點錢</h3>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-[13px]">
+                  <span className="text-sg-muted">起始零用金</span>
+                  <div className="flex items-center gap-1 font-num font-bold">
+                    <span>NT$</span>
+                    <input
+                      type="number"
+                      value={closingFloat}
+                      onChange={(e) => setClosingFloat(parseInt(e.target.value, 10) || 0)}
+                      className="w-24 px-2 py-1 rounded-xl border border-sg-line text-right"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[14px]">
+                  <span className="text-sg-ink font-bold">現金應有總額</span>
+                  <span className="text-[18px] font-bold text-sg-ink font-num">
+                    NT${closingPreview.expected_cash}
+                  </span>
+                </div>
+
+                <div className="pt-2 border-t border-sg-line">
+                  <MoneyInput
+                    label="實點現金總額"
+                    value={countedCash}
+                    onChange={setCountedCash}
+                  />
+                </div>
+
+                {/* Diff Result */}
+                {(() => {
+                  const diff = countedCash - closingPreview.expected_cash;
+                  if (diff === 0) {
+                    return (
+                      <div className="p-3 rounded-2xl bg-sg-sage-soft text-sg-sage-ink font-bold text-[13px] text-center">
+                        相符，沒有差額
+                      </div>
+                    );
+                  } else if (diff < 0) {
+                    return (
+                      <div className="p-3 rounded-2xl bg-sg-danger-soft text-sg-danger font-bold text-[13px] text-center">
+                        短少 NT${Math.abs(diff)}
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="p-3 rounded-2xl bg-sg-honey-soft text-sg-honey font-bold text-[13px] text-center">
+                        多出 NT${diff}
+                      </div>
+                    );
+                  }
+                })()}
+
+                <div>
+                  <label className="block text-[12px] text-sg-muted font-medium mb-1">交班備註</label>
+                  <input
+                    type="text"
+                    value={closingNote}
+                    onChange={(e) => setClosingNote(e.target.value)}
+                    placeholder="若有差額請填寫原因..."
+                    className="w-full px-3 py-2 rounded-xl border border-sg-line text-[13px]"
+                  />
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={handleSubmitClosing}
+                  loading={closingSubmitting}
+                  className="w-full"
+                >
+                  完成交班
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Previous Closings History */}
+          {closingsList.length > 0 && (
+            <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-2">
+              <span className="text-[13px] font-bold text-sg-ink block">歷史交班紀錄</span>
+              <div className="space-y-1.5">
+                {closingsList.map((c) => (
+                  <div key={c.id} className="p-2.5 rounded-2xl bg-sg-paper/40 border border-sg-line flex items-center justify-between text-[12px]">
+                    <div>
+                      <span className="font-bold text-sg-ink mr-2">{new Date(c.closed_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="text-sg-muted">{c.staff_name}</span>
+                    </div>
+                    <div>
+                      <span className="text-sg-muted mr-3">實點 NT${c.counted_cash}</span>
+                      <span className={`font-bold ${c.difference === 0 ? 'text-sg-sage-ink' : 'text-sg-danger'}`}>
+                        差額 NT${c.difference}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: UNPAID FOLLOW-UP (未結追蹤) */}
+      {activeTab === 'unpaid' && (
+        <div className="space-y-3">
+          <div className="text-[12px] text-sg-muted">
+            下列預約訂單尚未完成全額結帳，點選「結帳」可立即開啟結帳工作台。
+          </div>
+
+          <div className="bg-white rounded-3xl border border-sg-line overflow-hidden shadow-xs">
+            <table className="w-full text-left border-collapse text-[13px]">
+              <thead>
+                <tr className="bg-sg-paper/80 border-b border-sg-line text-[12px] text-sg-muted">
+                  <th className="py-2.5 px-3 font-semibold">日期</th>
+                  <th className="py-2.5 px-3 font-semibold">單號</th>
+                  <th className="py-2.5 px-3 font-semibold">顧客</th>
+                  <th className="py-2.5 px-2 font-semibold">人數</th>
+                  <th className="py-2.5 px-2 font-semibold">狀態</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">未收金額</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-sg-line">
+                {loadingUnpaid ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-sg-muted">載入未結追蹤中...</td>
+                  </tr>
+                ) : unpaidList.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-sg-muted">太棒了！目前沒有未結款項。</td>
+                  </tr>
+                ) : (
+                  unpaidList.map((r) => {
+                    const due = (r.amount_due || 0) - (r.amount_received || 0);
+
+                    return (
+                      <tr key={r.booking_ref} className="hover:bg-sg-paper/30 transition">
+                        <td className="py-3 px-3 text-sg-muted text-[12px]">
+                          {r.session_date ? new Date(r.session_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' }) : '-'}
+                        </td>
+                        <td className="py-3 px-3 font-mono font-bold text-sg-brown text-[12px]">
+                          {r.ref_display || r.booking_ref}
+                        </td>
+                        <td className="py-3 px-3 font-bold text-sg-ink">
+                          {r.name || r.user?.name || '現場貴賓'}
+                        </td>
+                        <td className="py-3 px-2 text-sg-muted font-num">{r.pax} 位</td>
+                        <td className="py-3 px-2">
+                          <StatusPill status={r.billing_status || 'unpaid'} />
+                        </td>
+                        <td className="py-3 px-3 text-right font-bold text-sg-danger font-num">
+                          NT${due}
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => setCheckoutBookingRef(r.booking_ref)}
+                          >
+                            結帳
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Void Payment Modal */}
+      <ConfirmPanel
+        isOpen={Boolean(voidPaymentTarget)}
+        onClose={() => setVoidPaymentTarget(null)}
+        onConfirm={handleConfirmVoid}
+        title="作廢這筆收款？"
+        message={`確定要作廢 ${voidPaymentTarget?.payment_no}（NT$${voidPaymentTarget?.amount}）？作廢會記到帳務異動紀錄，資料不會刪除。`}
+        danger={true}
+        loading={voidLoading}
+      >
+        <ReasonChips
+          presets={['收錯付款方式', '收錯金額', '客人改用其他方式', '其他']}
+          value={voidReason}
+          onChange={setVoidReason}
+        />
+      </ConfirmPanel>
+
+      {/* Closing Slip Preview Modal */}
+      <ResponsivePanel
+        isOpen={showClosingPreviewModal}
+        onClose={() => setShowClosingPreviewModal(false)}
+        title="日結單預覽 (58mm)"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setShowClosingPreviewModal(false)}>關閉</Button>
+            <Button variant="primary" size="sm" onClick={() => window.print()}>列印</Button>
+          </div>
+        }
+      >
+        <div
+          className="bg-sg-paper/60 p-4 rounded-xl border border-sg-line font-mono text-[12px] overflow-x-auto max-h-[60vh]"
+          dangerouslySetInnerHTML={{ __html: closingSlipHtml }}
+        />
+      </ResponsivePanel>
+
+      {/* Event Detail Modal */}
+      <ResponsivePanel
+        isOpen={Boolean(selectedEventDetail)}
+        onClose={() => setSelectedEventDetail(null)}
+        title="異動詳細紀錄"
+        subtitle={`事件 #${selectedEventDetail?.id} · ${selectedEventDetail?.created_at ? new Date(selectedEventDetail.created_at).toLocaleString('zh-TW') : ''}`}
+      >
+        {selectedEventDetail && (
+          <div className="space-y-4 py-2 text-[13px]">
+            <div className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line space-y-1">
+              <div><span className="text-sg-muted">操作人員：</span><span className="font-bold">{selectedEventDetail.staff_name}</span></div>
+              <div><span className="text-sg-muted">操作裝置：</span><span>{selectedEventDetail.device_label}</span></div>
+              <div><span className="text-sg-muted">關聯訂單：</span><span className="font-mono text-sg-brown font-bold">{selectedEventDetail.booking_ref || '無'}</span></div>
+              <div><span className="text-sg-muted">填寫原因：</span><span className="font-bold text-sg-danger">{selectedEventDetail.reason || '無'}</span></div>
+            </div>
+
+            <div>
+              <span className="font-bold text-sg-ink block mb-1">異動前後快照 (Snapshot)</span>
+              <pre className="p-3 rounded-2xl bg-sg-ink text-sg-paper text-[11px] overflow-x-auto max-h-60">
+                {JSON.stringify({ before: selectedEventDetail.before_snapshot, after: selectedEventDetail.after_snapshot }, null, 2)}
+              </pre>
+            </div>
+          </div>
+        )}
+      </ResponsivePanel>
+
+      {/* Checkout Workbench Modal */}
+      {checkoutBookingRef && (
+        <CheckoutWorkbench
+          isOpen={Boolean(checkoutBookingRef)}
+          onClose={() => setCheckoutBookingRef(null)}
+          bookingRef={checkoutBookingRef}
+          onPaymentSuccess={() => {
+            if (activeTab === 'payments') fetchPayments();
+            else if (activeTab === 'unpaid') fetchUnpaid();
+          }}
         />
       )}
     </div>
-  );
-}
-
-// Wrapper to fetch and display details
-function ReservationDetailsWrapper({ bookingRef, onClose }) {
-  const [reservation, setReservation] = useState(null);
-  
-  useEffect(() => {
-    const fetchRes = async () => {
-      try {
-        const res = await api.get(`/reservations/admin/${bookingRef}/details`);
-        setReservation(res.data);
-      } catch (err) {
-        console.error(err);
-        alert('無法取得訂單詳情');
-        onClose();
-      }
-    };
-    fetchRes();
-  }, [bookingRef]);
-
-  if (!reservation) return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"><div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div></div>;
-
-  return (
-    <ReservationDetailsModal 
-      reservation={reservation} 
-      onClose={onClose}
-      onUpdate={(updates) => setReservation(prev => ({...prev, ...updates}))}
-    />
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { XCircle, CheckCircle, Clock } from 'lucide-react';
+import { XCircle, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
 import api from '../api/axios';
 
 const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
@@ -199,7 +199,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
               
               {!isCapacitySufficient && (
                 <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 font-medium mb-2 flex items-start gap-2">
-                  <span className="mt-0.5">⚠️</span>
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
                   <p>所選時段剩餘容量不足！為避免惡意擠掉其他已預約客人，您只能選擇將此客人的加時時段放入外加等待區。</p>
                 </div>
               )}

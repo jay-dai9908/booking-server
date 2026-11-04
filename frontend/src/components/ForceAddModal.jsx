@@ -128,7 +128,10 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-fade-in-up flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="bg-indigo-600 px-6 py-4 flex items-center justify-between shrink-0">
-          <h2 className="text-xl font-bold text-white">➕ 現場加人 (外加區)</h2>
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Plus className="w-5 h-5" />
+            現場加人 (外加區)
+          </h2>
           <button 
             onClick={onClose}
             className="text-indigo-200 hover:text-white transition-colors p-1"

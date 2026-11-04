@@ -338,7 +338,7 @@ export default function EquipmentPage() {
               </h3>
               <p className="text-xs text-[#7A7067] mt-0.5 leading-relaxed">
                 {globalSettings.show_equipment_live_stock !== false
-                  ? '顧客預約頁顯示頂部「✨ 即時庫存狀況」'
+                  ? '顧客預約頁顯示頂部「即時庫存狀況」'
                   : '已在顧客預約頁隱藏即時庫存狀況卡片'}
               </p>
             </div>
@@ -492,7 +492,7 @@ export default function EquipmentPage() {
 
               {/* Explanatory Note */}
               <div className="text-[11px] text-[#8B5B43] bg-white/80 border border-[#E8DEC8] px-2.5 py-2 rounded-xl font-medium leading-relaxed">
-                💡 <strong>金額自動擇優計價</strong>：系統動態規劃為顧客計算最低應付時數。例如設定「買 3 送 1」與「買 8 送 4」，租借 11 小時時，因買 8 送 4 方案只需付 8 小時（比 9 小時更划算），系統將自動擇優套用收取 8 小時（直接折抵 3 小時）！每台設備獨立計算。
+                <strong>金額自動擇優計價</strong>：系統動態規劃為顧客計算最低應付時數。例如設定「買 3 送 1」與「買 8 送 4」，租借 11 小時時，因買 8 送 4 方案只需付 8 小時（比 9 小時更划算），系統將自動擇優套用收取 8 小時（直接折抵 3 小時）！每台設備獨立計算。
               </div>
             </div>
           )}
@@ -547,7 +547,7 @@ export default function EquipmentPage() {
                         }`}
                         title="前台正常顯示並開放預約"
                       >
-                        🟢 開放
+                        開放
                       </button>
                       <button
                         type="button"
@@ -559,7 +559,7 @@ export default function EquipmentPage() {
                         }`}
                         title="前台顯示但反灰標記維護中"
                       >
-                        🟠 維護
+                        維護
                       </button>
                       <button
                         type="button"
@@ -571,7 +571,7 @@ export default function EquipmentPage() {
                         }`}
                         title="前台完全隱藏不顯示"
                       >
-                        ⚪ 隱藏
+                        隱藏
                       </button>
                     </div>
                   </div>
@@ -586,7 +586,7 @@ export default function EquipmentPage() {
                         type="text"
                         value={config.status_note || ''}
                         onChange={(e) => handleConfigChange(config.id, 'status_note', e.target.value)}
-                        placeholder="例：🔧 設備維修保養中，暫停借用"
+                        placeholder="例：設備維修保養中，暫停借用"
                         className="w-full text-xs px-3 py-1.5 border border-amber-300 rounded-lg bg-white text-gray-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
                       />
                     </div>
@@ -645,7 +645,7 @@ export default function EquipmentPage() {
                           }`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0 ? 'bg-amber-600' : 'bg-gray-400'}`}></span>
-                          {config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0 ? '✨ 無上限 (已隱藏)' : '設為無上限'}
+                          {config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0 ? '無上限 (已隱藏)' : '設為無上限'}
                         </button>
                       </div>
 
@@ -815,7 +815,7 @@ export default function EquipmentPage() {
 
             <div className="p-6 overflow-y-auto space-y-4">
               <p className="text-sm text-gray-700 leading-relaxed font-medium">
-                ⚠️ 您剛剛調降了庫存或變更了顯示狀態，系統掃描到未來已有以下訂單預約了該規格，且該時段的預約總數已超過您設定的新可用量：
+                您剛剛調降了庫存或變更了顯示狀態，系統掃描到未來已有以下訂單預約了該規格，且該時段的預約總數已超過您設定的新可用量：
               </p>
 
               <div className="border border-amber-200 rounded-xl overflow-hidden text-xs">
@@ -844,7 +844,7 @@ export default function EquipmentPage() {
               </div>
 
               <div className="bg-amber-50 p-3.5 rounded-xl border border-amber-200 text-xs text-amber-800 leading-relaxed">
-                💡 <strong>處理建議：</strong> 雖然系統已儲存您的設定，但既有已成立訂單的權益仍受保護。若實體設備確實不足，請主動致電上述受影響顧客協商調整。
+                <strong>處理建議：</strong> 雖然系統已儲存您的設定，但既有已成立訂單的權益仍受保護。若實體設備確實不足，請主動致電上述受影響顧客協商調整。
               </div>
             </div>
 
@@ -935,7 +935,7 @@ export default function EquipmentPage() {
                           : 'bg-gray-200 text-gray-600'
                       }`}
                     >
-                      {newConfig.daily_cap === null ? '✨ 無上限 (已隱藏)' : '設為無上限'}
+                      {newConfig.daily_cap === null ? '無上限 (已隱藏)' : '設為無上限'}
                     </button>
                   </div>
                   {newConfig.daily_cap === null ? (

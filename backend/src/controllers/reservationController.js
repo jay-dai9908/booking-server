@@ -2,6 +2,7 @@ import prisma from '../prismaClient.js';
 import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
+import { loadAllocatorContext } from '../services/seating/layoutService.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { evaluatePromoCode } from './checkoutController.js';
@@ -9,6 +10,59 @@ import {
   sendBookingConfirmationNotification,
   sendBookingCancellationNotification
 } from '../utils/lineMessaging.js';
+import { markUnpaid, collectPayment, saveDraft, getBookingBill } from '../services/billing/billService.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+
+function mergeCustomerEquipments(rawList = []) {
+  if (!Array.isArray(rawList) || rawList.length === 0) return [];
+
+  const byUnitGroup = new Map();
+  const withoutUnitGroup = [];
+
+  for (const eq of rawList) {
+    if (eq.unit_group) {
+      if (!byUnitGroup.has(eq.unit_group)) byUnitGroup.set(eq.unit_group, []);
+      byUnitGroup.get(eq.unit_group).push(eq);
+    } else {
+      withoutUnitGroup.push(eq);
+    }
+  }
+
+  const result = [];
+
+  for (const [uGroup, segs] of byUnitGroup.entries()) {
+    if (segs.length > 1 || segs.some(s => s.ended_reason === 'swapped')) {
+      for (const s of segs) {
+        let timeSuffix = '';
+        if (s.start_at && s.end_at) {
+          const from = new Date(s.start_at).toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' });
+          const to = new Date(s.end_at).toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' });
+          timeSuffix = ` (${from}-${to})`;
+        }
+        result.push({
+          ...s,
+          equipment_name_snapshot: `${s.equipment_name_snapshot || ''}${timeSuffix}`
+        });
+      }
+    } else {
+      withoutUnitGroup.push(segs[0]);
+    }
+  }
+
+  const mergedMap = new Map();
+  for (const eq of withoutUnitGroup) {
+    const key = eq.equipment_id;
+    if (!mergedMap.has(key)) {
+      mergedMap.set(key, { ...eq });
+    } else {
+      const existing = mergedMap.get(key);
+      existing.quantity = (existing.quantity || 1) + (eq.quantity || 1);
+      existing.subtotal_price = (existing.subtotal_price || 0) + (eq.subtotal_price || 0);
+    }
+  }
+
+  return [...result, ...Array.from(mergedMap.values())];
+}
 
 // Helper function to group reservations by booking_ref
 const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
@@ -25,6 +79,13 @@ const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
         status: r.status,
         attendance: r.attendance,
         checked_in_at: r.checked_in_at || null,
+        checked_in_by: r.checked_in_by || null,
+        seat_source: r.seat_source || 'auto',
+        billing_status: r.billing_status || null,
+        amount_due: r.amount_due ?? null,
+        amount_received: r.amount_received ?? 0,
+        paid_persons: r.paid_persons ?? 0,
+        has_refund: r.has_refund || false,
         created_at: r.created_at,
         session_date: r.session.session_date,
         sessions: [],
@@ -49,12 +110,22 @@ const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
         cancelled_by: r.cancelled_by || null
       };
     } else {
-      // Synchronize attendance and check-in timestamp across all segments
       if (r.attendance === 'checked_in') {
         groups[ref].attendance = 'checked_in';
       } else if (!groups[ref].attendance && r.attendance) {
         groups[ref].attendance = r.attendance;
       }
+      if (r.checked_in_by && !groups[ref].checked_in_by) {
+        groups[ref].checked_in_by = r.checked_in_by;
+      }
+      if (r.seat_source && groups[ref].seat_source === 'auto') {
+        groups[ref].seat_source = r.seat_source;
+      }
+      if (r.billing_status) groups[ref].billing_status = r.billing_status;
+      if (r.amount_due != null) groups[ref].amount_due = r.amount_due;
+      if (r.amount_received) groups[ref].amount_received = r.amount_received;
+      if (r.paid_persons) groups[ref].paid_persons = r.paid_persons;
+      if (r.has_refund) groups[ref].has_refund = true;
 
       if (r.checked_in_at) {
         if (!groups[ref].checked_in_at || new Date(r.checked_in_at) < new Date(groups[ref].checked_in_at)) {
@@ -117,24 +188,41 @@ const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
         current_block = { start_time: session.start_time, end_time: session.end_time };
       } else {
         if (session.start_time === current_block.end_time) {
-          // contiguous
           current_block.end_time = session.end_time;
         } else {
-          // gap
           time_blocks.push(current_block);
           current_block = { start_time: session.start_time, end_time: session.end_time };
         }
       }
     }
     if (current_block) time_blocks.push(current_block);
+
+    const cleanRef = group.booking_ref.replace(/^BK-/i, '');
+    const ref_display = `BK-${cleanRef.slice(0, 4).toUpperCase()}-${cleanRef.slice(-4).toUpperCase()}`;
+
+    const billing = {
+      status: group.billing_status || (group.is_paid ? 'paid' : 'unpaid'),
+      amount_due: group.amount_due ?? group.total_amount ?? 0,
+      amount_received: group.amount_received ?? (group.is_paid ? (group.total_amount ?? 0) : 0),
+      paid_persons: group.paid_persons ?? (group.is_paid ? group.pax : 0),
+      persons_total: group.pax,
+      has_refund: Boolean(group.has_refund)
+    };
+
+    const rawEquipments = equipmentsMap[group.booking_ref] || [];
+    const finalEquipments = options.mergeEquipments ? mergeCustomerEquipments(rawEquipments) : rawEquipments;
     
     return {
       booking_ref: group.booking_ref,
+      ref_display,
       user_id: group.user_id,
       user: group.user,
       pax: group.pax,
       status: group.status,
       attendance: group.attendance,
+      checked_in_by: group.checked_in_by,
+      seat_source: group.seat_source,
+      billing,
       created_at: group.created_at,
       session_date: group.session_date,
       start_time,
@@ -161,7 +249,7 @@ const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
       cancelled_at: group.cancelled_at,
       cancelled_by: group.cancelled_by,
       checked_in_at: group.checked_in_at || null,
-      equipments: equipmentsMap[group.booking_ref] || []
+      equipments: finalEquipments
     };
   });
 };
@@ -381,7 +469,8 @@ export const createReservation = async (req, res) => {
       }
 
       // Run Continuous Block Allocation algorithm
-      const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true);
+      const ctx = await loadAllocatorContext(tx, sessionDate);
+      const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true, ctx);
 
       if (!allocResult.success) {
         if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
@@ -918,8 +1007,8 @@ export const getMyReservations = async (req, res) => {
       equipmentsMap[eq.booking_ref].push(eq);
     });
 
-    // 顧客端不回傳 admin_note 與敏感資料
-    const grouped = groupReservations(reservations, equipmentsMap, { includeAdminNote: false });
+    // 顧客端不回傳 admin_note 與敏感資料，並合併未換板的設備
+    const grouped = groupReservations(reservations, equipmentsMap, { includeAdminNote: false, mergeEquipments: true });
     res.json(grouped);
   } catch (error) {
     console.error('Error fetching my reservations:', error);
@@ -952,6 +1041,10 @@ export const cancelReservation = async (req, res) => {
 
     if (reservations[0].status === 'cancelled') {
       return res.status(400).json({ error: '此預約先前已取消' });
+    }
+
+    if (reservations[0].amount_received && reservations[0].amount_received > 0) {
+      return res.status(409).json({ error: `這筆已收款 NT$${reservations[0].amount_received}，請先退款或作廢收款` });
     }
 
     const hasPaid = reservations.some(r => r.is_paid);
@@ -1145,7 +1238,8 @@ export const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRef
     }
 
     // Run allocation algorithm (pure reshuffle)
-    const allocResult = allocateSeats(allDayReservations, null, false);
+    const ctx = await loadAllocatorContext(prisma, sampleSession?.session_date);
+    const allocResult = allocateSeats(allDayReservations, null, false, ctx);
 
     if (allocResult.updates && allocResult.updates.length > 0) {
       const sessionUpdates = [];
@@ -1557,7 +1651,8 @@ export const adminCreateReservation = async (req, res) => {
           mySeats.push(`WAIT-${waitCounter++}`);
         }
       } else {
-        const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true || forceSplit === 'true');
+        const ctx = await loadAllocatorContext(tx, sessionDate);
+        const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true || forceSplit === 'true', ctx);
 
         if (!allocResult.success) {
           if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
@@ -1800,7 +1895,8 @@ export const extendReservation = async (req, res) => {
           mySeats = assigned_seats || [];
         } else if (extendMode === 'system_allocate') {
           const newBlock = { booking_ref: 'NEW_RES', pax, session_ids };
-          const allocResult = allocateSeats(allCurrentReservations, newBlock, forceSplit === true || forceSplit === 'true');
+          const ctx = await loadAllocatorContext(tx, sessions[0]?.session_date);
+          const allocResult = allocateSeats(allCurrentReservations, newBlock, forceSplit === true || forceSplit === 'true', ctx);
           
           if (!allocResult.success) {
             if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
@@ -1902,11 +1998,41 @@ export const extendReservation = async (req, res) => {
 export const updateAttendance = async (req, res) => {
   const { id: booking_ref } = req.params;
   const { attendance } = req.body; // 'checked_in', 'no_show', or null
+  const staffName = req.user?.name || '管理員';
 
   try {
+    if (attendance === null || attendance === '') {
+      // Check if there is any payment
+      const payment = await prisma.payment.findFirst({
+        where: { booking_ref, status: 'valid' }
+      });
+      if (payment) {
+        return res.status(409).json({ error: '已有收款，不能取消報到' });
+      }
+
+      await prisma.bookingPerson.deleteMany({
+        where: { booking_ref }
+      });
+
+      const updated = await prisma.reservation.updateMany({
+        where: { booking_ref },
+        data: {
+          attendance: null,
+          checked_in_at: null,
+          checked_in_by: null,
+          seat_source: 'auto'
+        }
+      });
+      if (updated.count === 0) {
+        return res.status(404).json({ error: 'Reservation not found' });
+      }
+      return res.json({ message: '報到已取消', count: updated.count, attendance: null });
+    }
+
     const dataToUpdate = { attendance };
     if (attendance === 'checked_in') {
       dataToUpdate.checked_in_at = new Date();
+      dataToUpdate.checked_in_by = staffName;
     } else {
       dataToUpdate.checked_in_at = null;
     }
@@ -1934,88 +2060,81 @@ export const updateAttendance = async (req, res) => {
 
 export const updatePaymentStatus = async (req, res) => {
   const { booking_ref } = req.params;
-  const { is_paid } = req.body;
+  const { is_paid, reason, payment_method } = req.body;
+  const deviceInfo = getAdminDeviceInfo(req);
 
   if (typeof is_paid !== 'boolean') {
     return res.status(400).json({ error: 'Invalid payment status' });
   }
 
   try {
-    let totalAmount = undefined;
-
-    if (is_paid) {
-      // Recalculate amount using unified engine
-      await prisma.$transaction(async (tx) => {
-        totalAmount = await recalculateReservationTotal(tx, booking_ref);
-
-        const updated = await tx.reservation.updateMany({
-          where: { booking_ref },
-          data: { 
-            is_paid, 
-            paid_at: new Date()
-          }
-        });
-
-        if (updated.count === 0) {
-          throw new Error('NOT_FOUND');
-        }
-      });
-      res.json({ message: 'Payment status updated successfully', total_amount: totalAmount });
+    if (!is_paid) {
+      const result = await markUnpaid(booking_ref, reason || '未填原因（舊版畫面）', req.user, deviceInfo);
+      return res.json({ message: 'Payment status updated successfully', is_paid: false, ...result });
     } else {
-      await prisma.$transaction(async (tx) => {
-        const updated = await tx.reservation.updateMany({
-          where: { booking_ref },
-          data: { 
-            is_paid: false,
-            paid_at: null,
-            payment_method: null,
-            is_amount_manual: false
-          }
-        });
-        
-        if (updated.count === 0) {
-          throw new Error('NOT_FOUND');
-        }
+      const billData = await getBookingBill(booking_ref);
+      const unpaidPersonNos = (billData.bill.persons || [])
+        .filter(p => !p.paid)
+        .map(p => p.person_no);
 
-        totalAmount = await recalculateReservationTotal(tx, booking_ref);
-      });
-      
-      res.json({ message: 'Payment status updated successfully', is_paid: false, total_amount: totalAmount });
+      if (unpaidPersonNos.length === 0) {
+        return res.json({ message: '所有顧客皆已完成付款', is_paid: true });
+      }
+
+      const result = await collectPayment(
+        booking_ref,
+        {
+          person_nos: unpaidPersonNos,
+          method: payment_method || 'cash',
+          note: reason || '舊版收款更新'
+        },
+        req.user,
+        deviceInfo
+      );
+      return res.json({ message: 'Payment status updated successfully', is_paid: true, ...result });
     }
   } catch (error) {
     console.error('Error updating payment status:', error);
-    if (error.message === 'NOT_FOUND') {
-      return res.status(404).json({ error: 'Reservation not found' });
-    }
+    if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update payment status' });
   }
 };
 
 export const updateAmount = async (req, res) => {
   const { booking_ref } = req.params;
-  const { total_amount } = req.body;
+  const { total_amount, reason } = req.body;
+  const deviceInfo = getAdminDeviceInfo(req);
 
-  if (total_amount === undefined || isNaN(parseInt(total_amount))) {
+  if (total_amount === undefined || isNaN(parseInt(total_amount, 10))) {
     return res.status(400).json({ error: 'Valid total_amount is required' });
   }
 
   try {
-    const updated = await prisma.reservation.updateMany({
-      where: { booking_ref },
-      data: { 
-        total_amount: parseInt(total_amount),
-        is_amount_manual: true
-      }
-    });
-
-    if (updated.count === 0) {
-      return res.status(404).json({ error: 'Reservation not found' });
+    const billData = await getBookingBill(booking_ref);
+    if (billData.status.code === 'paid' || billData.status.code === 'waived') {
+      return res.status(409).json({ error: '已結清的訂單請用補收或退款' });
     }
 
-    res.json({ message: 'Amount updated successfully', total_amount: parseInt(total_amount) });
+    const draft = billData.draft || {};
+    draft.total_override = {
+      amount: parseInt(total_amount, 10),
+      reason: reason ? String(reason).trim() : '金額手動調整'
+    };
+
+    const newBill = await saveDraft(
+      booking_ref,
+      draft.rev,
+      draft,
+      req.user?.name || '管理員',
+      req.user?.id || null,
+      deviceInfo
+    );
+
+    return res.json({ message: 'Amount updated successfully', total_amount: parseInt(total_amount, 10), bill: newBill });
   } catch (error) {
     console.error('Error updating amount:', error);
-    res.status(500).json({ error: 'Failed to update amount' });
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    return res.status(500).json({ error: 'Failed to update amount' });
   }
 };
 

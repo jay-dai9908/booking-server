@@ -5,7 +5,9 @@ import {
   getUserPassesAdmin,
   getMyPasses,
   getPassPlans,
-  togglePassStatus
+  togglePassStatus,
+  createPassPlan,
+  updatePassPlan
 } from '../controllers/passController.js';
 import { verifyToken, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
 
@@ -19,6 +21,9 @@ router.get('/plans', getPassPlans);
 router.get('/my', verifyToken, requireRegisteredUser, getMyPasses);
 
 // Admin routes
+router.get('/admin/plans', verifyToken, checkPassPermission, getPassPlans);
+router.post('/admin/plans', verifyToken, checkPassPermission, createPassPlan);
+router.put('/admin/plans/:id', verifyToken, checkPassPermission, updatePassPlan);
 router.post('/admin/grant', verifyToken, checkPassPermission, grantUserPass);
 router.post('/admin/redeem', verifyToken, checkPassPermission, redeemUserPass);
 router.get('/admin/user/:userId', verifyToken, checkPassPermission, getUserPassesAdmin);

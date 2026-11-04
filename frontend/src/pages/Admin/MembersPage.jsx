@@ -167,9 +167,9 @@ export default function MembersPage() {
                 <thead>
                   <tr className="bg-[#FAF7F2] text-[#8C8279] text-xs uppercase tracking-wider border-b border-[#E8DEC8]">
                     <th className="px-6 py-4 font-semibold">顧客 / LINE 檔案</th>
-                    <th className="px-6 py-4 font-semibold">✨ 不限時(封頂)累計</th>
-                    <th className="px-6 py-4 font-semibold">⏱️ 一般計時累計</th>
-                    <th className="px-6 py-4 font-semibold">💰 累計消費 / 到訪</th>
+                    <th className="px-6 py-4 font-semibold">不限時(封頂)累計</th>
+                    <th className="px-6 py-4 font-semibold">一般計時累計</th>
+                    <th className="px-6 py-4 font-semibold">累計消費 / 到訪</th>
                     <th className="px-6 py-4 font-semibold">最後登入 / 註冊</th>
                     <th className="px-6 py-4 font-semibold">狀態</th>
                     <th className="px-6 py-4 font-semibold text-right">操作</th>
@@ -416,7 +416,7 @@ export default function MembersPage() {
                   className="w-full px-4 py-3 bg-[#FAF7F2] border-2 border-[#E8DEC8] rounded-xl text-base font-mono font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none shadow-inner"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
-                  💡 支援門市 USB/藍牙條碼掃描槍，刷碼後會自動帶入並可按 Enter 送出
+                  支援門市 USB/藍牙條碼掃描槍，刷碼後會自動帶入並可按 Enter 送出
                 </p>
               </div>
 

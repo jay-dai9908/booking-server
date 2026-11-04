@@ -23,6 +23,7 @@ import {
 import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
 import SendLineMessageModal from './SendLineMessageModal';
+import ConfirmPanel from './admin/ConfirmPanel';
 
 export default function MemberDetailsModal({ member, onClose, onMemberUpdated }) {
   const [memberReservations, setMemberReservations] = useState([]);
@@ -61,6 +62,13 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
 
   // Local copy of member for optimistic & refreshed updates
   const [localMember, setLocalMember] = useState(member);
+  const [toastMsg, setToastMsg] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+
+  const showToast = (text, isError = false) => {
+    setToastMsg({ text, isError });
+    setTimeout(() => setToastMsg(null), 3000);
+  };
 
   useEffect(() => {
     setLocalMember(member);
@@ -167,35 +175,38 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
         max_days_per_week: grantForm.max_days_per_week ? parseInt(grantForm.max_days_per_week, 10) : null,
         note: grantForm.note?.trim() || ''
       });
-      alert('已成功發放卡券！');
+      showToast('已成功發放卡券！');
       setShowGrantModal(false);
       fetchUserPasses(localMember.id);
     } catch (err) {
-      alert(err.response?.data?.error || '發放失敗');
+      showToast(err.response?.data?.error || '發放失敗', true);
     } finally {
       setIsGranting(false);
     }
   };
 
-  const handleRedeemPass = async (pass) => {
-    if (!window.confirm(`確定要現場核銷此卡券「${pass.plan?.name || pass.pass_code}」1 次嗎？`)) {
-      return;
-    }
-    setRedeemingPassId(pass.id);
-    try {
-      const res = await api.post('/passes/admin/redeem', {
-        user_pass_id: pass.id,
-        deduct_amount: 1,
-        note: '後台會員詳情手動核銷'
-      });
-      const remQuota = res.data?.pass?.remaining_quota ?? res.data?.remaining_quota;
-      alert(`核銷成功！${remQuota !== null && remQuota !== undefined ? `剩餘次數：${remQuota} 次` : ''}`);
-      fetchUserPasses(localMember.id);
-    } catch (err) {
-      alert(err.response?.data?.error || '核銷失敗');
-    } finally {
-      setRedeemingPassId(null);
-    }
+  const handleRedeemPass = (pass) => {
+    setConfirmAction({
+      title: '核銷卡券',
+      message: `確定要現場核銷此卡券「${pass.plan?.name || pass.pass_code}」1 次嗎？`,
+      onConfirm: async () => {
+        setRedeemingPassId(pass.id);
+        try {
+          const res = await api.post('/passes/admin/redeem', {
+            user_pass_id: pass.id,
+            deduct_amount: 1,
+            note: '後台會員詳情手動核銷'
+          });
+          const remQuota = res.data?.pass?.remaining_quota ?? res.data?.remaining_quota;
+          showToast(`核銷成功！${remQuota !== null && remQuota !== undefined ? `剩餘次數：${remQuota} 次` : ''}`);
+          fetchUserPasses(localMember.id);
+        } catch (err) {
+          showToast(err.response?.data?.error || '核銷失敗', true);
+        } finally {
+          setRedeemingPassId(null);
+        }
+      }
+    });
   };
 
   const handleCopyCode = (code) => {
@@ -212,7 +223,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
       if (onMemberUpdated) onMemberUpdated(res.data.user);
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.error || '更新失敗');
+      showToast(err.response?.data?.error || '更新失敗', true);
     } finally {
       setIsSavingNotes(false);
     }
@@ -222,7 +233,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
     if (e) e.preventDefault();
     const trimmedName = editName.trim();
     if (!trimmedName) {
-      alert('會員姓名不可為空白');
+      showToast('會員姓名不可為空白', true);
       return;
     }
     setIsSavingProfile(true);
@@ -234,8 +245,9 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
       setLocalMember(res.data.user);
       if (onMemberUpdated) onMemberUpdated(res.data.user);
       setIsEditingProfile(false);
+      showToast('會員資料已更新');
     } catch (err) {
-      alert(err.response?.data?.error || '儲存會員姓名/電話失敗');
+      showToast(err.response?.data?.error || '儲存會員姓名/電話失敗', true);
     } finally {
       setIsSavingProfile(false);
     }
@@ -298,6 +310,14 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
               <X className="w-5 h-5" />
             </button>
           </div>
+
+          {toastMsg && (
+            <div className={`mx-6 mt-4 p-3 rounded-xl text-xs font-bold border ${
+              toastMsg.isError ? 'bg-rose-50 text-rose-800 border-rose-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            }`}>
+              {toastMsg.text}
+            </div>
+          )}
           
           <div className="p-6 overflow-y-auto flex-1 space-y-6">
             {/* Section 1: Member Profile, LINE Info & Blacklist/Notes */}
@@ -349,7 +369,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                         </div>
 
                         <p className="text-sm font-mono font-semibold text-[#6D5D52] mt-1">
-                          📱 電話：{localMember.phone || '未提供'}
+                          電話：{localMember.phone || '未提供'}
                         </p>
 
                         {/* LINE Profile Badges */}
@@ -372,7 +392,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
 
                         {localMember.line_status_msg && (
                           <p className="text-xs text-[#8C8279] mt-1.5 italic bg-[#FAF7F2] px-3 py-1.5 rounded-lg border border-[#E8DEC8]">
-                            💬 LINE 簽名：「{localMember.line_status_msg}」
+                            LINE 簽名：「{localMember.line_status_msg}」
                           </p>
                         )}
                       </div>
@@ -460,7 +480,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
 
                 <div className="flex-1 flex flex-col">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-bold text-[#3E332B]">📌 店家內部備註</span>
+                    <span className="text-xs font-bold text-[#3E332B]">店家內部備註</span>
                     {isSavingNotes && <span className="text-xs text-[#8B5B43] font-bold">自動儲存中...</span>}
                   </div>
                   <textarea
@@ -482,14 +502,14 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
             <div>
               <div className="flex items-center justify-between mb-2.5">
                 <h3 className="text-sm font-bold text-[#3E332B]">
-                  📊 會員累計消費與時數統計（僅計入已報到／已結帳之有效訂單，含同行人數與拆帳明細）
+                  會員累計消費與時數統計（僅計入已報到／已結帳之有效訂單，含同行人數與拆帳明細）
                 </h3>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                 {/* Card 1: Unlimited Capped Pax Count */}
                 <div className="bg-amber-50/80 border border-amber-300 rounded-2xl p-4 shadow-2xs">
                   <div className="flex items-center justify-between text-amber-800 mb-1">
-                    <span className="text-xs font-bold">✨ 不限時 (封頂) 累計</span>
+                    <span className="text-xs font-bold">不限時 (封頂) 累計</span>
                     <Sparkles className="w-4 h-4 text-amber-600" />
                   </div>
                   <div className="text-2xl font-black text-amber-950">
@@ -503,7 +523,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                 {/* Card 2: Regular Hourly Cumulative Hours */}
                 <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 shadow-2xs">
                   <div className="flex items-center justify-between text-[#8B5B43] mb-1">
-                    <span className="text-xs font-bold">⏱️ 一般計時時長累計</span>
+                    <span className="text-xs font-bold">一般計時時長累計</span>
                     <Clock className="w-4 h-4 text-[#8B5B43]" />
                   </div>
                   <div className="text-2xl font-black text-[#3E332B]">
@@ -517,7 +537,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                 {/* Card 3: Total Spent */}
                 <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 shadow-2xs">
                   <div className="flex items-center justify-between text-[#8B5B43] mb-1">
-                    <span className="text-xs font-bold">💰 歷史累計結帳總額</span>
+                    <span className="text-xs font-bold">歷史累計結帳總額</span>
                   </div>
                   <div className="text-2xl font-black text-[#8B5B43]">
                     NT$ {(stats.total_spent || 0).toLocaleString()}
@@ -529,7 +549,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
 
                 {/* Card 4: Attendance Breakdown */}
                 <div className="bg-white border border-[#E8DEC8] rounded-2xl p-4 flex flex-col justify-between shadow-2xs">
-                  <div className="text-xs font-bold text-[#8C8279] mb-1">📋 預約出席信用紀錄</div>
+                  <div className="text-xs font-bold text-[#8C8279] mb-1">預約出席信用紀錄</div>
                   <div className="grid grid-cols-3 gap-1 text-center my-1">
                     <div className="bg-[#FAF7F2] rounded-lg py-1.5 border border-[#E8DEC8]">
                       <div className="text-base font-black text-emerald-700">{stats.completed_visits_count}</div>
@@ -637,12 +657,12 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                                 </span>
                                 {r.is_unlimited && (
                                   <span className="text-xs bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-full">
-                                    ✨ 不限時封頂
+                                    不限時封頂
                                   </span>
                                 )}
                                 {r.is_paid && (
                                   <span className="text-xs bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">
-                                    💰 已結帳 NT$ {r.total_amount || 0}
+                                    已結帳 NT$ {r.total_amount || 0}
                                   </span>
                                 )}
                               </div>
@@ -681,7 +701,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                 ) : (
                   <div className="space-y-2.5">
                     <p className="text-xs text-gray-500 mb-2">
-                      💡 系統自動記錄顧客透過 LINE 登入或開啟預約網頁之 IP 與硬體環境，並於每日午夜自動清除超過 60 天之舊紀錄。
+                      系統自動記錄顧客透過 LINE 登入或開啟預約網頁之 IP 與硬體環境，並於每日午夜自動清除超過 60 天之舊紀錄。
                     </p>
                     <div className="overflow-x-auto border border-gray-200 rounded-xl">
                       <table className="w-full text-left text-xs whitespace-nowrap">
@@ -896,7 +916,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                             {isExpanded && (
                               <div className="mt-3 pt-3 border-t border-[#E8DEC8]/60">
                                 <div className="text-xs font-bold text-[#6D5D52] mb-2 flex items-center justify-between">
-                                  <span>📜 使用與核銷歷史明細 ({logs.length} 筆)</span>
+                                  <span>使用與核銷歷史明細 ({logs.length} 筆)</span>
                                 </div>
                                 {logs.length === 0 ? (
                                   <p className="text-xs text-gray-400 py-1">尚無任何核銷使用紀錄</p>
@@ -1091,6 +1111,22 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
             </form>
           </div>
         </div>
+      )}
+
+      {/* Confirm Action Panel */}
+      {confirmAction && (
+        <ConfirmPanel
+          isOpen={!!confirmAction}
+          title={confirmAction.title}
+          message={confirmAction.message}
+          confirmText="確認"
+          onClose={() => setConfirmAction(null)}
+          onConfirm={async () => {
+            const act = confirmAction.onConfirm;
+            setConfirmAction(null);
+            if (act) await act();
+          }}
+        />
       )}
 
       {/* Reservation Details Modal (Stacked on top) */}

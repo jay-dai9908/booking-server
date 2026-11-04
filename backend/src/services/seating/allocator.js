@@ -1,0 +1,257 @@
+// backend/src/services/seating/allocator.js
+// 結合資料庫版面與排位計分演算法（含鎖定判定、局部洗牌與拆桌容錯）
+
+import { allocate } from '../../../../shared/allocator/score.js';
+
+export function isReservationPinned(r) {
+  if (!r) return false;
+  if (r.attendance === 'checked_in') return true;
+  if (r.is_seat_locked === true) return true;
+  if (r.seat_source === 'staff') return true;
+  if (r.persons && Array.isArray(r.persons) && r.persons.some(p => p.seat_code)) return true;
+  return false;
+}
+
+/**
+ * 版面排位主函式（與 legacyAllocateSeats 介面相容）
+ * @param {Array<any>} currentReservations
+ * @param {object} newReservationBlock
+ * @param {boolean} [forceSplit=false]
+ * @param {object} ctx - { layout, rules }
+ * @returns {{ success: boolean, updates: Array<{ booking_ref: string, assigned_seats: string[] }>, error?: string }}
+ */
+export function allocateWithLayout(currentReservations = [], newReservationBlock, forceSplit = false, ctx = {}) {
+  const { layout, rules = {} } = ctx;
+  if (!layout) {
+    return { success: false, error: 'INSUFFICIENT_SEATS' };
+  }
+
+  // 整理目標時段
+  let targetSessionIds = [];
+  if (newReservationBlock?.session_ids && Array.isArray(newReservationBlock.session_ids)) {
+    targetSessionIds = newReservationBlock.session_ids;
+  } else if (newReservationBlock?.original_sessions && Array.isArray(newReservationBlock.original_sessions)) {
+    targetSessionIds = newReservationBlock.original_sessions.map(s => s.session_id);
+  } else if (newReservationBlock?.session_id != null) {
+    targetSessionIds = [newReservationBlock.session_id];
+  }
+
+  // Group current reservations by booking_ref
+  const blocksMap = new Map();
+  for (const r of currentReservations) {
+    const ref = r.booking_ref || r.id;
+    if (!ref) continue;
+    if (newReservationBlock && (ref === newReservationBlock.booking_ref || ref === newReservationBlock.id)) {
+      continue; // Skip the new booking itself
+    }
+    if (!blocksMap.has(ref)) {
+      blocksMap.set(ref, {
+        booking_ref: ref,
+        pax: r.pax,
+        assigned_seats: Array.isArray(r.assigned_seats) ? [...r.assigned_seats] : [],
+        created_at: r.created_at ? new Date(r.created_at).getTime() : 0,
+        is_pinned: isReservationPinned(r),
+        session_ids: new Set()
+      });
+    }
+    const b = blocksMap.get(ref);
+    if (r.session_id != null) b.session_ids.add(r.session_id);
+    if (isReservationPinned(r)) b.is_pinned = true;
+  }
+
+  const allBlocks = Array.from(blocksMap.values()).map(b => ({
+    ...b,
+    session_ids: Array.from(b.session_ids)
+  }));
+
+  // Build current occupancy map: occupancy[sessionId][seatCode] = booking_ref
+  const buildOccupancy = (blocks) => {
+    const occ = {};
+    for (const sid of targetSessionIds) {
+      occ[sid] = {};
+    }
+    for (const b of blocks) {
+      for (const sid of b.session_ids) {
+        if (!occ[sid]) occ[sid] = {};
+        for (const seat of b.assigned_seats) {
+          if (!seat.startsWith('WAIT-')) {
+            occ[sid][seat] = b.booking_ref;
+          }
+        }
+      }
+    }
+    return occ;
+  };
+
+  const initialOccupancy = buildOccupancy(allBlocks);
+
+  // 1. 常規排位（直接分配）
+  const directAlloc = allocate({
+    layout,
+    rules,
+    pax: newReservationBlock.pax,
+    sessionIds: targetSessionIds,
+    occupancy: initialOccupancy,
+    allowSplit: Boolean(forceSplit)
+  });
+
+  if (directAlloc && directAlloc.seats && !directAlloc.error) {
+    return {
+      success: true,
+      updates: [
+        {
+          booking_ref: newReservationBlock.booking_ref || newReservationBlock.id,
+          assigned_seats: directAlloc.seats
+        }
+      ]
+    };
+  }
+
+  // 2. 局部洗牌（Reshuffle）
+  // 找出重疊時段中可以挪動（非 pinned）的預約
+  const overlappingMovable = allBlocks.filter(b => {
+    if (b.is_pinned) return false;
+    return b.session_ids.some(sid => targetSessionIds.includes(sid));
+  });
+
+  // 如果有可挪動預約，進行動態洗牌
+  if (overlappingMovable.length > 0) {
+    const queueToAllocate = [
+      ...overlappingMovable,
+      {
+        booking_ref: newReservationBlock.booking_ref || newReservationBlock.id,
+        pax: newReservationBlock.pax,
+        session_ids: targetSessionIds,
+        created_at: Date.now(),
+        is_pinned: false
+      }
+    ];
+
+    // 依「時段數多 → 人數多 → 建立時間早」排序 (Section 4.7.7)
+    queueToAllocate.sort((a, b) => {
+      if (b.session_ids.length !== a.session_ids.length) {
+        return b.session_ids.length - a.session_ids.length;
+      }
+      if (b.pax !== a.pax) {
+        return b.pax - a.pax;
+      }
+      return (a.created_at || 0) - (b.created_at || 0);
+    });
+
+    // 以 pinned reservations 為底座建立虛擬排位表
+    const pinnedBlocks = allBlocks.filter(b => !overlappingMovable.some(m => m.booking_ref === b.booking_ref));
+    const virtualOccupancy = buildOccupancy(pinnedBlocks);
+
+    let reshuffleSuccess = true;
+    const virtualAssigned = new Map();
+
+    for (const reqBlock of queueToAllocate) {
+      const res = allocate({
+        layout,
+        rules,
+        pax: reqBlock.pax,
+        sessionIds: reqBlock.session_ids,
+        occupancy: virtualOccupancy,
+        allowSplit: false
+      });
+
+      if (res && res.seats && !res.error) {
+        virtualAssigned.set(reqBlock.booking_ref, res.seats);
+        // Occupy in virtual occupancy
+        for (const sid of reqBlock.session_ids) {
+          if (!virtualOccupancy[sid]) virtualOccupancy[sid] = {};
+          for (const s of res.seats) {
+            virtualOccupancy[sid][s] = reqBlock.booking_ref;
+          }
+        }
+      } else {
+        reshuffleSuccess = false;
+        break;
+      }
+    }
+
+    if (reshuffleSuccess) {
+      const updates = [];
+      for (const [ref, seats] of virtualAssigned.entries()) {
+        const orig = allBlocks.find(b => b.booking_ref === ref);
+        if (!orig) {
+          // New booking
+          updates.push({ booking_ref: ref, assigned_seats: seats });
+        } else {
+          // Compare with original seats
+          const origSeats = orig.assigned_seats || [];
+          const changed = seats.length !== origSeats.length || !seats.every(s => origSeats.includes(s));
+          if (changed) {
+            updates.push({ booking_ref: ref, assigned_seats: seats });
+          }
+        }
+      }
+      return { success: true, updates };
+    }
+  }
+
+  // 3. 洗牌失敗防呆：若不允許拆桌，回傳 SPLIT_REQUIRED
+  if (!forceSplit) {
+    return { success: false, error: 'SPLIT_REQUIRED' };
+  }
+
+  // 4. 強制拆桌：拆成每段最多 4 人，各自排，不夠才給 WAIT-n
+  let remainingPax = newReservationBlock.pax;
+  const forcedAssigned = [];
+  let waitCounter = 1;
+
+  // Find highest current WAIT number
+  for (const b of allBlocks) {
+    for (const s of b.assigned_seats || []) {
+      if (s.startsWith('WAIT-')) {
+        const num = parseInt(s.replace('WAIT-', ''), 10);
+        if (!isNaN(num) && num >= waitCounter) waitCounter = num + 1;
+      }
+    }
+  }
+
+  const currentOccupancy = buildOccupancy(allBlocks);
+
+  while (remainingPax > 0) {
+    let chunk = remainingPax >= 4 ? 4 : remainingPax;
+    let chunkAlloc = null;
+
+    while (chunk > 0) {
+      chunkAlloc = allocate({
+        layout,
+        rules,
+        pax: chunk,
+        sessionIds: targetSessionIds,
+        occupancy: currentOccupancy,
+        allowSplit: true
+      });
+      if (chunkAlloc && chunkAlloc.seats && !chunkAlloc.error) break;
+      chunk--;
+    }
+
+    if (chunkAlloc && chunkAlloc.seats && !chunkAlloc.error) {
+      forcedAssigned.push(...chunkAlloc.seats);
+      for (const sid of targetSessionIds) {
+        if (!currentOccupancy[sid]) currentOccupancy[sid] = {};
+        for (const s of chunkAlloc.seats) {
+          currentOccupancy[sid][s] = newReservationBlock.booking_ref || newReservationBlock.id;
+        }
+      }
+      remainingPax -= chunkAlloc.seats.length;
+    } else {
+      // Fallback WAIT-n
+      forcedAssigned.push(`WAIT-${waitCounter++}`);
+      remainingPax -= 1;
+    }
+  }
+
+  return {
+    success: true,
+    updates: [
+      {
+        booking_ref: newReservationBlock.booking_ref || newReservationBlock.id,
+        assigned_seats: forcedAssigned
+      }
+    ]
+  };
+}

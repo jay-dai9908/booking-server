@@ -15,12 +15,14 @@ import {
   Lock,
   MessageCircle,
   Key,
-  ShoppingBag
+  ShoppingBag,
+  Printer
 } from 'lucide-react';
 import api from '../../api/axios';
+import ConfirmPanel from '../../components/admin/ConfirmPanel';
 
 const DEFAULT_PREVIEW_DISABLED_TEXT = '系統維護中，請點擊下方按鈕使用 LINE 進行預約';
-const DEFAULT_ANNOUNCEMENT_TEXT = '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
+const DEFAULT_ANNOUNCEMENT_TEXT = '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
 const DEFAULT_PRICE_NOTICE_TEXT = '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品';
 const DEFAULT_LINE_URL = 'https://lin.ee/vsZhRW5';
 
@@ -28,6 +30,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+  const [unpairingStation, setUnpairingStation] = useState(null);
 
   // 1. Access & Preview Controls
   const [requireLineLoginEveryTime, setRequireLineLoginEveryTime] = useState(false);
@@ -66,6 +69,20 @@ export default function SettingsPage() {
   const [lineMessagingTokenInput, setLineMessagingTokenInput] = useState('');
   const [lineAutoNotifyBooking, setLineAutoNotifyBooking] = useState(false);
   const [lineAutoNotifyCancel, setLineAutoNotifyCancel] = useState(false);
+
+  // 6. Checkout & Timer Rules (Spec 6.25)
+  const [billingGraceMinutes, setBillingGraceMinutes] = useState(10);
+  const [billingBlockMinutes, setBillingBlockMinutes] = useState(30);
+  const [earlyLeaveMode, setEarlyLeaveMode] = useState('booked');
+  const [boardSwapGraceMinutes, setBoardSwapGraceMinutes] = useState(10);
+  const [defaultSplitMode, setDefaultSplitMode] = useState('proportional');
+  const [cashFloatAmount, setCashFloatAmount] = useState(2000);
+
+  // 7. Printing & Station Settings (Spec 6.25)
+  const [autoPrintReceipt, setAutoPrintReceipt] = useState(true);
+  const [autoPrintSummary, setAutoPrintSummary] = useState(true);
+  const [receiptFooterText, setReceiptFooterText] = useState('謝謝光臨，作品記得帶回家');
+  const [printStations, setPrintStations] = useState([]);
 
   useEffect(() => {
     fetchGlobalSettings();
@@ -113,6 +130,22 @@ export default function SettingsPage() {
       setLineAutoNotifyBooking(!!d.line_auto_notify_booking);
       setLineAutoNotifyCancel(!!d.line_auto_notify_cancel);
       setLineMessagingTokenInput('');
+
+      setBillingGraceMinutes(d.billing_grace_minutes ?? 10);
+      setBillingBlockMinutes(d.billing_block_minutes ?? 30);
+      setEarlyLeaveMode(d.early_leave_mode || 'booked');
+      setBoardSwapGraceMinutes(d.board_swap_grace_minutes ?? 10);
+      setDefaultSplitMode(d.default_split_mode || 'proportional');
+      setCashFloatAmount(d.cash_float_amount ?? 2000);
+
+      setAutoPrintReceipt(d.auto_print_receipt !== false);
+      setAutoPrintSummary(d.auto_print_summary !== false);
+      setReceiptFooterText(d.receipt_footer_text ?? '謝謝光臨，作品記得帶回家');
+
+      try {
+        const stRes = await api.get('/print/stations');
+        setPrintStations(stRes.data?.stations || []);
+      } catch (stErr) {}
     } catch (err) {
       console.error('Failed to fetch global settings:', err);
     } finally {
@@ -149,6 +182,15 @@ export default function SettingsPage() {
         equipment_discount_stackable: equipmentDiscountStackable,
         line_auto_notify_booking: lineAutoNotifyBooking,
         line_auto_notify_cancel: lineAutoNotifyCancel,
+        billing_grace_minutes: parseInt(billingGraceMinutes, 10) || 10,
+        billing_block_minutes: parseInt(billingBlockMinutes, 10) || 30,
+        early_leave_mode: earlyLeaveMode,
+        board_swap_grace_minutes: parseInt(boardSwapGraceMinutes, 10) || 10,
+        default_split_mode: defaultSplitMode,
+        cash_float_amount: parseInt(cashFloatAmount, 10) || 2000,
+        auto_print_receipt: autoPrintReceipt,
+        auto_print_summary: autoPrintSummary,
+        receipt_footer_text: receiptFooterText,
         ...overridePatch
       };
 
@@ -221,7 +263,7 @@ export default function SettingsPage() {
           disabled={saving}
           className="inline-flex items-center justify-center gap-2 bg-[#8B5B43] hover:bg-[#724a35] text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-sm transition-all disabled:opacity-50 shrink-0"
         >
-          {saving ? '儲存設定中...' : '💾 儲存全部系統設定'}
+          {saving ? '儲存設定中...' : '儲存全部系統設定'}
         </button>
       </div>
 
@@ -280,8 +322,8 @@ export default function SettingsPage() {
                 : 'bg-white text-gray-600 border-gray-200'
             }`}>
               {requireLineLoginEveryTime
-                ? '🔒 目前狀態：【強制每次 LINE 登入】顧客每次打開網頁皆不使用舊有登入紀錄，須透過 LINE 重新登入'
-                : '🟢 目前狀態：【一般便利模式】顧客登入後保留 7 天登入紀錄，期間再次開啟可直接進入預約頁面'}
+                ? '目前狀態：【強制每次 LINE 登入】顧客每次打開網頁皆不使用舊有登入紀錄，須透過 LINE 重新登入'
+                : '目前狀態：【一般便利模式】顧客登入後保留 7 天登入紀錄，期間再次開啟可直接進入預約頁面'}
             </div>
           </div>
 
@@ -334,8 +376,8 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between gap-2 pt-1">
                 <span className={`text-[11px] font-semibold ${enablePreviewPage ? 'text-emerald-700' : 'text-amber-800'}`}>
                   {enablePreviewPage
-                    ? '🟢 目前狀態：公開空位預覽功能【開放中】'
-                    : '🟠 目前狀態：公開空位預覽【已關閉】，僅顯示上方提示並引導點擊下方按鈕登入 LINE'}
+                    ? '目前狀態：公開空位預覽功能【開放中】'
+                    : '目前狀態：公開空位預覽【已關閉】，僅顯示上方提示並引導點擊下方按鈕登入 LINE'}
                 </span>
                 <button
                   type="button"
@@ -409,7 +451,7 @@ export default function SettingsPage() {
               </div>
             )}
             <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
-              {showAnnouncement ? '🟢 目前狀態：顧客端顯示頂部系統公告欄' : '⚪ 目前狀態：顧客端隱藏公告欄'}
+              {showAnnouncement ? '目前狀態：顧客端顯示頂部系統公告欄' : '目前狀態：顧客端隱藏公告欄'}
             </div>
           </div>
 
@@ -448,7 +490,7 @@ export default function SettingsPage() {
               </div>
             )}
             <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
-              {showPriceCards ? '🟢 目前狀態：顧客端顯示平假日價格說明卡' : '⚪ 目前狀態：顧客端隱藏價格說明卡'}
+              {showPriceCards ? '目前狀態：顧客端顯示平假日價格說明卡' : '目前狀態：顧客端隱藏價格說明卡'}
             </div>
           </div>
 
@@ -461,7 +503,7 @@ export default function SettingsPage() {
                   官方 LINE 連結與按鈕設定
                 </span>
                 <p className="text-xs text-[#6D5D52] mt-1">
-                  控制預約頁頂部「💬 官方 LINE」按鈕顯示，以及空位預覽頁下方綠色按鈕跳轉網址
+                  控制預約頁頂部「官方 LINE」按鈕顯示，以及空位預覽頁下方綠色按鈕跳轉網址
                 </p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
@@ -485,7 +527,7 @@ export default function SettingsPage() {
               />
             </div>
             <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
-              {showLineButton ? '🟢 目前狀態：顧客端頂部顯示官方 LINE 按鈕' : '⚪ 目前狀態：顧客端頂部隱藏官方 LINE 按鈕'}
+              {showLineButton ? '目前狀態：顧客端頂部顯示官方 LINE 按鈕' : '目前狀態：顧客端頂部隱藏官方 LINE 按鈕'}
             </div>
           </div>
 
@@ -495,10 +537,10 @@ export default function SettingsPage() {
               <div>
                 <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
                   <ShoppingBag className="w-4 h-4 text-[#8B5B43]" />
-                  前台「🛍️ 商品預購」入口按鈕
+                  前台「商品預購」入口按鈕
                 </span>
                 <p className="text-xs text-[#6D5D52] mt-1">
-                  控制顧客預約頁面頂部的「🛍️ 商品預購」按鈕顯示。關閉時預約頁頂部隱藏此按鈕，避免擠壓手機排版或未開放預購時被誤點
+                  控制顧客預約頁面頂部的「商品預購」按鈕顯示。關閉時預約頁頂部隱藏此按鈕，避免擠壓手機排版或未開放預購時被誤點
                 </p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
@@ -512,7 +554,7 @@ export default function SettingsPage() {
               </label>
             </div>
             <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
-              {showShopButton ? '🟢 目前狀態：顧客預約頁頂部顯示「🛍️ 商品預購」按鈕' : '⚪ 目前狀態：顧客預約頁頂部隱藏此按鈕'}
+              {showShopButton ? '目前狀態：顧客預約頁頂部顯示「商品預購」按鈕' : '目前狀態：顧客預約頁頂部隱藏此按鈕'}
             </div>
           </div>
         </div>
@@ -725,7 +767,7 @@ export default function SettingsPage() {
           <div>
             <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
               <MessageCircle className="w-5 h-5 text-[#06C755]" />
-              5. 💬 LINE 官方帳號推播 (Messaging API) 設定
+              5. LINE 官方帳號推播 (Messaging API) 設定
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
               串接 LINE 官方帳號 Messaging API，啟用預約成功/取消自動推播憑證，以及後台向顧客發送提醒與自訂訊息
@@ -777,7 +819,7 @@ export default function SettingsPage() {
               />
             </div>
             <p className="text-[11px] text-[#6D5D52] leading-relaxed">
-              💡 <strong>如何取得 Token？</strong> 請前往{' '}
+              <strong>如何取得 Token？</strong> 請前往{' '}
               <a
                 href="https://developers.line.biz/console/"
                 target="_blank"
@@ -786,8 +828,8 @@ export default function SettingsPage() {
               >
                 LINE Developers Console
               </a>{' '}
-              ➔ 進入您的 <strong>Messaging API Channel</strong> ➔ 點選 <strong>Messaging API</strong> 分頁 ➔ 拉至最下方 <strong>Channel access token (long-lived)</strong> 點擊 <strong>Issue</strong> 產生長效 Token。<br />
-              ⚠️ 請確保「LINE Login Channel」與「Messaging API Channel」位於同一個 <strong>Provider</strong> 底下，且 LINE Login 已綁定 Linked OA，推播即可 100% 精準送達。
+              → 進入您的 <strong>Messaging API Channel</strong> → 點選 <strong>Messaging API</strong> 分頁 → 拉至最下方 <strong>Channel access token (long-lived)</strong> 點擊 <strong>Issue</strong> 產生長效 Token。<br />
+              請確保「LINE Login Channel」與「Messaging API Channel」位於同一個 <strong>Provider</strong> 底下，且 LINE Login 已綁定 Linked OA，推播即可 100% 精準送達。
             </p>
           </div>
 
@@ -797,7 +839,7 @@ export default function SettingsPage() {
             <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-start justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-sm font-bold text-[#3E332B] flex items-center gap-1.5">
-                  <span>🎟️ 預約成立時自動發送 LINE 電子憑證通知給顧客</span>
+                  <span>預約成立時自動發送 LINE 電子憑證通知給顧客</span>
                 </div>
                 <p className="text-xs text-[#6D5D52] leading-relaxed">
                   線上預約成立時，官方帳號自動發送《拾光製所》大地暖木色預約憑證 Flex 卡片（<strong>絕不透露任何座位號碼</strong>）。
@@ -820,7 +862,7 @@ export default function SettingsPage() {
             <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-start justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-sm font-bold text-[#3E332B] flex items-center gap-1.5">
-                  <span>❌ 預約取消時自動發送 LINE 取消通知給顧客</span>
+                  <span>預約取消時自動發送 LINE 取消通知給顧客</span>
                 </div>
                 <p className="text-xs text-[#6D5D52] leading-relaxed">
                   顧客自行或管理員於後台取消預約時，自動推播預約已取消之 Flex 暖心關懷通知給顧客。
@@ -847,11 +889,255 @@ export default function SettingsPage() {
               disabled={saving}
               className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-all disabled:opacity-50"
             >
-              {saving ? '儲存中...' : '💾 儲存 LINE 官方帳號推播設定'}
+              {saving ? '儲存中...' : '儲存 LINE 官方帳號推播設定'}
             </button>
           </div>
         </div>
       </div>
+
+      {/* 6. Checkout & Timer Settings (Spec 6.25) */}
+      <div className="bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden">
+        <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-gray-200">
+          <div className="flex items-center gap-2 text-[#8B5B43] font-bold text-base mb-1">
+            <Clock className="w-5 h-5" />
+            <h2>結帳與計時設定</h2>
+          </div>
+          <p className="text-xs text-gray-500">
+            設定現場計時寬限期、超時加收單位、提早離開計費規則、分攤方式與收銀機預設零用金。
+          </p>
+        </div>
+
+        <div className="p-5 sm:p-6 space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {/* Grace minutes */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">超時寬限（分鐘）</label>
+              <input
+                type="number"
+                value={billingGraceMinutes}
+                onChange={(e) => setBillingGraceMinutes(parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+              />
+              <span className="text-[11px] text-gray-400 mt-0.5 block">超過預約在此分鐘內不加收，預設 10 分</span>
+            </div>
+
+            {/* Block minutes */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">計費單位（分鐘）</label>
+              <select
+                value={billingBlockMinutes}
+                onChange={(e) => setBillingBlockMinutes(parseInt(e.target.value, 10) || 30)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white"
+              >
+                <option value={15}>15 分鐘</option>
+                <option value={30}>30 分鐘（預設）</option>
+                <option value={60}>60 分鐘</option>
+              </select>
+              <span className="text-[11px] text-gray-400 mt-0.5 block">每達到此區間加收 0.5 小時</span>
+            </div>
+
+            {/* Board swap grace */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">換板寬限（分鐘）</label>
+              <input
+                type="number"
+                value={boardSwapGraceMinutes}
+                onChange={(e) => setBoardSwapGraceMinutes(parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+              />
+              <span className="text-[11px] text-gray-400 mt-0.5 block">10/30 換板時間取整寬限，預設 10 分</span>
+            </div>
+
+            {/* Early leave mode */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">提早離開計費</label>
+              <div className="flex items-center gap-4 pt-1">
+                <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="early_leave"
+                    checked={earlyLeaveMode === 'booked'}
+                    onChange={() => setEarlyLeaveMode('booked')}
+                    className="text-[#8B5B43] focus:ring-[#8B5B43]"
+                  />
+                  <span>照預約時數收（預設）</span>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="early_leave"
+                    checked={earlyLeaveMode === 'actual'}
+                    onChange={() => setEarlyLeaveMode('actual')}
+                    className="text-[#8B5B43] focus:ring-[#8B5B43]"
+                  />
+                  <span>照實際時數收（最少 1 小時）</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Split mode */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">整單金額預設怎麼分</label>
+              <select
+                value={defaultSplitMode}
+                onChange={(e) => setDefaultSplitMode(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white"
+              >
+                <option value="proportional">依金額比例（預設）</option>
+                <option value="even">平均分攤</option>
+                <option value="first">全算第 1 位</option>
+              </select>
+            </div>
+
+            {/* Cash Float */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">收銀機起始零用金（元）</label>
+              <input
+                type="number"
+                value={cashFloatAmount}
+                onChange={(e) => setCashFloatAmount(parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+              />
+              <span className="text-[11px] text-gray-400 mt-0.5 block">每日交班基準零用金額，預設 NT$2,000</span>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={() => handleSaveAll()}
+              disabled={saving}
+              className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-all disabled:opacity-50"
+            >
+              {saving ? '儲存中...' : '儲存結帳與計時設定'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 7. Printing & Station Settings (Spec 6.25) */}
+      <div className="bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden">
+        <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-gray-200">
+          <div className="flex items-center gap-2 text-[#8B5B43] font-bold text-base mb-1">
+            <Printer className="w-5 h-5" />
+            <h2>列印與商米列印站設定</h2>
+          </div>
+          <p className="text-xs text-gray-500">
+            管理結帳自動出單行為、收據頁尾自訂文字與店內配對之商米列印站。
+          </p>
+        </div>
+
+        <div className="p-5 sm:p-6 space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-center justify-between">
+              <div>
+                <span className="text-sm font-bold text-[#3E332B] block">完成結帳就列印</span>
+                <span className="text-xs text-[#6D5D52]">門市收款完成後自動派送收據列印工作</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={autoPrintReceipt}
+                onChange={(e) => setAutoPrintReceipt(e.target.checked)}
+                className="w-5 h-5 rounded text-[#8B5B43] focus:ring-[#8B5B43]"
+              />
+            </div>
+
+            <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-center justify-between">
+              <div>
+                <span className="text-sm font-bold text-[#3E332B] block">整組結清時自動印整單總表</span>
+                <span className="text-xs text-[#6D5D52]">若分多人付款，結清時自動多印一張總表</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={autoPrintSummary}
+                onChange={(e) => setAutoPrintSummary(e.target.checked)}
+                className="w-5 h-5 rounded text-[#8B5B43] focus:ring-[#8B5B43]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">收據底部文字</label>
+            <input
+              type="text"
+              value={receiptFooterText}
+              onChange={(e) => setReceiptFooterText(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
+              placeholder="預設：謝謝光臨，作品記得帶回家"
+            />
+          </div>
+
+          {/* Station list */}
+          <div className="space-y-3 pt-2 border-t border-gray-200">
+            <span className="text-xs font-bold text-gray-700 block">已配對的商米列印站</span>
+            {printStations.length === 0 ? (
+              <div className="p-4 rounded-2xl bg-gray-50 text-center text-xs text-gray-400">
+                目前尚未配對任何商米列印站
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {printStations.map((st) => (
+                  <div key={st.id} className="p-3.5 rounded-2xl border border-gray-200 bg-white flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                        <Printer className="w-4 h-4 text-[#8B5B43]" />
+                        <span>{st.name}</span>
+                        {st.is_default && <span className="text-[10px] bg-[#FAF7F2] text-[#8B5B43] font-bold px-1.5 py-0.5 rounded border border-[#E8DEC8]">預設</span>}
+                      </div>
+                      <span className="text-[11px] text-gray-400 block mt-0.5">
+                        最後回報：{st.last_seen_at ? new Date(st.last_seen_at).toLocaleTimeString('zh-TW') : '從未'}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setUnpairingStation(st)}
+                      className="text-xs text-red-600 font-bold hover:underline"
+                    >
+                      解除配對
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-xs text-[#8B5B43] bg-[#FAF7F2] p-3 rounded-2xl border border-[#E8DEC8]">
+              設定新的列印站：在商米上打開拾光 App，登入後台，進入「列印站」頁面，按「把這台設為列印站」。
+            </p>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={() => handleSaveAll()}
+              disabled={saving}
+              className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-all disabled:opacity-50"
+            >
+              {saving ? '儲存中...' : '儲存列印設定'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {unpairingStation && (
+        <ConfirmPanel
+          open={!!unpairingStation}
+          title="解除配對列印站"
+          message={`確定要解除配對「${unpairingStation.name}」嗎？解除後該列印站將停止背景接單服務。`}
+          confirmText="確認解除配對"
+          confirmVariant="danger"
+          onCancel={() => setUnpairingStation(null)}
+          onConfirm={async () => {
+            try {
+              await api.post(`/print/stations/${unpairingStation.id}/unpair`);
+              setUnpairingStation(null);
+              fetchGlobalSettings();
+            } catch (err) {
+              setToastMsg('解除配對失敗');
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

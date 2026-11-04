@@ -58,6 +58,26 @@ export const startCronJobs = () => {
     }
   }, { timezone: 'Asia/Taipei' });
 
+  // Print lease timeout checker: every 30 seconds (spec 5.7)
+  setInterval(async () => {
+    try {
+      const now = new Date();
+      await prisma.printJob.updateMany({
+        where: {
+          status: 'claimed',
+          lease_until: { lt: now }
+        },
+        data: {
+          status: 'failed',
+          error_code: 'no_report',
+          error_message: '沒有回報結果，請確認是否已印出'
+        }
+      });
+    } catch (err) {
+      // silence transient DB check errors
+    }
+  }, 30000);
+
   // 2. 每小時檢查並自動釋放逾期未付款之預購虛擬帳號
   cron.schedule('0 * * * *', async () => {
     try {

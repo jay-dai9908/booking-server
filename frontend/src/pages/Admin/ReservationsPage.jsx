@@ -307,10 +307,10 @@ export default function ReservationsPage() {
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-bold">
         {[
           { key: 'all', label: `本頁全部 (${filterCounts.all})` },
-          { key: 'pending_checkin', label: `⏳ 待報到 (${filterCounts.pending_checkin})` },
-          { key: 'checked_in', label: `🟢 已報到 (${filterCounts.checked_in})` },
-          { key: 'unpaid', label: `💳 待結帳 (${filterCounts.unpaid})` },
-          { key: 'cancelled', label: `❌ 已取消 (${filterCounts.cancelled})` }
+          { key: 'pending_checkin', label: `待報到 (${filterCounts.pending_checkin})` },
+          { key: 'checked_in', label: `已報到 (${filterCounts.checked_in})` },
+          { key: 'unpaid', label: `待結帳 (${filterCounts.unpaid})` },
+          { key: 'cancelled', label: `已取消 (${filterCounts.cancelled})` }
         ].map(tab => (
           <button
             key={tab.key}
@@ -377,7 +377,7 @@ export default function ReservationsPage() {
                                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 truncate max-w-full"
                                   title={`顧客備註：${r.customer_note}`}
                                 >
-                                  💬 {r.customer_note}
+                                  備註：{r.customer_note}
                                 </span>
                               )}
                               {r.admin_note && (
@@ -385,7 +385,7 @@ export default function ReservationsPage() {
                                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 truncate max-w-full"
                                   title={`內部備註：${r.admin_note}`}
                                 >
-                                  📌 {r.admin_note}
+                                  內部：{r.admin_note}
                                 </span>
                               )}
                             </div>
@@ -407,7 +407,7 @@ export default function ReservationsPage() {
                               className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded flex items-center gap-0.5" 
                               title={`智能板: ${r.equipments.map(e => `${e.equipment_name_snapshot}×${e.quantity}`).join('、')}`}
                             >
-                              ⚙️ ×{r.equipments.reduce((sum, e) => sum + e.quantity, 0)}
+                              智能板 ×{r.equipments.reduce((sum, e) => sum + e.quantity, 0)}
                             </span>
                           )}
                         </div>
@@ -420,18 +420,18 @@ export default function ReservationsPage() {
                           {r.status !== 'cancelled' && (
                             r.is_paid ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                💰 已結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
+                                已結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                                💳 待結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
+                                待結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
                               </span>
                             )
                           )}
                         </div>
                         {r.attendance === 'checked_in' && r.checked_in_at && (
                           <div className="mt-1 text-[11px] font-medium text-blue-600 flex items-center gap-0.5">
-                            <span>🕒 報到 {format(new Date(r.checked_in_at), 'HH:mm')}</span>
+                            <span>報到 {format(new Date(r.checked_in_at), 'HH:mm')}</span>
                           </div>
                         )}
                         {r.status === 'cancelled' && r.cancelled_at && (

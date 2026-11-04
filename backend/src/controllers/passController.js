@@ -396,13 +396,127 @@ export const getMyPasses = async (req, res) => {
  */
 export const getPassPlans = async (req, res) => {
   try {
+    const where = req.query.all === 'true' || req.originalUrl?.includes('/admin')
+      ? {}
+      : { is_active: true };
     const plans = await prisma.passPlan.findMany({
-      where: { is_active: true },
+      where,
       orderBy: { id: 'asc' }
     });
     res.json(plans);
   } catch (error) {
     res.status(500).json({ error: '獲取卡券方案失敗' });
+  }
+};
+
+/**
+ * Admin: Create pass plan template
+ */
+export const createPassPlan = async (req, res) => {
+  try {
+    const {
+      name,
+      pass_type,
+      price,
+      original_value,
+      total_quota,
+      unit_name,
+      description,
+      max_hours_per_day,
+      max_days_per_week,
+      max_hours_per_week,
+      valid_days,
+      day_restriction,
+      is_active,
+      checkout_effect,
+      checkout_scope,
+      checkout_value
+    } = req.body;
+
+    if (!name || !pass_type) {
+      return res.status(400).json({ error: '方案名稱與類型為必填' });
+    }
+
+    const created = await prisma.passPlan.create({
+      data: {
+        name,
+        pass_type,
+        price: parseInt(price, 10) || 0,
+        original_value: parseInt(original_value, 10) || parseInt(price, 10) || 0,
+        total_quota: parseInt(total_quota, 10) || 1,
+        unit_name: unit_name || '次',
+        description: description || null,
+        max_hours_per_day: max_hours_per_day != null && max_hours_per_day !== '' ? parseInt(max_hours_per_day, 10) : null,
+        max_days_per_week: max_days_per_week != null && max_days_per_week !== '' ? parseInt(max_days_per_week, 10) : null,
+        max_hours_per_week: max_hours_per_week != null && max_hours_per_week !== '' ? parseInt(max_hours_per_week, 10) : null,
+        valid_days: valid_days != null && valid_days !== '' ? parseInt(valid_days, 10) : null,
+        day_restriction: day_restriction || 'ALL',
+        is_active: is_active !== false,
+        checkout_effect: checkout_effect || null,
+        checkout_scope: checkout_scope || 'entry',
+        checkout_value: checkout_value != null && checkout_value !== '' ? parseInt(checkout_value, 10) : null
+      }
+    });
+
+    res.status(201).json(created);
+  } catch (error) {
+    console.error('createPassPlan error:', error);
+    res.status(500).json({ error: '建立卡券方案失敗' });
+  }
+};
+
+/**
+ * Admin: Update pass plan template
+ */
+export const updatePassPlan = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const {
+      name,
+      pass_type,
+      price,
+      original_value,
+      total_quota,
+      unit_name,
+      description,
+      max_hours_per_day,
+      max_days_per_week,
+      max_hours_per_week,
+      valid_days,
+      day_restriction,
+      is_active,
+      checkout_effect,
+      checkout_scope,
+      checkout_value
+    } = req.body;
+
+    const data = {};
+    if (name !== undefined) data.name = name;
+    if (pass_type !== undefined) data.pass_type = pass_type;
+    if (price !== undefined) data.price = parseInt(price, 10) || 0;
+    if (original_value !== undefined) data.original_value = parseInt(original_value, 10) || 0;
+    if (total_quota !== undefined) data.total_quota = parseInt(total_quota, 10) || 1;
+    if (unit_name !== undefined) data.unit_name = unit_name;
+    if (description !== undefined) data.description = description;
+    if (max_hours_per_day !== undefined) data.max_hours_per_day = max_hours_per_day !== '' && max_hours_per_day !== null ? parseInt(max_hours_per_day, 10) : null;
+    if (max_days_per_week !== undefined) data.max_days_per_week = max_days_per_week !== '' && max_days_per_week !== null ? parseInt(max_days_per_week, 10) : null;
+    if (max_hours_per_week !== undefined) data.max_hours_per_week = max_hours_per_week !== '' && max_hours_per_week !== null ? parseInt(max_hours_per_week, 10) : null;
+    if (valid_days !== undefined) data.valid_days = valid_days !== '' && valid_days !== null ? parseInt(valid_days, 10) : null;
+    if (day_restriction !== undefined) data.day_restriction = day_restriction;
+    if (is_active !== undefined) data.is_active = Boolean(is_active);
+    if (checkout_effect !== undefined) data.checkout_effect = checkout_effect || null;
+    if (checkout_scope !== undefined) data.checkout_scope = checkout_scope || 'entry';
+    if (checkout_value !== undefined) data.checkout_value = checkout_value !== '' && checkout_value !== null ? parseInt(checkout_value, 10) : null;
+
+    const updated = await prisma.passPlan.update({
+      where: { id: parseInt(id, 10) },
+      data
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('updatePassPlan error:', error);
+    res.status(500).json({ error: '更新卡券方案失敗' });
   }
 };
 
@@ -423,3 +537,4 @@ export const togglePassStatus = async (req, res) => {
     res.status(500).json({ error: '更新卡券狀態失敗' });
   }
 };
+

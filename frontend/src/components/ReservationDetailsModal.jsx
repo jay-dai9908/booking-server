@@ -1,12 +1,25 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { X, CheckCircle2, XCircle, Trash2, Pencil, Check, Cpu, MessageCircle } from 'lucide-react';
+import {
+  X,
+  CheckCircle2,
+  XCircle,
+  Trash2,
+  Pencil,
+  Check,
+  Cpu,
+  MessageCircle,
+  Clock,
+  Plus,
+  CreditCard
+} from 'lucide-react';
 import api from '../api/axios';
+import ConfirmPanel from './admin/ConfirmPanel';
 
 const ExtendTimeModal = lazy(() => import('./ExtendTimeModal'));
 const EquipmentAddonModal = lazy(() => import('./EquipmentAddonModal'));
-const CheckoutModal = lazy(() => import('./CheckoutModal'));
+const CheckoutWorkbench = lazy(() => import('./admin/checkout/CheckoutWorkbench'));
 const SendLineMessageModal = lazy(() => import('./SendLineMessageModal'));
 
 export const getReservationStatusUI = (r) => {
@@ -35,16 +48,24 @@ export const getReservationStatusUI = (r) => {
 
 export default function ReservationDetailsModal({ reservation, onClose, onUpdate, readOnly = false }) {
   const navigate = useNavigate();
-  const [showExtendModal, setShowExtendModal] = React.useState(false);
-  const [isEditingAmount, setIsEditingAmount] = React.useState(false);
-  const [editAmountValue, setEditAmountValue] = React.useState('');
-  const [showEquipmentModal, setShowEquipmentModal] = React.useState(false);
-  const [showCheckoutModal, setShowCheckoutModal] = React.useState(false);
-  const [showLineModal, setShowLineModal] = React.useState(false);
-  const [adminNoteInput, setAdminNoteInput] = React.useState(reservation?.admin_note || '');
-  const [isSavingAdminNote, setIsSavingAdminNote] = React.useState(false);
+  const [showExtendModal, setShowExtendModal] = useState(false);
+  const [isEditingAmount, setIsEditingAmount] = useState(false);
+  const [editAmountValue, setEditAmountValue] = useState('');
+  const [showEquipmentModal, setShowEquipmentModal] = useState(false);
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [showLineModal, setShowLineModal] = useState(false);
+  const [adminNoteInput, setAdminNoteInput] = useState(reservation?.admin_note || '');
+  const [isSavingAdminNote, setIsSavingAdminNote] = useState(false);
+  const [toastMsg, setToastMsg] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [forceCancelInput, setForceCancelInput] = useState('');
 
-  React.useEffect(() => {
+  const showToast = (text, isError = false) => {
+    setToastMsg({ text, isError });
+    setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  useEffect(() => {
     setAdminNoteInput(reservation?.admin_note || '');
     if (reservation?.booking_ref && !reservation?.pricing_info && !readOnly) {
       api
@@ -70,9 +91,10 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
         onUpdate({ admin_note: res.data?.admin_note ?? (adminNoteInput.trim() || null) });
       }
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
+      showToast('內部備註已儲存');
     } catch (err) {
       console.error(err);
-      alert('儲存內部備註失敗');
+      showToast('儲存內部備註失敗', true);
     } finally {
       setIsSavingAdminNote(false);
     }
@@ -88,7 +110,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       console.error(err);
-      alert('更新狀態失敗');
+      showToast('更新狀態失敗', true);
     }
   };
 
@@ -99,13 +121,13 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       console.error(err);
-      alert('更新付費狀態失敗');
+      showToast('更新付費狀態失敗', true);
     }
   };
 
   const handleSaveAmount = async () => {
     if (!editAmountValue || isNaN(parseInt(editAmountValue))) {
-      alert('請輸入有效的金額');
+      showToast('請輸入有效的金額', true);
       return;
     }
     try {
@@ -125,50 +147,72 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           is_paid: true 
         });
       }
+      showToast('結帳金額已更新');
     } catch (err) {
       console.error(err);
-      alert('更新結帳金額失敗');
+      showToast('更新結帳金額失敗', true);
     }
   };
 
-  const handleCancelReservation = async () => {
-    let confirmPaid = false;
+  const handleCancelReservation = () => {
     if (reservation.is_paid) {
-      const doubleCheck = window.prompt(
-        '⚠️ 注意：此預約已完成付款結帳！\n若取消預約，當日結帳營收將產生異動。\n\n請輸入「確認取消」以完成強制取消：'
-      );
-      if (doubleCheck !== '確認取消') {
-        alert('輸入不符，已中止取消操作。');
-        return;
-      }
-      confirmPaid = true;
-    } else {
-      if (!window.confirm('確定要取消此預約嗎？')) {
-        return;
-      }
-    }
-
-    try {
-      await api.delete(`/reservations/${reservation.booking_ref}`, {
-        data: { confirmPaidCancel: confirmPaid }
+      setForceCancelInput('');
+      setConfirmAction({
+        title: '注意：此預約已完成付款結帳',
+        message: '若取消預約，當日結帳營收將產生異動。請在下方輸入「確認取消」以完成強制取消：',
+        danger: true,
+        type: 'force_cancel_paid',
+        onConfirm: async () => {
+          if (forceCancelInput.trim() !== '確認取消') {
+            showToast('輸入不符，已中止取消操作。', true);
+            return;
+          }
+          try {
+            await api.delete(`/reservations/${reservation.booking_ref}`, {
+              data: { confirmPaidCancel: true }
+            });
+            if (onUpdate) onUpdate();
+            onClose();
+          } catch (err) {
+            showToast(err.response?.data?.error || '取消失敗', true);
+          }
+        }
       });
-      if (onUpdate) onUpdate();
-      onClose();
-    } catch (err) {
-      alert(err.response?.data?.error || '取消失敗');
+    } else {
+      setConfirmAction({
+        title: '取消預約',
+        message: '確定要取消此預約嗎？',
+        danger: true,
+        onConfirm: async () => {
+          try {
+            await api.delete(`/reservations/${reservation.booking_ref}`, {
+              data: { confirmPaidCancel: false }
+            });
+            if (onUpdate) onUpdate();
+            onClose();
+          } catch (err) {
+            showToast(err.response?.data?.error || '取消失敗', true);
+          }
+        }
+      });
     }
   };
 
-  const handleDeleteRecord = async () => {
-    if (window.confirm('確定要永久刪除此筆訂單紀錄嗎？此操作無法復原。')) {
-      try {
-        await api.delete(`/reservations/${reservation.booking_ref}/record`);
-        if (onUpdate) onUpdate();
-        onClose();
-      } catch (err) {
-        alert(err.response?.data?.error || '刪除失敗');
+  const handleDeleteRecord = () => {
+    setConfirmAction({
+      title: '刪除訂單紀錄',
+      message: '確定要永久刪除此筆訂單紀錄嗎？此操作無法復原。',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await api.delete(`/reservations/${reservation.booking_ref}/record`);
+          if (onUpdate) onUpdate();
+          onClose();
+        } catch (err) {
+          showToast(err.response?.data?.error || '刪除失敗', true);
+        }
       }
-    }
+    });
   };
 
   return (
@@ -240,7 +284,8 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                         </span>
                         {reservation.attendance === 'checked_in' && (
                           <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
-                            🕒 報到時間：{reservation.checked_in_at ? format(new Date(reservation.checked_in_at), 'MM/dd HH:mm') : '已完成'}
+                            <Clock className="w-3.5 h-3.5" />
+                            報到時間：{reservation.checked_in_at ? format(new Date(reservation.checked_in_at), 'MM/dd HH:mm') : '已完成'}
                           </span>
                         )}
                         {reservation.status === 'cancelled' && reservation.cancelled_at && (
@@ -270,7 +315,8 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                       onClick={() => setShowExtendModal(true)}
                       className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-md hover:bg-indigo-100 transition-colors font-medium flex items-center gap-1"
                     >
-                      <span className="text-[10px]">➕</span> 現場加時
+                      <Plus className="w-3 h-3" />
+                      現場加時
                     </button>
                   )}
                 </div>
@@ -298,12 +344,12 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                   <p className="text-lg font-bold text-gray-900">{reservation.pax} 人</p>
                   {reservation.is_unlimited && (
                     <span className="inline-flex items-center gap-1 text-xs font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
-                      ✨ 不限時
+                      不限時
                     </span>
                   )}
                   {reservation.is_walk_in && (
                     <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-md">
-                      🚶 現場預約
+                      現場預約
                     </span>
                   )}
                 </div>
@@ -354,11 +400,11 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                     {!isEditingAmount && (
                       reservation.is_paid ? (
                         <span className="inline-flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded-md border border-yellow-200">
-                          💰 已結清 {reservation.payment_method === 'line_pay' ? '(LINE Pay)' : reservation.payment_method === 'transfer' ? '(轉帳)' : '(現金)'}
+                          已結清 {reservation.payment_method === 'line_pay' ? '(LINE Pay)' : reservation.payment_method === 'transfer' ? '(轉帳)' : '(現金)'}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200">
-                          ⏳ 未付款
+                          未付款
                         </span>
                       )
                     )}
@@ -367,12 +413,12 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                     <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
                       {reservation.addons_amount > 0 && (
                         <span className="px-2 py-0.5 rounded bg-pink-50 text-pink-700 border border-pink-200 font-bold">
-                          🛍️ 吊飾/加購 +${reservation.addons_amount}
+                          吊飾/加購 +${reservation.addons_amount}
                         </span>
                       )}
                       {reservation.discount_amount > 0 && (
                         <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-bold">
-                          🎟️ 優惠折抵 ({reservation.promo_code || '手動'}) -${reservation.discount_amount}
+                          優惠折抵 ({reservation.promo_code || '手動'}) -${reservation.discount_amount}
                         </span>
                       )}
                     </div>
@@ -386,7 +432,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-4">
               <h3 className="text-xs font-bold text-indigo-800 mb-1.5 flex items-center gap-1.5">
-                💬 顧客預約備註
+                顧客預約備註
               </h3>
               {reservation.customer_note ? (
                 <p className="text-sm font-bold text-indigo-950 whitespace-pre-wrap break-words">
@@ -400,7 +446,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
             <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4">
               <div className="flex items-center justify-between mb-1.5">
                 <h3 className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                  📌 店家當日內部備註（僅店員可見）
+                  店家當日內部備註（僅店員可見）
                 </h3>
                 {!readOnly && (
                   <button
@@ -431,7 +477,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           <div className="mb-8 bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2.5">
               <h3 className="text-sm font-bold text-[#8B5B43] flex items-center gap-1.5 whitespace-nowrap">
-                ⚙️ 智能拼豆板租賃明細
+                智能拼豆板租賃明細
               </h3>
               {!readOnly && reservation.status !== 'cancelled' && (
                 <button
@@ -440,9 +486,9 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                   className="text-xs bg-[#8B5B43] hover:bg-[#724a35] text-white px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 shadow-xs whitespace-nowrap"
                 >
                   {reservation.equipments && reservation.equipments.length > 0 ? (
-                    <>✏️ 調整智能板</>
+                    <>調整智能板</>
                   ) : (
-                    <>➕ 加購/補登智能板</>
+                    <>加購/補登智能板</>
                   )}
                 </button>
               )}
@@ -474,6 +520,14 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
               </div>
             )}
           </div>
+
+          {toastMsg && (
+            <div className={`mb-4 p-3 rounded-xl text-xs font-bold border ${
+              toastMsg.isError ? 'bg-rose-50 text-rose-800 border-rose-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            }`}>
+              {toastMsg.text}
+            </div>
+          )}
 
           {/* Actions */}
           {(!readOnly || reservation.status !== 'cancelled') && (
@@ -528,7 +582,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                             : 'bg-gradient-to-r from-indigo-600 to-emerald-600 text-white hover:from-indigo-700 hover:to-emerald-700'
                         }`}
                       >
-                        <span>💳</span>
+                        <CreditCard className="w-4 h-4" />
                         {reservation.is_paid ? '結帳明細 / 補印收據' : '前往結帳 (拆帳 / POS印單)'}
                       </button>
                       {reservation.is_paid && (
@@ -607,11 +661,11 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           />
         )}
         {showCheckoutModal && (
-          <CheckoutModal
+          <CheckoutWorkbench
             isOpen={showCheckoutModal}
             onClose={() => setShowCheckoutModal(false)}
-            reservation={reservation}
-            onCheckoutSuccess={async () => {
+            bookingRef={reservation.booking_ref}
+            onPaymentSuccess={async () => {
               try {
                 const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
                 if (onUpdate) onUpdate(res.data);
@@ -630,6 +684,32 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           />
         )}
       </Suspense>
+
+      {confirmAction && (
+        <ConfirmPanel
+          isOpen={!!confirmAction}
+          title={confirmAction.title}
+          message={confirmAction.message}
+          danger={confirmAction.danger}
+          onClose={() => setConfirmAction(null)}
+          onConfirm={async () => {
+            const act = confirmAction.onConfirm;
+            setConfirmAction(null);
+            if (act) await act();
+          }}
+        >
+          {confirmAction.type === 'force_cancel_paid' && (
+            <input
+              type="text"
+              autoFocus
+              value={forceCancelInput}
+              onChange={(e) => setForceCancelInput(e.target.value)}
+              placeholder="請輸入「確認取消」"
+              className="w-full px-3 py-2 border border-rose-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 font-bold"
+            />
+          )}
+        </ConfirmPanel>
+      )}
     </div>
   );
 }

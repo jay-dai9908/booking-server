@@ -198,7 +198,7 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
                 : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50 hover:border-amber-400'
             }`}
           >
-            ☀️ 平日 (13:00~21:00)
+            平日 (13:00~21:00)
           </button>
           <button
             type="button"
@@ -209,7 +209,7 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
                 : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50 hover:border-amber-400'
             }`}
           >
-            🌟 假日 (09:00~21:00)
+            假日 (09:00~21:00)
           </button>
           <button
             type="button"
@@ -220,7 +220,7 @@ export default function HourRangeScrollPicker({ startTime, setStartTime, endTime
                 : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50 hover:border-amber-400'
             }`}
           >
-            ⏰ 全天 (10:00~22:00)
+            全天 (10:00~22:00)
           </button>
         </div>
       </div>

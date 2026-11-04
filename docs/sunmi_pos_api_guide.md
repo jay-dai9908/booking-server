@@ -178,3 +178,54 @@ if (window.AndroidPrinter && typeof window.AndroidPrinter.isPosMachine === 'func
 // 後端 / Server 端 HTTP Header 判斷
 // 所有的 Request Header `User-Agent` 皆已包含 "ShiguangPOS/1.0 (SUNMI V2s)"
 ```
+
+## 6. 商米 App 列印站背景服務整合規格（第 7 節）
+
+### 6.1 架構與前景服務 (Foreground Service)
+- **獨立 Service**：新增 `PrintStationService`（Foreground Service），開機啟動（`BOOT_COMPLETED`）並在配對完成後常駐執行。
+- **常駐通知**：逐字「拾光列印站 · 背景接單中」。
+- **螢幕與連線**：螢幕關閉時持 Partial WakeLock 維持長輪詢；OkHttp 讀取逾時設為 30 秒（伺服器長輪詢上限 20 秒）。
+- **印表機連線**：使用商米 SDK `SunmiPrinterService`，進入交易模式（`enterPrinterBuffer` ... `exitPrinterBufferWithCallback`）進行原子列印與狀態回報。
+
+### 6.2 配對機制 (Pairing)
+1. 店員在商米設備上進入後台 `/admin/print-station` 頁面，點選「把這台設為列印站」。
+2. 網頁端呼叫 `POST /api/print/stations/pair` 取得 `{ station_id, secret }`。
+3. 網頁端呼叫 `window.AndroidPrinter.saveStationCredentials(JSON.stringify({ base_url: location.origin + '/api', station_id, secret }))`。
+4. App 將連線網址與憑證保存於 `EncryptedSharedPreferences`，隨即啟動背景服務並回傳 `"ok"`。
+5. 解除配對：
+   - 後台管理端點選「解除配對」：伺服器停用該列印站，後續請求回傳 `401`，App 收到 `401` 後自動停止背景服務並清除本機憑證。
+   - 設備端呼叫 `window.AndroidPrinter.clearStationCredentials()` 亦可手動解除並清除憑證。
+
+### 6.3 背景接單迴圈 (Service Polling Loop)
+- 每 30 秒發送心跳：`POST /api/print/station/heartbeat`，回傳狀態包含 `{ printer_state, printer_message, app_version, device_model, screen_on }`。
+- 接單迴圈：
+  - 若 `accepting === true` 且印表機狀態為 `ok`：發送 `POST /api/print/station/claim?wait=20`。
+  - 若取得單據（`job`）：進行實體列印，並於 callback 完成後呼叫 `POST /api/print/station/jobs/:id/result` 回傳 `{ success, error_code, error_message }`。
+  - 若印表機異常（如 `no_paper`）：暫停 claim，於 heartbeat 持續回報硬體狀態，直至印表機恢復 `ok` 才繼續 claim。
+  - 遇到網路中斷：採用指數退避重試（1s, 2s, 4s, 8s, 16s, 最多 30s）。
+
+### 6.4 HTTP Request Header 規範
+- `Authorization`: `Station <station_id>.<secret>`
+- `User-Agent`: `ShiguangPOS/1.0 (SUNMI V2s)`
+- `X-Device-Label`: `%E5%88%97%E5%8D%B0%E7%AB%99`（「列印站」URL encode）
+
+### 6.5 印表機狀態代碼對照表
+| 商米 updatePrinterState() | `printer_state` | 介面顯示文案 |
+| --- | --- | --- |
+| 1 正常 | `ok` | 正常 · 紙張充足 |
+| 2 準備中 | `ok` | 正常 · 準備中 |
+| 3 通訊異常 | `error` | 印表機異常 |
+| 4 缺紙 | `no_paper` | 缺紙 |
+| 5 過熱 | `overheat` | 印表機過熱 |
+| 6 開蓋 | `cover_open` | 上蓋沒蓋好 |
+| 7 切刀異常 | `error` | 印表機異常 |
+| 505 找不到印表機 | `not_found` | 找不到印表機 |
+| 其他 | `error` | 印表機異常 |
+
+### 6.6 JS 橋接函式 (window.AndroidPrinter 擴充)
+除保留原有 `printReceiptWithCallback`、`printReceipt`、`isPosMachine`、`getDeviceModel` 外，新增：
+- `saveStationCredentials(json)`: 儲存 station_id 與 secret 並啟動背景服務，成功回傳 `"ok"`。
+- `clearStationCredentials()`: 停止背景服務並清除憑證，回傳 `"ok"`。
+- `getStationStatus()`: 回傳 JSON 字串：`{"paired":true,"station_id":1,"service_running":true,"printer_state":"ok","last_heartbeat_at":"...","last_error":null,"app_version":"2.0.0"}`。
+- `openBatterySettings()`: 開啟忽略電池最佳化設定頁，引導加入後台常駐白名單。
+

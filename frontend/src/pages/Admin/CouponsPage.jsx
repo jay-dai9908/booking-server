@@ -67,9 +67,10 @@ const ADDON_CATEGORIES = {
 };
 
 export default function CouponsPage() {
-  const [activeTab, setActiveTab] = useState('coupons'); // 'coupons' | 'addons'
+  const [activeTab, setActiveTab] = useState('coupons'); // 'coupons' | 'addons' | 'plans'
   const [promoCodes, setPromoCodes] = useState([]);
   const [addonItems, setAddonItems] = useState([]);
+  const [passPlans, setPassPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toastMsg, setToastMsg] = useState(null);
 
@@ -115,6 +116,28 @@ export default function CouponsPage() {
     is_active: true
   });
 
+  // Modal states for Pass Plans (Section 3.9)
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [editingPlan, setEditingPlan] = useState(null);
+  const [planForm, setPlanForm] = useState({
+    name: '',
+    pass_type: 'TIME_PASS',
+    price: 600,
+    original_value: '',
+    total_quota: 5,
+    unit_name: '小時',
+    description: '',
+    max_hours_per_day: '',
+    max_days_per_week: '',
+    max_hours_per_week: '',
+    valid_days: '',
+    day_restriction: 'ALL',
+    is_active: true,
+    checkout_effect: '',
+    checkout_scope: 'entry',
+    checkout_value: ''
+  });
+
   // Delete confirmation
   const [deletingItem, setDeletingItem] = useState(null); // { type: 'promo' | 'addon', item }
 
@@ -126,14 +149,16 @@ export default function CouponsPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [promosRes, addonsRes] = await Promise.all([
+      const [promosRes, addonsRes, plansRes] = await Promise.all([
         api.get('/checkout/promo-codes'),
-        api.get('/checkout/addons')
+        api.get('/checkout/addons'),
+        api.get('/passes/admin/plans').catch(() => ({ data: [] }))
       ]);
       setPromoCodes(promosRes.data || []);
       setAddonItems(addonsRes.data || []);
+      setPassPlans(plansRes.data || []);
     } catch (err) {
-      console.error('Failed to load coupons or addons:', err);
+      console.error('Failed to load coupons, addons, or pass plans:', err);
       showToast('載入卡券或品項資料失敗', 'error');
     } finally {
       setLoading(false);
@@ -384,6 +409,99 @@ export default function CouponsPage() {
     }
   };
 
+  const handleOpenNewPlan = () => {
+    setEditingPlan(null);
+    setPlanForm({
+      name: '',
+      pass_type: 'TIME_PASS',
+      price: 600,
+      original_value: '',
+      total_quota: 5,
+      unit_name: '小時',
+      description: '',
+      max_hours_per_day: '',
+      max_days_per_week: '',
+      max_hours_per_week: '',
+      valid_days: '',
+      day_restriction: 'ALL',
+      is_active: true,
+      checkout_effect: '',
+      checkout_scope: 'entry',
+      checkout_value: ''
+    });
+    setShowPlanModal(true);
+  };
+
+  const handleOpenEditPlan = (plan) => {
+    setEditingPlan(plan);
+    setPlanForm({
+      name: plan.name || '',
+      pass_type: plan.pass_type || 'TIME_PASS',
+      price: plan.price != null ? plan.price : 0,
+      original_value: plan.original_value != null ? plan.original_value : '',
+      total_quota: plan.total_quota != null ? plan.total_quota : 1,
+      unit_name: plan.unit_name || '次',
+      description: plan.description || '',
+      max_hours_per_day: plan.max_hours_per_day != null ? plan.max_hours_per_day : '',
+      max_days_per_week: plan.max_days_per_week != null ? plan.max_days_per_week : '',
+      max_hours_per_week: plan.max_hours_per_week != null ? plan.max_hours_per_week : '',
+      valid_days: plan.valid_days != null ? plan.valid_days : '',
+      day_restriction: plan.day_restriction || 'ALL',
+      is_active: plan.is_active !== false,
+      checkout_effect: plan.checkout_effect || '',
+      checkout_scope: plan.checkout_scope || 'entry',
+      checkout_value: plan.checkout_value != null ? plan.checkout_value : ''
+    });
+    setShowPlanModal(true);
+  };
+
+  const handleSavePlan = async (e) => {
+    e.preventDefault();
+    if (!planForm.name.trim()) {
+      showToast('請填寫方案名稱', 'error');
+      return;
+    }
+    try {
+      const payload = {
+        ...planForm,
+        name: planForm.name.trim(),
+        price: parseInt(planForm.price, 10) || 0,
+        original_value: planForm.original_value !== '' && planForm.original_value !== null ? parseInt(planForm.original_value, 10) : null,
+        total_quota: parseInt(planForm.total_quota, 10) || 1,
+        max_hours_per_day: planForm.max_hours_per_day !== '' && planForm.max_hours_per_day !== null ? parseInt(planForm.max_hours_per_day, 10) : null,
+        max_days_per_week: planForm.max_days_per_week !== '' && planForm.max_days_per_week !== null ? parseInt(planForm.max_days_per_week, 10) : null,
+        max_hours_per_week: planForm.max_hours_per_week !== '' && planForm.max_hours_per_week !== null ? parseInt(planForm.max_hours_per_week, 10) : null,
+        valid_days: planForm.valid_days !== '' && planForm.valid_days !== null ? parseInt(planForm.valid_days, 10) : null,
+        checkout_effect: planForm.checkout_effect || null,
+        checkout_scope: planForm.checkout_scope || 'entry',
+        checkout_value: planForm.checkout_value !== '' && planForm.checkout_value !== null ? parseInt(planForm.checkout_value, 10) : null,
+      };
+
+      if (editingPlan) {
+        await api.put(`/passes/admin/plans/${editingPlan.id}`, payload);
+        showToast('方案更新成功');
+      } else {
+        await api.post('/passes/admin/plans', payload);
+        showToast('方案建立成功');
+      }
+      setShowPlanModal(false);
+      fetchData();
+    } catch (err) {
+      console.error('Failed to save pass plan:', err);
+      showToast(err.response?.data?.error || '儲存卡券方案失敗', 'error');
+    }
+  };
+
+  const handleTogglePlanActive = async (plan) => {
+    try {
+      await api.put(`/passes/admin/plans/${plan.id}`, { is_active: !plan.is_active });
+      showToast(`已${!plan.is_active ? '啟用' : '停用'}「${plan.name}」`);
+      fetchData();
+    } catch (err) {
+      showToast('切換方案狀態失敗', 'error');
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 space-y-6 animate-fade-in bg-[#FAF7F2] min-h-screen">
       {/* Toast Notification */}
@@ -443,9 +561,21 @@ export default function CouponsPage() {
               <ShoppingBag className="w-3.5 h-3.5" />
               <span>加購品項與周邊 ({addonItems.length})</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('plans')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'plans'
+                  ? 'bg-[#8B5B43] text-white shadow-xs'
+                  : 'text-[#6D5D52] hover:text-[#3E332B] hover:bg-[#FAF7F2]'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>會員卡券方案 ({passPlans.length})</span>
+            </button>
           </div>
 
-          {activeTab === 'coupons' ? (
+          {activeTab === 'coupons' && (
             <button
               type="button"
               onClick={handleOpenNewPromo}
@@ -454,7 +584,8 @@ export default function CouponsPage() {
               <Plus className="w-4 h-4" />
               <span>新增優惠券</span>
             </button>
-          ) : (
+          )}
+          {activeTab === 'addons' && (
             <button
               type="button"
               onClick={handleOpenNewAddon}
@@ -462,6 +593,16 @@ export default function CouponsPage() {
             >
               <Plus className="w-4 h-4" />
               <span>新增加購品項</span>
+            </button>
+          )}
+          {activeTab === 'plans' && (
+            <button
+              type="button"
+              onClick={handleOpenNewPlan}
+              className="px-4 py-2 bg-[#8B5B43] hover:bg-[#7A4F3A] text-white text-xs sm:text-sm font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>新增卡券方案</span>
             </button>
           )}
         </div>
@@ -656,37 +797,37 @@ export default function CouponsPage() {
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {promo.min_pax > 1 && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
-                            👥 滿 {promo.min_pax} 人
+                            滿 {promo.min_pax} 人
                           </span>
                         )}
                         {promo.min_hours > 1 && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
-                            ⏱️ 滿 {promo.min_hours} 小時
+                            滿 {promo.min_hours} 小時
                           </span>
                         )}
                         {promo.min_amount > 0 && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
-                            💰 低消 ${promo.min_amount}
+                            低消 NT${promo.min_amount}
                           </span>
                         )}
                         {(promo.day_type_limit === 'weekday' || promo.applicable_days === 'weekday') && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 border border-blue-200">
-                            📅 僅限平日
+                            僅限平日
                           </span>
                         )}
                         {(promo.day_type_limit === 'weekend' || promo.applicable_days === 'weekend') && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 border border-purple-200">
-                            🎉 僅限假日
+                            僅限假日
                           </span>
                         )}
                         {(promo.mode_limit === 'unlimited' || promo.applicable_mode === 'unlimited') && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
-                            ✨ 僅限不限時(封頂)
+                            僅限不限時(封頂)
                           </span>
                         )}
                         {(promo.mode_limit === 'hourly' || promo.applicable_mode === 'hourly') && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
-                            ⌛ 僅限計時方案
+                            僅限計時方案
                           </span>
                         )}
                       </div>
@@ -870,6 +1011,133 @@ export default function CouponsPage() {
         </div>
       )}
 
+      {/* TAB 3: MEMBER PASS PLANS (Section 3.9) */}
+      {activeTab === 'plans' && (
+        <div className="space-y-5">
+          <div className="bg-white rounded-2xl border border-[#E8DEC8] p-5 shadow-2xs">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-extrabold text-base text-[#3E332B]">會員卡券方案範本</h3>
+                <p className="text-xs text-[#8C8279] mt-0.5">
+                  定義時數券、計次卡與方案的結帳折抵規則（折抵方式、範圍與金額），由店員或系統發行給會員。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenNewPlan}
+                className="px-3.5 py-2 bg-[#8B5B43] hover:bg-[#7A4F3A] text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>新增卡券方案</span>
+              </button>
+            </div>
+
+            {loading ? (
+              <div className="py-12 text-center text-[#8C8279]">載入卡券方案中...</div>
+            ) : passPlans.length === 0 ? (
+              <div className="py-12 text-center text-[#8C8279]">
+                <Layers className="w-10 h-10 mx-auto text-[#D5CFC9] mb-2" />
+                <p className="font-bold text-[#3E332B]">尚未建立任何卡券方案</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {passPlans.map(plan => {
+                  const passTypeLabels = {
+                    TIME_PASS: '時數券',
+                    PUNCH_CARD: '計次卡',
+                    MONTHLY_PASS: '月票',
+                    DISCOUNT_VOUCHER: '折扣券'
+                  };
+                  const effectLabels = {
+                    entry_hours: '每單位折 1 小時入場',
+                    entry_full: '每次折一位入場費',
+                    percent_off: '打折優惠',
+                    fixed_amount: `每次折固定金額 NT$${plan.checkout_value || 0}`
+                  };
+                  return (
+                    <div
+                      key={plan.id}
+                      className="bg-white rounded-2xl border border-[#E8DEC8] p-4.5 shadow-2xs hover:shadow-xs transition-all relative flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8]">
+                            {passTypeLabels[plan.pass_type] || plan.pass_type}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              plan.is_active
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-stone-100 text-stone-600 border-stone-200'
+                            }`}
+                          >
+                            {plan.is_active ? '啟用中' : '已停用'}
+                          </span>
+                        </div>
+
+                        <h4 className="font-extrabold text-base text-[#3E332B]">{plan.name}</h4>
+                        {plan.description && (
+                          <p className="text-xs text-[#8C8279] mt-1 line-clamp-2">{plan.description}</p>
+                        )}
+
+                        <div className="mt-3 p-3 rounded-xl bg-[#FAF7F2] border border-[#E8DEC8]/80 space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#8C8279]">售價 / 額度</span>
+                            <span className="font-extrabold text-[#3E332B]">
+                              NT$ {plan.price} / {plan.total_quota} {plan.unit_name || '次'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#8C8279]">折抵方式</span>
+                            <span className="font-bold text-[#8B5B43]">
+                              {effectLabels[plan.checkout_effect] || '依卡券類型（預設）'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#8C8279]">折抵範圍</span>
+                            <span className="font-medium text-[#3E332B]">
+                              {plan.checkout_scope === 'all' ? '入場＋智能板＋加購' : '只折入場'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#8C8279]">有效期限</span>
+                            <span className="font-medium text-[#3E332B]">
+                              {plan.valid_days ? `${plan.valid_days} 天` : '永久有效'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-[#E8DEC8]/60 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePlanActive(plan)}
+                          className={`text-xs font-bold px-2.5 py-1 rounded-lg border transition-colors ${
+                            plan.is_active
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : 'bg-stone-100 text-stone-600 border-stone-200 hover:bg-stone-200'
+                          }`}
+                        >
+                          {plan.is_active ? '啟用中' : '已停用'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditPlan(plan)}
+                          className="px-3 py-1 bg-white hover:bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8] rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>編輯</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* PROMO ADD / EDIT MODAL */}
       {showPromoModal && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
@@ -1022,7 +1290,7 @@ export default function CouponsPage() {
                 </div>
 
                 <div className="text-[11px] text-[#8C8279] italic">
-                  💡 百分比折抵說明：填寫 10 代表 9 折（折抵 10%）；填寫 90 亦自動轉換為 9 折。
+                  百分比折抵說明：填寫 10 代表 9 折（折抵 10%）；填寫 90 亦自動轉換為 9 折。
                 </div>
               </div>
 
@@ -1131,7 +1399,7 @@ export default function CouponsPage() {
                     onChange={e => setPromoForm({ ...promoForm, is_pos_quick_select: e.target.checked })}
                     className="rounded border-[#E8DEC8] text-[#8B5B43] focus:ring-[#8B5B43]"
                   />
-                  <span>⚡ 設為 POS 現場結帳快捷鍵（店員可在結帳頁面一鍵點擊帶入）</span>
+                  <span>設為 POS 現場結帳快捷鍵（店員可在結帳頁面一鍵點擊帶入）</span>
                 </label>
 
                 <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-[#3E332B]">
@@ -1264,7 +1532,235 @@ export default function CouponsPage() {
         </div>
       )}
 
-      {/* DELETE CONFIRM DIALOG */}
+      {/* PASS PLAN ADD / EDIT MODAL (Section 3.9) */}
+      {showPlanModal && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-xs" onClick={() => setShowPlanModal(false)} />
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden relative z-10 flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="px-6 py-4.5 bg-[#FAF7F2] border-b border-[#E8DEC8] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-white border border-[#E8DEC8] flex items-center justify-center text-[#8B5B43]">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <h3 className="font-extrabold text-lg text-[#3E332B]">
+                  {editingPlan ? '編輯卡券方案' : '新增卡券方案'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPlanModal(false)}
+                className="p-1.5 text-[#8C8279] hover:text-[#3E332B] rounded-full hover:bg-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form Body */}
+            <form onSubmit={handleSavePlan} className="p-6 overflow-y-auto space-y-5 flex-1">
+              {/* Basic Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-[#3E332B] block mb-1">
+                    方案名稱 *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={planForm.name}
+                    onChange={e => setPlanForm({ ...planForm, name: e.target.value })}
+                    placeholder="例如: 平日10小時券、單次暢遊卡"
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-[#3E332B] block mb-1">
+                    卡券類型 *
+                  </label>
+                  <select
+                    value={planForm.pass_type}
+                    onChange={e => setPlanForm({ ...planForm, pass_type: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                  >
+                    <option value="TIME_PASS">時數券 (TIME_PASS)</option>
+                    <option value="PUNCH_CARD">次數卡 (PUNCH_CARD)</option>
+                    <option value="MONTHLY_PASS">月票 (MONTHLY_PASS)</option>
+                    <option value="DISCOUNT_VOUCHER">折扣券 (DISCOUNT_VOUCHER)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Price & Quota */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">售價 ($) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={planForm.price}
+                    onChange={e => setPlanForm({ ...planForm, price: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">參考原價 ($)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={planForm.original_value}
+                    onChange={e => setPlanForm({ ...planForm, original_value: e.target.value })}
+                    placeholder="無則留空"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">額度 *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={planForm.total_quota}
+                    onChange={e => setPlanForm({ ...planForm, total_quota: e.target.value })}
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">單位名稱 *</label>
+                  <input
+                    type="text"
+                    required
+                    value={planForm.unit_name}
+                    onChange={e => setPlanForm({ ...planForm, unit_name: e.target.value })}
+                    placeholder="小時 / 次 / 天"
+                    className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
+                  />
+                </div>
+              </div>
+
+              {/* Validity & Day Restrictions */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-[#3E332B] block mb-1">適用日期限制</label>
+                  <select
+                    value={planForm.day_restriction}
+                    onChange={e => setPlanForm({ ...planForm, day_restriction: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B]"
+                  >
+                    <option value="ALL">全日通用 (平日+假日)</option>
+                    <option value="WEEKDAY_ONLY">僅限平日使用</option>
+                    <option value="WEEKEND_ONLY">僅限週末假日使用</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-[#3E332B] block mb-1">有效天數 (發行日起算)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={planForm.valid_days}
+                    onChange={e => setPlanForm({ ...planForm, valid_days: e.target.value })}
+                    placeholder="永久有效請留空"
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B]"
+                  />
+                </div>
+              </div>
+
+              {/* Section 3.9: 結帳時怎麼折抵 */}
+              <div className="p-4 rounded-2xl bg-[#FAF0ED] border border-[#F2D6CD] space-y-3">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-[#C25E3E]" />
+                  <span className="text-xs font-extrabold text-[#3E332B]">結帳時怎麼折抵 (Section 3.9)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">折抵方式</label>
+                    <select
+                      value={planForm.checkout_effect}
+                      onChange={e => setPlanForm({ ...planForm, checkout_effect: e.target.value })}
+                      className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
+                    >
+                      <option value="">依卡券類型（預設）</option>
+                      <option value="entry_hours">每單位折 1 小時入場</option>
+                      <option value="entry_full">每次折一位的入場費</option>
+                      <option value="percent_off">打折</option>
+                      <option value="fixed_amount">每次折固定金額</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">折抵範圍</label>
+                    <select
+                      value={planForm.checkout_scope}
+                      onChange={e => setPlanForm({ ...planForm, checkout_scope: e.target.value })}
+                      className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
+                    >
+                      <option value="entry">只折入場</option>
+                      <option value="all">入場、智能板、加購都折</option>
+                    </select>
+                  </div>
+                </div>
+
+                {planForm.checkout_effect === 'fixed_amount' && (
+                  <div>
+                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">每次折固定金額 ($) *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={planForm.checkout_value}
+                      onChange={e => setPlanForm({ ...planForm, checkout_value: e.target.value })}
+                      placeholder="例如: 100 代表每次核銷折 NT$100"
+                      className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="text-xs font-bold text-[#3E332B] block mb-1">方案說明</label>
+                <textarea
+                  rows={2}
+                  value={planForm.description}
+                  onChange={e => setPlanForm({ ...planForm, description: e.target.value })}
+                  placeholder="顯示於前台或會員中心之卡券權益說明..."
+                  className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs text-[#3E332B]"
+                />
+              </div>
+
+              {/* Active Toggle */}
+              <div className="pt-2 border-t border-[#E8DEC8] flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-[#3E332B]">
+                  <input
+                    type="checkbox"
+                    checked={planForm.is_active}
+                    onChange={e => setPlanForm({ ...planForm, is_active: e.target.checked })}
+                    className="rounded border-[#E8DEC8] text-[#8B5B43] focus:ring-[#8B5B43]"
+                  />
+                  <span>即刻啟用方案（可在會員中心發行）</span>
+                </label>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="pt-4 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowPlanModal(false)}
+                  className="px-4 py-2 bg-white hover:bg-[#FAF7F2] text-[#6D5D52] text-xs font-bold rounded-xl border border-[#E8DEC8] transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[#8B5B43] hover:bg-[#7A4F3A] text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
+                >
+                  {editingPlan ? '儲存變更' : '確認建立方案'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {deletingItem && (
         <div className="fixed inset-0 z-[160] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-xs" onClick={() => setDeletingItem(null)} />

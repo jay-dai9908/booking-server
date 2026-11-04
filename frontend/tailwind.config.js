@@ -29,6 +29,9 @@ export default {
           full: '#C9BFB4',
           'full-soft': '#EEE9E3',
           danger: '#B4553F',
+          'danger-soft': '#FBEDE8', // 超時、退款底色
+          vent: '#4F7FA0',          // 冷氣出風口圖示
+          table: '#EADDCF',         // 平面圖上的桌面
           'line-green': '#06C755',
           frame: '#2A231E',
         },

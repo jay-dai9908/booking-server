@@ -94,9 +94,14 @@ export default function SessionsPage() {
       setShowPriceCards(res.data.show_price_cards !== false);
       setPriceNoticeText(res.data.price_notice_text ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品');
       setShowAnnouncement(res.data.show_announcement !== false);
-      setAnnouncementText(res.data.announcement_text ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠');
-      setShowLineButton(res.data.show_line_button !== false);
-      setLineButtonUrl(res.data.line_button_url || 'https://lin.ee/vsZhRW5');
+      setAnnouncementText(res.data.announcement_text ?? '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠');
+      try {
+        const layoutRes = await api.get('/seat-layouts/active');
+        const activeCount = layoutRes.data?.layout?.seats?.filter(s => s.is_active)?.length || 16;
+        setMaxCapacity(activeCount);
+      } catch (lErr) {
+        setMaxCapacity(16);
+      }
     } catch (err) {
       console.error('Error fetching global setting:', err);
     }
@@ -449,21 +454,21 @@ export default function SessionsPage() {
                     onClick={handleSelectWeekdays}
                     className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
-                    📅 平日 (二~五)
+                    平日 (二~五)
                   </button>
                   <button
                     type="button"
                     onClick={handleSelectMonToFri}
                     className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
-                    📅 週一~五
+                    週一~五
                   </button>
                   <button
                     type="button"
                     onClick={handleSelectWeekends}
                     className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
-                    🌟 週末 (六~日)
+                    週末 (六~日)
                   </button>
                   <button
                     type="button"
@@ -471,14 +476,14 @@ export default function SessionsPage() {
                     className="px-2 py-0.5 text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-600 hover:text-white rounded-full transition-all"
                     title="一鍵選取本月尚未排班的未來日期"
                   >
-                    🔍 選取未排班日
+                    選取未排班日
                   </button>
                   <button
                     type="button"
                     onClick={handleSelectAllMonth}
                     className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
-                    🗓️ 全選本月
+                    全選本月
                   </button>
                   <button
                     type="button"
@@ -577,7 +582,7 @@ export default function SessionsPage() {
                           : 'bg-[#FAF7F2] text-[#6E5D4F] border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white'
                       }`}
                     >
-                      ⚡ 平日 13:00-21:00
+                      平日 13:00-21:00
                     </button>
                     <button
                       type="button"
@@ -588,7 +593,7 @@ export default function SessionsPage() {
                           : 'bg-[#FAF7F2] text-[#6E5D4F] border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white'
                       }`}
                     >
-                      ⚡ 假日 10:00-21:00
+                      假日 10:00-21:00
                     </button>
                   </div>
                 </div>
@@ -600,19 +605,23 @@ export default function SessionsPage() {
                 />
               </div>
 
-              {/* Max Capacity Input */}
+              {/* Max Capacity Input (Readonly per Spec 4.9 & 6.26) */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  每時段容納人數 (預設 10 人)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  value={maxCapacity}
-                  onChange={(e) => setMaxCapacity(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm font-bold text-gray-800"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-semibold text-gray-700">
+                    時段人數上限
+                  </label>
+                  <a
+                    href="/admin/seat-layout"
+                    className="text-xs text-[#8B5B43] font-bold hover:underline"
+                  >
+                    修改座位設定 ↗
+                  </a>
+                </div>
+                <div className="w-full px-4 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-sm font-bold text-gray-600 flex items-center justify-between">
+                  <span>依座位設定：{maxCapacity || 16} 人</span>
+                  <span className="text-xs font-normal text-gray-400">已由座位圖自動同步</span>
+                </div>
               </div>
 
               {/* Submit Button */}
@@ -824,7 +833,7 @@ export default function SessionsPage() {
                   : 'text-gray-500 hover:text-gray-800'
               }`}
             >
-              ✨ 套用月曆已選 ({selectedDates.length} 天)
+              套用月曆已選 ({selectedDates.length} 天)
             </button>
             <button
               type="button"
@@ -835,7 +844,7 @@ export default function SessionsPage() {
                   : 'text-gray-500 hover:text-gray-800'
               }`}
             >
-              📅 自訂起訖日期
+              自訂起訖日期
             </button>
           </div>
 
@@ -941,7 +950,7 @@ export default function SessionsPage() {
           href="/admin/settings"
           className="px-5 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-all text-center shrink-0"
         >
-          ⚙️ 前往系統全域設定 →
+          前往系統全域設定 →
         </a>
       </div>
     </div>

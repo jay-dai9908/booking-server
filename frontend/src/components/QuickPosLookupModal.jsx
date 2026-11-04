@@ -17,6 +17,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
 import { formatBookingRef } from '../utils/customer/format';
+import ConfirmPanel from './admin/ConfirmPanel';
 
 export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) {
   const navigate = useNavigate();
@@ -30,6 +31,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
   const [toastMsg, setToastMsg] = useState(null);
   const [selectedReservationDetail, setSelectedReservationDetail] = useState(null);
   const [processingId, setProcessingId] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
 
   const notifyAdminDataChanged = () => {
     if (onDataChanged) onDataChanged();
@@ -100,7 +102,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
     setProcessingId(`checkin-${bookingRef}`);
     try {
       await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'checked_in' });
-      showToast('✅ 已完成預約報到！');
+      showToast('已完成預約報到！');
       await runLookup();
       notifyAdminDataChanged();
     } catch (err) {
@@ -120,11 +122,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
     }
   };
 
-  // 1-Click Redeem Pass
-  const handleQuickRedeemPass = async (pass) => {
-    if (!window.confirm(`確定要核銷「${pass.user?.name || ''}」的【${pass.plan_name_snapshot}】(#${pass.pass_code}) 嗎？`)) {
-      return;
-    }
+  const executeRedeemPass = async (pass) => {
     setProcessingId(`pass-${pass.id}`);
     try {
       const res = await api.post('/passes/admin/redeem', {
@@ -132,7 +130,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
         deduct_amount: 1,
         note: '櫃檯萬用查詢台快速核銷'
       });
-      showToast(res.data?.message || '🎟️ 卡券核銷成功！');
+      showToast(res.data?.message || '卡券核銷成功！');
       await runLookup();
       notifyAdminDataChanged();
     } catch (err) {
@@ -142,23 +140,22 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
     }
   };
 
-  // 1-Click Mark Shop Order Picked Up
-  const handleQuickPickupShopOrder = async (order) => {
-    if (
-      !window.confirm(
-        `確定顧客「${order.user?.name || ''}」已完成現場取貨 (#${order.order_ref}) 嗎？\n${
-          order.balance_amount > 0 ? `⚠️ 請確認現場已收取尾款 NT$ ${order.balance_amount}！\n` : ''
-        }取貨完成後若含有套裝贈品卡將自動發放至會員帳號！`
-      )
-    ) {
-      return;
-    }
+  // 1-Click Redeem Pass
+  const handleQuickRedeemPass = (pass) => {
+    setConfirmAction({
+      title: '核銷卡券',
+      message: `確定要核銷「${pass.user?.name || ''}」的【${pass.plan_name_snapshot}】(#${pass.pass_code}) 嗎？`,
+      onConfirm: () => executeRedeemPass(pass)
+    });
+  };
+
+  const executePickupShopOrder = async (order) => {
     setProcessingId(`shop-${order.id}`);
     try {
       await api.patch(`/shop/admin/orders/${order.id}`, {
         order_status: 'picked_up'
       });
-      showToast('📦 已標記取貨完成！');
+      showToast('已標記取貨完成！');
       await runLookup();
       notifyAdminDataChanged();
     } catch (err) {
@@ -166,6 +163,17 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
     } finally {
       setProcessingId(null);
     }
+  };
+
+  // 1-Click Mark Shop Order Picked Up
+  const handleQuickPickupShopOrder = (order) => {
+    setConfirmAction({
+      title: '確認取貨完成',
+      message: `確定顧客「${order.user?.name || ''}」已完成現場取貨 (#${order.order_ref}) 嗎？${
+        order.balance_amount > 0 ? ` 請確認現場已收取尾款 NT$ ${order.balance_amount}！` : ''
+      } 取貨完成後若含有套裝贈品卡將自動發放至會員帳號！`,
+      onConfirm: () => executePickupShopOrder(order)
+    });
   };
 
   const totalMatches =
@@ -189,7 +197,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
               </div>
               <div>
                 <h2 className="font-black text-base sm:text-lg">
-                  🔍 櫃檯萬用掃碼 ／ 單號快速查詢台
+                  櫃檯萬用掃碼 ／ 單號快速查詢台
                 </h2>
                 <p className="text-[11px] sm:text-xs text-[#D5CFC9]">
                   支援掃描條碼或輸入：電話、姓名、預約單號 (BK-...)、卡券條碼 (PS-...)、商城預購單 (PO-...)、末五碼
@@ -228,9 +236,9 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                   <button
                     type="button"
                     onClick={() => setQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm font-bold"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm font-bold p-1"
                   >
-                    ✕
+                    <X className="w-4 h-4" />
                   </button>
                 )}
               </div>
@@ -259,21 +267,21 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
           <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-6 bg-white">
             {!query.trim() ? (
               <div className="py-12 text-center space-y-3 text-[#8C8279]">
-                <div className="w-14 h-14 rounded-2xl bg-[#FAF7F2] border border-[#E8DEC8] flex items-center justify-center mx-auto text-2xl">
-                  📠
+                <div className="w-14 h-14 rounded-2xl bg-[#FAF7F2] border border-[#E8DEC8] flex items-center justify-center mx-auto text-[#8B5B43]">
+                  <QrCode className="w-7 h-7" />
                 </div>
                 <p className="text-sm font-bold text-[#3E332B]">
                   請刷入顧客手機條碼，或輸入電話／姓名／單號
                 </p>
                 <div className="flex flex-wrap justify-center gap-2 text-xs max-w-lg mx-auto pt-1">
                   <span className="px-3 py-1 rounded-full bg-[#FAF7F2] border border-[#E8DEC8]">
-                    📅 預約單一鍵報到 & POS 結帳
+                    預約單一鍵報到 & POS 結帳
                   </span>
                   <span className="px-3 py-1 rounded-full bg-[#FAF7F2] border border-[#E8DEC8]">
-                    🎟️ 代燙卡 / 月卡一鍵扣次核銷
+                    代燙卡 / 月卡一鍵扣次核銷
                   </span>
                   <span className="px-3 py-1 rounded-full bg-[#FAF7F2] border border-[#E8DEC8]">
-                    🛍️ 221色預購單一鍵完成取貨
+                    221色預購單一鍵完成取貨
                   </span>
                 </div>
               </div>
@@ -325,7 +333,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                                         : 'bg-amber-50 text-amber-700 border border-amber-200'
                                     }`}
                                   >
-                                    {r.is_paid ? `💰 已結帳 $${r.total_amount}` : `💳 待結帳 $${r.total_amount ?? 0}`}
+                                    {r.is_paid ? `已結帳 $${r.total_amount}` : `待結帳 $${r.total_amount ?? 0}`}
                                   </span>
                                 )}
                               </div>
@@ -343,12 +351,12 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                                 <div className="flex flex-wrap gap-1.5 pt-0.5">
                                   {r.customer_note && (
                                     <span className="text-[11px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200">
-                                      💬 顧客備註：{r.customer_note}
+                                      備註：{r.customer_note}
                                     </span>
                                   )}
                                   {r.admin_note && (
                                     <span className="text-[11px] font-bold bg-amber-50 text-amber-800 px-2 py-0.5 rounded border border-amber-200">
-                                      📌 內部備註：{r.admin_note}
+                                      內部：{r.admin_note}
                                     </span>
                                   )}
                                 </div>
@@ -413,7 +421,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                                       : 'bg-gray-200 text-gray-600'
                                   }`}
                                 >
-                                  {isActive ? '✅ 可使用' : pass.status === 'EXHAUSTED' ? '已用畢' : '已過期'}
+                                  {isActive ? '可使用' : pass.status === 'EXHAUSTED' ? '已用畢' : '已過期'}
                                 </span>
                               </div>
                               <div className="text-xs text-[#6D5D52] flex items-center flex-wrap gap-2">
@@ -436,7 +444,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                                 className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition shrink-0"
                               >
                                 <Sparkles className="w-3.5 h-3.5" />
-                                <span>⚡ 扣除 1 次 / 立即核銷</span>
+                                <span>扣除 1 次 / 立即核銷</span>
                               </button>
                             )}
                           </div>
@@ -482,12 +490,12 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                                   }`}
                                 >
                                   {isPickedUp
-                                    ? '✅ 已取貨'
+                                    ? '已取貨'
                                     : isCancelled
                                       ? '已取消'
                                       : order.order_status === 'arrived'
-                                        ? '📢 已到貨待取'
-                                        : '📦 預購備貨中'}
+                                        ? '已到貨待取'
+                                        : '預購備貨中'}
                                 </span>
                               </div>
                               <div className="text-xs text-[#6D5D52]">
@@ -553,6 +561,21 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
             }
             runLookup();
             notifyAdminDataChanged();
+          }}
+        />
+      )}
+
+      {confirmAction && (
+        <ConfirmPanel
+          isOpen={!!confirmAction}
+          title={confirmAction.title}
+          message={confirmAction.message}
+          confirmText="確認"
+          onClose={() => setConfirmAction(null)}
+          onConfirm={async () => {
+            const action = confirmAction.onConfirm;
+            setConfirmAction(null);
+            await action();
           }}
         />
       )}

@@ -177,7 +177,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
     } catch (err) {
       console.error(err);
       if (err.response?.status === 409) {
-        setErrorMessage('⚠️ 抱歉！您選擇的「智能拼豆板」在該時段剛被其他預約佔用，系統已為您更新最新可用數量，請重新調整數量。');
+        setErrorMessage('抱歉！您選擇的「智能拼豆板」在該時段剛被其他預約佔用，系統已為您更新最新可用數量，請重新調整數量。');
         fetchAvailability();
       } else {
         setErrorMessage(err.response?.data?.error || '更新設備失敗，請稍後再試');
@@ -200,11 +200,11 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-[#2C241E]">
-                  {oldTotalBoards > 0 ? '✏️ 追加/修改智能拼豆板' : '➕ 補預約智能拼豆板'}
+                  {oldTotalBoards > 0 ? '追加/修改智能拼豆板' : '補預約智能拼豆板'}
                 </h2>
                 {isAdmin && (
                   <span className="text-[11px] bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-md">
-                    🛡️ 管理員調度
+                    管理員調度
                   </span>
                 )}
               </div>
@@ -230,7 +230,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
           {/* Admin vs Customer helper message */}
           {isAdmin ? (
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex items-start gap-2.5 text-xs text-indigo-900 leading-relaxed font-medium">
-              <span className="text-base shrink-0 mt-0.5">🛡️</span>
+              <Cpu className="w-4 h-4 shrink-0 text-indigo-700 mt-0.5" />
               <div>
                 <strong>後台管理權限模式：</strong>可自由追加、調減或清空退租智能板，不受線上顧客 1 小時退租封鎖限制。確認送出後將同步自動更新訂單結帳金額。
               </div>
@@ -239,14 +239,14 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-amber-900 leading-relaxed font-medium">
               <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
               <div>
-                🔒 距離體驗開始已不足 1 小時（或體驗進行中），線上僅開放同行者「追加租用」；如需取消已保留之智能板請洽現場門市人員。
+                距離體驗開始已不足 1 小時（或體驗進行中），線上僅開放同行者「追加租用」；如需取消已保留之智能板請洽現場門市人員。
               </div>
             </div>
           ) : null}
 
           {/* Quota Banner */}
           <div className="bg-[#EDE6DD] text-[#4A3F35] px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-between">
-            <span>👥 預約人數：{reservation.pax} 人</span>
+            <span>預約人數：{reservation.pax} 人</span>
             <span>已配置：{totalBoards} 台</span>
             <span className="text-[#8B5B43]">
               尚可追加：{(allowExceedPax || isAdmin) ? '無限制' : `${Math.max(0, reservation.pax - totalBoards)} 台`}
@@ -314,7 +314,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-[15px] text-[#3E332B]">
-                          {isBringOwn ? '✨' : '🧩'} {c.name}
+                          {c.name}
                         </span>
                         <span className="text-xs bg-[#F4EFE6] text-[#8B5B43] font-bold px-2 py-0.5 rounded">
                           NT$ {c.hourly_rate} /時
@@ -326,18 +326,18 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
                         )}
                         {isHidden && (
                           <span className="text-xs bg-gray-200 text-gray-700 font-bold px-1.5 py-0.5 rounded">
-                            ⚪ 前台已隱藏
+                            前台已隱藏
                           </span>
                         )}
                         {isMaintenance && (
                           <span className="text-xs bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">
-                            🔧 維護中
+                            維護中
                           </span>
                         )}
                       </div>
                       {isMaintenance ? (
                         <div className="text-xs text-amber-700 font-bold mt-1">
-                          🔧 {c.status_note || '設備維護中，暫停借用'} {isAdmin && '(管理員可調度指派)'}
+                          {c.status_note || '設備維護中，暫停借用'} {isAdmin && '(管理員可調度指派)'}
                         </div>
                       ) : !isBringOwn ? (
                         <div className="text-xs text-[#8C8279] mt-0.5">

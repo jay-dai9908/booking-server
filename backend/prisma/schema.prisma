@@ -88,6 +88,14 @@ model Reservation {
   cancelled_at   DateTime?
   cancelled_by   String?
   
+  checked_in_by    String?   // 報到的店員名字
+  seat_source      String?   // auto | staff | customer（staff = 店員帶位，排位時固定不動）
+  billing_status   String?   // unpaid | partial | paid | waived（4.6 算出來的快取）
+  has_refund       Boolean   @default(false)
+  paid_persons     Int       @default(0)
+  amount_due       Int?      // 目前應收總額（帳單重算結果）
+  amount_received  Int       @default(0)       // 有效收款 + 補收 − 退款（不含卡券折抵）
+  
   session        Session  @relation(fields: [session_id], references: [id])
   user           User     @relation(fields: [user_id], references: [id])
 }
@@ -136,6 +144,23 @@ model GlobalSetting {
   shop_shipping_fee           Int      @default(60)
   official_line_url           String?  @default("https://lin.ee/vsZhRW5")
   bead_colors_json            Json?
+
+  // 計時與收費
+  billing_grace_minutes         Int      @default(10)
+  billing_block_minutes         Int      @default(30)
+  early_leave_mode              String   @default("booked")  // booked 照預約時數 | actual 照實際
+  board_swap_grace_minutes      Int      @default(10)
+  // 收款
+  payment_methods_json          Json?    // [{code:"cash",label:"現金",enabled:true}, ...]
+  default_split_mode            String   @default("proportional") // proportional | even | first
+  cash_float_amount             Int      @default(2000)  // 零用金
+  // 列印
+  auto_print_receipt            Boolean  @default(true)  // 完成結帳就列印
+  auto_print_summary            Boolean  @default(true)  // 整組結清時自動印整單總表
+  receipt_footer_text           String?  @default("謝謝光臨，作品記得帶回家")
+  print_lease_seconds           Int      @default(60)
+  // 座位
+  seat_layout_enabled           Boolean  @default(false)
 }
 
 model BannedIP {
@@ -183,9 +208,19 @@ model BookingEquipment {
   covered_sessions        String[]        @default([])
   created_at              DateTime        @default(now())
 
+  person_id        Int?       // 給哪一位（BookingPerson.id）
+  unit_group       String?    // 同一台板子的每一段共用一個 uuid
+  segment_no       Int        @default(1)
+  start_at         DateTime?  // 這一段開始（null = 依 covered_sessions 推算）
+  end_at           DateTime?  // 這一段結束
+  unit_rate        Int?       // 這一段的單價快照（元／小時）
+  ended_reason     String?    // swapped | returned | null
+  planned_end_at   DateTime?  // 原本預約的結束時間（拆列或第一次換板時填入），提早歸還時照這個計費（4.4.3）
+
   equipment               EquipmentConfig @relation(fields: [equipment_id], references: [id])
 
   @@index([booking_ref])
+  @@index([unit_group])
 }
 
 model PromoCode {
@@ -347,6 +382,10 @@ model PassPlan {
   is_active              Boolean   @default(true)
   created_at             DateTime  @default(now())
 
+  checkout_effect   String?   // entry_hours | entry_full | percent_off | fixed_amount；null = 依 pass_type 預設
+  checkout_scope    String    @default("entry")  // entry 只折入場 | all 入場＋智能板＋加購
+  checkout_value    Int?      // fixed_amount 用：每次折多少元
+
   user_passes            UserPass[]
 }
 
@@ -374,5 +413,271 @@ model UserPass {
   user                   User      @relation(fields: [user_id], references: [id])
   plan                   PassPlan  @relation(fields: [plan_id], references: [id])
 }
+
+// -------------------------------------------------------------
+// 座位版面（Section 3.1）
+// -------------------------------------------------------------
+
+model SeatLayout {
+  id                  Int        @id @default(autoincrement())
+  name                String     @default("店內格局")
+  status              String     @default("draft")   // draft | published | archived
+  effective_from      DateTime?  @db.Date            // 發布時填入；某天用「effective_from <= 那天」中最新的一份
+  canvas_w            Int        @default(1000)      // 平面圖單位：1 單位 = 1 公分
+  canvas_h            Int        @default(625)
+  seat_tile_w         Int        @default(60)        // 座位格在平面圖上的寬高（平面圖單位）
+  seat_tile_h         Int        @default(46)
+  grid_size           Int        @default(10)
+  background_image    String?    @db.Text            // data URL
+  background_opacity  Float      @default(0.35)
+  background_rect     Json?      // { x, y, w, h, rotation }
+  elements_json       Json       @default("[]")      // 牆面、門口、櫃檯、柱子、窗戶
+  rules_json          Json       @default("{}")      // 排位規則
+  capacity            Int        @default(0)         // 發布時算好：可自動排的啟用座位數
+  created_by_name     String?
+  published_by_name   String?
+  published_at        DateTime?
+  created_at          DateTime   @default(now())
+  updated_at          DateTime   @default(now()) @updatedAt
+
+  zones               SeatZone[]
+  tables              SeatTable[]
+  seats               Seat[]
+
+  @@index([status, effective_from])
+}
+
+model SeatZone {
+  id          Int        @id @default(autoincrement())
+  layout_id   Int
+  name        String                 // 前區、後區
+  note        String?                // 靠門口
+  sort_order  Int        @default(0) // 排位順序，越小越先排
+  polygon     Json?                  // [[x,y],...] 平面圖上的區域範圍
+  layout      SeatLayout @relation(fields: [layout_id], references: [id], onDelete: Cascade)
+  tables      SeatTable[]
+  seats       Seat[]
+}
+
+model SeatTable {
+  id               Int        @id @default(autoincrement())
+  layout_id        Int
+  zone_id          Int
+  label            String                 // 桌 1、長桌
+  shape            String     @default("rect")      // rect | square | round | long
+  arrangement      String     @default("two_sides") // two_sides | one_side | around | free
+  cx               Float                  // 桌子中心（平面圖單位）
+  cy               Float
+  w                Float      @default(60)   // 桌面寬、長（公分）
+  h                Float      @default(150)
+  rotation         Float      @default(0)    // 度，順時針，-180～180
+  sort_order       Int        @default(0)    // 同區內的桌號順序（左右交錯依此）
+  layout           SeatLayout @relation(fields: [layout_id], references: [id], onDelete: Cascade)
+  zone             SeatZone   @relation(fields: [zone_id], references: [id])
+  seats            Seat[]
+}
+
+model Seat {
+  id              Int        @id @default(autoincrement())
+  layout_id       Int
+  table_id        Int?                    // 單獨擺的座位為 null
+  zone_id         Int                     // 有桌子時必須等於桌子的 zone_id
+  code            String                  // 1-1、L-3、A1-1
+  lx              Float                   // 相對桌子中心座標或絕對座標
+  ly              Float
+  side_mode       String     @default("auto")   // auto | manual
+  side            String?                 // L | R | null
+  tags            String[]   @default([])  // vent | window | outlet | kids
+  priority        String     @default("normal") // normal | second | last | manual_only
+  is_active       Boolean    @default(true)     // false = 暫停使用
+  adjacent_codes  String[]   @default([])  // 手動指定相鄰座位
+  opposite_codes  String[]   @default([])  // 手動指定對面
+  sort_order      Int        @default(0)    // 順序
+  origin_code     String?                 // 複製草稿時原本代號
+  layout          SeatLayout @relation(fields: [layout_id], references: [id], onDelete: Cascade)
+  table           SeatTable? @relation(fields: [table_id], references: [id])
+  zone            SeatZone   @relation(fields: [zone_id], references: [id])
+
+  @@unique([layout_id, code])
+}
+
+// -------------------------------------------------------------
+// 現場每位客人與計時（Section 3.2）
+// -------------------------------------------------------------
+
+model BookingPerson {
+  id                Int       @id @default(autoincrement())
+  booking_ref       String
+  person_no         Int                     // 第幾位，從 1 開始
+  seat_code         String?                 // 實際座位
+  status            String    @default("active")   // active | removed
+  is_onsite_added   Boolean   @default(false)      // 現場加人
+  billing_start_at  DateTime?                       // 計費起點
+  timer_started_at  DateTime?                       // 開始計時
+  timer_ended_at    DateTime?                       // 離場或結帳時結束
+  paused_at         DateTime?                       // 正在暫停時間
+  paused_seconds    Int       @default(0)           // 已結束的暫停加總
+  created_by_name   String?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+
+  pauses            TimerPause[]
+
+  @@unique([booking_ref, person_no])
+  @@index([booking_ref])
+}
+
+model TimerPause {
+  id            Int           @id @default(autoincrement())
+  person_id     Int
+  started_at    DateTime
+  ended_at      DateTime?
+  reason        String?       // 外出用餐 | 休息 | 其他
+  staff_name    String?
+  person        BookingPerson @relation(fields: [person_id], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 收款紀錄（Section 3.4）
+// -------------------------------------------------------------
+
+model Payment {
+  id                  Int       @id @default(autoincrement())
+  payment_no          String    @unique          // R-0001
+  batch_no            String
+  client_batch_id     String?
+  booking_ref         String
+  kind                String                     // charge | supplement | refund | waive
+  status              String    @default("valid") // valid | voided
+  method              String                     // cash | line_pay | jkopay | card | transfer | pass | other | none
+  amount              Int                        // 正數
+  waived_amount       Int?
+  cash_received       Int?
+  change_given        Int?
+  person_nos          Int[]
+  breakdown_json      Json
+  pass_json           Json?
+  related_payment_id  Int?
+  reason              String?
+  note                String?
+  staff_name          String
+  staff_id            Int?
+  device_id           String?
+  device_label        String
+  receipt_status      String    @default("none") // none | queued | printed | failed | local
+  created_at          DateTime  @default(now())
+  voided_at           DateTime?
+  voided_by_name      String?
+  void_reason         String?
+
+  @@index([booking_ref])
+  @@index([created_at])
+  @@index([batch_no])
+  @@index([client_batch_id])
+}
+
+// -------------------------------------------------------------
+// 異動紀錄（Section 3.5）
+// -------------------------------------------------------------
+
+model AccountingEvent {
+  id            Int       @id @default(autoincrement())
+  booking_ref   String?
+  event_type    String
+  category      String    // payment | void | refund | amount | print | pass | closing | status
+  summary       String
+  amount        Int?
+  before_json   Json?
+  after_json    Json?
+  reason        String?
+  payment_id    Int?
+  print_job_id  Int?
+  staff_name    String
+  staff_id      Int?
+  device_id     String?
+  device_label  String
+  created_at    DateTime  @default(now())
+
+  @@index([created_at])
+  @@index([booking_ref])
+  @@index([category, created_at])
+}
+
+// -------------------------------------------------------------
+// 列印（Section 3.6）
+// -------------------------------------------------------------
+
+model PrintStation {
+  id               Int       @id @default(autoincrement())
+  name             String    @default("櫃檯商米")
+  secret_hash      String
+  is_active        Boolean   @default(true)
+  is_default       Boolean   @default(true)
+  accepting        Boolean   @default(true)
+  last_seen_at     DateTime?
+  printer_state    String?   // ok | no_paper | overheat | cover_open | error | not_found
+  printer_message  String?
+  app_version      String?
+  device_model     String?
+  paired_by_name   String?
+  created_at       DateTime  @default(now())
+}
+
+model PrintJob {
+  id                Int       @id @default(autoincrement())
+  job_no            String    @unique         // P-0413
+  station_id        Int?
+  type              String                    // receipt | supplement | refund | summary | closing | test
+  booking_ref       String?
+  payment_id        Int?
+  batch_no          String?
+  closing_id        Int?
+  title             String
+  commands_json     Json
+  is_reprint        Boolean   @default(false)
+  reprint_of_id     Int?
+  copy_no           Int       @default(1)
+  status            String    @default("queued") // queued | claimed | printed | failed | cancelled
+  error_code        String?
+  error_message     String?
+  attempts          Int       @default(0)
+  claimed_at        DateTime?
+  lease_until       DateTime?
+  printed_at        DateTime?
+  printed_by        String?
+  requested_by_name String
+  requested_device  String
+  created_at        DateTime  @default(now())
+
+  @@index([status, created_at])
+  @@index([booking_ref])
+}
+
+// -------------------------------------------------------------
+// 交班與流水號（Section 3.7）
+// -------------------------------------------------------------
+
+model CashClosing {
+  id               Int       @id @default(autoincrement())
+  business_date    DateTime  @db.Date
+  float_amount     Int
+  expected_cash    Int
+  counted_cash     Int
+  difference       Int
+  totals_json      Json
+  note             String?
+  staff_name       String
+  device_label     String
+  created_at       DateTime  @default(now())
+}
+
+model DailyCounter {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @db.Date
+  key         String   // payment | job
+  value       Int      @default(0)
+  @@unique([date, key])
+}
+
 
 

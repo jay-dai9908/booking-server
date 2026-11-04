@@ -28,11 +28,14 @@ export const isSunmiPosAvailable = () => {
   return typeof window !== 'undefined' && Boolean(window.AndroidPrinter);
 };
 
+import { PAYMENT_METHOD_LABELS as SHARED_PAYMENT_LABELS } from '@shared/billing.js';
+import { commandsToPreviewHtml } from '@shared/receipts.js';
+
 export const PAYMENT_METHOD_LABELS = {
-  cash: '現金付款',
-  line_pay: 'LINE Pay',
-  transfer: '銀行轉帳',
-  other: '其他方式'
+  ...SHARED_PAYMENT_LABELS,
+  jkopay: '街口支付',
+  card: '刷卡',
+  pass: '卡券折抵'
 };
 
 /**
@@ -165,7 +168,7 @@ export const buildFullReceiptCommands = (data) => {
   if (subtotalEquipment > 0) {
     commands.push({
       type: 'columns',
-      cols: ['智慧洞洞板租借', `NT$${subtotalEquipment}`],
+      cols: ['智能板租借', `NT$${subtotalEquipment}`],
       weights: [2, 1],
       aligns: [0, 2]
     });
@@ -270,7 +273,7 @@ export const buildPersonSplitReceiptCommands = (person, index, data) => {
   if (person.equipment_fee > 0) {
     commands.push({
       type: 'columns',
-      cols: [`智慧洞洞板 (${person.equipment_hours || person.base_hours}h)`, `NT$${person.equipment_fee}`],
+      cols: [`智能板 (${person.equipment_hours || person.base_hours}h)`, `NT$${person.equipment_fee}`],
       weights: [2, 1],
       aligns: [0, 2]
     });
@@ -384,6 +387,72 @@ export const sendCommandsToSunmiPrinter = (commands) => {
     } catch (err) {
       console.error('Sunmi print error:', err);
       resolve({ printedOnDevice: true, success: false, message: err.message || '列印發生例外錯誤' });
+    }
+  });
+};
+
+/**
+ * Print a job on this device (Sunmi native POS or browser print iframe) (spec 7.6)
+ */
+export const printJobOnThisDevice = async (job) => {
+  if (!job || !job.commands_json) {
+    throw new Error('無效的列印單資料');
+  }
+
+  if (isSunmiPosAvailable()) {
+    const res = await sendCommandsToSunmiPrinter(job.commands_json);
+    return {
+      success: Boolean(res.success),
+      via: 'sunmi',
+      message: res.message
+    };
+  }
+
+  // Regular browser fallback using hidden iframe
+  return new Promise((resolve) => {
+    try {
+      const htmlContent = commandsToPreviewHtml(job.commands_json);
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow.document;
+      doc.open();
+      doc.write(htmlContent);
+      doc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 1000);
+          resolve({
+            success: true,
+            via: 'browser',
+            message: '已呼叫瀏覽器列印'
+          });
+        } catch (e) {
+          document.body.removeChild(iframe);
+          resolve({
+            success: false,
+            via: 'browser',
+            message: e.message || '瀏覽器列印失敗'
+          });
+        }
+      }, 300);
+    } catch (err) {
+      resolve({
+        success: false,
+        via: 'browser',
+        message: err.message
+      });
     }
   });
 };

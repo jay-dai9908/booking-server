@@ -251,3 +251,33 @@ export const recordUserLoginLog = async (userId, req, clientInfo = {}, options =
     console.error('[recordUserLoginLog] Error:', err.message);
   }
 };
+
+/**
+ * Extract admin device ID and label from request headers (spec 5.0 item 2)
+ */
+export const getAdminDeviceInfo = (req) => {
+  const deviceId = req.headers['x-device-id'] ? String(req.headers['x-device-id']).trim() : null;
+  const rawLabel = req.headers['x-device-label'];
+  let deviceLabel = '';
+  if (rawLabel) {
+    try {
+      deviceLabel = decodeURIComponent(rawLabel).trim();
+    } catch {
+      deviceLabel = String(rawLabel).trim();
+    }
+  }
+  if (!deviceLabel) {
+    const ua = (req.headers['user-agent'] || '').toLowerCase();
+    if (/ipad|tablet|(android(?!.*mobile))/.test(ua)) {
+      deviceLabel = '平板';
+    } else if (/mobi|iphone|ipod|android.*mobile/.test(ua)) {
+      deviceLabel = '手機';
+    } else {
+      deviceLabel = '電腦';
+    }
+  }
+  return {
+    device_id: deviceId,
+    device_label: deviceLabel.slice(0, 20)
+  };
+};
