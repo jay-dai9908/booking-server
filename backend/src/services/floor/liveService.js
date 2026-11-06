@@ -364,19 +364,27 @@ export async function getLiveFloorData(dateStr = null) {
 
       if (diffMins > 10) {
         // Overtime alert
+        const alertText = `${user.name || '客人'} · 桌 ${tableName} 超時 ${diffMins} 分`;
+        const alertHint = `預約到 ${lastRes.session.end_time}，問要不要加時或結帳`;
         alerts.push({
           type: 'overtime',
           booking_ref: bRef,
-          text: `${user.name || '客人'} · 桌 ${tableName} 超時 ${diffMins} 分`,
-          hint: `預約到 ${lastRes.session.end_time}，問要不要加時或結帳`
+          title: alertText,
+          subtitle: alertHint,
+          text: alertText,
+          hint: alertHint
         });
       } else if (diffMins >= -30 && diffMins <= 0) {
         // 30 min before end
+        const alertText = `${user.name || '客人'} · 桌 ${tableName} 即將到時`;
+        const alertHint = `${lastRes.session.end_time} 到時，提醒預留 10 分鐘壓平作品`;
         alerts.push({
           type: 'warning_30m',
           booking_ref: bRef,
-          text: `${user.name || '客人'} · 桌 ${tableName} 即將到時`,
-          hint: `${lastRes.session.end_time} 到時，提醒預留 10 分鐘壓平作品`
+          title: alertText,
+          subtitle: alertHint,
+          text: alertText,
+          hint: alertHint
         });
       }
     }
@@ -385,11 +393,15 @@ export async function getLiveFloorData(dateStr = null) {
     const activeSeatCodes = new Set((layout?.seats || []).filter(s => s.is_active).map(s => s.code));
     const missingSeats = (firstRes.assigned_seats || []).filter(s => !s.startsWith('WAIT-') && !activeSeatCodes.has(s));
     if (missingSeats.length > 0) {
+      const alertText = `座位 ${missingSeats.join('、')} 已不存在，請重新帶位`;
+      const alertHint = `原座位佔用者（${user.name || '客人'} · ${bRef}）的座位已在新生效版面中刪除或停用`;
       alerts.push({
         type: 'seat_missing',
         booking_ref: bRef,
-        text: `座位 ${missingSeats.join('、')} 已不存在，請重新帶位`,
-        hint: `原座位佔用者（${user.name || '客人'} · ${bRef}）的座位已在新生效版面中刪除或停用`
+        title: alertText,
+        subtitle: alertHint,
+        text: alertText,
+        hint: alertHint
       });
     }
   }

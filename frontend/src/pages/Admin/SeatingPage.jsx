@@ -95,8 +95,25 @@ export default function SeatingPage() {
   const [swapSubmitting, setSwapSubmitting] = useState(false);
   const [swapError, setSwapError] = useState(null);
   const [selectedTableDetails, setSelectedTableDetails] = useState(null); // table object
+  const [activeMobileTableId, setActiveMobileTableId] = useState(null);
+  const [flashingTableId, setFlashingTableId] = useState(null);
 
-  // CheckIn sheet states
+  const handleMiniMapTableClick = (table) => {
+    setActiveMobileTableId(table.id);
+    const el = document.getElementById(`table-card-${table.id}`);
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const offset = 140; // sticky header + minimap
+      const targetY = window.pageYOffset + rect.top - offset;
+      window.scrollTo({ top: targetY, behavior: 'smooth' });
+      setFlashingTableId(table.id);
+      setTimeout(() => {
+        setFlashingTableId((curr) => (curr === table.id ? null : curr));
+      }, 1200);
+    }
+  };
+
+  // Toast message
   const [checkInSelectedSeats, setCheckInSelectedSeats] = useState([]);
   const [checkInStartTimer, setCheckInStartTimer] = useState(true);
   const [checkInBoardAssign, setCheckInBoardAssign] = useState({}); // { [unitGroup]: seatCode }
@@ -183,7 +200,7 @@ export default function SeatingPage() {
     // Populate pending bookings
     for (const b of pendingBookings) {
       const bSeats = b.assigned_seats || [];
-      const startTimeStr = b.start_at ? new Date(b.start_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+      const startTimeStr = b.start_at ? new Date(b.start_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : '';
       bSeats.forEach((seatCode) => {
         if (map[seatCode]) {
           map[seatCode] = {
@@ -201,6 +218,29 @@ export default function SeatingPage() {
 
     return map;
   }, [activeSeats, checkedInBookings, pendingBookings]);
+
+  // Mobile scroll-spy for MiniMap (Spec 6.5)
+  useEffect(() => {
+    if (activeTab !== 'floor') return;
+    const handleScroll = () => {
+      if (window.innerWidth >= 1024) return;
+      const tables = layout.tables || [];
+      const stickyOffset = 160;
+      for (const t of tables) {
+        const el = document.getElementById(`table-card-${t.id}`);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (rect.bottom > stickyOffset) {
+            setActiveMobileTableId(t.id);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [activeTab, layout.tables]);
 
   // Open Check In Sheet
   const handleOpenCheckIn = (booking) => {
@@ -332,7 +372,7 @@ export default function SeatingPage() {
           pillClass: 'bg-sg-honey-soft text-sg-honey font-bold'
         };
       } else {
-        const retainTime = new Date(startMs + 15 * 60000).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const retainTime = new Date(startMs + 15 * 60000).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
         return {
           label: `保留到 ${retainTime}`,
           pillClass: 'bg-sg-danger-soft text-sg-danger font-bold'
@@ -391,7 +431,7 @@ export default function SeatingPage() {
           <div className="flex items-center gap-2">
             <h1 className="text-[18px] font-bold text-sg-ink">今日帶位</h1>
             <span className="text-[13px] text-sg-muted">
-              {getServerNow().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' })}
+              {getServerNow().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short', timeZone: 'Asia/Taipei' })}
             </span>
           </div>
           <div className="text-[13px] text-sg-muted mt-0.5">
@@ -558,7 +598,7 @@ export default function SeatingPage() {
                         </div>
 
                         <div className="text-[12px] text-sg-muted mt-1">
-                          座位 {b.assigned_seats?.join('、') || '未帶位'} · 預約到 {b.end_at ? new Date(b.end_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''}
+                          座位 {b.assigned_seats?.join('、') || '未帶位'} · 預約到 {b.end_at ? new Date(b.end_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : ''}
                         </div>
                       </div>
 
@@ -632,10 +672,20 @@ export default function SeatingPage() {
       {/* TAB 2: FLOOR PLAN VIEW (平面圖) */}
       {activeTab === 'floor' && (
         <div className="space-y-4">
+          {/* Mobile Sticky MiniMap Header (Spec 6.5) */}
+          <div className="lg:hidden sticky top-0 z-20 pb-2 -mt-2 bg-sg-bg/95 backdrop-blur-sm">
+            <MiniMap
+              layout={layout}
+              seatStates={seatStatesMap}
+              activeTableId={activeMobileTableId}
+              onTableClick={handleMiniMapTableClick}
+            />
+          </div>
+
           {/* Desktop/Tablet: Side by side */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-            {/* Left: Floor canvas */}
-            <div className="lg:col-span-8 bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-3">
+            {/* Left: Floor canvas (Desktop / Tablet) */}
+            <div className="hidden lg:block lg:col-span-8 bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-sg-line">
                 <div className="text-[13px] font-bold text-sg-ink">全店座位平面圖</div>
                 <div className="flex items-center gap-3 text-[11px] text-sg-muted">
@@ -652,32 +702,35 @@ export default function SeatingPage() {
                   layout={layout}
                   seatStates={seatStatesMap}
                   onSeatClick={handleSeatClick}
-                  scale={0.8}
+                  fitContainer={true}
                 />
-              </div>
-
-              {/* Mobile Table Cards List below canvas for small screens */}
-              <div className="lg:hidden space-y-4 pt-4 border-t border-sg-line">
-                {(layout.tables || []).map((t) => {
-                  const tableSeats = (layout.seats || []).filter(s => s.table_id === t.id);
-                  const zone = (layout.zones || []).find(z => z.id === t.zone_id);
-
-                  return (
-                    <TableCard
-                      key={t.id}
-                      table={t}
-                      zoneName={zone?.name}
-                      seats={tableSeats}
-                      seatStates={seatStatesMap}
-                      onSeatClick={handleSeatClick}
-                    />
-                  );
-                })}
               </div>
             </div>
 
+            {/* Mobile Table Cards List below canvas for small screens */}
+            <div className="lg:hidden space-y-4">
+              {(layout.tables || []).map((t) => {
+                const tableSeats = (layout.seats || []).filter(s => s.table_id === t.id);
+                const zone = (layout.zones || []).find(z => z.id === t.zone_id);
+
+                return (
+                  <TableCard
+                    key={t.id}
+                    table={t}
+                    zoneName={zone?.name}
+                    seats={tableSeats}
+                    seatStates={seatStatesMap}
+                    onSeatClick={handleSeatClick}
+                    className={flashingTableId === t.id ? 'sg-flash-peach' : ''}
+                  />
+                );
+              })}
+              {/* Spacer so last card can scroll under MiniMap (Spec 6.5) */}
+              <div style={{ minHeight: 'calc(100vh - 280px)' }} />
+            </div>
+
             {/* Right: Sidebar Overview or Table Details */}
-            <div className="lg:col-span-4 space-y-4">
+            <div className="hidden lg:block lg:col-span-4 space-y-4">
               {selectedTableDetails ? (
                 <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-4">
                   <div className="flex items-center justify-between">
@@ -727,8 +780,8 @@ export default function SeatingPage() {
                             }}
                             className="p-2.5 rounded-2xl bg-white border border-sg-line cursor-pointer hover:border-sg-brown text-[12px] space-y-0.5"
                           >
-                            <div className="font-bold text-sg-ink">{al.title}</div>
-                            <div className="text-sg-muted">{al.subtitle}</div>
+                            <div className="font-bold text-sg-ink">{al.title || al.text}</div>
+                            <div className="text-sg-muted">{al.subtitle || al.hint}</div>
                           </div>
                         ))}
                       </div>

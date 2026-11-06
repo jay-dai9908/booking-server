@@ -127,21 +127,21 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[120] p-4">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-fade-in-up flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="bg-indigo-600 px-6 py-4 flex items-center justify-between shrink-0">
+        <div className="bg-sg-brown px-6 py-4 flex items-center justify-between shrink-0">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Plus className="w-5 h-5" />
             現場加人 (外加區)
           </h2>
           <button 
             onClick={onClose}
-            className="text-indigo-200 hover:text-white transition-colors p-1"
+            className="text-sg-brown-soft hover:text-white transition-colors p-1"
           >
             <X className="w-6 h-6" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 md:p-8 overflow-y-auto">
-          <p className="text-sm text-gray-500 mb-6 bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-indigo-700">
+          <p className="text-sm mb-6 bg-sg-brown-soft/40 p-3 rounded-xl border border-sg-line text-sg-ink font-medium">
             將顧客直接加入目前的「虛擬等候 / 外加區」。
           </p>
 
@@ -355,7 +355,7 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
                           <button
                             type="button"
                             onClick={() => setSelectedEquipments(prev => ({ ...prev, [c.id]: qty + 1 }))}
-                            className="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold transition-colors"
+                            className="w-7 h-7 rounded-lg bg-sg-brown-soft hover:bg-sg-brown hover:text-white text-sg-brown flex items-center justify-center font-bold transition-colors"
                           >
                             <Plus className="w-3.5 h-3.5" />
                           </button>
@@ -372,14 +372,14 @@ export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sess
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl transition-colors"
+              className="flex-1 py-3 px-4 bg-sg-paper hover:bg-sg-line/50 text-sg-ink font-bold rounded-xl border border-sg-line transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl transition-colors shadow-lg shadow-indigo-200 disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1 py-3 px-4 bg-sg-brown hover:bg-sg-brown-hover text-white font-bold rounded-xl transition-colors shadow-xs disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {isSubmitting ? (
                 <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

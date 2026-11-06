@@ -15,7 +15,8 @@ import {
   Eye,
   Check,
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  MoreVertical
 } from 'lucide-react';
 import api from '../../api/axios';
 import SegmentedTabs from '../../components/admin/SegmentedTabs';
@@ -44,6 +45,7 @@ export default function AccountingPage() {
   const [dateTo, setDateTo] = useState(todayStr);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStaff, setSelectedStaff] = useState('');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Tab 1: Payments list state
   const [payments, setPayments] = useState([]);
@@ -313,7 +315,8 @@ export default function AccountingPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Desktop Tabs (sm and above) */}
+        <div className="hidden sm:flex items-center gap-2">
           <SegmentedTabs
             tabs={[
               { id: 'payments', label: '收款明細' },
@@ -332,6 +335,69 @@ export default function AccountingPage() {
               列印日結單
             </Button>
           )}
+        </div>
+
+        {/* Mobile Tabs (below sm) - Spec 6.22 */}
+        <div className="flex sm:hidden items-center justify-between gap-1 w-full">
+          <SegmentedTabs
+            tabs={[
+              { id: 'closing', label: '日結' },
+              { id: 'events', label: '異動' },
+              { id: 'unpaid', label: `未結${summary?.unpaid?.count ? ` ${summary.unpaid.count}` : ''}` }
+            ]}
+            activeTab={['closing', 'events', 'unpaid'].includes(activeTab) ? activeTab : null}
+            onChange={(tab) => {
+              setActiveTab(tab);
+              setMobileMenuOpen(false);
+            }}
+          />
+
+          {/* More menu for 'payments' and 'print-jobs' */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className={`p-2 rounded-2xl border transition ${
+                ['payments', 'print-jobs'].includes(activeTab)
+                  ? 'bg-sg-brown text-white border-sg-brown'
+                  : 'bg-white text-sg-ink border-sg-line hover:border-sg-muted'
+              }`}
+              title="更多分頁"
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
+            {mobileMenuOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-36 bg-white border border-sg-line rounded-2xl shadow-lg z-30 py-1.5 text-[13px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('payments');
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 font-bold transition flex items-center justify-between ${
+                    activeTab === 'payments' ? 'bg-sg-paper text-sg-brown' : 'text-sg-ink hover:bg-sg-paper/60'
+                  }`}
+                >
+                  <span>收款明細</span>
+                  {activeTab === 'payments' && <Check className="w-3.5 h-3.5 text-sg-brown" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('print-jobs');
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 font-bold transition flex items-center justify-between ${
+                    activeTab === 'print-jobs' ? 'bg-sg-paper text-sg-brown' : 'text-sg-ink hover:bg-sg-paper/60'
+                  }`}
+                >
+                  <span>列印紀錄</span>
+                  {activeTab === 'print-jobs' && <Check className="w-3.5 h-3.5 text-sg-brown" />}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -488,7 +554,7 @@ export default function AccountingPage() {
                 ) : (
                   payments.map((p) => {
                     const isVoided = p.status === 'voided';
-                    const timeStr = new Date(p.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const timeStr = new Date(p.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
 
                     return (
                       <tr
@@ -607,7 +673,7 @@ export default function AccountingPage() {
                 ) : (
                   events.map((ev) => {
                     const isSensitive = ev.category === 'void' || ev.category === 'refund' || ev.category === 'amount_change';
-                    const timeStr = new Date(ev.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const timeStr = new Date(ev.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
 
                     return (
                       <tr
@@ -680,7 +746,7 @@ export default function AccountingPage() {
                   </tr>
                 ) : (
                   printJobs.map((job) => {
-                    const timeStr = new Date(job.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const timeStr = new Date(job.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
 
                     return (
                       <tr key={job.id} className="hover:bg-sg-paper/30 transition">
@@ -856,7 +922,7 @@ export default function AccountingPage() {
                 {closingsList.map((c) => (
                   <div key={c.id} className="p-2.5 rounded-2xl bg-sg-paper/40 border border-sg-line flex items-center justify-between text-[12px]">
                     <div>
-                      <span className="font-bold text-sg-ink mr-2">{new Date(c.closed_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="font-bold text-sg-ink mr-2">{new Date(c.closed_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
                       <span className="text-sg-muted">{c.staff_name}</span>
                     </div>
                     <div>
@@ -909,7 +975,7 @@ export default function AccountingPage() {
                     return (
                       <tr key={r.booking_ref} className="hover:bg-sg-paper/30 transition">
                         <td className="py-3 px-3 text-sg-muted text-[12px]">
-                          {r.session_date ? new Date(r.session_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' }) : '-'}
+                          {r.session_date ? new Date(r.session_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', timeZone: 'Asia/Taipei' }) : '-'}
                         </td>
                         <td className="py-3 px-3 font-mono font-bold text-sg-brown text-[12px]">
                           {r.ref_display || r.booking_ref}

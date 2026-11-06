@@ -65,10 +65,10 @@ export default function PrintStationPage() {
   // Test Print
   const handleTestPrint = async () => {
     try {
-      const res = await api.post('/print/jobs', {
-        type: 'test',
-        title: '印表機測試頁'
-      });
+      const defaultStation = stationList.find(s => s.is_default) || stationList[0];
+      const res = defaultStation
+        ? await api.post(`/print/stations/${defaultStation.id}/test`)
+        : await api.post('/print/jobs', { type: 'test', title: '印表機測試頁' });
       showToast('已送出測試列印工作！');
       fetchJobs();
       if (isSunmiApp && res.data?.job) {
@@ -223,7 +223,7 @@ export default function PrintStationPage() {
             {jobs.map((job) => {
               const isFailed = job.status === 'failed';
               const isSuccess = job.status === 'succeeded';
-              const timeStr = new Date(job.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+              const timeStr = new Date(job.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' });
 
               return (
                 <div key={job.id} className="py-3 flex items-center justify-between gap-2">

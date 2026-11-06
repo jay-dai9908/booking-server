@@ -296,7 +296,7 @@ export default function ReservationsPage() {
           />
           <button 
             onClick={() => setShowManualBooking(true)}
-            className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-colors shadow-sm whitespace-nowrap"
+            className="bg-sg-brown hover:bg-sg-brown-hover text-white px-4 py-2 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-colors shadow-sm whitespace-nowrap"
           >
             <Plus className="w-4 h-4"/> 新增手動預約
           </button>
@@ -318,7 +318,7 @@ export default function ReservationsPage() {
             onClick={() => setStatusFilter(tab.key)}
             className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
               statusFilter === tab.key
-                ? 'bg-gray-900 text-white shadow-xs'
+                ? 'bg-sg-brown text-white shadow-xs'
                 : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
             }`}
           >
@@ -334,7 +334,66 @@ export default function ReservationsPage() {
           ) : !filteredReservations || filteredReservations.length === 0 ? (
             <div className="p-12 text-center text-gray-400 font-medium">此月份尚無預約紀錄或找不到符合的篩選結果</div>
           ) : (
-            <table className="w-full text-left whitespace-nowrap">
+            <>
+            {/* Mobile / Tablet Card View */}
+            <div className="lg:hidden divide-y divide-gray-100">
+              {filteredReservations.map(r => {
+                const isCancelled = r.status === 'cancelled';
+                const statusUI = getReservationStatusUI(r);
+                return (
+                  <div
+                    key={r.booking_ref}
+                    onClick={() => setSelectedReservation(r)}
+                    className="p-4 hover:bg-gray-50 transition-colors cursor-pointer space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-bold text-[15px] ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                          {r.user?.name || '未設定'}
+                        </span>
+                        <span className="text-xs text-gray-500">· {r.pax} 位</span>
+                      </div>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                        {statusUI.icon} {statusUI.text}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {format(new Date(r.session_date), 'yyyy/MM/dd')} · {r.time_blocks ? r.time_blocks.map(b => `${b.start_time}-${b.end_time}`).join(', ') : `${r.start_time}-${r.end_time}`}
+                      {r.is_unlimited && <span className="ml-2 font-bold text-sg-brown">(不限時)</span>}
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs text-gray-400">
+                        {r.user?.phone || '未提供電話'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {!isCancelled && r.attendance !== 'checked_in' && (
+                          <button
+                            type="button"
+                            disabled={checkingInRef === r.booking_ref}
+                            onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
+                            className="px-2.5 py-1 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold"
+                          >
+                            報到
+                          </button>
+                        )}
+                        {!isCancelled && !r.is_paid && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setSelectedReservation(r); }}
+                            className="px-2.5 py-1 bg-sg-honey hover:bg-sg-honey-ink text-white rounded-lg text-xs font-bold"
+                          >
+                            結帳
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table */}
+            <table className="hidden lg:table w-full text-left whitespace-nowrap">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
                   <th className="px-6 py-4 font-medium">預約日期 / 時段</th>
@@ -398,7 +457,7 @@ export default function ReservationsPage() {
                             {r.pax}
                           </span>
                           {r.is_unlimited && (
-                            <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
+                            <span className="text-[10px] font-bold text-sg-brown bg-sg-brown-soft border border-sg-line px-1.5 py-0.5 rounded">
                               不限時
                             </span>
                           )}
@@ -430,7 +489,7 @@ export default function ReservationsPage() {
                           )}
                         </div>
                         {r.attendance === 'checked_in' && r.checked_in_at && (
-                          <div className="mt-1 text-[11px] font-medium text-blue-600 flex items-center gap-0.5">
+                          <div className="mt-1 text-[11px] font-medium text-sg-muted flex items-center gap-0.5">
                             <span>報到 {format(new Date(r.checked_in_at), 'HH:mm')}</span>
                           </div>
                         )}
@@ -451,7 +510,7 @@ export default function ReservationsPage() {
                               type="button"
                               disabled={checkingInRef === r.booking_ref}
                               onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
-                              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                              className="px-2.5 py-1.5 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               <span>報到</span>
@@ -477,6 +536,7 @@ export default function ReservationsPage() {
                 })}
               </tbody>
             </table>
+            </>
           )}
         </div>
         
@@ -528,19 +588,19 @@ export default function ReservationsPage() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">顧客姓名</label>
                   <input type="text" required value={manualName} onChange={e => setManualName(e.target.value)} placeholder="例：王小明"
-                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 outline-none" />
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-sg-brown outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">聯絡電話 <span className="text-gray-400 font-normal">(選填)</span></label>
                   <input type="tel" value={manualPhone} onChange={e => setManualPhone(e.target.value)} placeholder="例：0912345678"
-                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 outline-none" />
+                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-sg-brown outline-none" />
                 </div>
               </div>
 
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">預約日期</label>
                 <input type="date" required value={manualDate} onChange={e => setManualDate(e.target.value)}
-                  className="w-full md:w-1/2 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 outline-none" />
+                  className="w-full md:w-1/2 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-sg-brown outline-none" />
               </div>
 
               {/* Force Split */}
@@ -550,7 +610,7 @@ export default function ReservationsPage() {
                     type="checkbox"
                     checked={manualForceSplit}
                     onChange={(e) => setManualForceSplit(e.target.checked)}
-                    className="w-5 h-5 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
+                    className="w-5 h-5 text-gray-900 rounded border-gray-300 focus:ring-sg-brown"
                   />
                   <div className="flex flex-col">
                     <span className="text-sm font-bold text-gray-800">同意拆桌 <span className="ml-1 text-xs text-gray-600 bg-gray-200 px-1.5 py-0.5 rounded">預設推薦</span></span>
@@ -581,7 +641,7 @@ export default function ReservationsPage() {
                           key={session.id} type="button" disabled={isFull} onClick={() => toggleManualSession(session)}
                           className={`p-3 rounded-xl border flex flex-col items-center transition-all ${
                             isFull ? 'bg-gray-50 border-gray-100 text-gray-400 opacity-60 cursor-not-allowed' 
-                                   : isSelected ? 'border-gray-900 bg-gray-900 text-white shadow-md' 
+                                   : isSelected ? 'border-sg-brown bg-sg-brown text-white shadow-md' 
                                                 : 'border-gray-200 text-gray-700 hover:border-gray-400 hover:bg-gray-50'
                           }`}
                         >
@@ -599,7 +659,7 @@ export default function ReservationsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">預約人數 (最多 {manualMaxPax} 人)</label>
                   <select 
                     value={manualPax} onChange={(e) => setManualPax(parseInt(e.target.value))}
-                    className="w-full md:w-1/2 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 outline-none"
+                    className="w-full md:w-1/2 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-sg-brown outline-none"
                   >
                     {Array.from({ length: manualMaxPax }).map((_, i) => (
                       <option key={i + 1} value={i + 1}>{i + 1} 人</option>
@@ -669,7 +729,7 @@ export default function ReservationsPage() {
                             <button
                               type="button"
                               onClick={() => setManualEquipments(prev => ({ ...prev, [c.id]: qty + 1 }))}
-                              className="w-7 h-7 rounded-lg bg-gray-900 hover:bg-gray-800 text-white flex items-center justify-center font-bold transition-colors"
+                              className="w-7 h-7 rounded-lg bg-sg-brown hover:bg-sg-brown-hover text-white flex items-center justify-center font-bold transition-colors"
                             >
                               <Plus className="w-3.5 h-3.5" />
                             </button>
@@ -683,7 +743,7 @@ export default function ReservationsPage() {
 
               <div className="pt-4 border-t border-gray-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setShowManualBooking(false)} className="px-5 py-2.5 text-gray-600 hover:bg-gray-100 rounded-xl font-medium transition-colors">取消</button>
-                <button type="submit" disabled={manualSelectedSessions.length === 0} className="px-6 py-2.5 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white rounded-xl font-bold transition-colors">確認預約</button>
+                <button type="submit" disabled={manualSelectedSessions.length === 0} className="px-6 py-2.5 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-xl font-bold transition-colors">確認預約</button>
               </div>
             </form>
           </div>

@@ -350,7 +350,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                               {(r.customer_note || r.admin_note) && (
                                 <div className="flex flex-wrap gap-1.5 pt-0.5">
                                   {r.customer_note && (
-                                    <span className="text-[11px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200">
+                                    <span className="text-[11px] font-bold bg-sg-paper text-sg-ink px-2 py-0.5 rounded border border-sg-line">
                                       備註：{r.customer_note}
                                     </span>
                                   )}
@@ -369,7 +369,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                                   type="button"
                                   disabled={processingId === `checkin-${r.booking_ref}`}
                                   onClick={() => handleQuickCheckIn(r.booking_ref)}
-                                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                                  className="px-3.5 py-2 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs transition"
                                 >
                                   <CheckCircle2 className="w-3.5 h-3.5" />
                                   <span>一鍵報到</span>
@@ -378,7 +378,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                               <button
                                 type="button"
                                 onClick={() => handleOpenReservationModal(r.booking_ref)}
-                                className="px-3.5 py-2 bg-[#2C241E] hover:bg-[#3E332B] text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                                className="px-3.5 py-2 bg-sg-brown-soft hover:bg-sg-brown text-sg-brown hover:text-white border border-sg-line rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs transition"
                               >
                                 <CreditCard className="w-3.5 h-3.5" />
                                 <span>{r.is_paid ? '訂單詳情' : '結帳 / 詳情'}</span>

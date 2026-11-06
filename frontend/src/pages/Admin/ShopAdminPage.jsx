@@ -1076,7 +1076,7 @@ export default function ShopAdminPage() {
                                     : isPaidDeposit
                                       ? 'bg-teal-50 text-teal-700 border border-teal-200'
                                       : isReported
-                                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                        ? 'bg-sg-brown-soft text-sg-brown border border-sg-line'
                                         : 'bg-amber-50 text-amber-700 border border-amber-200'
                               }`}
                             >
@@ -1208,9 +1208,9 @@ export default function ShopAdminPage() {
                 <span className="text-amber-700 block text-[10px]">已配給訂單</span>
                 <strong className="font-mono font-black text-sm text-amber-800">{poolSummary.assigned || 0}</strong>
               </div>
-              <div className="bg-blue-50 p-2.5 rounded-xl border border-blue-200">
-                <span className="text-blue-700 block text-[10px]">已對帳收款</span>
-                <strong className="font-mono font-black text-sm text-blue-800">{poolSummary.used || 0}</strong>
+              <div className="bg-sg-brown-soft/40 p-2.5 rounded-xl border border-sg-line">
+                <span className="text-sg-brown block text-[10px]">已對帳收款</span>
+                <strong className="font-mono font-black text-sm text-sg-ink">{poolSummary.used || 0}</strong>
               </div>
             </div>
 
@@ -1256,7 +1256,7 @@ export default function ShopAdminPage() {
                           ? 'bg-emerald-100 text-emerald-800'
                           : item.status === 'ASSIGNED'
                             ? 'bg-amber-100 text-amber-800'
-                            : 'bg-blue-100 text-blue-800'
+                            : 'bg-sg-brown-soft text-sg-brown'
                       }`}
                     >
                       {item.status === 'AVAILABLE' ? '可用' : item.status === 'ASSIGNED' ? '已配給' : '已收款'}

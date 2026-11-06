@@ -15,7 +15,8 @@ import {
   getStations,
   updateStation,
   pairStation,
-  unpairStation
+  unpairStation,
+  testStation
 } from '../controllers/printController.js';
 
 const router = express.Router();
@@ -48,5 +49,6 @@ router.get('/stations', ...settingsAuth, getStations);
 router.patch('/stations/:id', ...settingsAuth, updateStation);
 router.post('/stations/pair', ...settingsAuth, pairStation);
 router.post('/stations/:id/unpair', ...settingsAuth, unpairStation);
+router.post('/stations/:id/test', ...settingsAuth, testStation);
 
 export default router;

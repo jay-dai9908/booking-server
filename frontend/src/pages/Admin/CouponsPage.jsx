@@ -56,7 +56,7 @@ const DISCOUNT_TYPE_CONFIG = {
 
 const CHANNEL_CONFIG = {
   all: { label: '全通路通用 (線上+櫃檯)', short: '全通路', color: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
-  online: { label: '僅限顧客線上預約', short: '線上專用', color: 'bg-blue-50 text-blue-800 border-blue-200' },
+  online: { label: '僅限顧客線上預約', short: '線上專用', color: 'bg-sg-brown-soft text-sg-brown border-sg-line' },
   pos: { label: '僅限現場 POS 櫃檯', short: '現場櫃檯', color: 'bg-amber-50 text-amber-900 border-amber-200' }
 };
 
@@ -811,12 +811,12 @@ export default function CouponsPage() {
                           </span>
                         )}
                         {(promo.day_type_limit === 'weekday' || promo.applicable_days === 'weekday') && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 border border-blue-200">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-sg-brown-soft text-sg-brown border border-sg-line">
                             僅限平日
                           </span>
                         )}
                         {(promo.day_type_limit === 'weekend' || promo.applicable_days === 'weekend') && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 border border-purple-200">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-sg-selected text-sg-ink border border-sg-line">
                             僅限假日
                           </span>
                         )}

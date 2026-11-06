@@ -7,3 +7,23 @@
     @apply bg-gray-50 text-gray-900;
   }
 }
+
+@keyframes sg-peach-flash {
+  0%, 100% {
+    box-shadow: 0 0 0 0 transparent;
+    border-color: #E6DDD2;
+  }
+  25%, 75% {
+    box-shadow: 0 0 0 4px #E7B4A2;
+    border-color: #E7B4A2;
+  }
+  50% {
+    box-shadow: 0 0 0 0 transparent;
+    border-color: #E6DDD2;
+  }
+}
+
+.sg-flash-peach {
+  animation: sg-peach-flash 1.2s ease-in-out;
+}
+

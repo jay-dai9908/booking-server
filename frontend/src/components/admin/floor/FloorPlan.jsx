@@ -9,22 +9,44 @@ export default function FloorPlan({
   onSeatClick = null,
   interactive = true,
   scale = 1,
+  fitContainer = false,
   className = ''
 }) {
+  const containerRef = React.useRef(null);
+  const [containerWidth, setContainerWidth] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!fitContainer || !containerRef.current) return;
+    const updateW = () => {
+      if (containerRef.current) {
+        setContainerWidth(containerRef.current.clientWidth);
+      }
+    };
+    updateW();
+    const ro = new ResizeObserver(updateW);
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [fitContainer]);
+
   const canvasW = layout.canvas_w || 1000;
   const canvasH = layout.canvas_h || 625;
   const tables = layout.tables || [];
   const seats = layout.seats || [];
   const elements = layout.elements || [];
 
+  const effectiveScale = (fitContainer && containerWidth > 0)
+    ? Math.min(1, containerWidth / canvasW)
+    : scale;
+
   return (
     <div
+      ref={containerRef}
       className={`relative overflow-hidden bg-[#FAF7F2] border border-sg-line rounded-2xl select-none ${className}`}
       style={{
-        width: canvasW * scale,
-        height: canvasH * scale,
-        minWidth: canvasW * scale,
-        minHeight: canvasH * scale
+        width: fitContainer ? '100%' : canvasW * scale,
+        height: canvasH * effectiveScale,
+        maxWidth: canvasW,
+        minHeight: canvasH * effectiveScale
       }}
     >
       <div
@@ -32,7 +54,7 @@ export default function FloorPlan({
         style={{
           width: canvasW,
           height: canvasH,
-          transform: `scale(${scale})`
+          transform: `scale(${effectiveScale})`
         }}
       >
         {/* Background photo if any */}

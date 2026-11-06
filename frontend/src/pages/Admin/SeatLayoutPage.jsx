@@ -13,7 +13,6 @@ import {
   X
 } from 'lucide-react';
 import api from '../../api/axios';
-import AdminShell from '../../components/admin/AdminShell';
 import SegmentedTabs from '../../components/admin/SegmentedTabs';
 import ResponsivePanel from '../../components/admin/ResponsivePanel';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
@@ -127,10 +126,17 @@ export default function SeatLayoutPage() {
   };
 
   return (
-    <AdminShell
-      title="座位設定"
-      subtitle={layout?.status === 'published' ? '已發布生效中' : '編輯草稿中'}
-      actions={
+    <div className="space-y-4 max-w-7xl mx-auto pb-12">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-[18px] font-bold text-sg-ink">座位設定</h1>
+            <span className={`text-[12px] px-2 py-0.5 rounded-full font-bold ${layout?.status === 'published' ? 'bg-sg-sage-soft text-sg-sage-ink' : 'bg-sg-honey-soft text-sg-honey'}`}>
+              {layout?.status === 'published' ? '已發布生效中' : '編輯草稿中'}
+            </span>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"
@@ -151,9 +157,9 @@ export default function SeatLayoutPage() {
             發布版面
           </Button>
         </div>
-      }
-    >
-      <div className="p-4 max-w-7xl mx-auto space-y-4">
+      </div>
+
+      <div className="space-y-4">
         {message && (
           <div className={`p-3.5 rounded-2xl text-[13px] font-bold flex items-center justify-between ${
             message.type === 'success' ? 'bg-sg-sage-soft text-sg-sage-ink' : 'bg-sg-danger-soft text-sg-danger'
@@ -186,6 +192,7 @@ export default function SeatLayoutPage() {
             <div className="lg:col-span-3 bg-white rounded-2xl border border-sg-line p-4 overflow-auto shadow-xs">
               <FloorPlan
                 layout={layout}
+                fitContainer={true}
                 scale={0.85}
                 interactive={true}
                 onSeatClick={(seat) => {
@@ -453,6 +460,6 @@ export default function SeatLayoutPage() {
           )}
         </div>
       </ConfirmPanel>
-    </AdminShell>
+    </div>
   );
 }

@@ -436,4 +436,13 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
     assert.ok(receiptJob, 'receipt job generated for person 2');
     assert.ok(summaryJob, 'summary job generated on multi-payment settlement');
   });
+
+  t.after(async () => {
+    const refs = ['BK-DUP-0001', 'BK-CACHE-0001', 'BK-PASS-0001', 'BK-PRINT-0001'];
+    await prisma.printJob.deleteMany({ where: { booking_ref: { in: refs } } });
+    await prisma.accountingEvent.deleteMany({ where: { booking_ref: { in: refs } } });
+    await prisma.payment.deleteMany({ where: { booking_ref: { in: refs } } });
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: refs } } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: refs } } });
+  });
 });

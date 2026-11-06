@@ -203,7 +203,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
                   {oldTotalBoards > 0 ? '追加/修改智能拼豆板' : '補預約智能拼豆板'}
                 </h2>
                 {isAdmin && (
-                  <span className="text-[11px] bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-md">
+                  <span className="text-[11px] bg-sg-brown-soft text-sg-brown border border-sg-line font-bold px-2 py-0.5 rounded-md">
                     管理員調度
                   </span>
                 )}
@@ -229,8 +229,8 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
 
           {/* Admin vs Customer helper message */}
           {isAdmin ? (
-            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex items-start gap-2.5 text-xs text-indigo-900 leading-relaxed font-medium">
-              <Cpu className="w-4 h-4 shrink-0 text-indigo-700 mt-0.5" />
+            <div className="bg-sg-brown-soft/40 border border-sg-line rounded-xl p-3 flex items-start gap-2.5 text-xs text-sg-ink leading-relaxed font-medium">
+              <Cpu className="w-4 h-4 shrink-0 text-sg-brown mt-0.5" />
               <div>
                 <strong>後台管理權限模式：</strong>可自由追加、調減或清空退租智能板，不受線上顧客 1 小時退租封鎖限制。確認送出後將同步自動更新訂單結帳金額。
               </div>

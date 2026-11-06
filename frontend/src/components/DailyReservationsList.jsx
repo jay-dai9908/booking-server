@@ -161,7 +161,66 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
           ) : !filteredReservations || filteredReservations.length === 0 ? (
             <div className="p-12 text-center text-gray-400 font-medium">此篩選條件下尚無預約紀錄</div>
           ) : (
-            <table className="w-full text-left whitespace-nowrap">
+            <>
+            {/* Mobile / Tablet Card View */}
+            <div className="lg:hidden divide-y divide-gray-100">
+              {filteredReservations.map(r => {
+                const isCancelled = r.status === 'cancelled';
+                const statusUI = getReservationStatusUI(r);
+                return (
+                  <div
+                    key={r.booking_ref}
+                    onClick={() => onOpenDetails && onOpenDetails(r.booking_ref)}
+                    className="p-4 hover:bg-gray-50 transition-colors cursor-pointer space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-bold text-[15px] ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                          {r.user?.name || '未設定'}
+                        </span>
+                        <span className="text-xs text-gray-500">· {r.pax} 位</span>
+                      </div>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                        {statusUI.icon} {statusUI.text}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {r.time_blocks ? r.time_blocks.map(b => `${b.start_time}-${b.end_time}`).join(', ') : `${r.start_time}-${r.end_time}`}
+                      {r.is_unlimited && <span className="ml-2 font-bold text-sg-brown">(不限時)</span>}
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs text-gray-400">
+                        {r.user?.phone || '未提供電話'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {!isCancelled && r.attendance !== 'checked_in' && (
+                          <button
+                            type="button"
+                            disabled={checkingInRef === r.booking_ref}
+                            onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
+                            className="px-2.5 py-1 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold"
+                          >
+                            報到
+                          </button>
+                        )}
+                        {!isCancelled && !r.is_paid && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); if (onOpenDetails) onOpenDetails(r.booking_ref); }}
+                            className="px-2.5 py-1 bg-sg-honey hover:bg-sg-honey-ink text-white rounded-lg text-xs font-bold"
+                          >
+                            結帳
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table */}
+            <table className="hidden lg:table w-full text-left whitespace-nowrap">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
                   <th className="px-6 py-4 font-medium">預約時段</th>
@@ -224,7 +283,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                             {r.pax}
                           </span>
                           {r.is_unlimited && (
-                            <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
+                            <span className="text-[10px] font-bold text-sg-brown bg-sg-brown-soft border border-sg-line px-1.5 py-0.5 rounded">
                               不限時
                             </span>
                           )}
@@ -256,7 +315,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                           )}
                         </div>
                         {r.attendance === 'checked_in' && r.checked_in_at && (
-                          <div className="mt-1 text-[11px] font-medium text-blue-600 flex items-center gap-0.5">
+                          <div className="mt-1 text-[11px] font-medium text-sg-muted flex items-center gap-0.5">
                             <span>報到 {format(new Date(r.checked_in_at), 'HH:mm')}</span>
                           </div>
                         )}
@@ -277,7 +336,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                               type="button"
                               disabled={checkingInRef === r.booking_ref}
                               onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
-                              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                              className="px-2.5 py-1.5 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               <span>報到</span>
@@ -290,7 +349,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                                 e.stopPropagation();
                                 if (onOpenDetails) onOpenDetails(r.booking_ref);
                               }}
-                              className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                              className="px-2.5 py-1.5 bg-sg-honey hover:bg-sg-honey-ink text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
                             >
                               <CreditCard className="w-3.5 h-3.5" />
                               <span>結帳</span>
@@ -313,6 +372,7 @@ export default function DailyReservationsList({ date, onOpenDetails, refreshTrig
                 })}
               </tbody>
             </table>
+            </>
           )}
         </div>
         

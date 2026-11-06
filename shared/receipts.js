@@ -264,17 +264,19 @@ export function buildReceipt(payment, booking = {}, opts = {}) {
       commands.push({ type: 'text', text: `${p.label}${seatText}`, size: 22, bold: true });
 
       // Entry
-      commands.push({
-        type: 'text',
-        text: fitLine(`  入場 ${p.entry.hours} 小時`, formatReceiptMoney(p.entry.amount)),
-        size: 22
-      });
-      if (p.entry?.paused_minutes > 0) {
+      if (p.entry) {
         commands.push({
           type: 'text',
-          text: `  (已扣暫停 ${p.entry.paused_minutes} 分)`,
-          size: 20
+          text: fitLine(`  入場 ${p.entry.hours || 0} 小時`, formatReceiptMoney(p.entry.amount || 0)),
+          size: 22
         });
+        if (p.entry.paused_minutes > 0) {
+          commands.push({
+            type: 'text',
+            text: `  (已扣暫停 ${p.entry.paused_minutes} 分)`,
+            size: 20
+          });
+        }
       }
 
       // Board

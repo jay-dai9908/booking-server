@@ -289,6 +289,27 @@ export async function unpairStation(req, res) {
   }
 }
 
+export async function testStation(req, res) {
+  const { id } = req.params;
+  const deviceInfo = getAdminDeviceInfo(req);
+  try {
+    const station = await prisma.printStation.findUnique({ where: { id: Number(id) } });
+    if (!station) return res.status(404).json({ error: '找不到列印站' });
+
+    const job = await queuePrintJob({
+      type: 'test',
+      user: req.user,
+      device: deviceInfo,
+      opts: { station_id: station.id }
+    });
+
+    return res.json({ success: true, job });
+  } catch (error) {
+    console.error('[testStation] Error:', error);
+    return res.status(500).json({ error: '建立測試頁失敗' });
+  }
+}
+
 export default {
   stationHeartbeat,
   stationClaim,
@@ -303,5 +324,6 @@ export default {
   getStations,
   updateStation,
   pairStation,
-  unpairStation
+  unpairStation,
+  testStation
 };

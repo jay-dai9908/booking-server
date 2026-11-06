@@ -787,7 +787,7 @@ export default function EquipmentPage() {
                       );
                     })}
                     {sessionOcc['bring_own'] > 0 && (
-                      <span className="px-2.5 py-1 rounded-lg font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                      <span className="px-2.5 py-1 rounded-lg font-bold bg-sg-brown-soft text-sg-brown border border-sg-line">
                         自帶板: {sessionOcc['bring_own']} 台
                       </span>
                     )}

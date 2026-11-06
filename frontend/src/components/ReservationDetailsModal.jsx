@@ -27,7 +27,7 @@ export const getReservationStatusUI = (r) => {
     return { text: '已取消', icon: <XCircle className="w-4 h-4"/>, colorClass: 'text-gray-400', bgClass: 'bg-gray-100' };
   }
   if (r.attendance === 'checked_in') {
-    return { text: '已報到', icon: <CheckCircle2 className="w-4 h-4"/>, colorClass: 'text-blue-600', bgClass: 'bg-blue-50' };
+    return { text: '已報到', icon: <CheckCircle2 className="w-4 h-4"/>, colorClass: 'text-sg-brown', bgClass: 'bg-sg-brown-soft' };
   }
   if (r.attendance === 'no_show') {
     return { text: '預約未到', icon: <XCircle className="w-4 h-4"/>, colorClass: 'text-red-500', bgClass: 'bg-red-50' };
@@ -244,7 +244,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                         onClose();
                         navigate(`/admin/members?userId=${reservation.user_id}`);
                       }}
-                      className="text-xs text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md font-medium transition-colors"
+                      className="text-xs text-sg-brown hover:text-sg-brown-hover bg-sg-brown-soft hover:bg-sg-line px-2 py-0.5 rounded-md font-bold transition-colors"
                     >
                       會員資料
                     </button>
@@ -283,7 +283,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                           {statusUI.icon} {statusUI.text}
                         </span>
                         {reservation.attendance === 'checked_in' && (
-                          <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                          <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-bold text-sg-brown bg-sg-brown-soft px-2.5 py-1 rounded-lg border border-sg-line">
                             <Clock className="w-3.5 h-3.5" />
                             報到時間：{reservation.checked_in_at ? format(new Date(reservation.checked_in_at), 'MM/dd HH:mm') : '已完成'}
                           </span>
@@ -343,7 +343,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                 <div className="flex items-center gap-2">
                   <p className="text-lg font-bold text-gray-900">{reservation.pax} 人</p>
                   {reservation.is_unlimited && (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-sg-brown bg-sg-brown-soft border border-sg-line px-2 py-0.5 rounded-md">
                       不限時
                     </span>
                   )}
@@ -553,7 +553,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                       <button 
                         onClick={() => handleUpdateAttendance('checked_in')}
                         disabled={reservation.attendance === 'checked_in'}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
+                        className="px-4 py-2 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-xl font-bold transition-colors flex items-center gap-2"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                         完成報到

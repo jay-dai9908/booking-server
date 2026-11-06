@@ -26,7 +26,8 @@ export async function queuePrintJob({
   closing_id = null,
   reprint_of_id = null,
   user = {},
-  device = {}
+  device = {},
+  opts: passedOpts = {}
 }, clientTx = null) {
   const staffName = user?.name || '系統';
   const staffId = user?.id || null;
@@ -36,7 +37,12 @@ export async function queuePrintJob({
   const client = clientTx || prisma;
   const globalSetting = await client.globalSetting.findFirst() || {};
   const footerText = globalSetting.receipt_footer_text || '謝謝光臨，作品記得帶回家';
-  const opts = { footerText };
+  const opts = {
+    footerText,
+    receiptFooterText: footerText,
+    publicSiteUrl: process.env.PUBLIC_SITE_URL || device?.origin || 'https://shiguang.tw',
+    ...passedOpts
+  };
 
   let commands = [];
   let title = '列印單';
@@ -145,7 +151,10 @@ export async function queuePrintJob({
     commands = buildClosingSlip(closing, opts);
     title = `日結單 ${closing?.business_date ? closing.business_date.toISOString().slice(0, 10) : ''}`;
   } else if (type === 'test') {
-    const station = await client.printStation.findFirst({ where: { is_default: true } });
+    const stationId = opts.station_id || opts.stationId;
+    const station = stationId
+      ? await client.printStation.findUnique({ where: { id: Number(stationId) } })
+      : await client.printStation.findFirst({ where: { is_default: true } });
     commands = buildTestPage(station);
     title = '測試頁';
   }

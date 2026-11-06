@@ -527,7 +527,7 @@ export default function SessionsPage() {
                                 : isPast
                                 ? 'text-gray-400 bg-gray-50/60 hover:bg-gray-100'
                                 : isSelected
-                                ? 'bg-gray-900 text-white shadow-sm font-bold scale-[1.03]'
+                                ? 'bg-sg-brown text-white shadow-sm font-bold scale-[1.03]'
                                 : 'text-gray-700 hover:bg-amber-50 hover:text-amber-900'
                             } ${
                               isViewingList ? 'ring-2 ring-amber-500 ring-offset-1' : ''
@@ -557,7 +557,7 @@ export default function SessionsPage() {
                       已有時段
                     </span>
                     <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded bg-gray-900 inline-block" />
+                      <span className="w-2.5 h-2.5 rounded bg-sg-brown inline-block" />
                       已勾選
                     </span>
                     <span className="flex items-center gap-1">
@@ -628,7 +628,7 @@ export default function SessionsPage() {
               <button
                 type="submit"
                 disabled={isSubmitting || selectedDates.length === 0}
-                className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50 mt-2 flex justify-center items-center gap-2"
+                className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50 mt-2 flex justify-center items-center gap-2"
               >
                 {isSubmitting ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -665,7 +665,7 @@ export default function SessionsPage() {
               <label className="flex items-center cursor-pointer">
                 <div className="relative">
                   <input type="checkbox" className="sr-only" checked={allowUnlimited} onChange={handleToggleUnlimited} disabled={isLoading} />
-                  <div className={`block w-10 h-6 rounded-full transition-colors ${allowUnlimited ? 'bg-purple-500' : 'bg-gray-300'}`}></div>
+                  <div className={`block w-10 h-6 rounded-full transition-colors ${allowUnlimited ? 'bg-sg-brown' : 'bg-gray-300'}`}></div>
                   <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${allowUnlimited ? 'transform translate-x-4' : ''}`}></div>
                 </div>
                 <div className="ml-2.5 text-xs font-semibold text-gray-700">開放不限時</div>
@@ -791,7 +791,7 @@ export default function SessionsPage() {
                 <input type="number" value={globalWeekendUnlimited} onChange={e => setGlobalWeekendUnlimited(e.target.value)} placeholder="800" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
               </div>
             </div>
-            <button type="submit" className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-xl transition-all shadow-sm">儲存全店預設</button>
+            <button type="submit" className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm">儲存全店預設</button>
           </form>
         </div>
 
@@ -809,7 +809,7 @@ export default function SessionsPage() {
               <label className="block text-sm font-semibold text-gray-700 mb-1.5">不限時價格 (留空使用預設)</label>
               <input type="number" value={dailyUnlimited} onChange={e => setDailyUnlimited(e.target.value)} placeholder="留空使用預設" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
             </div>
-            <button type="submit" className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-xl transition-all shadow-sm">儲存單日覆蓋</button>
+            <button type="submit" className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm">儲存單日覆蓋</button>
           </form>
         </div>
 
@@ -919,7 +919,7 @@ export default function SessionsPage() {
             <button
               type="submit"
               disabled={isBatching || (batchMode === 'selected' && selectedDates.length === 0)}
-              className="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
+              className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
             >
               {isBatching ? (
                 <div className="w-5 h-5 mx-auto border-2 border-white/30 border-t-white rounded-full animate-spin" />

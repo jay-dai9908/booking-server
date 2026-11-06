@@ -840,7 +840,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                                     </span>
                                   )}
                                   {p.day_restriction === 'WEEKDAY_ONLY' && (
-                                    <span className="text-[11px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-bold">
+                                    <span className="text-[11px] px-2 py-0.5 rounded bg-sg-brown-soft text-sg-brown border border-sg-line font-bold">
                                       僅限平日
                                     </span>
                                   )}

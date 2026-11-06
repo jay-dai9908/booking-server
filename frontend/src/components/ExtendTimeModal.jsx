@@ -116,7 +116,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+            <div className="p-2 bg-sg-brown-soft text-sg-brown rounded-lg">
               <Clock className="w-5 h-5" />
             </div>
             <div>
@@ -145,7 +145,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
             <div className="flex justify-between items-center mb-3">
               <label className="block text-sm font-bold text-gray-700">選擇後續時段</label>
               {selectedSessions.length > 0 && (
-                <span className="text-xs bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-md font-bold">
+                <span className="text-xs bg-sg-brown-soft text-sg-brown px-2.5 py-1 rounded-md font-bold">
                   已選 {selectedSessions.length} 小時
                 </span>
               )}
@@ -165,17 +165,17 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
                   
                   return (
                     <div 
-                      key={session.id}
+                      key={session.id} 
                       onClick={() => toggleSession(session)}
                       className={`
                         relative p-3 rounded-xl border-2 cursor-pointer transition-all duration-200
                         ${isSelected 
-                          ? 'border-indigo-600 bg-indigo-50/50 shadow-sm' 
-                          : 'border-gray-100 bg-white hover:border-indigo-300 hover:bg-gray-50'}
+                          ? 'border-sg-brown bg-sg-selected shadow-sm' 
+                          : 'border-gray-100 bg-white hover:border-sg-brown hover:bg-gray-50'}
                       `}
                     >
                       {isSelected && (
-                        <div className="absolute -top-2 -right-2 bg-indigo-600 rounded-full p-0.5 shadow-sm">
+                        <div className="absolute -top-2 -right-2 bg-sg-brown rounded-full p-0.5 shadow-sm">
                           <CheckCircle className="w-4 h-4 text-white" />
                         </div>
                       )}
@@ -206,7 +206,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
 
               <div className="space-y-3">
                 {/* Mode A: Keep Seat */}
-                <label className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${extendMode === 'keep_seat' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white'} ${!isCapacitySufficient ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'hover:border-indigo-300'}`}>
+                <label className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${extendMode === 'keep_seat' ? 'border-sg-brown bg-sg-selected' : 'border-gray-200 bg-white'} ${!isCapacitySufficient ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'hover:border-sg-brown'}`}>
                   <input
                     type="radio"
                     name="extendMode"
@@ -214,7 +214,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
                     checked={extendMode === 'keep_seat'}
                     onChange={() => { if(isCapacitySufficient) setExtendMode('keep_seat') }}
                     disabled={!isCapacitySufficient}
-                    className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                    className="mt-1 w-4 h-4 text-sg-brown border-gray-300 focus:ring-sg-brown"
                   />
                   <div className="flex flex-col">
                     <span className="text-sm font-bold text-gray-900">保留原位 (推薦)</span>
@@ -223,7 +223,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
                 </label>
 
                 {/* Mode B: System Allocate */}
-                <div className={`rounded-xl border-2 transition-colors ${extendMode === 'system_allocate' ? 'border-indigo-600 bg-indigo-50/50' : 'border-gray-200 bg-white'} ${!isCapacitySufficient ? 'opacity-50 cursor-not-allowed bg-gray-50' : ''}`}>
+                <div className={`rounded-xl border-2 transition-colors ${extendMode === 'system_allocate' ? 'border-sg-brown bg-sg-selected' : 'border-gray-200 bg-white'} ${!isCapacitySufficient ? 'opacity-50 cursor-not-allowed bg-gray-50' : ''}`}>
                   <label className={`flex items-start gap-3 p-4 cursor-pointer ${!isCapacitySufficient ? 'cursor-not-allowed' : ''}`}>
                     <input
                       type="radio"
@@ -232,7 +232,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
                       checked={extendMode === 'system_allocate'}
                       onChange={() => { if(isCapacitySufficient) setExtendMode('system_allocate') }}
                       disabled={!isCapacitySufficient}
-                      className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                      className="mt-1 w-4 h-4 text-sg-brown border-gray-300 focus:ring-sg-brown"
                     />
                     <div className="flex flex-col">
                       <span className="text-sm font-bold text-gray-900">交由系統排位</span>
@@ -248,7 +248,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
                           type="checkbox"
                           checked={forceSplit}
                           onChange={(e) => setForceSplit(e.target.checked)}
-                          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                          className="w-4 h-4 text-sg-brown border-gray-300 rounded focus:ring-sg-brown"
                         />
                         <span className="text-sm font-bold text-gray-700">同意拆桌</span>
                         <span className="text-xs text-gray-500 ml-1">(若找不到大桌，優先拆散)</span>
@@ -290,10 +290,10 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
             onClick={handleSubmit}
             disabled={isSubmitting || selectedSessions.length === 0}
             className={`
-              px-6 py-2.5 text-sm font-bold rounded-xl transition-all shadow-sm
+              px-6 py-2.5 text-sm font-bold rounded-xl transition-all shadow-xs
               ${isSubmitting || selectedSessions.length === 0
-                ? 'bg-indigo-400 text-white opacity-70 cursor-not-allowed' 
-                : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-md active:scale-[0.98]'
+                ? 'bg-sg-brown text-white opacity-50 cursor-not-allowed' 
+                : 'bg-sg-brown text-white hover:bg-sg-brown-hover active:scale-[0.98]'
               }
             `}
           >
