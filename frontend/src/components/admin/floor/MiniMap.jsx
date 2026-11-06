@@ -57,6 +57,54 @@ export default function MiniMap({
             marginRight: `-${canvasW * (1 - scale)}px`
           }}
         >
+          {/* Architectural elements (walls, counters, doors, windows, pillars) */}
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${canvasW} ${canvasH}`}>
+            {(layout.elements_json || layout.elements || []).map((el, idx) => {
+              if (el.type === 'wall' && el.points && el.points.length > 1) {
+                return (
+                  <polyline
+                    key={el.id || idx}
+                    points={el.points.map(p => p.join(',')).join(' ')}
+                    stroke="#796E65"
+                    strokeWidth={el.thickness || 4}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+                );
+              }
+              if (el.type === 'window' && el.points && el.points.length > 1) {
+                return (
+                  <polyline
+                    key={el.id || idx}
+                    points={el.points.map(p => p.join(',')).join(' ')}
+                    stroke="#78B5C5"
+                    strokeWidth={el.thickness || 3}
+                    strokeDasharray="6,3"
+                    fill="none"
+                  />
+                );
+              }
+              if (el.type === 'door' || el.type === 'counter' || el.type === 'pillar') {
+                return (
+                  <rect
+                    key={el.id || idx}
+                    x={el.x}
+                    y={el.y}
+                    width={el.w}
+                    height={el.h}
+                    fill={el.type === 'pillar' ? '#796E65' : '#E5DDD0'}
+                    stroke="#C8BEB2"
+                    strokeWidth="1.5"
+                    rx="3"
+                    transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
+                  />
+                );
+              }
+              return null;
+            })}
+          </svg>
+
           {/* Tables */}
           {tables.map((t) => {
             const isActive = t.id === activeTableId;

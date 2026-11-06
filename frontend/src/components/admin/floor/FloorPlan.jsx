@@ -32,7 +32,10 @@ export default function FloorPlan({
   const canvasH = layout.canvas_h || 625;
   const tables = layout.tables || [];
   const seats = layout.seats || [];
-  const elements = layout.elements || [];
+  const elements = layout.elements_json || layout.elements || [];
+  const bgImg = layout.background_image || layout.bg_image_url;
+  const bgOpacity = (layout.background_opacity ?? layout.bg_opacity ?? 30) / 100;
+  const bgRect = layout.background_rect || { x: 0, y: 0, w: canvasW, h: canvasH };
 
   const effectiveScale = (fitContainer && containerWidth > 0)
     ? Math.min(1, containerWidth / canvasW)
@@ -58,22 +61,41 @@ export default function FloorPlan({
         }}
       >
         {/* Background photo if any */}
-        {layout.bg_image_url && (
+        {bgImg && (
           <img
-            src={layout.bg_image_url}
+            src={bgImg}
             alt="底圖"
-            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-            style={{ opacity: (layout.bg_opacity ?? 30) / 100 }}
+            className="absolute pointer-events-none object-cover"
+            style={{
+              left: bgRect.x ?? 0,
+              top: bgRect.y ?? 0,
+              width: bgRect.w ?? canvasW,
+              height: bgRect.h ?? canvasH,
+              opacity: bgOpacity
+            }}
           />
         )}
 
-        {/* SVG architectural elements (walls, doors, counters) */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none">
+        {/* SVG architectural elements (walls, doors, counters, windows, pillars) */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${canvasW} ${canvasH}`}>
           {elements.map((el, idx) => {
             if (el.type === 'wall') {
+              if (el.points && el.points.length > 1) {
+                return (
+                  <polyline
+                    key={el.id || idx}
+                    points={el.points.map(p => p.join(',')).join(' ')}
+                    stroke="#796E65"
+                    strokeWidth={el.thickness || 4}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+                );
+              }
               return (
                 <line
-                  key={idx}
+                  key={el.id || idx}
                   x1={el.x1}
                   y1={el.y1}
                   x2={el.x2}
@@ -84,10 +106,43 @@ export default function FloorPlan({
                 />
               );
             }
+            if (el.type === 'window') {
+              if (el.points && el.points.length > 1) {
+                return (
+                  <polyline
+                    key={el.id || idx}
+                    points={el.points.map(p => p.join(',')).join(' ')}
+                    stroke="#78B5C5"
+                    strokeWidth={el.thickness || 3}
+                    strokeDasharray="6,3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+                );
+              }
+            }
+            if (el.type === 'door') {
+              return (
+                <rect
+                  key={el.id || idx}
+                  x={el.x}
+                  y={el.y}
+                  width={el.w}
+                  height={el.h}
+                  fill="#FBF6EE"
+                  stroke="#A78B71"
+                  strokeWidth="2"
+                  strokeDasharray="4,2"
+                  rx="2"
+                  transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
+                />
+              );
+            }
             if (el.type === 'counter') {
               return (
                 <rect
-                  key={idx}
+                  key={el.id || idx}
                   x={el.x}
                   y={el.y}
                   width={el.w}
@@ -96,19 +151,21 @@ export default function FloorPlan({
                   stroke="#C8BEB2"
                   strokeWidth="2"
                   rx="6"
+                  transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
                 />
               );
             }
             if (el.type === 'pillar') {
               return (
                 <rect
-                  key={idx}
+                  key={el.id || idx}
                   x={el.x}
                   y={el.y}
                   width={el.w}
                   height={el.h}
                   fill="#796E65"
                   rx="4"
+                  transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
                 />
               );
             }
