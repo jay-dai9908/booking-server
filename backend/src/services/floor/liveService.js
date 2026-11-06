@@ -361,7 +361,10 @@ export async function getLiveFloorData(dateStr = null) {
 
   // 9. Board usage
   const equipmentConfigs = await prisma.equipmentConfig.findMany({
-    where: { is_active: true }
+    where: {
+      visibility_status: { not: 'HIDDEN' },
+      id: { not: 'bring_own' }
+    }
   });
 
   const boardUsage = equipmentConfigs.map(c => {
@@ -381,7 +384,7 @@ export async function getLiveFloorData(dateStr = null) {
       equipment_id: c.id,
       name: c.name,
       in_use: inUse,
-      total: c.total_inventory
+      total: c.total_stock ?? 0
     };
   });
 

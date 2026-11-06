@@ -5,8 +5,6 @@ import api from '../api/axios';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 
 export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSuccess, isAdmin = false }) {
-  if (!isOpen || !reservation) return null;
-
   const [configs, setConfigs] = useState([]);
   const [selections, setSelections] = useState({});
   const [allowExceedPax, setAllowExceedPax] = useState(false);
@@ -25,7 +23,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
   // Original quantities snapshot
   const oldQtys = React.useMemo(() => {
     const map = {};
-    (reservation.equipments || []).forEach(e => {
+    (reservation?.equipments || []).forEach(e => {
       map[e.equipment_id] = (map[e.equipment_id] || 0) + e.quantity;
     });
     return map;
@@ -103,6 +101,8 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
   useEffect(() => {
     fetchAvailability();
   }, [reservation]);
+
+  if (!isOpen || !reservation) return null;
 
   const visibleConfigs = isAdmin ? configs : configs.filter(c => c.visibility_status !== 'HIDDEN');
   const totalBoards = visibleConfigs.reduce((sum, c) => sum + (selections[c.id] || 0), 0);

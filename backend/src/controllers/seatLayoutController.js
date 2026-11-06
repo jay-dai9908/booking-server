@@ -1,9 +1,9 @@
 // backend/src/controllers/seatLayoutController.js
 import prisma from '../prismaClient.js';
 import { getActiveLayoutForDate, getLegacyFallbackLayout } from '../services/seating/layoutService.js';
-import { resolveLayoutGeometry } from '../../../../shared/allocator/geometry.js';
-import { allocate } from '../../../../shared/allocator/score.js';
-import { toTaipeiDateString } from '../../../../shared/time.js';
+import { resolveLayoutGeometry } from '../../../shared/allocator/geometry.js';
+import { allocate } from '../../../shared/allocator/score.js';
+import { toTaipeiDateString } from '../../../shared/time.js';
 
 export async function getActiveLayout(req, res) {
   try {

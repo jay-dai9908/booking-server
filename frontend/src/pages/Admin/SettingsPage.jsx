@@ -16,7 +16,8 @@ import {
   MessageCircle,
   Key,
   ShoppingBag,
-  Printer
+  Printer,
+  Clock
 } from 'lucide-react';
 import api from '../../api/axios';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';

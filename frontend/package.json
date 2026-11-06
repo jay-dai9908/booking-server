@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run lint && vite build",
     "postbuild": "node -e \"const cp = require('child_process'); try { cp.execSync('npx prisma generate', { cwd: '../backend', stdio: 'pipe' }); console.log('Prisma client synced.'); } catch (e) {} try { cp.execSync('npx prisma db push --skip-generate', { cwd: '../backend', stdio: 'pipe' }); console.log('Database schema pushed.'); } catch (e) {}\"",
-    "lint": "eslint .",
+    "lint": "eslint . --ext .js,.jsx",
     "preview": "vite preview"
   },
   "dependencies": {

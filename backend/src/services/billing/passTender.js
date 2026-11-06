@@ -1,5 +1,5 @@
 import prisma from '../../prismaClient.js';
-import { toTaipeiDateString } from '../../../shared/time.js';
+import { toTaipeiDateString } from '../../../../shared/time.js';
 
 export function checkDayRestrictionForDate(restriction, dateInput) {
   if (!restriction || restriction === 'ALL') return { ok: true };

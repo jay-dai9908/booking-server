@@ -14,7 +14,8 @@ import {
   Wrench,
   Eye,
   EyeOff,
-  Gift
+  Gift,
+  X
 } from 'lucide-react';
 import api from '../../api/axios';
 

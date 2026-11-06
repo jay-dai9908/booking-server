@@ -66,7 +66,15 @@ export default function SeatingPage() {
 
   // Live data polling
   const { data: floorData, loading, error, refresh } = useLiveFloor(null, 8000);
-  const serverNow = useServerClock(floorData?.server_now);
+  const { getServerNow } = useServerClock(floorData?.server_now);
+  const [, setClockTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setClockTick(t => t + 1);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Modals & Panels
   const [checkoutBookingRef, setCheckoutBookingRef] = useState(null);
@@ -303,7 +311,7 @@ export default function SeatingPage() {
   // Arrival status helper
   const getArrivalStatus = (startAt) => {
     if (!startAt) return null;
-    const nowMs = serverNow.getTime();
+    const nowMs = getServerNow().getTime();
     const startMs = new Date(startAt).getTime();
     const diffMins = Math.round((startMs - nowMs) / 60000);
 
@@ -379,7 +387,7 @@ export default function SeatingPage() {
           <div className="flex items-center gap-2">
             <h1 className="text-[18px] font-bold text-sg-ink">今日帶位</h1>
             <span className="text-[13px] text-sg-muted">
-              {serverNow.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' })}
+              {getServerNow().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' })}
             </span>
           </div>
           <div className="text-[13px] text-sg-muted mt-0.5">
