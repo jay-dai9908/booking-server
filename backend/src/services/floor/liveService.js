@@ -41,6 +41,39 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
   for (const eq of equipments) {
     const unitRate = eq.equipment?.hourly_rate || (eq.rental_hours > 0 ? Math.round(eq.subtotal_price / (eq.quantity * eq.rental_hours)) : 60);
 
+    let eqPlannedEndAt = null;
+    if (eq.covered_sessions && eq.covered_sessions.length > 0) {
+      const covIds = eq.covered_sessions.map(Number);
+      const matched = reservations.filter(r => covIds.includes(r.session_id));
+      if (matched.length > 0) {
+        matched.sort((a, b) => a.session.start_time.localeCompare(b.session.start_time));
+        const lastMatch = matched[matched.length - 1];
+        const dStr = typeof lastMatch.session.session_date === 'string'
+          ? lastMatch.session.session_date.slice(0, 10)
+          : toTaipeiDateString(lastMatch.session.session_date);
+        eqPlannedEndAt = new Date(`${dStr}T${lastMatch.session.end_time}:00+08:00`);
+      } else {
+        const coveredSessList = await tx.session.findMany({
+          where: { id: { in: covIds } },
+          orderBy: { start_time: 'asc' }
+        });
+        if (coveredSessList.length > 0) {
+          const lastS = coveredSessList[coveredSessList.length - 1];
+          const dStr = typeof lastS.session_date === 'string'
+            ? lastS.session_date.slice(0, 10)
+            : toTaipeiDateString(lastS.session_date);
+          eqPlannedEndAt = new Date(`${dStr}T${lastS.end_time}:00+08:00`);
+        }
+      }
+    }
+    if (!eqPlannedEndAt && reservations.length > 0) {
+      const lastRes = reservations[reservations.length - 1];
+      const dStr = typeof lastRes.session.session_date === 'string'
+        ? lastRes.session.session_date.slice(0, 10)
+        : toTaipeiDateString(lastRes.session.session_date);
+      eqPlannedEndAt = new Date(`${dStr}T${lastRes.session.end_time}:00+08:00`);
+    }
+
     if (eq.quantity <= 1) {
       if (!eq.unit_group) {
         await tx.bookingEquipment.update({
@@ -49,7 +82,7 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
             unit_group: crypto.randomUUID(),
             segment_no: 1,
             unit_rate: unitRate,
-            planned_end_at: plannedEndAt
+            planned_end_at: eqPlannedEndAt
           }
         });
       }
@@ -70,7 +103,7 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
         unit_group: crypto.randomUUID(),
         segment_no: 1,
         unit_rate: unitRate,
-        planned_end_at: plannedEndAt
+        planned_end_at: eqPlannedEndAt
       }
     });
 
@@ -88,7 +121,7 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
           unit_group: crypto.randomUUID(),
           segment_no: 1,
           unit_rate: unitRate,
-          planned_end_at: plannedEndAt
+          planned_end_at: eqPlannedEndAt
         }
       });
     }
@@ -385,6 +418,8 @@ export async function getLiveFloorData(dateStr = null) {
     return {
       equipment_id: c.id,
       name: c.name,
+      status_note: c.status_note,
+      hourly_rate: c.hourly_rate,
       in_use: inUse,
       total: c.total_stock ?? 0
     };

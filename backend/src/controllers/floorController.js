@@ -6,6 +6,7 @@ import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { refreshBillingCache, getBookingBill } from '../services/billing/billService.js';
+import { swapBoundaryOptions, toTaipeiDateString } from '../../../shared/time.js';
 
 export async function getLive(req, res) {
   try {
@@ -630,7 +631,10 @@ export async function removePerson(req, res) {
 
 export async function swapBoard(req, res) {
   const { booking_ref, unit_group } = req.params;
-  const { to_equipment_id, boundary_at } = req.body;
+  const { to_equipment_id, boundary_at, now } = req.body;
+  const deviceInfo = getAdminDeviceInfo(req);
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
 
   try {
     const updatedBill = await prisma.$transaction(async (tx) => {
@@ -648,39 +652,168 @@ export async function swapBoard(req, res) {
       if (!segments.length) throw { status: 404, message: '找不到此板子' };
 
       const activeSeg = segments[segments.length - 1];
-      const boundaryDt = new Date(boundary_at);
 
-      // Close current segment
-      await tx.bookingEquipment.update({
-        where: { id: activeSeg.id },
-        data: {
-          end_at: boundaryDt,
-          ended_reason: 'swapped'
-        }
+      // Load all covered sessions of activeSeg
+      const covSessionIds = (activeSeg.covered_sessions || []).map(Number);
+      const coveredSessions = await tx.session.findMany({
+        where: { id: { in: covSessionIds } },
+        orderBy: { start_time: 'asc' }
       });
 
-      // Create next segment
-      await tx.bookingEquipment.create({
-        data: {
-          booking_ref,
-          equipment_id: to_equipment_id,
-          equipment_name_snapshot: targetConfig.name,
-          quantity: 1,
-          rental_hours: activeSeg.rental_hours,
-          subtotal_price: 0,
-          covered_sessions: activeSeg.covered_sessions,
-          person_id: activeSeg.person_id,
-          unit_group: activeSeg.unit_group,
-          segment_no: activeSeg.segment_no + 1,
-          start_at: boundaryDt,
-          end_at: activeSeg.planned_end_at,
-          unit_rate: targetConfig.hourly_rate,
-          planned_end_at: activeSeg.planned_end_at
+      // Determine segment start time in ms
+      let segStartMs;
+      if (activeSeg.start_at) {
+        segStartMs = activeSeg.start_at.getTime();
+      } else if (coveredSessions.length > 0) {
+        const firstSess = coveredSessions[0];
+        const dStr = typeof firstSess.session_date === 'string'
+          ? firstSess.session_date.slice(0, 10)
+          : toTaipeiDateString(firstSess.session_date);
+        segStartMs = new Date(`${dStr}T${firstSess.start_time}:00+08:00`).getTime();
+      } else {
+        segStartMs = Date.now();
+      }
+
+      const nowMs = now ? new Date(now).getTime() : Date.now();
+      const { options, suggested } = swapBoundaryOptions(segStartMs, nowMs);
+
+      // Validate boundary_at
+      let boundaryMs;
+      if (boundary_at !== undefined && boundary_at !== null) {
+        boundaryMs = new Date(boundary_at).getTime();
+        const isValid = options.some(opt => Math.abs(opt - boundaryMs) < 60000);
+        if (!isValid) {
+          throw { status: 422, message: '換板時間必須是建議的半小時選項之一' };
         }
+      } else {
+        boundaryMs = suggested;
+      }
+
+      const boundaryDt = new Date(boundaryMs);
+      const isStartBoundary = Math.abs(boundaryMs - segStartMs) < 60000;
+
+      // Determine session partitioning
+      let swapSessionIndex = 0;
+      if (coveredSessions.length > 0) {
+        const foundIdx = coveredSessions.findIndex(s => {
+          const dStr = typeof s.session_date === 'string'
+            ? s.session_date.slice(0, 10)
+            : toTaipeiDateString(s.session_date);
+          const sStart = new Date(`${dStr}T${s.start_time}:00+08:00`).getTime();
+          const sEnd = new Date(`${dStr}T${s.end_time}:00+08:00`).getTime();
+          return sStart <= boundaryMs && boundaryMs < sEnd;
+        });
+        if (foundIdx !== -1) {
+          swapSessionIndex = foundIdx;
+        } else {
+          const lastS = coveredSessions[coveredSessions.length - 1];
+          const dStr = typeof lastS.session_date === 'string'
+            ? lastS.session_date.slice(0, 10)
+            : toTaipeiDateString(lastS.session_date);
+          const lastEnd = new Date(`${dStr}T${lastS.end_time}:00+08:00`).getTime();
+          if (boundaryMs >= lastEnd) {
+            swapSessionIndex = coveredSessions.length - 1;
+          } else {
+            swapSessionIndex = 0;
+          }
+        }
+      }
+
+      const oldCoveredSessions = coveredSessions.slice(0, swapSessionIndex + 1).map(s => String(s.id));
+      const newCoveredSessions = isStartBoundary
+        ? coveredSessions.map(s => String(s.id))
+        : coveredSessions.slice(swapSessionIndex).map(s => String(s.id));
+
+      // Check stock for targetConfig in all newCoveredSessions
+      const totalStock = targetConfig.total_stock;
+      if (totalStock !== null && totalStock !== undefined) {
+        const activeEquips = await tx.bookingEquipment.findMany({
+          where: {
+            equipment_id: to_equipment_id,
+            OR: [
+              { unit_group: null },
+              { unit_group: { not: unit_group } }
+            ]
+          }
+        });
+        const activeResvs = await tx.reservation.findMany({
+          where: {
+            status: { not: 'cancelled' },
+            booking_ref: { in: activeEquips.map(e => e.booking_ref) }
+          },
+          select: { booking_ref: true }
+        });
+        const activeBookingSet = new Set(activeResvs.map(r => r.booking_ref));
+        const uncancelledEquips = activeEquips.filter(e => activeBookingSet.has(e.booking_ref));
+
+        for (const sIdStr of newCoveredSessions) {
+          const sId = Number(sIdStr);
+          const occupiedCount = uncancelledEquips.filter(be => {
+            const cSessions = (be.covered_sessions || []).map(Number);
+            return cSessions.includes(sId);
+          }).reduce((sum, be) => sum + (be.quantity || 1), 0);
+
+          const available = totalStock - occupiedCount;
+          if (available < 1) {
+            throw { status: 409, message: `${targetConfig.name}剩 0 台` };
+          }
+        }
+      }
+
+      if (isStartBoundary) {
+        await tx.bookingEquipment.update({
+          where: { id: activeSeg.id },
+          data: {
+            equipment_id: to_equipment_id,
+            equipment_name_snapshot: targetConfig.name,
+            unit_rate: targetConfig.hourly_rate
+          }
+        });
+      } else {
+        await tx.bookingEquipment.update({
+          where: { id: activeSeg.id },
+          data: {
+            end_at: boundaryDt,
+            ended_reason: 'swapped',
+            covered_sessions: oldCoveredSessions
+          }
+        });
+
+        await tx.bookingEquipment.create({
+          data: {
+            booking_ref,
+            equipment_id: to_equipment_id,
+            equipment_name_snapshot: targetConfig.name,
+            quantity: 1,
+            rental_hours: activeSeg.rental_hours,
+            subtotal_price: 0,
+            covered_sessions: newCoveredSessions,
+            person_id: activeSeg.person_id,
+            unit_group: activeSeg.unit_group,
+            segment_no: activeSeg.segment_no + 1,
+            start_at: boundaryDt,
+            end_at: activeSeg.planned_end_at,
+            unit_rate: targetConfig.hourly_rate,
+            planned_end_at: activeSeg.planned_end_at
+          }
+        });
+      }
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'amount_adjusted',
+        category: 'amount',
+        summary: `換板 ${activeSeg.equipment_name_snapshot} → ${targetConfig.name}`,
+        reason: '更換智能板尺寸',
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
       });
 
       await refreshBillingCache(tx, booking_ref);
-      return await getBookingBill(booking_ref, tx);
+      const billData = await getBookingBill(booking_ref, tx);
+      return billData.bill;
     });
 
     return res.json({ success: true, bill: updatedBill, server_now: new Date().toISOString() });
@@ -694,6 +827,9 @@ export async function swapBoard(req, res) {
 export async function returnBoard(req, res) {
   const { booking_ref, unit_group } = req.params;
   const { at = new Date() } = req.body;
+  const deviceInfo = getAdminDeviceInfo(req);
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
 
   try {
     const updatedBill = await prisma.$transaction(async (tx) => {
@@ -706,16 +842,67 @@ export async function returnBoard(req, res) {
       if (!segments.length) throw { status: 404, message: '找不到此板子' };
 
       const activeSeg = segments[segments.length - 1];
+      const returnDt = new Date(at);
+      const returnMs = returnDt.getTime();
+
+      const covSessionIds = (activeSeg.covered_sessions || []).map(Number);
+      const coveredSessions = await tx.session.findMany({
+        where: { id: { in: covSessionIds } },
+        orderBy: { start_time: 'asc' }
+      });
+
+      let returnIndex = coveredSessions.length - 1;
+      if (coveredSessions.length > 0) {
+        const foundIdx = coveredSessions.findIndex(s => {
+          const dStr = typeof s.session_date === 'string'
+            ? s.session_date.slice(0, 10)
+            : toTaipeiDateString(s.session_date);
+          const sStart = new Date(`${dStr}T${s.start_time}:00+08:00`).getTime();
+          const sEnd = new Date(`${dStr}T${s.end_time}:00+08:00`).getTime();
+          return sStart <= returnMs && returnMs < sEnd;
+        });
+        if (foundIdx !== -1) {
+          returnIndex = foundIdx;
+        } else {
+          const firstS = coveredSessions[0];
+          const dStr = typeof firstS.session_date === 'string'
+            ? firstS.session_date.slice(0, 10)
+            : toTaipeiDateString(firstS.session_date);
+          const firstStart = new Date(`${dStr}T${firstS.start_time}:00+08:00`).getTime();
+          if (returnMs < firstStart) {
+            returnIndex = -1;
+          }
+        }
+      }
+
+      const keptCoveredSessions = returnIndex >= 0
+        ? coveredSessions.slice(0, returnIndex + 1).map(s => String(s.id))
+        : [];
+
       await tx.bookingEquipment.update({
         where: { id: activeSeg.id },
         data: {
-          end_at: new Date(at),
-          ended_reason: 'returned'
+          end_at: returnDt,
+          ended_reason: 'returned',
+          covered_sessions: keptCoveredSessions
         }
       });
 
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'amount_adjusted',
+        category: 'amount',
+        summary: `歸還 ${activeSeg.equipment_name_snapshot}`,
+        reason: '提前歸還智能板',
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
       await refreshBillingCache(tx, booking_ref);
-      return await getBookingBill(booking_ref, tx);
+      const billData = await getBookingBill(booking_ref, tx);
+      return billData.bill;
     });
 
     return res.json({ success: true, bill: updatedBill, server_now: new Date().toISOString() });

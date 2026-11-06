@@ -263,7 +263,8 @@ export function computeBill({
     const personBoards = [];
     let boardAmount = 0;
     for (const b of boards || []) {
-      if (b.person_no === pNo) {
+      const bPersonNo = b.person_no ?? (activePersons[0]?.person_no || 1);
+      if (bPersonNo === pNo) {
         const bCalc = boardUnitMap.get(b.unit_group);
         if (bCalc) {
           personBoards.push(bCalc);

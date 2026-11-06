@@ -72,10 +72,10 @@ export function buildBillInput({
   for (const be of bookingEquipments) {
     const uGroup = be.unit_group || `single-${be.id}`;
     if (!boardGroups.has(uGroup)) {
-      const assignedPerson = be.person_id ? effectivePersons.find(p => p.id === be.person_id) : null;
+      const assignedPerson = be.person_id ? effectivePersons.find(p => p.id === be.person_id) : (effectivePersons[0] || null);
       boardGroups.set(uGroup, {
         unit_group: be.unit_group || uGroup,
-        person_no: assignedPerson ? assignedPerson.person_no : null,
+        person_no: assignedPerson ? assignedPerson.person_no : 1,
         subtotal_price: be.subtotal_price,
         raw_items: []
       });

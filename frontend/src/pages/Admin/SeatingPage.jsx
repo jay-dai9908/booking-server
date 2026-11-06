@@ -44,7 +44,7 @@ import EquipmentAddonModal from '../../components/EquipmentAddonModal';
 import ExtendTimeModal from '../../components/ExtendTimeModal';
 import SendLineMessageModal from '../../components/SendLineMessageModal';
 
-import { swapBoundaryOptions, formatTimerHMM, blocksBy1030 } from '@shared/time.js';
+import { swapBoundaryOptions, formatTimerHMM, blocksBy1030, formatTimeHHmm } from '@shared/time.js';
 import { calculateBoardTotal } from '@shared/boardPricing.js';
 import { displayBoardName } from '@shared/billing.js';
 
@@ -90,6 +90,10 @@ export default function SeatingPage() {
   const [timerTarget, setTimerTarget] = useState(null); // booking
   const [seatActionTarget, setSeatActionTarget] = useState(null); // seat object + booking
   const [boardSwapTarget, setBoardSwapTarget] = useState(null); // { booking, unit_group, board }
+  const [selectedSwapSize, setSelectedSwapSize] = useState(null);
+  const [selectedBoundary, setSelectedBoundary] = useState(null);
+  const [swapSubmitting, setSwapSubmitting] = useState(false);
+  const [swapError, setSwapError] = useState(null);
   const [selectedTableDetails, setSelectedTableDetails] = useState(null); // table object
 
   // CheckIn sheet states
@@ -1112,6 +1116,49 @@ export default function SeatingPage() {
                 {seatActionTarget.seatInfo?.state === 'paused' ? '繼續計時' : '暫停計時'}
               </Button>
 
+              {/* Board swap button */}
+              {(() => {
+                const b = seatActionTarget.booking;
+                const pNo = seatActionTarget.seatInfo?.personNo || 1;
+                const personBoard = (b.boards || []).find(bd => bd.person_no === pNo) || (b.boards || [])[0];
+                if (personBoard) {
+                  return (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setBoardSwapTarget({
+                          booking: b,
+                          board: personBoard,
+                          personNo: pNo,
+                          seatCode: seatActionTarget.seat?.code
+                        });
+                        setSelectedSwapSize(null);
+                        setSelectedBoundary(null);
+                        setSwapError(null);
+                        setSeatActionTarget(null);
+                      }}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                      換板
+                    </Button>
+                  );
+                }
+                return (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setAddonReservation(seatActionTarget.booking);
+                      setSeatActionTarget(null);
+                    }}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    加租智能板
+                  </Button>
+                );
+              })()}
+
               <Button
                 variant="secondary"
                 size="sm"
@@ -1121,6 +1168,17 @@ export default function SeatingPage() {
                 }}
               >
                 加時
+              </Button>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setDetailsReservation({ booking_ref: seatActionTarget.booking.booking_ref });
+                  setSeatActionTarget(null);
+                }}
+              >
+                訂單詳情
               </Button>
             </div>
 
@@ -1134,6 +1192,226 @@ export default function SeatingPage() {
           </div>
         )}
       </ResponsivePanel>
+
+      {/* Board Swap Sheet (Section 6.9) */}
+      {boardSwapTarget && (() => {
+        const b = boardSwapTarget.booking;
+        const currentBoard = (b.boards || []).find(bd => bd.person_no === boardSwapTarget.personNo) || (b.boards || [])[0];
+        const lastSeg = currentBoard?.segments ? currentBoard.segments[currentBoard.segments.length - 1] : null;
+        const currentEqId = lastSeg?.equipment_id;
+        const currentEqName = lastSeg?.name || '智能板';
+
+        const segStartMs = lastSeg?.start_at
+          ? new Date(lastSeg.start_at).getTime()
+          : (b.start_at ? new Date(b.start_at).getTime() : Date.now());
+        const nowMs = getServerNow().getTime();
+        const usedMins = Math.max(0, Math.floor((nowMs - segStartMs) / 60000));
+        const usedText = `${Math.floor(usedMins / 60)} 小時 ${usedMins % 60} 分`;
+
+        const { options: boundaryOptions, suggested: suggestedBoundary } = swapBoundaryOptions(segStartMs, nowMs);
+        const activeBoundary = selectedBoundary !== null ? selectedBoundary : suggestedBoundary;
+
+        const bookingEndMs = b.end_at ? new Date(b.end_at).getTime() : (segStartMs + 4 * 3600000);
+        const seg1Hours = Math.max(0, (activeBoundary - segStartMs) / 3600000);
+        const seg2Hours = Math.max(0, (bookingEndMs - activeBoundary) / 3600000);
+
+        const targetOption = boardUsage.find(item => item.equipment_id === selectedSwapSize);
+
+        // Price preview calculation
+        let segsCalc = [];
+        if (selectedSwapSize === 'return') {
+          segsCalc = [
+            { hours: seg1Hours, rate: lastSeg?.hourly_rate || 90 }
+          ];
+        } else if (targetOption) {
+          segsCalc = [
+            { hours: seg1Hours, rate: lastSeg?.hourly_rate || 90 },
+            { hours: seg2Hours, rate: targetOption.hourly_rate || 120 }
+          ];
+        }
+        const calcRes = segsCalc.length > 0 ? calculateBoardTotal(segsCalc) : null;
+
+        const handleConfirmSwap = async () => {
+          if (!selectedSwapSize) return;
+          try {
+            setSwapSubmitting(true);
+            setSwapError(null);
+            const unitGroup = currentBoard?.unit_group;
+            if (!unitGroup) throw new Error('找不到此板子代號');
+
+            if (selectedSwapSize === 'return') {
+              await api.post(`/floor/${b.booking_ref}/boards/${unitGroup}/return`, {
+                at: new Date(activeBoundary).toISOString()
+              });
+              showToast('歸還智能板成功');
+            } else {
+              await api.post(`/floor/${b.booking_ref}/boards/${unitGroup}/swap`, {
+                to_equipment_id: selectedSwapSize,
+                boundary_at: new Date(activeBoundary).toISOString()
+              });
+              showToast('換板成功');
+            }
+            setBoardSwapTarget(null);
+            refresh();
+          } catch (err) {
+            console.error('swap board error:', err);
+            setSwapError(err.response?.data?.error || err.response?.data?.message || err.message || '換板失敗');
+          } finally {
+            setSwapSubmitting(false);
+          }
+        };
+
+        return (
+          <ResponsivePanel
+            isOpen={Boolean(boardSwapTarget)}
+            onClose={() => setBoardSwapTarget(null)}
+            title="換板"
+            subtitle={`${boardSwapTarget.seatCode} 第 ${boardSwapTarget.personNo} 位 · 目前 ${currentEqName}，${formatTimeHHmm(segStartMs)} 起已用 ${usedText}`}
+            footer={
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => setBoardSwapTarget(null)}
+                  disabled={swapSubmitting}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant={selectedSwapSize === 'return' ? 'danger' : 'primary'}
+                  size="md"
+                  onClick={handleConfirmSwap}
+                  disabled={!selectedSwapSize || swapSubmitting}
+                >
+                  {swapSubmitting ? '處理中...' : (selectedSwapSize === 'return' ? '確認歸還' : '確認換板')}
+                </Button>
+              </div>
+            }
+          >
+            <div className="space-y-4 py-2">
+              {swapError && (
+                <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl flex items-center gap-2 border border-red-200">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{swapError}</span>
+                </div>
+              )}
+
+              {/* 換成選項 */}
+              <div>
+                <span className="text-[13px] font-bold text-sg-ink block mb-2">換成</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {boardUsage.map(item => {
+                    const isCurrent = item.equipment_id === currentEqId;
+                    const stockLeft = Math.max(0, item.total - item.in_use);
+                    const isOutOfStock = stockLeft <= 0;
+                    const isSelected = selectedSwapSize === item.equipment_id;
+
+                    return (
+                      <button
+                        key={item.equipment_id}
+                        type="button"
+                        disabled={isCurrent || isOutOfStock}
+                        onClick={() => setSelectedSwapSize(item.equipment_id)}
+                        className={`p-3 rounded-2xl border text-left transition relative ${
+                          isSelected
+                            ? 'border-sg-brown bg-sg-paper/60 ring-2 ring-sg-brown'
+                            : isCurrent || isOutOfStock
+                            ? 'border-sg-line bg-gray-50 opacity-50 cursor-not-allowed'
+                            : 'border-sg-line bg-white hover:border-sg-brown/50'
+                        }`}
+                      >
+                        <div className="font-bold text-[14px] text-sg-ink">
+                          {item.name} {item.status_note ? `(${item.status_note})` : ''}
+                          {isCurrent && <span className="ml-1 text-[11px] text-sg-muted font-normal">(目前尺寸)</span>}
+                        </div>
+                        <div className="text-[12px] text-sg-muted mt-0.5">
+                          NT${item.hourly_rate || 120} / 小時 · {isOutOfStock ? '剩 0 台' : `剩 ${stockLeft} 台`}
+                        </div>
+                      </button>
+                    );
+                  })}
+
+                  {/* 不用了，歸還 */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSwapSize('return')}
+                    className={`p-3 rounded-2xl border text-left transition relative ${
+                      selectedSwapSize === 'return'
+                        ? 'border-sg-danger bg-red-50 ring-2 ring-sg-danger'
+                        : 'border-sg-line bg-white hover:border-sg-danger/50'
+                    }`}
+                  >
+                    <div className="font-bold text-[14px] text-sg-danger">
+                      不用了，歸還
+                    </div>
+                    <div className="text-[12px] text-sg-muted mt-0.5">
+                      提前結束租借，庫存將自歸還時間點釋出
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* 換板時間 */}
+              <div>
+                <span className="text-[13px] font-bold text-sg-ink block mb-1">換板時間</span>
+                <div className="flex items-center gap-2 mb-1.5">
+                  {boundaryOptions.map(opt => {
+                    const isSelected = activeBoundary === opt;
+                    const isSuggested = opt === suggestedBoundary;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setSelectedBoundary(opt)}
+                        className={`px-3 py-1.5 rounded-xl text-[13px] font-bold border transition ${
+                          isSelected
+                            ? 'bg-sg-brown text-white border-sg-brown'
+                            : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown/40'
+                        }`}
+                      >
+                        {formatTimeHHmm(opt)}
+                        {isSuggested && <span className="ml-1 text-[10px] opacity-80">(建議)</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-sg-muted">
+                  現在 {formatTimeHHmm(nowMs)}，以半小時取整（超過 10 分鐘才算下一個半小時）：{formatTimeHHmm(activeBoundary)} 前算{currentEqName}，之後算新尺寸。
+                </p>
+              </div>
+
+              {/* 金額試算框 */}
+              {calcRes && (
+                <div className="p-3.5 rounded-2xl bg-sg-paper/40 border border-sg-line text-[12px] space-y-1.5">
+                  <div className="flex justify-between">
+                    <span>{currentEqName} {formatTimeHHmm(segStartMs)} 到 {formatTimeHHmm(activeBoundary)} · {seg1Hours} 小時</span>
+                    <span className="font-bold">NT${Math.round(seg1Hours * (lastSeg?.hourly_rate || 90))}</span>
+                  </div>
+
+                  {selectedSwapSize !== 'return' && targetOption && (
+                    <div className="flex justify-between">
+                      <span>{targetOption.name} {formatTimeHHmm(activeBoundary)} 到 {formatTimeHHmm(bookingEndMs)} · {seg2Hours} 小時</span>
+                      <span className="font-bold">NT${Math.round(seg2Hours * (targetOption.hourly_rate || 120))}</span>
+                    </div>
+                  )}
+
+                  {calcRes.discount > 0 && (
+                    <div className="flex justify-between text-sg-green font-medium">
+                      <span>合計 {calcRes.hours} 小時買送折抵</span>
+                      <span>−NT${calcRes.discount}</span>
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t border-sg-line flex justify-between items-center text-[13px]">
+                    <span className="font-bold text-sg-ink">這台合計</span>
+                    <span className="font-num text-[16px] font-bold text-sg-ink">NT${calcRes.total}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </ResponsivePanel>
+        );
+      })()}
 
       {/* Checkout Workbench */}
       {checkoutBookingRef && (
