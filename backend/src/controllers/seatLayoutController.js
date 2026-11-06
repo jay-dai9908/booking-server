@@ -4,7 +4,7 @@ import { getActiveLayoutForDate, getLegacyFallbackLayout, loadAllocatorContext }
 import { resolveLayoutGeometry } from '../../../shared/allocator/geometry.js';
 import { allocate } from '../../../shared/allocator/score.js';
 import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
-import { allocateWithLayout } from '../services/seating/allocator.js';
+import { allocateWithLayout, reseatBookings } from '../services/seating/allocator.js';
 
 export async function getActiveLayout(req, res) {
   try {
@@ -629,54 +629,24 @@ export async function publishLayout(req, res) {
           continue;
         }
 
-        // Try to reallocate movable reservation
-        const bSessionIds = bResvs.map(r => r.session_id);
-        const bPax = firstRes.pax;
-        const bForceSplit = Boolean(firstRes.is_force_split);
-
-        const sessionResvs = await tx.reservation.findMany({
-          where: { session_id: { in: bSessionIds }, status: { not: 'cancelled' } }
-        });
-        const otherResvs = sessionResvs.filter(r => r.booking_ref !== bRef);
-
-        const newReservationBlock = {
-          booking_ref: bRef,
-          pax: bPax,
-          session_ids: bSessionIds,
-          original_sessions: bResvs
-        };
-
-        const allocResult = allocateWithLayout(otherResvs, newReservationBlock, bForceSplit, ctx);
-
-        if (allocResult.success) {
-          const myUpdate = allocResult.updates?.find(u => u.booking_ref === bRef);
-          const newSeats = myUpdate?.assigned_seats;
-          if (newSeats && newSeats.length && !newSeats.some(s => s.startsWith('WAIT-'))) {
-            await tx.reservation.updateMany({
-              where: { booking_ref: bRef },
-              data: { assigned_seats: newSeats }
-            });
-
-            // Sync booking person seats
-            const bPersons = await tx.bookingPerson.findMany({
-              where: { booking_ref: bRef },
-              orderBy: { person_no: 'asc' }
-            });
-            for (let i = 0; i < bPersons.length; i++) {
-              await tx.bookingPerson.update({
-                where: { id: bPersons[i].id },
-                data: { seat_code: newSeats[i] || null }
-              });
+        // Try to reallocate movable reservation using reseatBookings
+        try {
+          const bSessionIds = bResvs.map(r => r.session_id);
+          const disp = await reseatBookings(tx, {
+            bookingRefs: [bRef],
+            reservedSeats: [],
+            sessionIds: bSessionIds
+          });
+          if (disp && disp.length) {
+            for (const d of disp) {
+              if (!reallocated.some(r => r.booking_ref === d.booking_ref)) {
+                reallocated.push(d);
+              }
             }
-
-            reallocated.push({
-              booking_ref: bRef,
-              name: firstRes.user?.name || '客人',
-              from: assignedSeats,
-              to: newSeats
-            });
             continue;
           }
+        } catch (reseatErr) {
+          // If reseat failed, fall through to needsManual
         }
 
         needsManual.push({

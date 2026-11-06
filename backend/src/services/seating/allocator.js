@@ -6,6 +6,7 @@ import { loadAllocatorContext } from './layoutService.js';
 
 export function isReservationPinned(r) {
   if (!r) return false;
+  if (r.is_pinned === true) return true;
   if (r.attendance === 'checked_in') return true;
   if (r.is_seat_locked === true) return true;
   if (r.seat_source === 'staff') return true;
@@ -109,9 +110,10 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
   }
 
   // 2. 局部洗牌（Reshuffle）
-  // 找出重疊時段中可以挪動（非 pinned）的預約
+  // 找出重疊時段中可以挪動（非 pinned）且已佔用實體座位的預約
   const overlappingMovable = allBlocks.filter(b => {
     if (b.is_pinned) return false;
+    if (!b.assigned_seats || !b.assigned_seats.some(s => s && !s.startsWith('WAIT-'))) return false;
     return b.session_ids.some(sid => targetSessionIds.includes(sid));
   });
 
@@ -267,11 +269,48 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
  * @param {number[]} params.sessionIds - session IDs where reservedSeats are held
  * @returns {Promise<Array<{ booking_ref: string, name: string, from: string[], to: string[] }>>}
  */
-export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [], sessionIds = [] }) {
+/**
+ * 檢查給定時段是否有任何座位重複劃位（最後一道防線）
+ */
+export async function assertNoSeatCollisions(tx, sessionIds) {
+  if (!sessionIds || !sessionIds.length) return;
+  const numSessionIds = [...new Set(sessionIds.map(Number))].filter(n => Number.isInteger(n));
+  if (!numSessionIds.length) return;
+
+  const collisions = await tx.$queryRawUnsafe(`
+    SELECT session_id, seat, count(distinct booking_ref)::int as count
+    FROM "Reservation", unnest(assigned_seats) seat
+    WHERE status <> 'cancelled' AND seat NOT LIKE 'WAIT-%'
+      AND session_id IN (${numSessionIds.join(',')})
+    GROUP BY 1, 2 HAVING count(distinct booking_ref) > 1
+  `);
+
+  if (collisions && collisions.length > 0) {
+    const list = collisions.map(c => `${c.seat} (時段 ${c.session_id})`).join('、');
+    throw {
+      status: 409,
+      code: 'SEAT_COLLISION',
+      message: `座位衝突：時段內檢測到重複劃位（${list}）`
+    };
+  }
+}
+
+/**
+ * 重新排位指定預約（若被擠走）
+ * @param {any} tx - Prisma transaction
+ * @param {object} params
+ * @param {string[]} params.bookingRefs - refs of displaced bookings to reseat
+ * @param {string[]} params.reservedSeats - seats being taken by the primary action
+ * @param {number[]} params.sessionIds - session IDs where reservedSeats are held
+ * @param {string} [params.primaryBookingRef] - booking ref of the primary action (excluded from occupied reservations)
+ * @returns {Promise<Array<{ booking_ref: string, name: string, from: string[], to: string[] }>>}
+ */
+export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [], sessionIds = [], primaryBookingRef = null }) {
   const displaced = [];
   if (!bookingRefs.length) return displaced;
 
   const uniqueRefs = [...new Set(bookingRefs)];
+  const allTouchedSessionIds = new Set(sessionIds);
 
   for (const bRef of uniqueRefs) {
     const bResvs = await tx.reservation.findMany({
@@ -283,6 +322,7 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
 
     const firstRes = bResvs[0];
     const bSessionIds = bResvs.map(r => r.session_id);
+    bSessionIds.forEach(sid => allTouchedSessionIds.add(sid));
     const bPax = firstRes.pax;
     const bForceSplit = Boolean(firstRes.is_force_split);
     const sessionDate = firstRes.session.session_date;
@@ -312,7 +352,8 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
       is_pinned: true
     }));
 
-    const otherResvs = allResvsInSessions.filter(r => r.booking_ref !== bRef);
+    const excludeRefs = new Set([bRef, primaryBookingRef].filter(Boolean));
+    const otherResvs = allResvsInSessions.filter(r => !excludeRefs.has(r.booking_ref));
     const currentReservations = [...otherResvs, ...dummyReserved];
 
     const newReservationBlock = {
@@ -324,7 +365,7 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
 
     const allocResult = allocateWithLayout(currentReservations, newReservationBlock, bForceSplit, ctx);
 
-    if (!allocResult.success) {
+    if (!allocResult.success || !allocResult.updates || !allocResult.updates.length) {
       throw {
         status: 409,
         code: 'CANNOT_DISPLACE',
@@ -332,41 +373,64 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
       };
     }
 
-    const myUpdate = allocResult.updates?.find(u => u.booking_ref === bRef);
-    const newSeats = myUpdate?.assigned_seats;
+    // Apply EVERY update in allocResult.updates (Spec 1.2)
+    for (const update of allocResult.updates) {
+      const uRef = update.booking_ref;
+      if (!uRef || uRef.startsWith('__RESERVED_')) continue;
+      const newSeats = update.assigned_seats;
 
-    if (!newSeats || !newSeats.length || newSeats.some(s => s.startsWith('WAIT-'))) {
-      throw {
-        status: 409,
-        code: 'CANNOT_DISPLACE',
-        message: `原座位佔用者（${firstRes.user?.name || bRef}）自動改排失敗，座位不足`
-      };
-    }
+      if (!newSeats || !newSeats.length || newSeats.some(s => s.startsWith('WAIT-'))) {
+        throw {
+          status: 409,
+          code: 'CANNOT_DISPLACE',
+          message: `原座位佔用者（${uRef}）自動改排失敗，座位不足`
+        };
+      }
 
-    // Update reservation seats across all sessions of this booking
-    await tx.reservation.updateMany({
-      where: { booking_ref: bRef },
-      data: { assigned_seats: newSeats }
-    });
-
-    // Sync booking person seats
-    const bPersons = await tx.bookingPerson.findMany({
-      where: { booking_ref: bRef },
-      orderBy: { person_no: 'asc' }
-    });
-    for (let i = 0; i < bPersons.length; i++) {
-      await tx.bookingPerson.update({
-        where: { id: bPersons[i].id },
-        data: { seat_code: newSeats[i] || null }
+      // Fetch original reservations for this booking
+      const targetResvs = await tx.reservation.findMany({
+        where: { booking_ref: uRef, status: { not: 'cancelled' } },
+        include: { user: true }
       });
-    }
+      if (!targetResvs.length) continue;
+      const origSeats = targetResvs[0].assigned_seats || [];
 
-    displaced.push({
-      booking_ref: bRef,
-      name: firstRes.user?.name || '客人',
-      from: firstRes.assigned_seats || [],
-      to: newSeats
-    });
+      // Update reservation seats across ALL sessions of this booking
+      await tx.reservation.updateMany({
+        where: { booking_ref: uRef, status: { not: 'cancelled' } },
+        data: { assigned_seats: newSeats }
+      });
+
+      // Sync booking person seats if any exist
+      const bPersons = await tx.bookingPerson.findMany({
+        where: { booking_ref: uRef },
+        orderBy: { person_no: 'asc' }
+      });
+      for (let i = 0; i < bPersons.length; i++) {
+        await tx.bookingPerson.update({
+          where: { id: bPersons[i].id },
+          data: { seat_code: newSeats[i] || null }
+        });
+      }
+
+      // Add to displaced list
+      const existingDisp = displaced.find(d => d.booking_ref === uRef);
+      if (!existingDisp) {
+        displaced.push({
+          booking_ref: uRef,
+          name: targetResvs[0].user?.name || '客人',
+          from: origSeats,
+          to: newSeats
+        });
+      } else {
+        existingDisp.to = newSeats;
+      }
+    }
+  }
+
+  // Final check: assert no collisions in any touched sessions (when not in intermediate state with a caller)
+  if (!primaryBookingRef) {
+    await assertNoSeatCollisions(tx, Array.from(allTouchedSessionIds));
   }
 
   return displaced;

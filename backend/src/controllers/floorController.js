@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { getLiveFloorData, splitBoardUnits } from '../services/floor/liveService.js';
-import { reseatBookings } from '../services/seating/allocator.js';
+import { reseatBookings, assertNoSeatCollisions } from '../services/seating/allocator.js';
 import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
@@ -110,7 +110,8 @@ export async function checkIn(req, res) {
       const displaced = await reseatBookings(tx, {
         bookingRefs: displacedRefs,
         reservedSeats: seats,
-        sessionIds
+        sessionIds,
+        primaryBookingRef: booking_ref
       });
 
       // Split equipment units
@@ -190,6 +191,9 @@ export async function checkIn(req, res) {
           checked_in_by: staffName
         }
       });
+
+      // Assert no collisions in these sessions
+      await assertNoSeatCollisions(tx, sessionIds);
 
       return {
         booking_ref,
@@ -331,7 +335,8 @@ export async function moveSeat(req, res) {
           await reseatBookings(tx, {
             bookingRefs: conflictRefs,
             reservedSeats: [to_seat],
-            sessionIds
+            sessionIds,
+            primaryBookingRef: booking_ref
           });
         }
       }
@@ -348,6 +353,9 @@ export async function moveSeat(req, res) {
         where: { booking_ref, seat_code: from_seat },
         data: { seat_code: to_seat }
       });
+
+      // Assert no collisions
+      await assertNoSeatCollisions(tx, sessionIds);
     });
 
     return res.json({ success: true, server_now: new Date().toISOString() });
@@ -521,7 +529,8 @@ export async function addPerson(req, res) {
         await reseatBookings(tx, {
           bookingRefs: conflictRefs,
           reservedSeats: [seat_code],
-          sessionIds
+          sessionIds,
+          primaryBookingRef: booking_ref
         });
       }
 
@@ -551,6 +560,10 @@ export async function addPerson(req, res) {
           ...(seat_code ? { assigned_seats: [...(firstRes.assigned_seats || []), seat_code] } : {})
         }
       });
+
+      if (seat_code) {
+        await assertNoSeatCollisions(tx, sessionIds);
+      }
 
       const existingPersons = await tx.bookingPerson.findMany({
         where: { booking_ref },
