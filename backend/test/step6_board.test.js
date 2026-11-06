@@ -144,7 +144,6 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
   });
 
   await t.test('4.4.2 swapBoard: boundary 15:30, amount NT$345, covered_sessions updated, audit logged', async () => {
-    await prisma.accountingEvent.deleteMany({ where: { booking_ref: { startsWith: 'BK-TEST-6-' } } });
     await prisma.bookingEquipment.deleteMany({ where: { OR: [{ booking_ref: { startsWith: 'BK-TEST-6-' } }, { booking_ref: { startsWith: 'BK-OCCUPY-' } }] } });
     await prisma.reservation.deleteMany({ where: { OR: [{ booking_ref: { startsWith: 'BK-TEST-6-' } }, { booking_ref: { startsWith: 'BK-OCCUPY-' } }] } });
 
@@ -349,7 +348,6 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
     const bookingRef = 'BK-TEST-6-RETURN';
     const unitGroup = 'UG-TEST-6-RETURN';
 
-    await prisma.accountingEvent.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.bookingEquipment.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } });
 
@@ -408,8 +406,8 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
     assert.match(event.summary, /歸還 小板/);
   });
 
-  // Cleanup test data
-  await prisma.accountingEvent.deleteMany({ where: { booking_ref: { startsWith: 'BK-TEST-6-' } } });
-  await prisma.bookingEquipment.deleteMany({ where: { booking_ref: { startsWith: 'BK-TEST-6-' } } });
-  await prisma.reservation.deleteMany({ where: { booking_ref: { startsWith: 'BK-TEST-6-' } } });
+  t.after(async () => {
+    await prisma.bookingEquipment.deleteMany({ where: { OR: [{ booking_ref: { startsWith: 'BK-TEST-6-' } }, { booking_ref: { startsWith: 'BK-OCCUPY-' } }] } });
+    await prisma.reservation.deleteMany({ where: { OR: [{ booking_ref: { startsWith: 'BK-TEST-6-' } }, { booking_ref: { startsWith: 'BK-OCCUPY-' } }] } });
+  });
 });

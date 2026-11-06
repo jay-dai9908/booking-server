@@ -71,10 +71,9 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
   const deviceInfo = { device_id: 'dev-pos-1', device_label: '櫃檯平板' };
 
   await t.test('3.5 Prevent duplicate person payment & removed/nonexistent person checks', async () => {
-    const bookingRef = 'BK-DUP-0001';
+    const bookingRef = `BK-DUP-${Date.now()}-1`;
 
     await prisma.printJob.deleteMany({ where: { booking_ref: bookingRef } });
-    await prisma.accountingEvent.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.payment.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } });
@@ -145,11 +144,10 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
   });
 
   await t.test('3.6 Refresh billing cache and promo code used_count sync', async () => {
-    const bookingRef = 'BK-CACHE-0001';
-    const promoCodeStr = 'PROMO_STEP4_TEST';
+    const bookingRef = `BK-CACHE-${Date.now()}-2`;
+    const promoCodeStr = `PROMO_STEP4_${Date.now()}`;
 
     await prisma.printJob.deleteMany({ where: { booking_ref: bookingRef } });
-    await prisma.accountingEvent.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.payment.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } });
@@ -254,10 +252,9 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
   });
 
   await t.test('3.7 Validate pass tender ownership, restrictions, and restoration', async () => {
-    const bookingRef = 'BK-PASS-0001';
+    const bookingRef = `BK-PASS-${Date.now()}-3`;
 
     await prisma.printJob.deleteMany({ where: { booking_ref: bookingRef } });
-    await prisma.accountingEvent.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.payment.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } });
@@ -381,10 +378,9 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
   });
 
   await t.test('3.8 Automatic print jobs created in transaction', async () => {
-    const bookingRef = 'BK-PRINT-0001';
+    const bookingRef = `BK-PRINT-${Date.now()}-4`;
 
     await prisma.printJob.deleteMany({ where: { booking_ref: bookingRef } });
-    await prisma.accountingEvent.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.payment.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } });
@@ -438,11 +434,9 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
   });
 
   t.after(async () => {
-    const refs = ['BK-DUP-0001', 'BK-CACHE-0001', 'BK-PASS-0001', 'BK-PRINT-0001'];
-    await prisma.printJob.deleteMany({ where: { booking_ref: { in: refs } } });
-    await prisma.accountingEvent.deleteMany({ where: { booking_ref: { in: refs } } });
-    await prisma.payment.deleteMany({ where: { booking_ref: { in: refs } } });
-    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: refs } } });
-    await prisma.reservation.deleteMany({ where: { booking_ref: { in: refs } } });
+    await prisma.printJob.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
+    await prisma.payment.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
   });
 });
