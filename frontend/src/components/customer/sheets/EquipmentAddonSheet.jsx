@@ -223,9 +223,9 @@ export default function EquipmentAddonSheet({
     const datePart = reservation.session_date || reservation.session?.session_date;
     if (datePart) {
       const cleanDate = String(datePart).split('T')[0];
-      const [y, m, d] = cleanDate.split('-').map(Number);
-      const [curH] = [now.getHours()];
-      const isToday = now.getFullYear() === y && now.getMonth() === m - 1 && now.getDate() === d;
+      const taipeiDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+      const isToday = cleanDate === taipeiDate;
+      const curH = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', hour: 'numeric', hour12: false }).format(now));
       if (isToday) {
         const curIdx = bookingSessions.findIndex((s) => {
           const [sh] = s.start_time.split(':').map(Number);

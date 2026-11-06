@@ -16,11 +16,22 @@ export default function AdminAppBar({
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const d = String(now.getDate()).padStart(2, '0');
-      const w = WEEKDAY_NAMES[now.getDay()];
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
+      const parts = new Intl.DateTimeFormat('zh-TW', {
+        timeZone: 'Asia/Taipei',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).formatToParts(now);
+
+      const m = parts.find(p => p.type === 'month')?.value || '';
+      const d = parts.find(p => p.type === 'day')?.value || '';
+      const rawW = parts.find(p => p.type === 'weekday')?.value || '';
+      const w = rawW.replace('週', '').replace('星期', '');
+      const hh = parts.find(p => p.type === 'hour')?.value || '00';
+      const mm = parts.find(p => p.type === 'minute')?.value || '00';
       setNowText(`${m}/${d}(${w}) ${hh}:${mm}`);
     };
     updateTime();

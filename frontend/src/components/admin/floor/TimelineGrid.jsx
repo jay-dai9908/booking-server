@@ -18,8 +18,21 @@ export default function TimelineGrid({
   const hourWidth = 80; // pixels per hour
   const timelineWidth = totalHours * hourWidth;
 
+  const getTaipeiDecimalHour = (d) => {
+    if (!d) return 0;
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Taipei',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false
+    }).formatToParts(d instanceof Date ? d : new Date(d));
+    const h = Number(parts.find(p => p.type === 'hour')?.value) || 0;
+    const m = Number(parts.find(p => p.type === 'minute')?.value) || 0;
+    return h + m / 60;
+  };
+
   const now = new Date();
-  const currentHour = now.getHours() + now.getMinutes() / 60;
+  const currentHour = getTaipeiDecimalHour(now);
   const nowOffsetPx = (currentHour - startHour) * hourWidth;
 
   useEffect(() => {
@@ -111,8 +124,8 @@ export default function TimelineGrid({
                   {seatBookings.map((b) => {
                     const startDt = new Date(b.start_at);
                     const endDt = new Date(b.end_at);
-                    const bStartHour = startDt.getHours() + startDt.getMinutes() / 60;
-                    const bEndHour = endDt.getHours() + endDt.getMinutes() / 60;
+                    const bStartHour = getTaipeiDecimalHour(startDt);
+                    const bEndHour = getTaipeiDecimalHour(endDt);
 
                     const leftPx = Math.max(0, (bStartHour - startHour) * hourWidth);
                     const widthPx = Math.max(20, (bEndHour - bStartHour) * hourWidth - 4);

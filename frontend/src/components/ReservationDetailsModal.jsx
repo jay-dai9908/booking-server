@@ -34,12 +34,11 @@ export const getReservationStatusUI = (r) => {
   }
 
   const now = new Date();
-  const [hours, minutes] = r.start_time.split(':').map(Number);
-  const sessionDate = new Date(r.session_date);
-  sessionDate.setHours(hours, minutes, 0, 0);
-  sessionDate.setMinutes(sessionDate.getMinutes() + 15);
+  const dStr = typeof r.session_date === 'string' ? r.session_date.slice(0, 10) : '';
+  const sessionDate = dStr ? new Date(`${dStr}T${r.start_time}:00+08:00`) : new Date(r.session_date);
+  const retainDate = new Date(sessionDate.getTime() + 15 * 60000);
 
-  if (now > sessionDate) {
+  if (now > retainDate) {
     return { text: '預約未到', icon: <XCircle className="w-4 h-4"/>, colorClass: 'text-red-500', bgClass: 'bg-red-50' };
   }
 
