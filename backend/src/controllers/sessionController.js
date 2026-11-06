@@ -1,4 +1,6 @@
 import prisma from '../prismaClient.js';
+import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
+import { dateOnly } from '../../../shared/time.js';
 
 export const getSessions = async (req, res) => {
   const { date, start_date, end_date } = req.query; 
@@ -63,9 +65,9 @@ export const createBulkSessions = async (req, res) => {
     return res.status(400).json({ error: 'Dates, start time and end time are required' });
   }
 
-  const capacity = (max_capacity !== undefined && max_capacity !== null && max_capacity !== '') 
-    ? parseInt(max_capacity, 10) 
-    : 10;
+  if (max_capacity !== undefined && max_capacity !== null && max_capacity !== '') {
+    console.log('[createBulkSessions] max_capacity provided by client was ignored in favor of layout capacity:', max_capacity);
+  }
 
   try {
     const startHour = parseInt(start_time.split(':')[0], 10);
@@ -78,7 +80,10 @@ export const createBulkSessions = async (req, res) => {
     const sessionsToCreate = [];
     
     for (const d of dates) {
-      const targetDate = new Date(d);
+      const targetDate = dateOnly(d);
+      const activeLayout = await getActiveLayoutForDate(prisma, targetDate);
+      const capacity = activeLayout?.capacity || (max_capacity ? parseInt(max_capacity, 10) : 10);
+
       for (let h = startHour; h < endHour; h++) {
         sessionsToCreate.push({
           session_date: targetDate,

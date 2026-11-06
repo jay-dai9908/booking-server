@@ -2,6 +2,7 @@
 // 結合資料庫版面與排位計分演算法（含鎖定判定、局部洗牌與拆桌容錯）
 
 import { allocate } from '../../../../shared/allocator/score.js';
+import { loadAllocatorContext } from './layoutService.js';
 
 export function isReservationPinned(r) {
   if (!r) return false;
@@ -254,4 +255,119 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
       }
     ]
   };
+}
+
+/**
+ * Reseat bookings displaced by check-in, move, or add-person across all their sessions.
+ * (Section 4.1)
+ * @param {any} tx - Prisma transaction
+ * @param {object} params
+ * @param {string[]} params.bookingRefs - refs of displaced bookings to reseat
+ * @param {string[]} params.reservedSeats - seats being taken by the primary action
+ * @param {number[]} params.sessionIds - session IDs where reservedSeats are held
+ * @returns {Promise<Array<{ booking_ref: string, name: string, from: string[], to: string[] }>>}
+ */
+export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [], sessionIds = [] }) {
+  const displaced = [];
+  if (!bookingRefs.length) return displaced;
+
+  const uniqueRefs = [...new Set(bookingRefs)];
+
+  for (const bRef of uniqueRefs) {
+    const bResvs = await tx.reservation.findMany({
+      where: { booking_ref: bRef, status: { not: 'cancelled' } },
+      include: { session: true, user: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!bResvs.length) continue;
+
+    const firstRes = bResvs[0];
+    const bSessionIds = bResvs.map(r => r.session_id);
+    const bPax = firstRes.pax;
+    const bForceSplit = Boolean(firstRes.is_force_split);
+    const sessionDate = firstRes.session.session_date;
+
+    const ctx = await loadAllocatorContext(tx, sessionDate);
+    if (!ctx.layout) {
+      throw {
+        status: 409,
+        code: 'CANNOT_DISPLACE',
+        message: `原座位佔用者（${firstRes.user?.name || bRef}）自動改排失敗，無可用版面`
+      };
+    }
+
+    const allSessionIds = [...new Set([...bSessionIds, ...sessionIds])];
+    const allResvsInSessions = await tx.reservation.findMany({
+      where: { session_id: { in: allSessionIds }, status: { not: 'cancelled' } }
+    });
+
+    // Inject dummy pinned reservation for reservedSeats in relevant sessions
+    const dummyReserved = sessionIds.map(sid => ({
+      booking_ref: `__RESERVED_${sid}__`,
+      session_id: sid,
+      pax: reservedSeats.length,
+      assigned_seats: reservedSeats,
+      is_seat_locked: true,
+      attendance: 'checked_in',
+      is_pinned: true
+    }));
+
+    const otherResvs = allResvsInSessions.filter(r => r.booking_ref !== bRef);
+    const currentReservations = [...otherResvs, ...dummyReserved];
+
+    const newReservationBlock = {
+      booking_ref: bRef,
+      pax: bPax,
+      session_ids: bSessionIds,
+      original_sessions: bResvs
+    };
+
+    const allocResult = allocateWithLayout(currentReservations, newReservationBlock, bForceSplit, ctx);
+
+    if (!allocResult.success) {
+      throw {
+        status: 409,
+        code: 'CANNOT_DISPLACE',
+        message: `原座位佔用者（${firstRes.user?.name || bRef}）自動改排失敗，座位不足`
+      };
+    }
+
+    const myUpdate = allocResult.updates?.find(u => u.booking_ref === bRef);
+    const newSeats = myUpdate?.assigned_seats;
+
+    if (!newSeats || !newSeats.length || newSeats.some(s => s.startsWith('WAIT-'))) {
+      throw {
+        status: 409,
+        code: 'CANNOT_DISPLACE',
+        message: `原座位佔用者（${firstRes.user?.name || bRef}）自動改排失敗，座位不足`
+      };
+    }
+
+    // Update reservation seats across all sessions of this booking
+    await tx.reservation.updateMany({
+      where: { booking_ref: bRef },
+      data: { assigned_seats: newSeats }
+    });
+
+    // Sync booking person seats
+    const bPersons = await tx.bookingPerson.findMany({
+      where: { booking_ref: bRef },
+      orderBy: { person_no: 'asc' }
+    });
+    for (let i = 0; i < bPersons.length; i++) {
+      await tx.bookingPerson.update({
+        where: { id: bPersons[i].id },
+        data: { seat_code: newSeats[i] || null }
+      });
+    }
+
+    displaced.push({
+      booking_ref: bRef,
+      name: firstRes.user?.name || '客人',
+      from: firstRes.assigned_seats || [],
+      to: newSeats
+    });
+  }
+
+  return displaced;
 }

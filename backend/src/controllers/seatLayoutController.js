@@ -1,9 +1,10 @@
 // backend/src/controllers/seatLayoutController.js
 import prisma from '../prismaClient.js';
-import { getActiveLayoutForDate, getLegacyFallbackLayout } from '../services/seating/layoutService.js';
+import { getActiveLayoutForDate, getLegacyFallbackLayout, loadAllocatorContext } from '../services/seating/layoutService.js';
 import { resolveLayoutGeometry } from '../../../shared/allocator/geometry.js';
 import { allocate } from '../../../shared/allocator/score.js';
 import { toTaipeiDateString } from '../../../shared/time.js';
+import { allocateWithLayout } from '../services/seating/allocator.js';
 
 export async function getActiveLayout(req, res) {
   try {
@@ -175,7 +176,7 @@ export async function createLayoutDraft(req, res) {
             adjacent_codes: s.adjacent_codes || [],
             opposite_codes: s.opposite_codes || [],
             sort_order: s.sort_order || 0,
-            origin_code: s.origin_code || s.code
+            origin_code: s.code
           }
         });
       }
@@ -381,7 +382,13 @@ export async function previewPublish(req, res) {
     }
 
     const currentLayout = await getActiveLayoutForDate(prisma, effDate);
-    const capacityBefore = currentLayout?.capacity || 20;
+    const futureSessions = await prisma.session.findMany({
+      where: { session_date: { gte: effDate } },
+      select: { max_capacity: true }
+    });
+    const capacityBefore = futureSessions.length > 0
+      ? Math.max(...futureSessions.map(s => s.max_capacity))
+      : (currentLayout?.capacity || 20);
     const capacityAfter = draft.seats.filter(s => s.is_active && s.priority !== 'manual_only').length;
 
     // Check sessions over capacity on or after effective_from
@@ -471,6 +478,15 @@ export async function publishLayout(req, res) {
     const staffName = req.user?.name || '店長';
 
     const publishResult = await prisma.$transaction(async (tx) => {
+      const currentLayout = await getActiveLayoutForDate(tx, effDate);
+      const futureSessions = await tx.session.findMany({
+        where: { session_date: { gte: effDate } },
+        select: { max_capacity: true }
+      });
+      const capacityBefore = futureSessions.length > 0
+        ? Math.max(...futureSessions.map(s => s.max_capacity))
+        : (currentLayout?.capacity || 20);
+
       // 1. If effective today, check if any deleted/disabled seats are currently occupied right now
       if (effStr === todayStr) {
         const activeSeatsInDraft = new Set(draft.seats.filter(s => s.is_active).map(s => s.code));
@@ -561,11 +577,125 @@ export async function publishLayout(req, res) {
         }
       }
 
+      // 6. Reallocate reservations on deleted or disabled seats
+      const activeNewSeats = new Set(draft.seats.filter(s => s.is_active).map(s => s.code));
+      
+      const futureResvs = await tx.reservation.findMany({
+        where: {
+          session: { session_date: { gte: effDate } },
+          status: 'confirmed'
+        },
+        include: { session: true, user: true }
+      });
+
+      const bookingsMap = new Map();
+      for (const r of futureResvs) {
+        if (!bookingsMap.has(r.booking_ref)) {
+          bookingsMap.set(r.booking_ref, []);
+        }
+        bookingsMap.get(r.booking_ref).push(r);
+      }
+
+      const reallocated = [];
+      const needsManual = [];
+
+      const ctx = await loadAllocatorContext(tx, effDate);
+
+      for (const [bRef, bResvs] of bookingsMap.entries()) {
+        const firstRes = bResvs[0];
+        const assignedSeats = firstRes.assigned_seats || [];
+        const missingSeats = assignedSeats.filter(code => !activeNewSeats.has(code));
+        
+        if (missingSeats.length === 0) {
+          continue;
+        }
+
+        const isPinned = firstRes.attendance === 'checked_in' ||
+                         Boolean(firstRes.is_seat_locked) ||
+                         firstRes.seat_source === 'staff';
+
+        const sessionDateStr = toTaipeiDateString(firstRes.session.session_date);
+        const timeStr = `${bResvs[0].session.start_time}-${bResvs[bResvs.length - 1].session.end_time}`;
+
+        if (isPinned) {
+          needsManual.push({
+            booking_ref: bRef,
+            name: firstRes.user?.name || '客人',
+            date: sessionDateStr,
+            time: timeStr,
+            missing_seats: missingSeats,
+            pinned: true
+          });
+          continue;
+        }
+
+        // Try to reallocate movable reservation
+        const bSessionIds = bResvs.map(r => r.session_id);
+        const bPax = firstRes.pax;
+        const bForceSplit = Boolean(firstRes.is_force_split);
+
+        const sessionResvs = await tx.reservation.findMany({
+          where: { session_id: { in: bSessionIds }, status: { not: 'cancelled' } }
+        });
+        const otherResvs = sessionResvs.filter(r => r.booking_ref !== bRef);
+
+        const newReservationBlock = {
+          booking_ref: bRef,
+          pax: bPax,
+          session_ids: bSessionIds,
+          original_sessions: bResvs
+        };
+
+        const allocResult = allocateWithLayout(otherResvs, newReservationBlock, bForceSplit, ctx);
+
+        if (allocResult.success) {
+          const myUpdate = allocResult.updates?.find(u => u.booking_ref === bRef);
+          const newSeats = myUpdate?.assigned_seats;
+          if (newSeats && newSeats.length && !newSeats.some(s => s.startsWith('WAIT-'))) {
+            await tx.reservation.updateMany({
+              where: { booking_ref: bRef },
+              data: { assigned_seats: newSeats }
+            });
+
+            // Sync booking person seats
+            const bPersons = await tx.bookingPerson.findMany({
+              where: { booking_ref: bRef },
+              orderBy: { person_no: 'asc' }
+            });
+            for (let i = 0; i < bPersons.length; i++) {
+              await tx.bookingPerson.update({
+                where: { id: bPersons[i].id },
+                data: { seat_code: newSeats[i] || null }
+              });
+            }
+
+            reallocated.push({
+              booking_ref: bRef,
+              name: firstRes.user?.name || '客人',
+              from: assignedSeats,
+              to: newSeats
+            });
+            continue;
+          }
+        }
+
+        needsManual.push({
+          booking_ref: bRef,
+          name: firstRes.user?.name || '客人',
+          date: sessionDateStr,
+          time: timeStr,
+          missing_seats: missingSeats,
+          pinned: false
+        });
+      }
+
       return {
+        capacity_before: capacityBefore,
+        capacity_after: capacity,
         capacity,
         renamed: renamedBookings,
-        reallocated: [],
-        needs_manual: []
+        reallocated,
+        needs_manual: needsManual
       };
     });
 

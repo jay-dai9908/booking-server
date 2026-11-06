@@ -347,6 +347,18 @@ export async function getLiveFloorData(dateStr = null) {
         });
       }
     }
+
+    // Check if any seat does not exist in the active layout (Spec 5.1 step 6)
+    const activeSeatCodes = new Set((layout?.seats || []).filter(s => s.is_active).map(s => s.code));
+    const missingSeats = (firstRes.assigned_seats || []).filter(s => !s.startsWith('WAIT-') && !activeSeatCodes.has(s));
+    if (missingSeats.length > 0) {
+      alerts.push({
+        type: 'seat_missing',
+        booking_ref: bRef,
+        text: `座位 ${missingSeats.join('、')} 已不存在，請重新帶位`,
+        hint: `原座位佔用者（${user.name || '客人'} · ${bRef}）的座位已在新生效版面中刪除或停用`
+      });
+    }
   }
 
   // 9. Board usage

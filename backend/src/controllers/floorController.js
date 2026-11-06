@@ -1,7 +1,8 @@
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { getLiveFloorData, splitBoardUnits } from '../services/floor/liveService.js';
-import { allocateWithLayout } from '../services/seating/allocator.js';
+import { reseatBookings } from '../services/seating/allocator.js';
+import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { refreshBillingCache, getBookingBill } from '../services/billing/billService.js';
@@ -66,6 +67,22 @@ export async function checkIn(req, res) {
         throw { status: 400, message: `選擇的座位數（${seats.length}）不可超過預約人數（${pax} 人）` };
       }
 
+      // Validation: seats must not have duplicates
+      const seatSet = new Set(seats);
+      if (seatSet.size !== seats.length) {
+        throw { status: 400, message: '選擇的座位不可重複' };
+      }
+
+      // Validation: seats must exist and be active on layout for this date
+      const activeLayout = await getActiveLayoutForDate(tx, firstRes.session.session_date);
+      const layoutSeats = activeLayout?.seats || [];
+      for (const s of seats) {
+        const found = layoutSeats.find(ls => ls.code === s);
+        if (!found || !found.is_active) {
+          throw { status: 400, message: `座位 ${s} 不存在或未啟用` };
+        }
+      }
+
       // Check conflicts for seats
       const sessionIds = reservations.map(r => r.session_id);
       const conflictReservations = await tx.reservation.findMany({
@@ -75,47 +92,25 @@ export async function checkIn(req, res) {
           status: { not: 'cancelled' },
           assigned_seats: { hasSome: seats }
         },
-        include: { user: true, session: true }
+        include: { user: true }
       });
 
-      const displaced = [];
       for (const cr of conflictReservations) {
-        if (cr.is_seat_locked) {
+        if (cr.is_seat_locked || cr.attendance === 'checked_in' || cr.seat_source === 'staff') {
           throw {
             status: 409,
             code: 'SEAT_CONFLICT',
             message: `座位已被固定的預約（${cr.user?.name || '客人'} · ${cr.booking_ref}）佔用，無法排入`
           };
         }
-        // Movable reservation -> attempt re-allocation
-        try {
-          const realloc = await allocateWithLayout(
-            tx,
-            [cr.session_id],
-            cr.pax,
-            Boolean(cr.is_force_split),
-            cr.booking_ref
-          );
-          if (realloc?.seats?.length) {
-            await tx.reservation.updateMany({
-              where: { booking_ref: cr.booking_ref },
-              data: { assigned_seats: realloc.seats }
-            });
-            displaced.push({
-              booking_ref: cr.booking_ref,
-              name: cr.user?.name || '預約客人',
-              from: cr.assigned_seats,
-              to: realloc.seats
-            });
-          }
-        } catch (err) {
-          throw {
-            status: 409,
-            code: 'CANNOT_DISPLACE',
-            message: `原座位佔用者（${cr.user?.name || '客人'}）自動改排失敗，座位不足`
-          };
-        }
       }
+
+      const displacedRefs = [...new Set(conflictReservations.map(cr => cr.booking_ref))];
+      const displaced = await reseatBookings(tx, {
+        bookingRefs: displacedRefs,
+        reservedSeats: seats,
+        sessionIds
+      });
 
       // Split equipment units
       await splitBoardUnits(tx, booking_ref);
@@ -232,6 +227,15 @@ export async function moveSeat(req, res) {
 
       const sessionIds = reservations.map(r => r.session_id);
 
+      // Validate to_seat exists and is active on layout
+      const sessionDate = reservations[0].session.session_date;
+      const activeLayout = await getActiveLayoutForDate(tx, sessionDate);
+      const layoutSeats = activeLayout?.seats || [];
+      const targetSeatObj = layoutSeats.find(ls => ls.code === to_seat);
+      if (!targetSeatObj || !targetSeatObj.is_active) {
+        throw { status: 400, message: `目標座位 ${to_seat} 不存在或未啟用` };
+      }
+
       // Check target occupancy
       const targetConflict = await tx.reservation.findFirst({
         where: {
@@ -245,31 +249,37 @@ export async function moveSeat(req, res) {
 
       if (targetConflict) {
         if (mode === 'swap') {
-          // Swap seats between targetConflict and this booking
+          // Check that target occupies to_seat in ALL sessions of its booking
+          const targetAllResvs = await tx.reservation.findMany({
+            where: { booking_ref: targetConflict.booking_ref, status: { not: 'cancelled' } }
+          });
+          const allSitToSeat = targetAllResvs.every(r => r.assigned_seats?.includes(to_seat));
+          if (!allSitToSeat) {
+            throw { status: 409, message: '目標座位佔用者在不同時段座位不一致，無法對調' };
+          }
+
+          // Swap seats for target booking (only swap the single seat)
           const newTargetSeats = targetConflict.assigned_seats.map(s => s === to_seat ? from_seat : s);
           await tx.reservation.updateMany({
             where: { booking_ref: targetConflict.booking_ref },
-            data: { assigned_seats: newTargetSeats, seat_source: 'staff' }
+            data: { assigned_seats: newTargetSeats }
           });
-          // Update target person seat
+          // Sync target booking person seat_code
           await tx.bookingPerson.updateMany({
             where: { booking_ref: targetConflict.booking_ref, seat_code: to_seat },
             data: { seat_code: from_seat }
           });
         } else {
-          if (targetConflict.is_seat_locked) {
+          if (targetConflict.is_seat_locked || targetConflict.attendance === 'checked_in' || targetConflict.seat_source === 'staff') {
             throw { status: 409, message: `目標座位已被固定的預約（${targetConflict.user?.name || '客人'}）佔用` };
           }
-          // Movable -> displace
-          const realloc = await allocateWithLayout(tx, [targetConflict.session_id], targetConflict.pax, Boolean(targetConflict.is_force_split), targetConflict.booking_ref);
-          if (realloc?.seats?.length) {
-            await tx.reservation.updateMany({
-              where: { booking_ref: targetConflict.booking_ref },
-              data: { assigned_seats: realloc.seats }
-            });
-          } else {
-            throw { status: 409, message: '目標座位佔用者自動改排失敗，座位不足' };
-          }
+
+          // Displace using reseatBookings
+          await reseatBookings(tx, {
+            bookingRefs: [targetConflict.booking_ref],
+            reservedSeats: [to_seat],
+            sessionIds
+          });
         }
       }
 
@@ -464,6 +474,42 @@ export async function addPerson(req, res) {
       });
 
       if (seat_code) {
+        // Validate seat_code exists and active on layout
+        const sessionDate = reservations[0].session.session_date;
+        const activeLayout = await getActiveLayoutForDate(tx, sessionDate);
+        const targetSeatObj = (activeLayout?.seats || []).find(ls => ls.code === seat_code);
+        if (!targetSeatObj || !targetSeatObj.is_active) {
+          throw { status: 400, message: `座位 ${seat_code} 不存在或未啟用` };
+        }
+
+        const sessionIds = reservations.map(r => r.session_id);
+        const conflictReservations = await tx.reservation.findMany({
+          where: {
+            session_id: { in: sessionIds },
+            booking_ref: { not: booking_ref },
+            status: { not: 'cancelled' },
+            assigned_seats: { has: seat_code }
+          },
+          include: { user: true }
+        });
+
+        for (const cr of conflictReservations) {
+          if (cr.is_seat_locked || cr.attendance === 'checked_in' || cr.seat_source === 'staff') {
+            throw {
+              status: 409,
+              code: 'SEAT_CONFLICT',
+              message: `座位已被固定的預約（${cr.user?.name || '客人'} · ${cr.booking_ref}）佔用，無法排入`
+            };
+          }
+        }
+
+        const conflictRefs = [...new Set(conflictReservations.map(cr => cr.booking_ref))];
+        await reseatBookings(tx, {
+          bookingRefs: conflictRefs,
+          reservedSeats: [seat_code],
+          sessionIds
+        });
+
         const firstRes = reservations[0];
         const newSeats = [...(firstRes.assigned_seats || []), seat_code];
         await tx.reservation.updateMany({
