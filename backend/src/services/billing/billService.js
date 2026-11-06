@@ -5,6 +5,7 @@ import { toTaipeiDateString, blocksBy1030, dateOnly } from '../../../../shared/t
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 import { log as auditLog } from '../audit/auditService.js';
 import { deductPass, restorePass } from './passTender.js';
+import { buildBillInput } from './billInput.js';
 
 export async function getNextDailySeq(tx, key, date = new Date()) {
   const d = dateOnly(date);
@@ -30,7 +31,7 @@ export async function getNextDailySeq(tx, key, date = new Date()) {
 /**
  * Get the full bill and related entities for a booking
  */
-export async function getBookingBill(booking_ref, tx = prisma) {
+export async function getBookingBill(booking_ref, tx = prisma, now = new Date()) {
   const reservations = await tx.reservation.findMany({
     where: { booking_ref, status: { not: 'cancelled' } },
     include: { user: true, session: true },
@@ -89,52 +90,6 @@ export async function getBookingBill(booking_ref, tx = prisma) {
     orderBy: { person_no: 'asc' }
   });
 
-  const now = new Date();
-  const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
-  const bookingEndDt = new Date(`${dStr}T${lastRes.session.end_time}:00+08:00`);
-  const bookedMinutes = Math.max(0, Math.floor((bookingEndDt.getTime() - bookingStartDt.getTime()) / 60000));
-  const bookedHours = reservations.length; // sessions count
-
-  // Fallback to pax if no persons in db
-  const effectivePersons = persons.length > 0
-    ? persons
-    : Array.from({ length: firstRes.pax }, (_, i) => ({
-        person_no: i + 1,
-        seat_code: firstRes.assigned_seats?.[i] || null,
-        status: 'active',
-        billing_start_at: bookingStartDt,
-        timer_started_at: null,
-        timer_ended_at: null,
-        paused_seconds: 0
-      }));
-
-  const personInputs = effectivePersons.map(p => {
-    let actualMinutes = bookedMinutes;
-    if (p.timer_started_at) {
-      const startDt = p.billing_start_at ? new Date(p.billing_start_at) : new Date(p.timer_started_at);
-      const endDt = p.timer_ended_at ? new Date(p.timer_ended_at) : now;
-      let durationMs = endDt.getTime() - startDt.getTime();
-      const pausedSec = p.paused_seconds || 0;
-      durationMs -= pausedSec * 1000;
-      actualMinutes = Math.max(0, Math.floor(durationMs / 60000));
-    }
-
-    const pDraft = draft.persons?.find(dp => dp.person_no === p.person_no) || {};
-
-    return {
-      person_no: p.person_no,
-      seat_code: p.seat_code,
-      status: p.status,
-      booked_hours: bookedHours,
-      actual_minutes: actualMinutes,
-      mode: pDraft.mode || 'hourly',
-      hours_override: pDraft.hours_override ?? null,
-      addons: pDraft.addons || [],
-      promos: pDraft.promos || [],
-      adjust: pDraft.adjust || null
-    };
-  });
-
   // Equipments / Boards
   const bookingEquipments = await tx.bookingEquipment.findMany({
     where: { booking_ref },
@@ -142,62 +97,33 @@ export async function getBookingBill(booking_ref, tx = prisma) {
     orderBy: [{ unit_group: 'asc' }, { segment_no: 'asc' }]
   });
 
-  const boardGroups = new Map();
-  for (const be of bookingEquipments) {
-    const uGroup = be.unit_group || `single-${be.id}`;
-    if (!boardGroups.has(uGroup)) {
-      boardGroups.set(uGroup, {
-        unit_group: be.unit_group,
-        person_no: be.person_id ? persons.find(p => p.id === be.person_id)?.person_no || null : null,
-        segments: []
-      });
-    }
-    boardGroups.get(uGroup).segments.push({
-      equipment_id: be.equipment_id,
-      name: be.equipment?.name || be.equipment_name_snapshot,
-      rate: be.unit_rate || be.equipment?.hourly_rate || 60,
-      hours: be.rental_hours,
-      start_at: be.start_at,
-      end_at: be.end_at,
-      ended_reason: be.ended_reason,
-      planned_end_at: be.planned_end_at
-    });
-  }
-
-  // Equipment discount rules from global setting
-  const boardRules = {
-    discount_enabled: globalSetting.equipment_discount_enabled ?? true,
-    buy_hours: globalSetting.equipment_discount_buy_hours ?? 3,
-    free_hours: globalSetting.equipment_discount_free_hours ?? 1,
-    discount2_enabled: globalSetting.equipment_discount2_enabled ?? false,
-    buy_hours2: globalSetting.equipment_discount2_buy_hours ?? 8,
-    free_hours2: globalSetting.equipment_discount2_free_hours ?? 4
-  };
-
   // Payments
   const payments = await tx.payment.findMany({
     where: { booking_ref },
     orderBy: { created_at: 'asc' }
   });
 
-  const bill = computeBill({
-    booking: {
-      booking_ref,
-      pax: firstRes.pax,
-      start_time: firstRes.session.start_time,
-      end_time: lastRes.session.end_time,
-      is_walk_in: Boolean(firstRes.is_walk_in)
+  const billInput = buildBillInput({
+    bookingRef: booking_ref,
+    reservations,
+    bookingPersons: persons,
+    bookingEquipments,
+    payments,
+    globalSetting,
+    pricing: {
+      hourly_price,
+      unlimited_price,
+      allow_unlimited,
+      is_weekend
     },
-    pricing,
-    draft,
-    persons: personInputs,
-    boards: Array.from(boardGroups.values()),
-    boardRules,
-    payments
+    now,
+    draft
   });
 
+  const bill = computeBill(billInput);
+
   const status = billingStatus({
-    persons: effectivePersons,
+    persons: billInput.persons,
     payments
   });
 
@@ -222,8 +148,8 @@ export async function getBookingBill(booking_ref, tx = prisma) {
     },
     draft,
     pricing,
-    persons: effectivePersons,
-    boards: Array.from(boardGroups.values()),
+    persons: billInput.effectivePersons,
+    boards: billInput.boards,
     payments,
     status
   };

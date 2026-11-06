@@ -207,7 +207,8 @@ export function computeBill({
   const boardUnitMap = new Map(); // unit_group -> calculated board object
   for (const b of (boards || [])) {
     const calc = calculateBoardTotal({ segments: b.segments || [], discountConfig });
-    boardUnitMap.set(b.unit_group, { ...b, ...calc });
+    const total = b.fixed_total != null ? b.fixed_total : calc.total;
+    boardUnitMap.set(b.unit_group, { ...b, ...calc, total });
   }
 
   // 1. Calculate each person's entry, board, and personal addons
@@ -218,8 +219,14 @@ export function computeBill({
 
     if (frozenSnap) {
       // FROZEN: Use breakdown from snapshot exactly!
+      const baseAmt = frozenSnap.base_amount ?? (
+        (Number(frozenSnap.entry?.amount) || 0) +
+        (Number(frozenSnap.board?.amount) || 0) +
+        (frozenSnap.addons || []).reduce((s, a) => s + (Number(a.subtotal) || Number(a.price) || 0), 0)
+      );
       computedPersons.push({
         ...frozenSnap,
+        base_amount: baseAmt,
         is_paid: true,
         is_frozen: true
       });
@@ -495,6 +502,12 @@ export function computeBill({
         }
       }
     }
+  }
+
+  // 4b. Pending supplements per person
+  for (const p of computedPersons) {
+    const personSupplements = pendingSupplements.filter(ps => ps.person_no === p.person_no);
+    p.pending_supplement = personSupplements.reduce((sum, ps) => sum + ps.amount, 0);
   }
 
   // 5. Aggregate order totals
