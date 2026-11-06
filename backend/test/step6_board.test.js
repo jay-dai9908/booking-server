@@ -71,7 +71,7 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
     create: { line_user_id: 'test_step6_user', name: '換板測試客', phone: '0966000001' }
   });
 
-  const testDate = dateOnly('2026-11-04');
+  const testDate = dateOnly('2026-11-06');
 
   // Create 4 sessions: 14:00, 15:00, 16:00, 17:00
   const sess14 = await prisma.session.upsert({
@@ -165,8 +165,8 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
     }
 
     // Small board 14:00 to 18:00
-    const start14 = new Date('2026-11-04T14:00:00+08:00');
-    const end18 = new Date('2026-11-04T18:00:00+08:00');
+    const start14 = new Date('2026-11-06T14:00:00+08:00');
+    const end18 = new Date('2026-11-06T18:00:00+08:00');
 
     await prisma.bookingEquipment.create({
       data: {
@@ -186,13 +186,13 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
     });
 
     // Swap to pegboard_m at 15:30
-    const boundaryAt = new Date('2026-11-04T15:30:00+08:00').toISOString();
+    const boundaryAt = new Date('2026-11-06T15:30:00+08:00').toISOString();
     const { req, res } = createMockReqRes({
       params: { booking_ref: bookingRef, unit_group: unitGroup },
       body: {
         to_equipment_id: 'pegboard_m',
         boundary_at: boundaryAt,
-        now: '2026-11-04T15:40:00+08:00'
+        now: '2026-11-06T15:40:00+08:00'
       }
     });
 
@@ -254,7 +254,7 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
         covered_sessions: [String(sess14.id)],
         unit_group: unitGroup,
         segment_no: 1,
-        start_at: new Date('2026-11-04T14:00:00+08:00'),
+        start_at: new Date('2026-11-06T14:00:00+08:00'),
         unit_rate: 90
       }
     });
@@ -264,7 +264,7 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
       params: { booking_ref: bookingRef, unit_group: unitGroup },
       body: {
         to_equipment_id: 'pegboard_m',
-        boundary_at: '2026-11-04T14:17:00+08:00'
+        boundary_at: '2026-11-06T14:17:00+08:00'
       }
     });
 
@@ -325,7 +325,7 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
         covered_sessions: sessionIds.map(String),
         unit_group: unitGroup,
         segment_no: 1,
-        start_at: new Date('2026-11-04T14:00:00+08:00'),
+        start_at: new Date('2026-11-06T14:00:00+08:00'),
         unit_rate: 90
       }
     });
@@ -335,8 +335,8 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
       params: { booking_ref: bookingRef, unit_group: unitGroup },
       body: {
         to_equipment_id: 'pegboard_m',
-        boundary_at: '2026-11-04T15:30:00+08:00',
-        now: '2026-11-04T15:40:00+08:00'
+        boundary_at: '2026-11-06T15:30:00+08:00',
+        now: '2026-11-06T15:40:00+08:00'
       }
     });
 
@@ -376,9 +376,9 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
         covered_sessions: sessionIds.map(String),
         unit_group: unitGroup,
         segment_no: 1,
-        start_at: new Date('2026-11-04T14:00:00+08:00'),
+        start_at: new Date('2026-11-06T14:00:00+08:00'),
         unit_rate: 90,
-        planned_end_at: new Date('2026-11-04T18:00:00+08:00')
+        planned_end_at: new Date('2026-11-06T18:00:00+08:00')
       }
     });
 
@@ -386,7 +386,7 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
     const { req, res } = createMockReqRes({
       params: { booking_ref: bookingRef, unit_group: unitGroup },
       body: {
-        at: '2026-11-04T15:15:00+08:00'
+        at: '2026-11-06T15:15:00+08:00'
       }
     });
 

@@ -6,7 +6,8 @@ import {
   buildRefundSlip,
   buildOrderSummary,
   buildClosingSlip,
-  buildTestPage
+  buildTestPage,
+  formatBookingRef
 } from '../../../../shared/receipts.js';
 import { getNextDailySeq } from '../billing/billService.js';
 import { log as auditLog } from '../audit/auditService.js';
@@ -51,40 +52,94 @@ export async function queuePrintJob({
     opts.copyNo = copyNo;
   }
 
+  const formattedRef = formatBookingRef(booking_ref);
+
   if (type === 'receipt' && payment_id) {
     const payment = await client.payment.findUnique({ where: { id: Number(payment_id) } });
-    const booking = booking_ref ? await client.reservation.findFirst({
-      where: { booking_ref },
-      include: { user: true, session: true }
-    }) : null;
+    const bookingReservations = booking_ref ? await client.reservation.findMany({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { user: true, session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    }) : [];
+    const firstRes = bookingReservations[0];
+    const lastRes = bookingReservations[bookingReservations.length - 1];
+    const booking = firstRes ? {
+      booking_ref,
+      ref_display: formattedRef,
+      customer_name: firstRes.user?.name,
+      pax: firstRes.pax,
+      session_date: firstRes.session?.session_date,
+      start_time: firstRes.session?.start_time,
+      end_time: lastRes.session?.end_time,
+      assigned_seats: firstRes.assigned_seats || []
+    } : null;
     commands = buildReceipt(payment, booking, opts);
-    title = `結帳單 ${booking_ref || ''} 第 ${(payment?.person_nos || []).join('、')} 位`;
+    title = `結帳單 ${formattedRef || ''} 第 ${(payment?.person_nos || []).join('、')} 位`;
   } else if (type === 'supplement' && payment_id) {
     const payment = await client.payment.findUnique({ where: { id: Number(payment_id) } });
-    const booking = booking_ref ? await client.reservation.findFirst({
-      where: { booking_ref },
-      include: { user: true, session: true }
-    }) : null;
+    const bookingReservations = booking_ref ? await client.reservation.findMany({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { user: true, session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    }) : [];
+    const firstRes = bookingReservations[0];
+    const lastRes = bookingReservations[bookingReservations.length - 1];
+    const booking = firstRes ? {
+      booking_ref,
+      ref_display: formattedRef,
+      customer_name: firstRes.user?.name,
+      pax: firstRes.pax,
+      session_date: firstRes.session?.session_date,
+      start_time: firstRes.session?.start_time,
+      end_time: lastRes.session?.end_time,
+      assigned_seats: firstRes.assigned_seats || []
+    } : null;
     commands = buildSupplementReceipt(payment, booking, opts);
-    title = `補收收據 ${booking_ref || ''}`;
+    title = `補收收據 ${formattedRef || ''}`;
   } else if (type === 'refund' && payment_id) {
     const payment = await client.payment.findUnique({ where: { id: Number(payment_id) } });
-    const booking = booking_ref ? await client.reservation.findFirst({
-      where: { booking_ref },
-      include: { user: true, session: true }
-    }) : null;
+    const bookingReservations = booking_ref ? await client.reservation.findMany({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { user: true, session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    }) : [];
+    const firstRes = bookingReservations[0];
+    const lastRes = bookingReservations[bookingReservations.length - 1];
+    const booking = firstRes ? {
+      booking_ref,
+      ref_display: formattedRef,
+      customer_name: firstRes.user?.name,
+      pax: firstRes.pax,
+      session_date: firstRes.session?.session_date,
+      start_time: firstRes.session?.start_time,
+      end_time: lastRes.session?.end_time,
+      assigned_seats: firstRes.assigned_seats || []
+    } : null;
     commands = buildRefundSlip(payment, booking, opts);
-    title = `退款單 ${booking_ref || ''}`;
+    title = `退款單 ${formattedRef || ''}`;
   } else if (type === 'summary' && booking_ref) {
-    const booking = await client.reservation.findFirst({
-      where: { booking_ref },
-      include: { user: true, session: true }
+    const bookingReservations = await client.reservation.findMany({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { user: true, session: true },
+      orderBy: { session: { start_time: 'asc' } }
     });
+    const firstRes = bookingReservations[0];
+    const lastRes = bookingReservations[bookingReservations.length - 1];
+    const booking = firstRes ? {
+      booking_ref,
+      ref_display: formattedRef,
+      customer_name: firstRes.user?.name,
+      pax: firstRes.pax,
+      session_date: firstRes.session?.session_date,
+      start_time: firstRes.session?.start_time,
+      end_time: lastRes.session?.end_time,
+      assigned_seats: firstRes.assigned_seats || []
+    } : {};
     const payments = await client.payment.findMany({
       where: { booking_ref, status: 'valid' }
     });
     commands = buildOrderSummary(booking, payments, opts);
-    title = `整單總表 ${booking_ref}`;
+    title = `整單總表 ${formattedRef}`;
   } else if (type === 'closing' && closing_id) {
     const closing = await client.cashClosing.findUnique({ where: { id: Number(closing_id) } });
     commands = buildClosingSlip(closing, opts);

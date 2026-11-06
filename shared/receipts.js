@@ -4,7 +4,23 @@
 import { PAYMENT_METHOD_LABELS, displayBoardName } from './billing.js';
 
 export const RECEIPT_WIDTH = 31;
-export const DIVIDER = '-------------------------------\n';
+export const DIVIDER = '-------------------------------';
+
+/**
+ * 格式化預約代碼為 BK-XXXX-XXXX
+ * @param {string} ref
+ * @returns {string}
+ */
+export function formatBookingRef(ref) {
+  if (!ref) return '';
+  if (typeof ref !== 'string') ref = String(ref);
+  if (/^BK-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(ref)) return ref.toUpperCase();
+  const clean = ref.replace(/[^a-zA-Z0-9]/g, '');
+  if (clean.length >= 8) {
+    return `BK-${clean.slice(0, 4).toUpperCase()}-${clean.slice(-4).toUpperCase()}`;
+  }
+  return ref;
+}
 
 /**
  * 計算字元顯示寬度（全形/中文算 2 格，半形算 1 格）
@@ -40,14 +56,14 @@ export function strWidth(str) {
 }
 
 /**
- * 左右對齊一列（左邊太長截斷加 …，右邊金額完整保留）
+ * 左右對齊一列（左邊太長截斷加 …，右邊金額完整保留；不附帶尾端換行）
  * @param {string} left
  * @param {string} right
  * @param {number} [width=31]
  * @returns {string}
  */
 export function fitLine(left = '', right = '', width = RECEIPT_WIDTH) {
-  const cleanLeft = String(left).trim();
+  const cleanLeft = String(left).trimEnd();
   const cleanRight = String(right).trim();
   const rightW = strWidth(cleanRight);
 
@@ -67,7 +83,7 @@ export function fitLine(left = '', right = '', width = RECEIPT_WIDTH) {
 
   const leftW = strWidth(finalLeft);
   const spacesNeeded = Math.max(1, width - leftW - rightW);
-  return finalLeft + ' '.repeat(spacesNeeded) + cleanRight + '\n';
+  return finalLeft + ' '.repeat(spacesNeeded) + cleanRight;
 }
 
 /**
@@ -117,17 +133,46 @@ export function formatReceiptTimeRange(start, end) {
 }
 
 /**
+ * 從預約與付款物件中擷取日期、時段與桌名
+ * 優先使用預約時段（start_time-end_time）而非付款時間（Section 4.5）
+ */
+export function extractReceiptSessionInfo(booking = {}, payment = {}) {
+  const dateVal = booking.session_date || booking.session?.session_date || booking.start_at || payment.created_at || Date.now();
+  const dateStr = formatReceiptDate(dateVal);
+
+  let timeRange = '';
+  const startTime = booking.start_time || booking.session?.start_time;
+  const endTime = booking.end_time || booking.session?.end_time;
+  if (startTime && endTime) {
+    timeRange = `${startTime}-${endTime}`;
+  } else if (booking.start_at && booking.end_at) {
+    timeRange = formatReceiptTimeRange(booking.start_at, booking.end_at);
+  } else {
+    timeRange = formatReceiptTimeRange(payment.created_at || Date.now(), payment.created_at || Date.now());
+  }
+
+  let tableLabel = booking.table_label || '';
+  if (!tableLabel && Array.isArray(booking.assigned_seats) && booking.assigned_seats.length > 0) {
+    const s0 = String(booking.assigned_seats[0]);
+    const m = s0.match(/^([A-Za-z0-9]+)-/);
+    if (m) tableLabel = `桌 ${m[1]}`;
+  }
+
+  return { dateStr, timeRange, tableLabel: tableLabel ? ` ${tableLabel}` : '' };
+}
+
+/**
  * 產生通用收據底部指令（QR, 標語, 換行）
  */
 function appendReceiptFooter(commands, bookingRef, opts = {}) {
-  const publicSiteUrl = opts.publicSiteUrl || 'https://shiguang.tw';
+  const publicSiteUrl = opts.publicSiteUrl || (typeof process !== 'undefined' && process.env?.PUBLIC_SITE_URL) || 'https://shiguang.tw';
   const qrUrl = `${publicSiteUrl}/history?tab=bookings&ref=${bookingRef}`;
   const footerText = opts.receiptFooterText || '謝謝光臨，作品記得帶回家';
 
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
   commands.push({ type: 'qr', data: qrUrl, size: 6, align: 1 });
-  commands.push({ type: 'text', text: '掃描查看預約明細\n', size: 22, align: 1 });
-  commands.push({ type: 'text', text: `${footerText}\n`, size: 22, align: 1 });
+  commands.push({ type: 'text', text: '掃描查看預約明細', size: 22, align: 1 });
+  commands.push({ type: 'text', text: footerText, size: 22, align: 1 });
   commands.push({ type: 'lineWrap', lines: 3 });
 }
 
@@ -144,20 +189,29 @@ export function buildReceipt(payment, booking = {}, opts = {}) {
   const persons = breakdown.persons || [];
   const isReprint = Boolean(opts.isReprint || payment.is_reprint);
   const bookingRef = booking.booking_ref || payment.booking_ref || '';
-  const refDisplay = opts.refDisplay || bookingRef;
+  const refDisplay = opts.refDisplay || formatBookingRef(bookingRef);
 
   // Header
-  commands.push({ type: 'title', text: '拾光製所\n', size: 32, align: 1 });
+  commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
   if (isReprint) {
-    commands.push({ type: 'text', text: '*** 補印 ***\n', size: 24, align: 1, bold: true });
+    commands.push({ type: 'text', text: '*** 補印 ***', size: 24, align: 1, bold: true });
   }
 
-  const isFullOrder = opts.isFullOrder || (persons.length === (booking.pax || persons.length) && (payment.person_nos || []).length === (booking.pax || persons.length));
-  commands.push({ type: 'text', text: `結帳單 ${refDisplay}\n`, size: 28, align: 1, bold: true });
+  const orderMeta = breakdown.order || {};
+  const personsTotal = orderMeta.persons_total || booking.pax || (persons.length || 1);
+  const personsPaidAfter = orderMeta.persons_paid_after ?? (
+    booking.paid_persons != null ? booking.paid_persons : persons.length
+  );
+  const isFullOrder = opts.isFullOrder !== undefined
+    ? opts.isFullOrder
+    : (personsTotal > 0 &&
+       (payment.person_nos || []).length >= personsTotal &&
+       personsPaidAfter >= personsTotal &&
+       (!booking.payments || booking.payments.length <= 1));
 
-  const dateStr = formatReceiptDate(booking.start_at || payment.created_at);
-  const timeRange = formatReceiptTimeRange(booking.start_at || payment.created_at, booking.end_at || payment.created_at);
-  const tableLabel = booking.table_label ? ` ${booking.table_label}` : '';
+  commands.push({ type: 'text', text: `結帳單 ${refDisplay}`, size: 28, align: 1, bold: true });
+
+  const { dateStr, timeRange, tableLabel } = extractReceiptSessionInfo(booking, payment);
   commands.push({ type: 'text', text: fitLine(`${dateStr} ${timeRange}${tableLabel}`, ''), size: 22 });
 
   const staffName = payment.staff_name || opts.staffName || '櫃檯';
@@ -198,14 +252,16 @@ export function buildReceipt(payment, booking = {}, opts = {}) {
     const allPromos = persons.flatMap(p => p.promos || []);
     const allShares = persons.flatMap(p => (p.shares || []).filter(s => s.amount < 0));
     if (allPromos.length > 0 || allShares.length > 0) {
+      const discNames = [...allPromos.map(pr => pr.name || pr.code), ...allShares.map(sh => sh.label)].filter(Boolean).join('、') || '折扣與折讓';
       const discTot = allPromos.reduce((s, pr) => s + pr.amount, 0) + allShares.reduce((s, sh) => s + sh.amount, 0);
-      commands.push({ type: 'text', text: fitLine('折扣與折讓', formatReceiptMoney(discTot)), size: 22 });
+      commands.push({ type: 'text', text: fitLine(discNames, formatReceiptMoney(discTot)), size: 22 });
     }
   } else {
     // Section 8.2: 分開收款明細
     for (const p of persons) {
-      const seatText = p.seat_code ? `座位 ${p.seat_code}` : '';
-      commands.push({ type: 'text', text: fitLine(`${p.label}  ${seatText}`, ''), size: 22, bold: true });
+      const seatCode = p.seat_code ? `座位 ${p.seat_code}` : (booking.assigned_seats?.[p.person_no - 1] ? `座位 ${booking.assigned_seats[p.person_no - 1]}` : '');
+      const seatText = seatCode ? `  ${seatCode}` : '';
+      commands.push({ type: 'text', text: `${p.label}${seatText}`, size: 22, bold: true });
 
       // Entry
       commands.push({
@@ -213,6 +269,13 @@ export function buildReceipt(payment, booking = {}, opts = {}) {
         text: fitLine(`  入場 ${p.entry.hours} 小時`, formatReceiptMoney(p.entry.amount)),
         size: 22
       });
+      if (p.entry?.paused_minutes > 0) {
+        commands.push({
+          type: 'text',
+          text: `  (已扣暫停 ${p.entry.paused_minutes} 分)`,
+          size: 20
+        });
+      }
 
       // Board
       if (p.board?.amount > 0) {
@@ -228,14 +291,15 @@ export function buildReceipt(payment, booking = {}, opts = {}) {
             const to = s.to || (s.end_at ? new Date(s.end_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
             commands.push({
               type: 'text',
-              text: `   ${displayBoardName(s.name)} ${from}-${to} ${s.hours}h\n`,
+              text: `   ${displayBoardName(s.name)} ${from}-${to} ${s.hours}h`,
               size: 20
             });
           }
           if (u.discount > 0) {
+            const freeH = u.free_hours || 1;
             commands.push({
               type: 'text',
-              text: fitLine(`   買送折抵 ${u.free_hours || 1}h`, formatReceiptMoney(-u.discount)),
+              text: fitLine(`   ${u.discount_label || '買送折抵'} 折 ${freeH}h`, formatReceiptMoney(-u.discount)),
               size: 20
             });
           }
@@ -285,7 +349,7 @@ export function buildReceipt(payment, booking = {}, opts = {}) {
   }
 
   // Payment totals
-  const paxLabel = persons.length > 1 ? `（${persons.length} 位）` : '';
+  const paxLabel = (isFullOrder && persons.length > 1) ? `（${persons.length} 位）` : '';
   commands.push({
     type: 'text',
     text: fitLine(`本次收款${paxLabel}`, formatReceiptMoney(payment.amount)),
@@ -297,24 +361,23 @@ export function buildReceipt(payment, booking = {}, opts = {}) {
   if (payment.method === 'cash') {
     const recv = payment.cash_received != null ? `  收 ${formatReceiptMoney(payment.cash_received)}` : '';
     const chg = payment.change_given != null ? `  找 ${formatReceiptMoney(payment.change_given)}` : '';
-    commands.push({ type: 'text', text: `現金${recv}${chg}\n`, size: 22 });
+    commands.push({ type: 'text', text: `現金${recv}${chg}`, size: 22 });
   } else {
     commands.push({ type: 'text', text: fitLine(methodLabel, formatReceiptMoney(payment.amount)), size: 22 });
   }
 
-  // Status line
-  const orderMeta = breakdown.order || {};
-  if (orderMeta.persons_total) {
-    if (orderMeta.persons_paid_after >= orderMeta.persons_total) {
-      commands.push({ type: 'text', text: `整單已結清 ${orderMeta.persons_total}/${orderMeta.persons_total}\n`, size: 22 });
+  // Status line (Section 8.2 / 8.3)
+  if (personsTotal != null && personsPaidAfter != null) {
+    if (personsPaidAfter >= personsTotal) {
+      commands.push({ type: 'text', text: isFullOrder ? `狀態 已結清 ${personsTotal}/${personsTotal}` : `整單已結清 ${personsTotal}/${personsTotal}`, size: 22 });
     } else {
-      const left = orderMeta.persons_total - orderMeta.persons_paid_after;
-      commands.push({ type: 'text', text: `整單 ${orderMeta.persons_total} 位：已結 ${orderMeta.persons_paid_after} 位，尚 ${left} 位\n`, size: 22 });
+      const left = Math.max(0, personsTotal - personsPaidAfter);
+      commands.push({ type: 'text', text: `整單 ${personsTotal} 位：已結 ${personsPaidAfter} 位，尚 ${left} 位`, size: 22 });
     }
   }
 
   if (payment.note) {
-    commands.push({ type: 'text', text: `備註：${payment.note}\n`, size: 22 });
+    commands.push({ type: 'text', text: `備註：${payment.note}`, size: 22 });
   }
 
   appendReceiptFooter(commands, bookingRef, opts);
@@ -328,17 +391,15 @@ export function buildSupplementReceipt(payment, booking = {}, opts = {}) {
   const commands = [];
   const isReprint = Boolean(opts.isReprint || payment.is_reprint);
   const bookingRef = booking.booking_ref || payment.booking_ref || '';
-  const refDisplay = opts.refDisplay || bookingRef;
+  const refDisplay = opts.refDisplay || formatBookingRef(bookingRef);
 
-  commands.push({ type: 'title', text: '拾光製所\n', size: 32, align: 1 });
+  commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
   if (isReprint) {
-    commands.push({ type: 'text', text: '*** 補印 ***\n', size: 24, align: 1, bold: true });
+    commands.push({ type: 'text', text: '*** 補印 ***', size: 24, align: 1, bold: true });
   }
-  commands.push({ type: 'text', text: `補收單 ${refDisplay}\n`, size: 28, align: 1, bold: true });
+  commands.push({ type: 'text', text: `補收單 ${refDisplay}`, size: 28, align: 1, bold: true });
 
-  const dateStr = formatReceiptDate(booking.start_at || payment.created_at);
-  const timeRange = formatReceiptTimeRange(booking.start_at || payment.created_at, booking.end_at || payment.created_at);
-  const tableLabel = booking.table_label ? ` ${booking.table_label}` : '';
+  const { dateStr, timeRange, tableLabel } = extractReceiptSessionInfo(booking, payment);
   commands.push({ type: 'text', text: fitLine(`${dateStr} ${timeRange}${tableLabel}`, ''), size: 22 });
 
   const staffName = payment.staff_name || opts.staffName || '櫃檯';
@@ -353,7 +414,7 @@ export function buildSupplementReceipt(payment, booking = {}, opts = {}) {
 
   const pNo = payment.person_nos?.[0] || 1;
   const seatCode = booking.assigned_seats?.[pNo - 1] ? `  座位 ${booking.assigned_seats[pNo - 1]}` : '';
-  commands.push({ type: 'text', text: `第 ${pNo} 位${seatCode}\n`, size: 22, bold: true });
+  commands.push({ type: 'text', text: `第 ${pNo} 位${seatCode}`, size: 22, bold: true });
 
   const breakdown = payment.breakdown_json || {};
   const items = breakdown.items || [];
@@ -369,7 +430,7 @@ export function buildSupplementReceipt(payment, booking = {}, opts = {}) {
   if (payment.method === 'cash') {
     const recv = payment.cash_received != null ? `  收 ${formatReceiptMoney(payment.cash_received)}` : '';
     const chg = payment.change_given != null ? `  找 ${formatReceiptMoney(payment.change_given)}` : '';
-    commands.push({ type: 'text', text: `現金${recv}${chg}\n`, size: 22 });
+    commands.push({ type: 'text', text: `現金${recv}${chg}`, size: 22 });
   } else {
     commands.push({ type: 'text', text: fitLine(PAYMENT_METHOD_LABELS[payment.method] || payment.method, formatReceiptMoney(payment.amount)), size: 22 });
   }
@@ -388,13 +449,13 @@ export function buildSupplementReceipt(payment, booking = {}, opts = {}) {
 function buildSingleRefundSlip(payment, booking = {}, opts = {}, isCustomerCopy = false) {
   const commands = [];
   const bookingRef = booking.booking_ref || payment.booking_ref || '';
-  const refDisplay = opts.refDisplay || bookingRef;
+  const refDisplay = opts.refDisplay || formatBookingRef(bookingRef);
 
-  commands.push({ type: 'title', text: '拾光製所\n', size: 32, align: 1 });
+  commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
   if (isCustomerCopy) {
-    commands.push({ type: 'text', text: '顧客聯\n', size: 22, align: 1 });
+    commands.push({ type: 'text', text: '顧客聯', size: 22, align: 1 });
   }
-  commands.push({ type: 'text', text: `退款單 ${refDisplay}\n`, size: 28, align: 1, bold: true });
+  commands.push({ type: 'text', text: `退款單 ${refDisplay}`, size: 28, align: 1, bold: true });
 
   const staffName = payment.staff_name || opts.staffName || '櫃檯';
   const payTime = new Date(payment.created_at || Date.now()).toLocaleTimeString('en-GB', {
@@ -410,7 +471,7 @@ function buildSingleRefundSlip(payment, booking = {}, opts = {}, isCustomerCopy 
   const seatCode = booking.assigned_seats?.[pNo - 1]
     ? `  座位 ${booking.assigned_seats[pNo - 1]}`
     : (payment.breakdown_json?.seat_code ? `  座位 ${payment.breakdown_json.seat_code}` : '');
-  commands.push({ type: 'text', text: `第 ${pNo} 位${seatCode}\n`, size: 22 });
+  commands.push({ type: 'text', text: `第 ${pNo} 位${seatCode}`, size: 22 });
 
   const breakdown = payment.breakdown_json || {};
   if (breakdown.original_payment_summary || breakdown.original_amount) {
@@ -423,12 +484,12 @@ function buildSingleRefundSlip(payment, booking = {}, opts = {}, isCustomerCopy 
   }
   commands.push({ type: 'text', text: fitLine('退款', formatReceiptMoney(-payment.amount)), size: 26, bold: true });
   const methodLabel = payment.method === 'cash' ? '現金退回' : payment.method === 'line_pay' ? 'LINE Pay 退回' : '其他退回';
-  commands.push({ type: 'text', text: `方式 ${methodLabel}\n`, size: 22 });
-  commands.push({ type: 'text', text: `原因 ${payment.reason || '現場調整'}\n`, size: 22 });
+  commands.push({ type: 'text', text: `方式 ${methodLabel}`, size: 22 });
+  commands.push({ type: 'text', text: `原因 ${payment.reason || '現場調整'}`, size: 22 });
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
 
-  commands.push({ type: 'text', text: '店員簽名 ____________\n', size: 22 });
-  commands.push({ type: 'text', text: '顧客簽名 ____________\n', size: 22 });
+  commands.push({ type: 'text', text: '店員簽名 ____________', size: 22 });
+  commands.push({ type: 'text', text: '顧客簽名 ____________', size: 22 });
   commands.push({ type: 'lineWrap', lines: 3 });
 
   return commands;
@@ -450,18 +511,16 @@ export function buildRefundSlip(payment, booking = {}, opts = {}) {
 export function buildOrderSummary(booking = {}, payments = [], opts = {}) {
   const commands = [];
   const bookingRef = booking.booking_ref || '';
-  const refDisplay = opts.refDisplay || bookingRef;
+  const refDisplay = opts.refDisplay || formatBookingRef(bookingRef);
 
-  commands.push({ type: 'title', text: '拾光製所\n', size: 32, align: 1 });
-  commands.push({ type: 'text', text: '整單總表（店家留存）\n', size: 28, align: 1, bold: true });
+  commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
+  commands.push({ type: 'text', text: '整單總表（店家留存）', size: 28, align: 1, bold: true });
 
   const paxStr = booking.pax ? ` ${booking.pax} 位` : '';
   const nameStr = booking.customer_name || booking.name || '現場顧客';
   commands.push({ type: 'text', text: fitLine(`${refDisplay}  ${nameStr}${paxStr}`, ''), size: 22 });
 
-  const dateStr = formatReceiptDate(booking.start_at || Date.now());
-  const timeRange = formatReceiptTimeRange(booking.start_at || Date.now(), booking.end_at || Date.now());
-  const tableLabel = booking.table_label ? ` ${booking.table_label}` : '';
+  const { dateStr, timeRange, tableLabel } = extractReceiptSessionInfo(booking, payments[0] || {});
   commands.push({ type: 'text', text: fitLine(`${dateStr} ${timeRange}${tableLabel}`, ''), size: 22 });
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
 
@@ -508,11 +567,11 @@ export function buildOrderSummary(booking = {}, payments = [], opts = {}) {
 
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
   commands.push({ type: 'text', text: fitLine('整單合計', formatReceiptMoney(orderTotal)), size: 30, bold: true });
-  commands.push({ type: 'text', text: `狀態 已結清 ${booking.pax || '全'}/${booking.pax || '全'}\n`, size: 22 });
+  commands.push({ type: 'text', text: `狀態 已結清 ${booking.pax || '全'}/${booking.pax || '全'}`, size: 22 });
 
   if (opts.reprintCount) {
     const rTime = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
-    commands.push({ type: 'text', text: `補印 ${opts.reprintCount} 次 · ${rTime} 印出\n`, size: 20 });
+    commands.push({ type: 'text', text: `補印 ${opts.reprintCount} 次 · ${rTime} 印出`, size: 20 });
   }
 
   commands.push({ type: 'lineWrap', lines: 3 });
@@ -533,8 +592,8 @@ export function buildClosingSlip(closing = {}, opts = {}) {
     hour12: false
   });
 
-  commands.push({ type: 'title', text: '拾光製所\n', size: 32, align: 1 });
-  commands.push({ type: 'text', text: `${dateStr} 日結單\n`, size: 28, align: 1, bold: true });
+  commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
+  commands.push({ type: 'text', text: `${dateStr} 日結單`, size: 28, align: 1, bold: true });
   commands.push({ type: 'text', text: fitLine(`列印 ${printTime}`, `店員 ${staffName}`), size: 22 });
 
   const totals = closing.totals_json || {};
@@ -619,12 +678,12 @@ export function buildClosingSlip(closing = {}, opts = {}) {
     commands.push({ type: 'text', text: fitLine('實點現金', formatReceiptMoney(closing.counted_cash)), size: 22 });
     commands.push({ type: 'text', text: fitLine('差額', formatReceiptMoney(closing.difference || 0)), size: 24, bold: true });
   } else {
-    commands.push({ type: 'text', text: '實點現金 ____________\n', size: 22 });
-    commands.push({ type: 'text', text: '差額 ____________\n', size: 22 });
+    commands.push({ type: 'text', text: '實點現金 ____________', size: 22 });
+    commands.push({ type: 'text', text: '差額 ____________', size: 22 });
   }
 
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
-  commands.push({ type: 'text', text: '店員簽名 ____________\n', size: 22 });
+  commands.push({ type: 'text', text: '店員簽名 ____________', size: 22 });
   commands.push({ type: 'lineWrap', lines: 3 });
 
   return commands;
@@ -635,14 +694,14 @@ export function buildClosingSlip(closing = {}, opts = {}) {
  */
 export function buildTestPage(station = {}, opts = {}) {
   const commands = [];
-  commands.push({ type: 'title', text: '拾光製所\n', size: 32, align: 1 });
-  commands.push({ type: 'text', text: '印表機測試頁\n', size: 28, align: 1, bold: true });
+  commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
+  commands.push({ type: 'text', text: '印表機測試頁', size: 28, align: 1, bold: true });
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
-  commands.push({ type: 'text', text: `列印站：${station.name || '櫃檯商米'}\n`, size: 22 });
-  commands.push({ type: 'text', text: `狀態：正常在線\n`, size: 22 });
-  commands.push({ type: 'text', text: `時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}\n`, size: 22 });
+  commands.push({ type: 'text', text: `列印站：${station.name || '櫃檯商米'}`, size: 22 });
+  commands.push({ type: 'text', text: '狀態：正常在線', size: 22 });
+  commands.push({ type: 'text', text: `時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`, size: 22 });
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
-  commands.push({ type: 'text', text: '列印功能運作正常！\n', size: 24, align: 1, bold: true });
+  commands.push({ type: 'text', text: '列印功能運作正常！', size: 24, align: 1, bold: true });
   commands.push({ type: 'lineWrap', lines: 3 });
   return commands;
 }

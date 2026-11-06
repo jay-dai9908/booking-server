@@ -5,6 +5,8 @@ import {
   fitLine,
   strWidth,
   formatReceiptMoney,
+  formatBookingRef,
+  extractReceiptSessionInfo,
   buildReceipt,
   buildSupplementReceipt,
   buildRefundSlip,
@@ -21,17 +23,15 @@ test('fitLine width budgeting (Section 8.1, 4.10)', () => {
   assert.equal(strWidth('NT$1,650'), 8);
 
   const line1 = fitLine('第 1 位 入場 4 小時', 'NT$600', 31);
-  // line1 should end with \n and stripped width should not exceed 31
-  const trimmed1 = line1.replace(/\n$/, '');
-  assert.ok(strWidth(trimmed1) <= 31, `Expected <= 31, got ${strWidth(trimmed1)} for: ${trimmed1}`);
-  assert.ok(trimmed1.endsWith('NT$600'));
+  assert.ok(strWidth(line1) <= 31, `Expected <= 31, got ${strWidth(line1)} for: ${line1}`);
+  assert.ok(line1.endsWith('NT$600'));
+  assert.ok(!line1.endsWith('\n'), 'fitLine should not end with newline');
 
   // Truncation test: very long left item
   const line2 = fitLine('這是一個非常非常非常非常非常非常非常長的商品名稱', 'NT$120', 31);
-  const trimmed2 = line2.replace(/\n$/, '');
-  assert.ok(strWidth(trimmed2) <= 31, `Expected <= 31, got ${strWidth(trimmed2)} for: ${trimmed2}`);
-  assert.ok(trimmed2.includes('…'));
-  assert.ok(trimmed2.endsWith('NT$120'));
+  assert.ok(strWidth(line2) <= 31, `Expected <= 31, got ${strWidth(line2)} for: ${line2}`);
+  assert.ok(line2.includes('…'));
+  assert.ok(line2.endsWith('NT$120'));
 });
 
 test('formatReceiptMoney negative uses half-width hyphen', () => {
@@ -44,11 +44,90 @@ test('displayBoardName replaces 洞洞板 with 智能板', () => {
   assert.equal(displayBoardName('大智能板'), '大智能板');
 });
 
-test('buildReceipt generates valid Sunmi command structure', () => {
+test('formatBookingRef formats references to BK-XXXX-XXXX (Section 4.5)', () => {
+  assert.equal(formatBookingRef('BK-4E1A-90C2'), 'BK-4E1A-90C2');
+  assert.equal(formatBookingRef('9d35-74f1'), 'BK-9D35-74F1');
+  assert.equal(formatBookingRef('9d35-1234-5678-74f1'), 'BK-9D35-74F1');
+  assert.equal(formatBookingRef('9d3574f1'), 'BK-9D35-74F1');
+});
+
+test('Section 4.5 & 8.2: Split payment receipt line widths <= 31, session times, ref format, and status line', () => {
   const payment = {
     payment_no: 'R-0001',
-    booking_ref: 'BK-4E1A-90C2',
-    created_at: '2026-11-04T18:35:00Z',
+    booking_ref: '9d35-1234-5678-74f1',
+    created_at: '2026-11-04T16:12:00+08:00',
+    staff_name: '小安',
+    amount: 1035,
+    method: 'cash',
+    cash_received: 1100,
+    change_given: 65,
+    person_nos: [1, 2],
+    breakdown_json: {
+      persons: [
+        {
+          label: '第 1 位',
+          person_no: 1,
+          seat_code: '1-1',
+          entry: { hours: 3, amount: 450 },
+          addons: [{ name: '鑰匙圈加購', qty: 1, subtotal: 60 }]
+        },
+        {
+          label: '第 2 位',
+          person_no: 2,
+          seat_code: '1-2',
+          entry: { hours: 3.5, amount: 525, paused_minutes: 12 }
+        }
+      ],
+      order: {
+        persons_total: 4,
+        persons_paid_after: 3
+      }
+    }
+  };
+
+  const booking = {
+    booking_ref: '9d35-1234-5678-74f1',
+    pax: 4,
+    start_time: '13:00',
+    end_time: '16:00',
+    session_date: '2026-11-04',
+    assigned_seats: ['1-1', '1-2', '1-3', '1-4']
+  };
+
+  const commands = buildReceipt(payment, booking, { isFullOrder: false });
+
+  // 1. Title and Ref check
+  assert.equal(commands[0].text, '拾光製所');
+  const refCmd = commands.find(c => c.text?.startsWith('結帳單'));
+  assert.ok(refCmd);
+  assert.equal(refCmd.text, '結帳單 BK-9D35-74F1');
+
+  // 2. Session time check: must be 13:00-16:00 桌 1, not 16:12-16:12
+  const timeCmd = commands.find(c => c.text?.includes('13:00-16:00'));
+  assert.ok(timeCmd, 'Session time must use reservation start/end time');
+  assert.ok(timeCmd.text.includes('桌 1'), 'Table label must be present');
+
+  // 3. Status line check: must include "整單 4 位：已結 3 位，尚 1 位"
+  const statusCmd = commands.find(c => c.text?.includes('整單 4 位：已結 3 位，尚 1 位'));
+  assert.ok(statusCmd, 'Split status line must be present');
+
+  // 4. Line width check and no trailing newlines check
+  for (const cmd of commands) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      assert.ok(!cmd.text.endsWith('\n'), `Command should not end with newline: ${JSON.stringify(cmd.text)}`);
+      for (const line of cmd.text.split('\n')) {
+        const w = strWidth(line);
+        assert.ok(w <= 31, `Line width exceeds 31 (${w} chars): "${line}"`);
+      }
+    }
+  }
+});
+
+test('Section 8.3: Full order receipt matches spec template and widths <= 31', () => {
+  const payment = {
+    payment_no: 'R-0001',
+    booking_ref: '4e1a-1234-5678-90c2',
+    created_at: '2026-11-04T18:35:00+08:00',
     staff_name: '阿哲',
     amount: 1650,
     method: 'cash',
@@ -65,17 +144,34 @@ test('buildReceipt generates valid Sunmi command structure', () => {
   };
 
   const booking = {
-    booking_ref: 'BK-4E1A-90C2',
+    booking_ref: '4e1a-1234-5678-90c2',
     pax: 2,
-    start_at: '2026-11-04T14:00:00Z',
-    end_at: '2026-11-04T18:00:00Z',
+    start_time: '14:00',
+    end_time: '18:00',
+    session_date: '2026-11-04',
     table_label: '桌 2'
   };
 
   const commands = buildReceipt(payment, booking, { isFullOrder: true });
-  assert.ok(commands.length > 5);
   assert.equal(commands[0].type, 'title');
-  assert.equal(commands[0].text, '拾光製所\n');
+  assert.equal(commands[0].text, '拾光製所');
+
+  const refCmd = commands.find(c => c.text?.startsWith('結帳單'));
+  assert.equal(refCmd.text, '結帳單 BK-4E1A-90C2');
+
+  const statusCmd = commands.find(c => c.text?.includes('狀態 已結清 2/2'));
+  assert.ok(statusCmd);
+
+  // Width check
+  for (const cmd of commands) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      assert.ok(!cmd.text.endsWith('\n'), `Command should not end with newline: ${JSON.stringify(cmd.text)}`);
+      for (const line of cmd.text.split('\n')) {
+        const w = strWidth(line);
+        assert.ok(w <= 31, `Line width exceeds 31 (${w} chars): "${line}"`);
+      }
+    }
+  }
 
   const html = commandsToPreviewHtml(commands);
   assert.ok(html.includes('拾光製所'));
@@ -94,8 +190,8 @@ test('Section 8.4 buildSupplementReceipt generates valid supplement slip', () =>
     change_given: 40,
     person_nos: [1],
     breakdown_json: {
-      item_name: '鑰匙圈 ×1',
-      total_paid_after: 653
+      items: [{ name: '鑰匙圈', qty: 1, amount: 60 }],
+      person_total_paid: 653
     }
   };
   const booking = {
@@ -109,6 +205,15 @@ test('Section 8.4 buildSupplementReceipt generates valid supplement slip', () =>
   const commands = buildSupplementReceipt(payment, booking);
   assert.ok(commands.some(c => c.text && c.text.includes('補收單')));
   assert.ok(commands.some(c => c.text && c.text.includes('NT$60')));
+
+  for (const cmd of commands) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      assert.ok(!cmd.text.endsWith('\n'), `No trailing newline in ${cmd.text}`);
+      for (const line of cmd.text.split('\n')) {
+        assert.ok(strWidth(line) <= 31);
+      }
+    }
+  }
 });
 
 test('Section 8.5 buildRefundSlip generates merchant and customer copy', () => {
@@ -134,6 +239,15 @@ test('Section 8.5 buildRefundSlip generates merchant and customer copy', () => {
   const commands = buildRefundSlip(refundPayment, booking);
   assert.ok(commands.some(c => c.text && c.text.includes('退款單')));
   assert.ok(commands.some(c => c.text && c.text.includes('顧客聯')));
+
+  for (const cmd of commands) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      assert.ok(!cmd.text.endsWith('\n'));
+      for (const line of cmd.text.split('\n')) {
+        assert.ok(strWidth(line) <= 31);
+      }
+    }
+  }
 });
 
 test('Section 8.6 buildOrderSummary generates store summary slip', () => {
@@ -155,6 +269,15 @@ test('Section 8.6 buildOrderSummary generates store summary slip', () => {
   const commands = buildOrderSummary(booking, payments);
   assert.ok(commands.some(c => c.text && c.text.includes('整單總表（店家留存）')));
   assert.ok(commands.some(c => c.text && c.text.includes('NT$2,205')));
+
+  for (const cmd of commands) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      assert.ok(!cmd.text.endsWith('\n'));
+      for (const line of cmd.text.split('\n')) {
+        assert.ok(strWidth(line) <= 31);
+      }
+    }
+  }
 });
 
 test('Section 8.7 buildClosingSlip generates daily cash closing slip', () => {
@@ -187,5 +310,13 @@ test('Section 8.7 buildClosingSlip generates daily cash closing slip', () => {
   assert.ok(commands.some(c => c.text && c.text.includes('日結單')));
   assert.ok(commands.some(c => c.text && c.text.includes('NT$20,430')));
   assert.ok(commands.some(c => c.text && c.text.includes('NT$14,480')));
-});
 
+  for (const cmd of commands) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      assert.ok(!cmd.text.endsWith('\n'));
+      for (const line of cmd.text.split('\n')) {
+        assert.ok(strWidth(line) <= 31);
+      }
+    }
+  }
+});
