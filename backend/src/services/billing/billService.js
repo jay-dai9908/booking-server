@@ -29,6 +29,13 @@ export async function getNextDailySeq(tx, key, date = new Date()) {
   return counter.value;
 }
 
+export function currentRevOf(checkout_details) {
+  if (!checkout_details || typeof checkout_details !== 'object') return 0;
+  if (checkout_details.version !== 2) return 0;
+  if (typeof checkout_details.rev !== 'number') return 0;
+  return checkout_details.rev;
+}
+
 /**
  * Get the full bill and related entities for a booking
  */
@@ -77,11 +84,11 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
     note: '',
     updated_at: new Date().toISOString(),
     updated_by: firstRes.checked_in_by || '系統',
-    rev: 1
+    rev: currentRevOf(rawDraft)
   };
 
   if (rawDraft && typeof rawDraft === 'object' && rawDraft.version === 2) {
-    draft = rawDraft;
+    draft = { ...rawDraft, rev: currentRevOf(rawDraft) };
   }
 
   // Persons
@@ -166,7 +173,7 @@ export async function saveDraft(booking_ref, base_rev, newDraft, staffName, staf
   if (!reservations.length) throw { status: 404, message: '找不到此筆預約' };
 
   const currentDetails = reservations[0].checkout_details;
-  const currentRev = currentDetails?.rev || 0;
+  const currentRev = currentRevOf(currentDetails);
 
   if (base_rev !== undefined && base_rev !== null && base_rev !== currentRev) {
     throw {
@@ -238,7 +245,11 @@ export async function saveDraft(booking_ref, base_rev, newDraft, staffName, staf
 
   await refreshBillingCache(tx, booking_ref);
   const result = await getBookingBill(booking_ref, tx);
-  return result.bill;
+  return {
+    bill: result.bill,
+    draft: draftToSave,
+    rev: updatedRev
+  };
 }
 
 /**

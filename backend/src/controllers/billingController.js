@@ -54,11 +54,13 @@ export async function putDraft(req, res) {
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
-    const newBill = await saveDraft(booking_ref, base_rev, draft, staffName, staffId, deviceInfo);
+    const saveResult = await saveDraft(booking_ref, base_rev, draft, staffName, staffId, deviceInfo);
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
-      bill: newBill
+      bill: saveResult.bill || saveResult,
+      draft: saveResult.draft,
+      rev: saveResult.rev
     });
   } catch (error) {
     console.error('[putDraft] Error:', error);

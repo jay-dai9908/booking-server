@@ -103,7 +103,7 @@ export default function CheckoutWorkbench({
       setBillData(res.data);
       setDraftState(res.data.draft || {
         version: 2,
-        rev: 1,
+        rev: 0,
         split_mode: 'proportional',
         persons: [],
         order_addons: [],
@@ -145,22 +145,61 @@ export default function CheckoutWorkbench({
       try {
         setIsSavingDraft(true);
         setDraftConflictMsg(null);
+        const currentRev = billData.draft?.rev ?? 0;
         const res = await api.put(`/billing/${bookingRef}/draft`, {
-          base_rev: billData.draft?.rev || 1,
+          base_rev: currentRev,
           draft: newDraft
         });
         if (res.data?.bill) {
+          const nextRev = res.data.rev ?? res.data.draft?.rev ?? (currentRev + 1);
           setBillData(prev => ({
             ...prev,
             bill: res.data.bill,
-            draft: { ...newDraft, rev: (prev.draft?.rev || 1) + 1 }
+            draft: { ...newDraft, rev: nextRev }
           }));
+          setDraftState(prev => ({ ...prev, rev: nextRev }));
         }
       } catch (err) {
         console.error('[CheckoutWorkbench] Draft save error:', err);
         if (err.response?.status === 409) {
           setDraftConflictMsg('另一台裝置剛改過這筆帳，已重新載入');
-          loadBill();
+          try {
+            const freshRes = await api.get(`/billing/${bookingRef}`);
+            const freshBillData = freshRes.data;
+            const freshDraft = freshBillData?.draft || {};
+            const freshRev = freshDraft.rev ?? 0;
+            const mergedDraft = {
+              ...freshDraft,
+              order_addons: newDraft.order_addons !== undefined ? newDraft.order_addons : freshDraft.order_addons,
+              order_promos: newDraft.order_promos !== undefined ? newDraft.order_promos : freshDraft.order_promos,
+              manual_discount: newDraft.manual_discount !== undefined ? newDraft.manual_discount : freshDraft.manual_discount,
+              total_override: newDraft.total_override !== undefined ? newDraft.total_override : freshDraft.total_override,
+              persons: newDraft.persons !== undefined ? newDraft.persons : freshDraft.persons,
+              note: newDraft.note !== undefined ? newDraft.note : freshDraft.note,
+              rev: freshRev
+            };
+            setBillData({
+              ...freshBillData,
+              draft: mergedDraft
+            });
+            setDraftState(mergedDraft);
+            const retryRes = await api.put(`/billing/${bookingRef}/draft`, {
+              base_rev: freshRev,
+              draft: mergedDraft
+            });
+            if (retryRes.data?.bill) {
+              const retryRev = retryRes.data.rev ?? retryRes.data.draft?.rev ?? (freshRev + 1);
+              setBillData(prev => ({
+                ...prev,
+                bill: retryRes.data.bill,
+                draft: { ...mergedDraft, rev: retryRev }
+              }));
+              setDraftState(prev => ({ ...prev, rev: retryRev }));
+            }
+          } catch (retryErr) {
+            console.error('[CheckoutWorkbench] Re-apply after 409 failed:', retryErr);
+            loadBill();
+          }
         }
       } finally {
         setIsSavingDraft(false);
