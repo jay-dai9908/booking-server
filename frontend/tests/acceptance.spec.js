@@ -23,6 +23,10 @@ async function run() {
 
   page.on('response', (res) => {
     if (res.url().includes('/api/') && res.status() >= 400) {
+      if (res.url().includes('/api/auth/me') && res.status() === 401) {
+        // Expected before login
+        return;
+      }
       console.error(`API Error ${res.status()} on ${res.url()}`);
       apiErrors.push({ url: res.url(), status: res.status() });
     }
@@ -31,12 +35,23 @@ async function run() {
   try {
     // 1. Login as admin
     console.log('Logging in as admin...');
-    await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'domcontentloaded' });
-    const passInput = page.locator('input[type="password"], input[type="text"]').first();
-    if (await passInput.isVisible()) {
-      await passInput.fill(process.env.ADMIN_PASSWORD || 'gathering.light2609');
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(1000);
+    await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
+    const passInput = page.locator('input[type="password"]');
+    await passInput.waitFor({ state: 'visible', timeout: 15000 });
+    await passInput.fill(process.env.ADMIN_PASSWORD || 'gathering.light2609');
+    await page.locator('button[type="submit"]').click();
+    await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
+    await page.waitForTimeout(1000);
+    console.log('Admin login succeeded, current URL:', page.url());
+
+    // Inject token to browser context so all subsequent reloads and navigations stay logged in
+    const token = await page.evaluate(() => sessionStorage.getItem('shiguang_auth_token'));
+    if (token) {
+      await context.addInitScript((tok) => {
+        try {
+          sessionStorage.setItem('shiguang_auth_token', tok);
+        } catch (e) {}
+      }, token);
     }
 
     // 2. Section 4 Acceptance Flow: Seat Layout Editor
@@ -44,19 +59,17 @@ async function run() {
     await page.goto(`${BASE_URL}/admin/seat-layout`, { waitUntil: 'networkidle', timeout: 15000 });
     await page.waitForSelector('[data-testid="seat-layout-svg"]', { timeout: 10000 });
 
-    // Step 0: Ensure Table 3 exists (add preset if not)
+    // Step 0: Ensure Table 3 exists (add 4p presets if needed)
     let table3 = page.locator('[data-testid="table-node-桌 3"], [data-testid="table-node-3"]').first();
-    if (!await table3.isVisible()) {
-      console.log('Table 3 not found, adding 4p preset...');
+    let attempts = 0;
+    while (!await table3.isVisible() && attempts < 5) {
+      attempts++;
+      console.log(`Table 3 not visible yet, adding 4p preset (attempt ${attempts})...`);
       await page.locator('[data-testid="preset-4p"]').click();
-      await page.waitForTimeout(500);
-      // Change label to 桌 3 if needed
-      const labelInput = page.locator('[data-testid="table-label-input"]');
-      if (await labelInput.isVisible()) {
-        await labelInput.fill('桌 3');
-        await labelInput.blur();
-      }
+      await page.waitForTimeout(400);
+      table3 = page.locator('[data-testid="table-node-桌 3"], [data-testid="table-node-3"]').first();
     }
+    await assert.ok(await table3.isVisible(), 'Table 3 must be visible on canvas');
 
     // Step 1: 把桌 3 轉成 −10°
     console.log('Step 1: Setting Table 3 rotation to -10°...');
@@ -71,12 +84,11 @@ async function run() {
 
     // Step 2: 把 3-3 從桌邊拉開
     console.log('Step 2: Pulling Seat 3-3 away from table...');
-    // If seat 3-3 is not present, add it or click the 3rd seat of table 3
     let seat33 = page.locator('[data-testid="seat-node-3-3"]').first();
     if (!await seat33.isVisible()) {
-      // Find any seat in table 3 and change code to 3-3
-      const firstSeat = page.locator('[data-testid^="seat-node-"]').first();
-      await firstSeat.click();
+      // If 3-3 not labeled, find first seat of table 3 and set code to 3-3
+      const anySeat = page.locator('[data-testid^="seat-node-"]').first();
+      await anySeat.click();
       const codeInput = page.locator('[data-testid="seat-code-input"]');
       if (await codeInput.isVisible()) {
         await codeInput.fill('3-3');
@@ -84,13 +96,12 @@ async function run() {
       }
       seat33 = page.locator('[data-testid="seat-node-3-3"]').first();
     }
-    await seat33.click();
-    // Drag seat 3-3 by 60px
+    await seat33.waitFor({ state: 'visible', timeout: 5000 });
     const seatBox = await seat33.boundingBox();
     if (seatBox) {
       await page.mouse.move(seatBox.x + seatBox.width / 2, seatBox.y + seatBox.height / 2);
       await page.mouse.down();
-      await page.mouse.move(seatBox.x + seatBox.width / 2 + 60, seatBox.y + seatBox.height / 2 + 40);
+      await page.mouse.move(seatBox.x + seatBox.width / 2 + 50, seatBox.y + seatBox.height / 2 + 50);
       await page.mouse.up();
       await page.waitForTimeout(300);
     }
@@ -98,23 +109,33 @@ async function run() {
     // Step 3: 畫一面斜牆
     console.log('Step 3: Drawing diagonal wall...');
     await page.locator('[data-testid="draw-wall-btn"]').click();
+    await page.waitForTimeout(300);
     const svgEl = page.locator('[data-testid="seat-layout-svg"]');
     const svgBox = await svgEl.boundingBox();
     if (svgBox) {
-      // Click two diagonal points
-      await page.mouse.click(svgBox.x + 100, svgBox.y + 100);
+      await page.mouse.click(svgBox.x + 80, svgBox.y + 80);
       await page.waitForTimeout(200);
-      await page.mouse.click(svgBox.x + 250, svgBox.y + 250);
+      await page.mouse.click(svgBox.x + 220, svgBox.y + 220);
       await page.waitForTimeout(200);
       await page.locator('[data-testid="finish-wall-btn"]').click();
       await page.waitForTimeout(300);
     }
 
     // Step 4: 放一張底圖並調透明度
-    console.log('Step 4: Setting background opacity...');
+    console.log('Step 4: Setting background image and opacity...');
+    const fileInput = page.locator('input[type="file"][accept="image/*"]');
+    const pngBuffer = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+    await fileInput.setInputFiles({
+      name: 'blueprint.png',
+      mimeType: 'image/png',
+      buffer: pngBuffer
+    });
+    await page.waitForTimeout(500);
+
     const opacitySlider = page.locator('[data-testid="bg-opacity-slider"]');
     if (await opacitySlider.isVisible()) {
       await opacitySlider.fill('45');
+      await opacitySlider.dispatchEvent('mouseup');
       await page.waitForTimeout(300);
     }
 
@@ -130,7 +151,7 @@ async function run() {
     // Step 6: 儲存草稿，重新整理頁面
     console.log('Step 6: Saving draft and reloading page...');
     await page.locator('[data-testid="save-draft-btn"]').click();
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForSelector('[data-testid="seat-layout-svg"]', { timeout: 10000 });
 

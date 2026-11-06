@@ -22,6 +22,7 @@ router.get('/active', ...readAuth, getActiveLayout);
 router.get('/', ...readAuth, listLayouts);
 router.get('/:id', ...readAuth, getLayoutById);
 router.post('/', ...writeAuth, createLayoutDraft);
+router.post('/draft', ...writeAuth, createLayoutDraft);
 router.put('/:id', ...writeAuth, updateLayoutDraft);
 router.post('/:id/preview-publish', ...writeAuth, previewPublish);
 router.post('/:id/publish', ...writeAuth, publishLayout);

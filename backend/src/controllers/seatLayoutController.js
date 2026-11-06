@@ -357,9 +357,20 @@ export async function updateLayoutDraft(req, res) {
       }
     });
 
+    const updated = await prisma.seatLayout.findUnique({
+      where: { id },
+      include: {
+        zones: { orderBy: { sort_order: 'asc' } },
+        tables: { orderBy: { sort_order: 'asc' } },
+        seats: { orderBy: { sort_order: 'asc' } }
+      }
+    });
+    const resolved = resolveLayoutGeometry(updated);
+
     return res.json({
       server_now: new Date().toISOString(),
-      message: '草稿儲存成功'
+      message: '草稿儲存成功',
+      layout: resolved
     });
   } catch (err) {
     console.error('updateLayoutDraft error:', err);

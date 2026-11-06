@@ -90,6 +90,8 @@ export default function SeatLayoutPage() {
 
   const svgRef = useRef(null);
   const fileInputRef = useRef(null);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
 
   // 1. Initial Load
   useEffect(() => {
@@ -136,7 +138,9 @@ export default function SeatLayoutPage() {
 
   // Push new state to undo/redo history
   const commitLayoutChange = useCallback((newLayout) => {
-    const cloned = JSON.parse(JSON.stringify(newLayout));
+    const target = newLayout || layoutRef.current;
+    if (!target) return;
+    const cloned = JSON.parse(JSON.stringify(target));
     setHistory(prev => {
       const next = prev.slice(0, historyIndex + 1);
       if (next.length >= 50) next.shift();
@@ -199,17 +203,22 @@ export default function SeatLayoutPage() {
 
   // Save Draft to Backend
   const handleSaveDraft = async () => {
-    if (!layout) return;
+    const current = layoutRef.current || layout;
+    if (!current) return;
     try {
       setSaving(true);
-      let targetId = layout.id;
-      // If active layout is published, create draft on backend first
-      if (layout.status === 'published') {
-        const draftRes = await api.post('/seat-layouts/draft', { from_id: layout.id });
+      let targetId = current.id;
+      // If active layout is published or legacy (id: 0), create draft on backend first
+      if (current.status === 'published' || !targetId) {
+        const draftRes = await api.post('/seat-layouts/draft', { from_id: targetId || undefined });
         targetId = draftRes.data.layout_id;
       }
-      const res = await api.put(`/seat-layouts/${targetId}`, layout);
-      setLayout(res.data.layout);
+      const res = await api.put(`/seat-layouts/${targetId}`, current);
+      if (res.data?.layout) {
+        setLayout(res.data.layout);
+      } else {
+        setLayout(prev => ({ ...prev, id: targetId, status: 'draft' }));
+      }
       setMessage({ type: 'success', text: '草稿儲存成功！' });
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.error || '儲存失敗' });
