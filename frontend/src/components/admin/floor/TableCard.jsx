@@ -31,7 +31,7 @@ export default function TableCard({
       </div>
 
       {isOneSide ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {seats.map((seat) => {
             const seatInfo = seatStates[seat.code] || {};
             let state = seatInfo.state || (seat.is_active ? 'empty' : 'off');

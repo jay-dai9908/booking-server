@@ -97,13 +97,14 @@ export default function SeatingPage() {
   const [selectedTableDetails, setSelectedTableDetails] = useState(null); // table object
   const [activeMobileTableId, setActiveMobileTableId] = useState(null);
   const [flashingTableId, setFlashingTableId] = useState(null);
+  const mobileStickyHeaderRef = useRef(null);
 
   const handleMiniMapTableClick = (table) => {
     setActiveMobileTableId(table.id);
     const el = document.getElementById(`table-card-${table.id}`);
     if (el) {
       const rect = el.getBoundingClientRect();
-      const offset = 140; // sticky header + minimap
+      const offset = mobileStickyHeaderRef.current ? mobileStickyHeaderRef.current.offsetHeight + 8 : 160;
       const targetY = window.pageYOffset + rect.top - offset;
       window.scrollTo({ top: targetY, behavior: 'smooth' });
       setFlashingTableId(table.id);
@@ -219,13 +220,72 @@ export default function SeatingPage() {
     return map;
   }, [activeSeats, checkedInBookings, pendingBookings]);
 
+  // Group tables by zone (Spec 3.2)
+  const zoneGroupedTables = useMemo(() => {
+    const zones = [...(layout.zones || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const allTables = layout.tables || [];
+    const allSeats = layout.seats || [];
+
+    const groups = [];
+
+    // Map zones
+    for (const zone of zones) {
+      const zoneTables = allTables
+        .filter(t => t.zone_id === zone.id)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+      if (zoneTables.length === 0) continue;
+
+      const zoneSeats = allSeats.filter(s => s.zone_id === zone.id && s.is_active);
+      const totalSeats = zoneSeats.length;
+      const inUseSeats = zoneSeats.filter(s => {
+        const state = seatStatesMap[s.code]?.state;
+        return state === 'in_use' || state === 'paused';
+      }).length;
+
+      const prefix = (zone.sort_order != null && !zone.name.startsWith(String(zone.sort_order + 1)))
+        ? `${zone.sort_order + 1} `
+        : '';
+      const zoneTitle = `${prefix}${zone.name}`;
+
+      groups.push({
+        zone,
+        zoneTitle,
+        totalSeats,
+        inUseSeats,
+        tables: zoneTables
+      });
+    }
+
+    // Any tables without a zone
+    const unzonedTables = allTables
+      .filter(t => !t.zone_id || !zones.some(z => z.id === t.zone_id))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+    if (unzonedTables.length > 0) {
+      const unzonedSeats = allSeats.filter(s => unzonedTables.some(t => t.id === s.table_id) && s.is_active);
+      groups.push({
+        zone: null,
+        zoneTitle: '其他區域',
+        totalSeats: unzonedSeats.length,
+        inUseSeats: unzonedSeats.filter(s => {
+          const state = seatStatesMap[s.code]?.state;
+          return state === 'in_use' || state === 'paused';
+        }).length,
+        tables: unzonedTables
+      });
+    }
+
+    return groups;
+  }, [layout.zones, layout.tables, layout.seats, seatStatesMap]);
+
   // Mobile scroll-spy for MiniMap (Spec 6.5)
   useEffect(() => {
     if (activeTab !== 'floor') return;
     const handleScroll = () => {
       if (window.innerWidth >= 1024) return;
       const tables = layout.tables || [];
-      const stickyOffset = 160;
+      const stickyOffset = mobileStickyHeaderRef.current ? mobileStickyHeaderRef.current.offsetHeight + 16 : 180;
       for (const t of tables) {
         const el = document.getElementById(`table-card-${t.id}`);
         if (el) {
@@ -425,8 +485,8 @@ export default function SeatingPage() {
         </div>
       )}
 
-      {/* Top Header & Summary */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
+      {/* Desktop Top Header & Summary */}
+      <div className="hidden lg:flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-[18px] font-bold text-sg-ink">今日帶位</h1>
@@ -460,8 +520,8 @@ export default function SeatingPage() {
         </div>
       </div>
 
-      {/* Filter Chips Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      {/* Desktop Filter Chips Bar */}
+      <div className="hidden lg:flex items-center gap-2 overflow-x-auto pb-1">
         {[
           { key: 'all', label: '全部' },
           { key: 'alert', label: `需要注意 ${alerts.length ? alerts.length : ''}` },
@@ -481,6 +541,65 @@ export default function SeatingPage() {
             {chip.label}
           </button>
         ))}
+      </div>
+
+      {/* Mobile Sticky Header (Tabs + Filter Chips + MiniMap when on floor tab) */}
+      <div
+        ref={mobileStickyHeaderRef}
+        className="lg:hidden sticky top-0 z-20 bg-sg-bg/95 backdrop-blur-md pt-2 pb-2 space-y-2 border-b border-sg-line/50 shadow-xs"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <SegmentedTabs
+            tabs={[
+              { id: 'list', label: '名單' },
+              { id: 'floor', label: '平面圖' },
+              { id: 'timeline', label: '時間軸' }
+            ]}
+            activeTab={activeTab}
+            onChange={handleTabChange}
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowForceAdd(true)}
+          >
+            <Plus className="w-4 h-4 mr-0.5 text-sg-brown" />
+            加人
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+          {[
+            { key: 'all', label: '全部' },
+            { key: 'alert', label: `需要注意 ${alerts.length ? alerts.length : ''}` },
+            { key: 'pending', label: `待入座 ${pendingBookings.length}` },
+            { key: 'empty', label: `空位 ${emptySeatCount}` }
+          ].map(chip => (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => setFilterMode(chip.key)}
+              className={`px-3 py-1 rounded-2xl text-[12px] font-bold whitespace-nowrap transition border ${
+                filterMode === chip.key
+                  ? 'bg-sg-brown text-white border-sg-brown'
+                  : 'bg-white text-sg-ink border-sg-line'
+              }`}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'floor' && (
+          <div className="pt-1">
+            <MiniMap
+              layout={layout}
+              seatStates={seatStatesMap}
+              activeTableId={activeMobileTableId}
+              onTableClick={handleMiniMapTableClick}
+            />
+          </div>
+        )}
       </div>
 
       {/* TAB 1: LIST VIEW (名單) */}
@@ -672,16 +791,6 @@ export default function SeatingPage() {
       {/* TAB 2: FLOOR PLAN VIEW (平面圖) */}
       {activeTab === 'floor' && (
         <div className="space-y-4">
-          {/* Mobile Sticky MiniMap Header (Spec 6.5) */}
-          <div className="lg:hidden sticky top-0 z-20 pb-2 -mt-2 bg-sg-bg/95 backdrop-blur-sm">
-            <MiniMap
-              layout={layout}
-              seatStates={seatStatesMap}
-              activeTableId={activeMobileTableId}
-              onTableClick={handleMiniMapTableClick}
-            />
-          </div>
-
           {/* Desktop/Tablet: Side by side */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
             {/* Left: Floor canvas (Desktop / Tablet) */}
@@ -708,23 +817,40 @@ export default function SeatingPage() {
             </div>
 
             {/* Mobile Table Cards List below canvas for small screens */}
-            <div className="lg:hidden space-y-4">
-              {(layout.tables || []).map((t) => {
-                const tableSeats = (layout.seats || []).filter(s => s.table_id === t.id);
-                const zone = (layout.zones || []).find(z => z.id === t.zone_id);
+            <div className="lg:hidden space-y-5">
+              {zoneGroupedTables.map((group) => (
+                <div key={group.zone?.id || 'unzoned'} className="space-y-3">
+                  {/* Zone Header: e.g. 1 前區 靠門口 使用中 8 / 12 位 */}
+                  <div className="bg-sg-paper/90 border border-sg-line px-3.5 py-2 rounded-2xl flex items-center justify-between text-[13px] font-bold text-sg-ink">
+                    <div className="flex items-center gap-2">
+                      <span>{group.zoneTitle}</span>
+                      {group.zone?.note && (
+                        <span className="text-[12px] text-sg-muted font-normal">{group.zone.note}</span>
+                      )}
+                    </div>
+                    <div className="text-[12px] text-sg-muted">
+                      使用中 <span className="font-bold text-sg-ink font-num">{group.inUseSeats}</span> / <span className="font-num">{group.totalSeats}</span> 位
+                    </div>
+                  </div>
 
-                return (
-                  <TableCard
-                    key={t.id}
-                    table={t}
-                    zoneName={zone?.name}
-                    seats={tableSeats}
-                    seatStates={seatStatesMap}
-                    onSeatClick={handleSeatClick}
-                    className={flashingTableId === t.id ? 'sg-flash-peach' : ''}
-                  />
-                );
-              })}
+                  <div className="space-y-3">
+                    {group.tables.map((t) => {
+                      const tableSeats = (layout.seats || []).filter(s => s.table_id === t.id);
+                      return (
+                        <TableCard
+                          key={t.id}
+                          table={t}
+                          zoneName={group.zone?.name}
+                          seats={tableSeats}
+                          seatStates={seatStatesMap}
+                          onSeatClick={handleSeatClick}
+                          className={flashingTableId === t.id ? 'sg-flash-peach' : ''}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
               {/* Spacer so last card can scroll under MiniMap (Spec 6.5) */}
               <div style={{ minHeight: 'calc(100vh - 280px)' }} />
             </div>

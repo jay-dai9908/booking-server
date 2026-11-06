@@ -233,7 +233,7 @@ export default function AdminShell({ children, title = '拾光製所', subtitle 
           actions={actions}
         />
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1">
           {children}
         </main>
       </div>
