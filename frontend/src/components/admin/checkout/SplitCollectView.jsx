@@ -92,20 +92,14 @@ export default function SplitCollectView({
         print: autoPrint
       });
 
-      // Local printing if requested
-      if (autoPrint && res.data?.payments?.length) {
-        try {
-          const lastPay = res.data.payments[res.data.payments.length - 1];
-          const printRes = await api.post('/print/jobs', {
-            type: 'receipt',
-            payment_id: lastPay.id,
-            booking_ref: bookingRef
-          });
-          if (printRes.data?.job) {
-            await printJobOnThisDevice(printRes.data.job);
+      // Print jobs created automatically by backend (Section 3.8)
+      if (res.data?.print_jobs?.length) {
+        for (const job of res.data.print_jobs) {
+          try {
+            await printJobOnThisDevice(job);
+          } catch (printErr) {
+            console.warn('[SplitCollect] Local print trigger:', printErr);
           }
-        } catch (printErr) {
-          console.warn('[SplitCollect] Local print trigger:', printErr);
         }
       }
 

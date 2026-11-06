@@ -26,13 +26,14 @@ export async function queuePrintJob({
   reprint_of_id = null,
   user = {},
   device = {}
-}) {
+}, clientTx = null) {
   const staffName = user?.name || '系統';
   const staffId = user?.id || null;
   const deviceLabel = device?.device_label || '櫃檯';
   const deviceId = device?.device_id || null;
 
-  const globalSetting = await prisma.globalSetting.findFirst() || {};
+  const client = clientTx || prisma;
+  const globalSetting = await client.globalSetting.findFirst() || {};
   const footerText = globalSetting.receipt_footer_text || '謝謝光臨，作品記得帶回家';
   const opts = { footerText };
 
@@ -42,7 +43,7 @@ export async function queuePrintJob({
   const isReprint = Boolean(reprint_of_id);
 
   if (isReprint) {
-    const orig = await prisma.printJob.findUnique({ where: { id: Number(reprint_of_id) } });
+    const orig = await client.printJob.findUnique({ where: { id: Number(reprint_of_id) } });
     if (orig) {
       copyNo = (orig.copy_no || 1) + 1;
     }
@@ -51,51 +52,51 @@ export async function queuePrintJob({
   }
 
   if (type === 'receipt' && payment_id) {
-    const payment = await prisma.payment.findUnique({ where: { id: Number(payment_id) } });
-    const booking = booking_ref ? await prisma.reservation.findFirst({
+    const payment = await client.payment.findUnique({ where: { id: Number(payment_id) } });
+    const booking = booking_ref ? await client.reservation.findFirst({
       where: { booking_ref },
       include: { user: true, session: true }
     }) : null;
     commands = buildReceipt(payment, booking, opts);
     title = `結帳單 ${booking_ref || ''} 第 ${(payment?.person_nos || []).join('、')} 位`;
   } else if (type === 'supplement' && payment_id) {
-    const payment = await prisma.payment.findUnique({ where: { id: Number(payment_id) } });
-    const booking = booking_ref ? await prisma.reservation.findFirst({
+    const payment = await client.payment.findUnique({ where: { id: Number(payment_id) } });
+    const booking = booking_ref ? await client.reservation.findFirst({
       where: { booking_ref },
       include: { user: true, session: true }
     }) : null;
     commands = buildSupplementReceipt(payment, booking, opts);
     title = `補收收據 ${booking_ref || ''}`;
   } else if (type === 'refund' && payment_id) {
-    const payment = await prisma.payment.findUnique({ where: { id: Number(payment_id) } });
-    const booking = booking_ref ? await prisma.reservation.findFirst({
+    const payment = await client.payment.findUnique({ where: { id: Number(payment_id) } });
+    const booking = booking_ref ? await client.reservation.findFirst({
       where: { booking_ref },
       include: { user: true, session: true }
     }) : null;
     commands = buildRefundSlip(payment, booking, opts);
     title = `退款單 ${booking_ref || ''}`;
   } else if (type === 'summary' && booking_ref) {
-    const booking = await prisma.reservation.findFirst({
+    const booking = await client.reservation.findFirst({
       where: { booking_ref },
       include: { user: true, session: true }
     });
-    const payments = await prisma.payment.findMany({
+    const payments = await client.payment.findMany({
       where: { booking_ref, status: 'valid' }
     });
     commands = buildOrderSummary(booking, payments, opts);
     title = `整單總表 ${booking_ref}`;
   } else if (type === 'closing' && closing_id) {
-    const closing = await prisma.cashClosing.findUnique({ where: { id: Number(closing_id) } });
+    const closing = await client.cashClosing.findUnique({ where: { id: Number(closing_id) } });
     commands = buildClosingSlip(closing, opts);
     title = `日結單 ${closing?.business_date ? closing.business_date.toISOString().slice(0, 10) : ''}`;
   } else if (type === 'test') {
-    const station = await prisma.printStation.findFirst({ where: { is_default: true } });
+    const station = await client.printStation.findFirst({ where: { is_default: true } });
     commands = buildTestPage(station);
     title = '測試頁';
   }
 
-  // Create PrintJob in transaction with daily sequence
-  const job = await prisma.$transaction(async (tx) => {
+  // Create PrintJob with daily sequence
+  const executeInTx = async (tx) => {
     const seq = await getNextDailySeq(tx, 'job');
     const jobNo = `P-${String(seq).padStart(4, '0')}`;
 
@@ -139,11 +140,12 @@ export async function queuePrintJob({
     });
 
     return createdJob;
-  });
+  };
+
+  const job = clientTx ? await executeInTx(clientTx) : await prisma.$transaction(executeInTx);
 
   // Notify any waiting station pollers
   printEvents.emit('job-queued', job);
-
   return job;
 }
 

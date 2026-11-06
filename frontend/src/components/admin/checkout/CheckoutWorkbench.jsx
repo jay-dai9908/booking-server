@@ -392,20 +392,14 @@ export default function CheckoutWorkbench({
         print: collectAutoPrint
       });
 
-      // Local printing fallback if requested
-      if (collectAutoPrint && res.data?.payments?.length) {
-        try {
-          const lastPay = res.data.payments[res.data.payments.length - 1];
-          const printRes = await api.post('/print/jobs', {
-            type: 'receipt',
-            payment_id: lastPay.id,
-            booking_ref: bookingRef
-          });
-          if (printRes.data?.job) {
-            await printJobOnThisDevice(printRes.data.job);
+      // Print jobs created automatically by backend (Section 3.8)
+      if (res.data?.print_jobs?.length) {
+        for (const job of res.data.print_jobs) {
+          try {
+            await printJobOnThisDevice(job);
+          } catch (pErr) {
+            console.warn('[CheckoutWorkbench] Local print fallback error:', pErr);
           }
-        } catch (pErr) {
-          console.warn('[CheckoutWorkbench] Local print fallback error:', pErr);
         }
       }
 

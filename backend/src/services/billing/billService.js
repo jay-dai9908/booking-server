@@ -4,8 +4,9 @@ import { computeBill, billingStatus } from '../../../../shared/billing.js';
 import { toTaipeiDateString, blocksBy1030, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 import { log as auditLog } from '../audit/auditService.js';
-import { deductPass, restorePass } from './passTender.js';
+import { deductPass, restorePass, validatePassUsage } from './passTender.js';
 import { buildBillInput } from './billInput.js';
+import { queuePrintJob } from '../print/printService.js';
 
 export async function getNextDailySeq(tx, key, date = new Date()) {
   const d = dateOnly(date);
@@ -250,11 +251,70 @@ export async function refreshBillingCache(tx = prisma, booking_ref) {
   const latestPayment = validPayments[validPayments.length - 1];
 
   const hasRefund = validPayments.some(p => p.kind === 'refund');
-  const paidPersons = bill.persons ? bill.persons.filter(p => p.paid).length : 0;
-  const amountDue = bill.order?.due_total ?? bill.amount ?? 0;
-  const amountReceived = bill.amount_received ?? 0;
+  const paidPersons = status.covered ?? 0;
+  const amountDue = bill.summary?.amount_due ?? 0;
+  const amountReceived = bill.summary?.amount_received ?? 0;
 
   const isPaid = status.code === 'paid' || status.code === 'waived';
+
+  // Determine payment method
+  const chargeMethods = [...new Set(
+    validPayments
+      .filter(p => p.kind === 'charge' || p.kind === 'supplement')
+      .map(p => p.method)
+      .filter(m => m && m !== 'none')
+  )];
+  let paymentMethod = null;
+  if (chargeMethods.length > 1) {
+    paymentMethod = 'mixed';
+  } else if (chargeMethods.length === 1) {
+    paymentMethod = chargeMethods[0];
+  } else if (status.code === 'waived') {
+    paymentMethod = 'none';
+  }
+
+  // Preserve paid_at if already set, or set if newly paid, null if not paid
+  const existingRes = await tx.reservation.findFirst({
+    where: { booking_ref },
+    select: { paid_at: true, is_paid: true, checkout_details: true }
+  });
+
+  let paidAt = existingRes?.paid_at || null;
+  if (isPaid) {
+    if (!paidAt) {
+      paidAt = latestPayment?.created_at || new Date();
+    }
+  } else {
+    paidAt = null;
+  }
+
+  // Emit bill_reopened audit event if previously is_paid was true and now is false
+  if (existingRes?.is_paid && !isPaid) {
+    await auditLog(tx, {
+      booking_ref,
+      event_type: 'bill_reopened',
+      category: 'status',
+      summary: `帳單重新開啟（未結清），目前應收 NT$${amountDue}，已收 NT$${amountReceived}`,
+      amount: Math.max(0, amountDue - amountReceived),
+      staff_name: '系統',
+      device_label: '系統'
+    });
+  }
+
+  // Extract promo code string from draft or bill
+  const draft = existingRes?.checkout_details || {};
+  const promoCodes = [];
+  if (Array.isArray(draft.order_promos)) {
+    for (const op of draft.order_promos) if (op.code) promoCodes.push(op.code);
+  }
+  if (Array.isArray(draft.persons)) {
+    for (const p of draft.persons) {
+      if (Array.isArray(p.promos)) {
+        for (const pr of p.promos) if (pr.code) promoCodes.push(pr.code);
+      }
+    }
+  }
+  const promoCodeStr = [...new Set(promoCodes)].join(',') || null;
 
   await tx.reservation.updateMany({
     where: { booking_ref },
@@ -266,8 +326,13 @@ export async function refreshBillingCache(tx = prisma, booking_ref) {
       amount_received: amountReceived,
       is_paid: isPaid,
       total_amount: amountDue,
-      paid_at: isPaid ? (latestPayment?.created_at || new Date()) : null,
-      payment_method: latestPayment?.method || null
+      paid_at: paidAt,
+      payment_method: paymentMethod,
+      checkout_unlimited_pax: isPaid ? (bill.summary?.unlimited_pax_total ?? 0) : null,
+      checkout_regular_hours: isPaid ? (bill.summary?.regular_hours_total ?? 0) : null,
+      discount_amount: bill.summary?.discounts_total ?? 0,
+      addons_amount: bill.summary?.addons_total ?? 0,
+      promo_code: promoCodeStr
     }
   });
 
@@ -305,21 +370,51 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       }
     }
 
+    // Count prior valid payments (for promo used_count trigger)
+    const priorValidPayments = await tx.payment.findMany({
+      where: { booking_ref, status: 'valid' }
+    });
+    const priorValidCount = priorValidPayments.length;
+
     // Recalculate bill
     const billData = await getBookingBill(booking_ref, tx);
-    const { bill, pricing } = billData;
+    const { bill, pricing, draft } = billData;
 
     // Filter target persons
     const targetPersonNos = person_nos.map(Number);
-    const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
+    if (!targetPersonNos.length) {
+      throw { status: 400, message: '請選擇收款人數' };
+    }
 
-    // Verify none is already paid
-    for (const tp of targetPersons) {
-      if (tp.paid) {
-        throw { status: 400, message: `第 ${tp.person_no} 位已經結清，不可重複收款` };
+    // Verify each person: exists, not removed, not already paid (Section 3.5)
+    for (const pno of targetPersonNos) {
+      const pObj = billData.persons?.find(p => p.person_no === pno);
+      if (!pObj) {
+        throw { status: 409, message: `第 ${pno} 位不存在` };
+      }
+      if (pObj.status === 'removed') {
+        throw { status: 409, message: `第 ${pno} 位已移除，無法收款` };
+      }
+      const computedP = bill.persons.find(p => p.person_no === pno);
+      if (computedP?.is_paid) {
+        throw { status: 409, message: `第 ${pno} 位已經付過款` };
       }
     }
 
+    // Direct Payment check in transaction: reject if any valid charge/waive includes this person
+    const priorPaidPersons = new Set();
+    for (const p of priorValidPayments) {
+      if ((p.kind === 'charge' || p.kind === 'waive') && Array.isArray(p.person_nos)) {
+        for (const pno of p.person_nos) priorPaidPersons.add(pno);
+      }
+    }
+    for (const pno of targetPersonNos) {
+      if (priorPaidPersons.has(pno)) {
+        throw { status: 409, message: `第 ${pno} 位已經付過款` };
+      }
+    }
+
+    const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
     const calculatedTotal = targetPersons.reduce((sum, p) => sum + (p.total || 0), 0);
     if (expected_amount !== undefined && expected_amount !== null && calculatedTotal !== Number(expected_amount)) {
       throw {
@@ -334,15 +429,44 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
     const createdPayments = [];
     let remainingAmount = calculatedTotal;
 
-    // Handle pass tenders (4.5.7)
+    // Handle pass tenders (Section 3.7 & 4.5.7)
     const passRecords = [];
     if (Array.isArray(pass_tenders) && pass_tenders.length) {
+      const usedPassIds = new Set();
+      const firstRes = await tx.reservation.findFirst({
+        where: { booking_ref },
+        include: { session: true }
+      });
+      const sessionDate = firstRes?.session?.session_date || firstRes?.session_date || new Date();
+
       for (const pt of pass_tenders) {
+        if (usedPassIds.has(pt.user_pass_id)) {
+          throw { status: 422, message: '同一次收款不能重複使用同一張卡券' };
+        }
+        usedPassIds.add(pt.user_pass_id);
+
         const pass = await tx.userPass.findUnique({
           where: { id: pt.user_pass_id },
           include: { plan: true }
         });
-        if (!pass) continue;
+        if (!pass) {
+          throw { status: 422, message: '找不到卡券' };
+        }
+
+        // Check if pass belongs to this reservation's user
+        if (firstRes && pass.user_id !== firstRes.user_id) {
+          throw { status: 422, message: '此卡券不屬於此預約會員' };
+        }
+
+        // Validate pass usage
+        const validation = validatePassUsage(pass, {
+          date: sessionDate,
+          units: pt.units || 1,
+          hours: pt.units || 1
+        });
+        if (!validation.usable) {
+          throw { status: 422, message: validation.reason };
+        }
 
         const pBill = targetPersons.find(p => p.person_no === pt.person_no) || targetPersons[0];
         let discountValue = 0;
@@ -482,6 +606,21 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       });
     }
 
+    // First time covered by payment: increment promo used_count (Section 3.6)
+    if (priorValidCount === 0 && createdPayments.length > 0) {
+      const promoCodes = [];
+      for (const op of draft?.order_promos || []) if (op.code) promoCodes.push(op.code);
+      for (const p of draft?.persons || []) {
+        for (const pr of p.promos || []) if (pr.code) promoCodes.push(pr.code);
+      }
+      for (const c of [...new Set(promoCodes)]) {
+        await tx.promoCode.updateMany({
+          where: { code: c },
+          data: { used_count: { increment: 1 } }
+        });
+      }
+    }
+
     // End timer for these persons if still running
     const now = new Date();
     await tx.bookingPerson.updateMany({
@@ -499,11 +638,49 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
     // Refresh billing cache
     const { bill: finalBill, status: finalStatus } = await refreshBillingCache(tx, booking_ref);
 
+    // Automatic print handling (Section 3.8)
+    const print_jobs = [];
+    const globalSetting = await tx.globalSetting.findFirst() || {};
+
+    if (print !== false && globalSetting.auto_print_receipt !== false) {
+      for (const pay of createdPayments) {
+        const job = await queuePrintJob({
+          type: 'receipt',
+          booking_ref,
+          payment_id: pay.id,
+          user: staffUser,
+          device: deviceInfo
+        }, tx);
+        print_jobs.push(job);
+      }
+    }
+
+    // Auto print summary if fully settled after multiple payments
+    if (
+      print !== false &&
+      globalSetting.auto_print_summary !== false &&
+      (finalStatus.code === 'paid' || finalStatus.code === 'waived')
+    ) {
+      const allValid = await tx.payment.findMany({
+        where: { booking_ref, status: 'valid', kind: { in: ['charge', 'waive'] } }
+      });
+      const batchSet = new Set(allValid.map(p => p.batch_no));
+      if (batchSet.size > 1 || allValid.length > 1) {
+        const sumJob = await queuePrintJob({
+          type: 'summary',
+          booking_ref,
+          user: staffUser,
+          device: deviceInfo
+        }, tx);
+        print_jobs.push(sumJob);
+      }
+    }
+
     return {
       payments: createdPayments,
       bill: finalBill,
       status: finalStatus,
-      print_jobs: []
+      print_jobs
     };
   });
 
@@ -613,8 +790,22 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
       device_label: deviceInfo?.device_label
     });
 
+    // Automatic print receipt (Section 3.8)
+    const print_jobs = [];
+    const globalSetting = await tx.globalSetting.findFirst() || {};
+    if (payload.print !== false && globalSetting.auto_print_receipt !== false) {
+      const job = await queuePrintJob({
+        type: 'supplement',
+        booking_ref,
+        payment_id: payment.id,
+        user: staffUser,
+        device: deviceInfo
+      }, tx);
+      print_jobs.push(job);
+    }
+
     const { bill, status } = await refreshBillingCache(tx, booking_ref);
-    return { payment, bill, status };
+    return { payment, bill, status, print_jobs };
   });
 }
 
@@ -701,8 +892,52 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       device_label: deviceInfo?.device_label
     });
 
+    // Restore pass if this was refunding a pass payment (Section 3.7)
+    if (method === 'pass') {
+      const passPayment = priorPayments.find(p => p.method === 'pass' && Array.isArray(p.pass_json));
+      if (passPayment) {
+        for (const pj of passPayment.pass_json) {
+          if (pj.user_pass_id) {
+            await restorePass(tx, {
+              user_pass_id: pj.user_pass_id,
+              units: pj.units || 1,
+              booking_ref,
+              payment_no: payNo,
+              person_no: pNo,
+              staff_name: staffName
+            });
+            await auditLog(tx, {
+              booking_ref,
+              event_type: 'pass_restored',
+              category: 'pass',
+              summary: `卡券退款退回 · ${pj.plan_name || '卡券'} · ${pj.units || 1} 單位`,
+              payment_id: payment.id,
+              staff_name: staffName,
+              staff_id: staffId,
+              device_id: deviceInfo?.device_id,
+              device_label: deviceInfo?.device_label
+            });
+          }
+        }
+      }
+    }
+
+    // Automatic print receipt (Section 3.8)
+    const print_jobs = [];
+    const globalSetting = await tx.globalSetting.findFirst() || {};
+    if (payload.print !== false && globalSetting.auto_print_receipt !== false) {
+      const job = await queuePrintJob({
+        type: 'refund',
+        booking_ref,
+        payment_id: payment.id,
+        user: staffUser,
+        device: deviceInfo
+      }, tx);
+      print_jobs.push(job);
+    }
+
     const { bill, status } = await refreshBillingCache(tx, booking_ref);
-    return { payment, bill, status };
+    return { payment, bill, status, print_jobs };
   });
 }
 
@@ -796,6 +1031,29 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
       });
     }
 
+    // Decrement promo used_count if all payments on this booking are voided (Section 3.6)
+    const remainingValid = await tx.payment.count({
+      where: { booking_ref: payment.booking_ref, status: 'valid' }
+    });
+    if (remainingValid === 0) {
+      const billData = await getBookingBill(payment.booking_ref, tx);
+      const draft = billData.draft || {};
+      const codes = [];
+      for (const op of draft.order_promos || []) if (op.code) codes.push(op.code);
+      for (const p of draft.persons || []) {
+        for (const pr of p.promos || []) if (pr.code) codes.push(pr.code);
+      }
+      for (const c of [...new Set(codes)]) {
+        const promo = await tx.promoCode.findUnique({ where: { code: c } });
+        if (promo && promo.used_count > 0) {
+          await tx.promoCode.update({
+            where: { code: c },
+            data: { used_count: Math.max(0, promo.used_count - 1) }
+          });
+        }
+      }
+    }
+
     const { bill, status } = await refreshBillingCache(tx, payment.booking_ref);
     return { voided_count: batchPayments.length, bill, status };
   });
@@ -852,8 +1110,37 @@ export async function markUnpaid(booking_ref, reason, staffUser, deviceInfo) {
               person_no: pj.person_no,
               staff_name: staffName
             });
+            await auditLog(tx, {
+              booking_ref,
+              event_type: 'pass_restored',
+              category: 'pass',
+              summary: `卡券退回 · ${pj.plan_name || '卡券'} · ${pj.units || 1} 單位`,
+              payment_id: p.id,
+              staff_name: staffName,
+              staff_id: staffId,
+              device_id: deviceInfo?.device_id,
+              device_label: deviceInfo?.device_label
+            });
           }
         }
+      }
+    }
+
+    // Decrement promo used_count on full mark unpaid (Section 3.6)
+    const billData = await getBookingBill(booking_ref, tx);
+    const draft = billData.draft || {};
+    const codes = [];
+    for (const op of draft.order_promos || []) if (op.code) codes.push(op.code);
+    for (const p of draft.persons || []) {
+      for (const pr of p.promos || []) if (pr.code) codes.push(pr.code);
+    }
+    for (const c of [...new Set(codes)]) {
+      const promo = await tx.promoCode.findUnique({ where: { code: c } });
+      if (promo && promo.used_count > 0) {
+        await tx.promoCode.update({
+          where: { code: c },
+          data: { used_count: Math.max(0, promo.used_count - 1) }
+        });
       }
     }
 
@@ -890,16 +1177,43 @@ export async function waivePayment(booking_ref, payload, staffUser, deviceInfo) 
   return await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
-    const { bill, pricing } = await getBookingBill(booking_ref, tx);
+    const billData = await getBookingBill(booking_ref, tx);
+    const { bill, pricing } = billData;
     const targetPersonNos = person_nos.map(Number);
-    const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
+    if (!targetPersonNos.length) {
+      throw { status: 400, message: '請選擇免收人數' };
+    }
 
-    for (const tp of targetPersons) {
-      if (tp.paid) {
-        throw { status: 400, message: `第 ${tp.person_no} 位已經結清` };
+    // Verify each person: exists, not removed, not already paid (Section 3.5)
+    for (const pno of targetPersonNos) {
+      const pObj = billData.persons?.find(p => p.person_no === pno);
+      if (!pObj) {
+        throw { status: 409, message: `第 ${pno} 位不存在` };
+      }
+      if (pObj.status === 'removed') {
+        throw { status: 409, message: `第 ${pno} 位已移除，無法免收` };
+      }
+      const computedP = bill.persons.find(p => p.person_no === pno);
+      if (computedP?.is_paid) {
+        throw { status: 409, message: `第 ${pno} 位已經付過款` };
       }
     }
 
+    // Direct Payment check in transaction
+    const priorValidPayments = await tx.payment.findMany({
+      where: { booking_ref, status: 'valid' }
+    });
+    for (const p of priorValidPayments) {
+      if ((p.kind === 'charge' || p.kind === 'waive') && Array.isArray(p.person_nos)) {
+        for (const pno of targetPersonNos) {
+          if (p.person_nos.includes(pno)) {
+            throw { status: 409, message: `第 ${pno} 位已經付過款` };
+          }
+        }
+      }
+    }
+
+    const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
     const waiveAmount = targetPersons.reduce((sum, p) => sum + (p.total || 0), 0);
     const paySeq = await getNextDailySeq(tx, 'payment');
     const payNo = `R-${String(paySeq).padStart(4, '0')}`;
