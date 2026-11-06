@@ -3,7 +3,42 @@ import { format } from 'date-fns';
 import { Search, Plus, XCircle, CheckCircle2, Cpu, Minus, CreditCard } from 'lucide-react';
 import api from '../../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from '../../components/ReservationDetailsModal';
+import StatusPill from '../../components/admin/StatusPill';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
+
+function getBillingStatusPillProps(r) {
+  const billing = r.billing || {
+    status: r.billing_status || (r.is_paid ? 'paid' : 'unpaid'),
+    paid_persons: r.paid_persons ?? (r.is_paid ? r.pax : 0),
+    persons_total: r.pax || 1,
+    has_refund: Boolean(r.has_refund)
+  };
+
+  if (billing.has_refund) {
+    return { status: 'refund', label: '有退款' };
+  }
+
+  if (billing.status === 'waived') {
+    return { status: 'waived', label: '免收' };
+  }
+
+  if (billing.status === 'paid' || r.is_paid) {
+    return { status: 'paid', label: '已結清' };
+  }
+
+  if (billing.status === 'partial' || (billing.paid_persons > 0 && billing.paid_persons < billing.persons_total)) {
+    return {
+      status: 'partial',
+      label: `已結 ${billing.paid_persons}/${billing.persons_total}`
+    };
+  }
+
+  if (billing.status === 'pending') {
+    return { status: 'pending', label: '待補收' };
+  }
+
+  return { status: 'unpaid', label: '未結帳' };
+}
 
 export default function ReservationsPage() {
   const [reservations, setReservations] = useState([]);
@@ -476,17 +511,10 @@ export default function ReservationsPage() {
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
                             {statusUI.icon} {statusUI.text}
                           </span>
-                          {r.status !== 'cancelled' && (
-                            r.is_paid ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                已結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                                待結帳 {r.total_amount != null ? `$${r.total_amount}` : ''}
-                              </span>
-                            )
-                          )}
+                          {r.status !== 'cancelled' && (() => {
+                            const pill = getBillingStatusPillProps(r);
+                            return <StatusPill status={pill.status} label={pill.label} />;
+                          })()}
                         </div>
                         {r.attendance === 'checked_in' && r.checked_in_at && (
                           <div className="mt-1 text-[11px] font-medium text-sg-muted flex items-center gap-0.5">
