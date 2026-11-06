@@ -191,7 +191,11 @@ export async function checkIn(req, res) {
         }
       });
 
-      return { booking_ref, displaced };
+      return {
+        booking_ref,
+        displaced,
+        displaced_reservations: displaced.map(d => ({ ...d, new_seats: d.to }))
+      };
     });
 
     return res.json({
@@ -237,8 +241,38 @@ export async function moveSeat(req, res) {
         throw { status: 400, message: `目標座位 ${to_seat} 不存在或未啟用` };
       }
 
-      // Check target occupancy
-      const targetConflict = await tx.reservation.findFirst({
+      // Check internal moves within the same booking
+      const currentRes = reservations[0];
+      const isInternalSeat = (currentRes.assigned_seats || []).includes(to_seat);
+
+      if (isInternalSeat) {
+        if (mode === 'swap') {
+          // Internal swap between two seats of the same reservation
+          const newSeats = currentRes.assigned_seats.map(s => s === from_seat ? to_seat : (s === to_seat ? from_seat : s));
+          await tx.reservation.updateMany({
+            where: { booking_ref },
+            data: { assigned_seats: newSeats, seat_source: 'staff' }
+          });
+          // Swap bookingPerson seat_codes safely using a temp code
+          const pFrom = await tx.bookingPerson.findFirst({ where: { booking_ref, seat_code: from_seat } });
+          const pTo = await tx.bookingPerson.findFirst({ where: { booking_ref, seat_code: to_seat } });
+          if (pFrom) {
+            await tx.bookingPerson.update({ where: { id: pFrom.id }, data: { seat_code: '__TEMP_SWAP__' } });
+          }
+          if (pTo) {
+            await tx.bookingPerson.update({ where: { id: pTo.id }, data: { seat_code: from_seat } });
+          }
+          if (pFrom) {
+            await tx.bookingPerson.update({ where: { id: pFrom.id }, data: { seat_code: to_seat } });
+          }
+          return;
+        } else {
+          throw { status: 400, message: `座位 ${to_seat} 已被本筆預約的其他人員佔用` };
+        }
+      }
+
+      // Check target occupancy across all sessions of this reservation
+      const conflictReservations = await tx.reservation.findMany({
         where: {
           session_id: { in: sessionIds },
           booking_ref: { not: booking_ref },
@@ -248,8 +282,9 @@ export async function moveSeat(req, res) {
         include: { user: true }
       });
 
-      if (targetConflict) {
+      if (conflictReservations.length > 0) {
         if (mode === 'swap') {
+          const targetConflict = conflictReservations[0];
           // Check that target occupies to_seat in ALL sessions of its booking
           const targetAllResvs = await tx.reservation.findMany({
             where: { booking_ref: targetConflict.booking_ref, status: { not: 'cancelled' } }
@@ -257,6 +292,20 @@ export async function moveSeat(req, res) {
           const allSitToSeat = targetAllResvs.every(r => r.assigned_seats?.includes(to_seat));
           if (!allSitToSeat) {
             throw { status: 409, message: '目標座位佔用者在不同時段座位不一致，無法對調' };
+          }
+
+          // Check that from_seat is free in all target sessions
+          const targetSessionIds = targetAllResvs.map(r => r.session_id);
+          const fromSeatConflicts = await tx.reservation.findMany({
+            where: {
+              session_id: { in: targetSessionIds },
+              booking_ref: { notIn: [booking_ref, targetConflict.booking_ref] },
+              status: { not: 'cancelled' },
+              assigned_seats: { has: from_seat }
+            }
+          });
+          if (fromSeatConflicts.length > 0) {
+            throw { status: 409, message: `對調座位的原座位 ${from_seat} 在其他時段已被佔用，無法對調` };
           }
 
           // Swap seats for target booking (only swap the single seat)
@@ -271,13 +320,16 @@ export async function moveSeat(req, res) {
             data: { seat_code: from_seat }
           });
         } else {
-          if (targetConflict.is_seat_locked || targetConflict.attendance === 'checked_in' || targetConflict.seat_source === 'staff') {
-            throw { status: 409, message: `目標座位已被固定的預約（${targetConflict.user?.name || '客人'}）佔用` };
+          for (const targetConflict of conflictReservations) {
+            if (targetConflict.is_seat_locked || targetConflict.attendance === 'checked_in' || targetConflict.seat_source === 'staff') {
+              throw { status: 409, message: `目標座位已被固定的預約（${targetConflict.user?.name || '客人'}）佔用` };
+            }
           }
 
-          // Displace using reseatBookings
+          // Displace using reseatBookings across all conflicting bookings
+          const conflictRefs = [...new Set(conflictReservations.map(cr => cr.booking_ref))];
           await reseatBookings(tx, {
-            bookingRefs: [targetConflict.booking_ref],
+            bookingRefs: conflictRefs,
             reservedSeats: [to_seat],
             sessionIds
           });
@@ -285,7 +337,6 @@ export async function moveSeat(req, res) {
       }
 
       // Update current booking seats
-      const currentRes = reservations[0];
       const newSeats = currentRes.assigned_seats.map(s => s === from_seat ? to_seat : s);
       await tx.reservation.updateMany({
         where: { booking_ref },
@@ -430,60 +481,22 @@ export async function addPerson(req, res) {
       });
       if (!reservations.length) throw { status: 404, message: '找不到此筆預約' };
 
-      // Check session capacities
-      if (!force) {
-        for (const r of reservations) {
-          const bookedPax = await tx.reservation.aggregate({
-            where: { session_id: r.session_id, status: { not: 'cancelled' } },
-            _sum: { pax: true }
-          });
-          const totalBooked = (bookedPax._sum.pax || 0) + 1;
-          if (totalBooked > r.session.max_capacity) {
-            throw {
-              status: 409,
-              code: 'OVER_CAPACITY',
-              message: `該時段（${r.session.start_time} - ${r.session.end_time}）人數已達上限 ${r.session.max_capacity} 人`
-            };
-          }
-        }
-      }
-
-      // Increment pax
-      await tx.reservation.updateMany({
-        where: { booking_ref },
-        data: { pax: { increment: 1 } }
-      });
-
-      const existingPersons = await tx.bookingPerson.findMany({
-        where: { booking_ref },
-        orderBy: { person_no: 'desc' }
-      });
-      const newPersonNo = (existingPersons[0]?.person_no || 0) + 1;
-
-      const now = new Date();
-      const newPerson = await tx.bookingPerson.create({
-        data: {
-          booking_ref,
-          person_no: newPersonNo,
-          seat_code: seat_code || null,
-          status: 'active',
-          is_onsite_added: true,
-          billing_start_at: seat_code ? now : null,
-          timer_started_at: seat_code ? now : null,
-          created_by_name: staffName
-        }
-      });
+      const firstRes = reservations[0];
+      const sessionIds = reservations.map(r => r.session_id);
 
       if (seat_code) {
+        if ((firstRes.assigned_seats || []).includes(seat_code)) {
+          throw { status: 400, message: `座位 ${seat_code} 已被本筆預約的其他人員佔用` };
+        }
+
         // Validate seat_code exists and active on layout
-        const sessionDate = reservations[0].session.session_date;
+        const sessionDate = firstRes.session.session_date;
         const activeLayout = await getActiveLayoutForDate(tx, sessionDate);
         const targetSeatObj = (activeLayout?.seats || []).find(ls => ls.code === seat_code);
         if (!targetSeatObj || !targetSeatObj.is_active) {
           throw { status: 400, message: `座位 ${seat_code} 不存在或未啟用` };
         }
 
-        const sessionIds = reservations.map(r => r.session_id);
         const conflictReservations = await tx.reservation.findMany({
           where: {
             session_id: { in: sessionIds },
@@ -510,14 +523,54 @@ export async function addPerson(req, res) {
           reservedSeats: [seat_code],
           sessionIds
         });
-
-        const firstRes = reservations[0];
-        const newSeats = [...(firstRes.assigned_seats || []), seat_code];
-        await tx.reservation.updateMany({
-          where: { booking_ref },
-          data: { assigned_seats: newSeats }
-        });
       }
+
+      // Check session capacities
+      if (!force) {
+        for (const r of reservations) {
+          const bookedPax = await tx.reservation.aggregate({
+            where: { session_id: r.session_id, status: { not: 'cancelled' } },
+            _sum: { pax: true }
+          });
+          const totalBooked = (bookedPax._sum.pax || 0) + 1;
+          if (totalBooked > r.session.max_capacity) {
+            throw {
+              status: 409,
+              code: 'OVER_CAPACITY',
+              message: `該時段（${r.session.start_time} - ${r.session.end_time}）人數已達上限 ${r.session.max_capacity} 人`
+            };
+          }
+        }
+      }
+
+      // Increment pax
+      await tx.reservation.updateMany({
+        where: { booking_ref },
+        data: {
+          pax: { increment: 1 },
+          ...(seat_code ? { assigned_seats: [...(firstRes.assigned_seats || []), seat_code] } : {})
+        }
+      });
+
+      const existingPersons = await tx.bookingPerson.findMany({
+        where: { booking_ref },
+        orderBy: { person_no: 'desc' }
+      });
+      const newPersonNo = (existingPersons[0]?.person_no || 0) + 1;
+
+      const now = new Date();
+      const newPerson = await tx.bookingPerson.create({
+        data: {
+          booking_ref,
+          person_no: newPersonNo,
+          seat_code: seat_code || null,
+          status: 'active',
+          is_onsite_added: true,
+          billing_start_at: seat_code ? now : null,
+          timer_started_at: seat_code ? now : null,
+          created_by_name: staffName
+        }
+      });
 
       await auditLog(tx, {
         booking_ref,
@@ -792,7 +845,7 @@ export async function swapBoard(req, res) {
             unit_group: activeSeg.unit_group,
             segment_no: activeSeg.segment_no + 1,
             start_at: boundaryDt,
-            end_at: activeSeg.planned_end_at,
+            end_at: null,
             unit_rate: targetConfig.hourly_rate,
             planned_end_at: activeSeg.planned_end_at
           }
@@ -926,6 +979,8 @@ export async function reassignBoard(req, res) {
         where: { booking_ref, unit_group },
         data: { person_id: person ? person.id : null }
       });
+
+      await refreshBillingCache(tx, booking_ref);
     });
 
     return res.json({ success: true, server_now: new Date().toISOString() });

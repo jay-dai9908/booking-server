@@ -2,6 +2,7 @@
 import prisma from '../../prismaClient.js';
 import { resolveLayoutGeometry } from '../../../../shared/allocator/geometry.js';
 import { allocate } from '../../../../shared/allocator/score.js';
+import { dateOnly } from '../../../../shared/time.js';
 
 export function getLegacyFallbackLayout() {
   const zones = [
@@ -61,7 +62,7 @@ export function getLegacyFallbackLayout() {
  * @returns {Promise<any>}
  */
 export async function getActiveLayoutForDate(client = prisma, date) {
-  const targetDate = date ? new Date(date) : new Date();
+  const targetDate = dateOnly(date);
 
   // Find latest published layout with effective_from <= targetDate
   const layout = await client.seatLayout.findFirst({

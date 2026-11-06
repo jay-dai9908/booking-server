@@ -1086,7 +1086,7 @@ export default function SettingsPage() {
                         {st.is_default && <span className="text-[10px] bg-[#FAF7F2] text-[#8B5B43] font-bold px-1.5 py-0.5 rounded border border-[#E8DEC8]">預設</span>}
                       </div>
                       <span className="text-[11px] text-gray-400 block mt-0.5">
-                        最後回報：{st.last_seen_at ? new Date(st.last_seen_at).toLocaleTimeString('zh-TW') : '從未'}
+                        最後回報：{st.last_seen_at ? new Date(st.last_seen_at).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' }) : '從未'}
                       </span>
                     </div>
 

@@ -1049,7 +1049,7 @@ export default function AccountingPage() {
         isOpen={Boolean(selectedEventDetail)}
         onClose={() => setSelectedEventDetail(null)}
         title="異動詳細紀錄"
-        subtitle={`事件 #${selectedEventDetail?.id} · ${selectedEventDetail?.created_at ? new Date(selectedEventDetail.created_at).toLocaleString('zh-TW') : ''}`}
+        subtitle={`事件 #${selectedEventDetail?.id} · ${selectedEventDetail?.created_at ? new Date(selectedEventDetail.created_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : ''}`}
       >
         {selectedEventDetail && (
           <div className="space-y-4 py-2 text-[13px]">

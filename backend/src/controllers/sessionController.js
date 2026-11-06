@@ -12,11 +12,11 @@ export const getSessions = async (req, res) => {
   try {
     let whereClause = {};
     if (date) {
-      whereClause.session_date = new Date(date);
+      whereClause.session_date = dateOnly(date);
     } else {
       whereClause.session_date = {
-        gte: new Date(start_date),
-        lte: new Date(end_date)
+        gte: dateOnly(start_date),
+        lte: dateOnly(end_date)
       };
     }
     
@@ -158,7 +158,7 @@ export const deleteSessionsByDate = async (req, res) => {
   const { date } = req.params;
 
   try {
-    const targetDate = new Date(date);
+    const targetDate = dateOnly(date);
 
     // Find all sessions for this date
     const sessions = await prisma.session.findMany({

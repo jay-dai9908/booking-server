@@ -27,7 +27,7 @@ const ADMIN_ROUTES = [
   '/admin/equipment',
   '/admin/coupons',
   '/admin/accounting',
-  '/admin/print-stations',
+  '/admin/print-station',
   '/admin/settings',
   '/admin/staff'
 ];
@@ -66,13 +66,12 @@ export async function runAdminSmoke() {
       // Login as admin to ensure session
       try {
         await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'domcontentloaded', timeout: 8000 });
-        const usernameInput = page.locator('input[name="username"], input[type="text"]').first();
-        const passwordInput = page.locator('input[name="password"], input[type="password"]').first();
-        if (await usernameInput.isVisible() && await passwordInput.isVisible()) {
-          await usernameInput.fill('admin');
-          await passwordInput.fill('admin123');
+        const passInput = page.locator('input[type="password"], input[type="text"]').first();
+        if (await passInput.isVisible()) {
+          const adminPwd = process.env.ADMIN_PASSWORD || 'gathering.light2609';
+          await passInput.fill(adminPwd);
           await page.keyboard.press('Enter');
-          await page.waitForTimeout(1000);
+          await page.waitForTimeout(1500);
         }
       } catch (e) {
         console.warn(`Admin login skipped or failed: ${e.message}`);

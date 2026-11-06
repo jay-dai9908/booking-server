@@ -74,6 +74,7 @@ export async function queuePrintJob({
       ref_display: formattedRef,
       customer_name: firstRes.user?.name,
       pax: firstRes.pax,
+      paid_persons: firstRes.paid_persons,
       session_date: firstRes.session?.session_date,
       start_time: firstRes.session?.start_time,
       end_time: lastRes.session?.end_time,

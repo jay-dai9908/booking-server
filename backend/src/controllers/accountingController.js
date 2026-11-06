@@ -47,10 +47,12 @@ export const getAccountingSummary = async (req, res) => {
     const passValue = passes.reduce((sum, p) => sum + p.amount, 0);
 
     // Unpaid reservations today
+    const sessionStartDate = dateOnly(start_date || toTaipeiDateString(start));
+    const sessionEndDate = dateOnly(end_date || toTaipeiDateString(end));
     const unpaidReservations = await prisma.reservation.findMany({
       where: {
         status: { not: 'cancelled' },
-        session: { session_date: { gte: start, lte: end } },
+        session: { session_date: { gte: sessionStartDate, lte: sessionEndDate } },
         billing_status: { in: ['unpaid', 'partial'] }
       }
     });
@@ -302,7 +304,7 @@ export const getClosingPreview = async (req, res) => {
     const unpaidRes = await prisma.reservation.findMany({
       where: {
         status: { not: 'cancelled' },
-        session: { session_date: { gte: start, lte: end } },
+        session: { session_date: dateOnly(targetDateStr) },
         billing_status: { in: ['unpaid', 'partial'] }
       }
     });

@@ -124,7 +124,7 @@ export function buildBillInput({
     boards.push({
       unit_group: bg.unit_group,
       person_no: bg.person_no,
-      fixed_total: isSingleUnmodified && bg.subtotal_price != null && bg.subtotal_price > 0 ? bg.subtotal_price : undefined,
+      fixed_total: isSingleUnmodified && bg.subtotal_price != null && Number(bg.subtotal_price) >= 0 ? Number(bg.subtotal_price) : undefined,
       segments
     });
   }

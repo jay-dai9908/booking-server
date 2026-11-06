@@ -526,7 +526,7 @@ export default function CheckoutWorkbench({
               <div>
                 <span className="text-sg-muted block">報到紀錄</span>
                 <span className="font-bold text-sg-ink">
-                  {booking.checked_in_at ? new Date(booking.checked_in_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }) : '未報到'}
+                  {booking.checked_in_at ? new Date(booking.checked_in_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : '未報到'}
                   {booking.checked_in_by ? ` · ${booking.checked_in_by}` : ''}
                 </span>
               </div>

@@ -3,7 +3,7 @@ import prisma from '../prismaClient.js';
 import { getActiveLayoutForDate, getLegacyFallbackLayout, loadAllocatorContext } from '../services/seating/layoutService.js';
 import { resolveLayoutGeometry } from '../../../shared/allocator/geometry.js';
 import { allocate } from '../../../shared/allocator/score.js';
-import { toTaipeiDateString } from '../../../shared/time.js';
+import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
 import { allocateWithLayout } from '../services/seating/allocator.js';
 
 export async function getActiveLayout(req, res) {
@@ -371,7 +371,7 @@ export async function previewPublish(req, res) {
   try {
     const id = parseInt(req.params.id, 10);
     const { effective_from } = req.body;
-    const effDate = effective_from ? new Date(effective_from) : new Date();
+    const effDate = dateOnly(effective_from || toTaipeiDateString(new Date()));
 
     const draft = await prisma.seatLayout.findUnique({
       where: { id },
@@ -459,7 +459,7 @@ export async function publishLayout(req, res) {
       return res.status(400).json({ error: '請確認發布', code: 'CONFIRM_REQUIRED' });
     }
 
-    const effDate = effective_from ? new Date(effective_from) : new Date();
+    const effDate = dateOnly(effective_from || toTaipeiDateString(new Date()));
     const todayStr = toTaipeiDateString(new Date());
     const effStr = toTaipeiDateString(effDate);
 

@@ -64,6 +64,7 @@ export const buildFullReceiptCommands = (data) => {
   const shortRef = String(bookingRef).slice(0, 8).toUpperCase();
   const maskedPhone = maskPhoneNumber(customerPhone);
   const nowStr = new Date().toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -241,6 +242,7 @@ export const buildPersonSplitReceiptCommands = (person, index, data) => {
   const shortRef = String(bookingRef).slice(0, 8).toUpperCase();
   const label = person.label || `第 ${index + 1} 位`;
   const nowStr = new Date().toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

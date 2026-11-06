@@ -1044,8 +1044,10 @@ export const cancelReservation = async (req, res) => {
       return res.status(400).json({ error: '此預約先前已取消' });
     }
 
-    if (reservations[0].amount_received && reservations[0].amount_received > 0) {
-      return res.status(409).json({ error: `這筆已收款 NT$${reservations[0].amount_received}，請先退款或作廢收款` });
+    const isCollected = reservations.some(r => (r.amount_received && r.amount_received > 0) || r.is_paid);
+    if (isCollected) {
+      const amt = reservations[0].amount_received || 0;
+      return res.status(409).json({ error: `這筆已收款 NT$${amt}，請先退款或作廢收款` });
     }
 
     const hasPaid = reservations.some(r => r.is_paid);

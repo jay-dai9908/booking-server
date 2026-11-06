@@ -580,7 +580,12 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           breakdown_json: {
             persons: targetPersons,
             pricing,
-            order: bill.order,
+            order: {
+              persons_total: bill.status?.total ?? targetPersons.length,
+              persons_paid_after: priorPaidPersons.size + targetPersonNos.length,
+              amount_due: bill.summary?.amount_due,
+              amount_received: bill.summary?.amount_received
+            },
             snapshot_at: new Date().toISOString()
           },
           note: note ? String(note).trim() : null,
