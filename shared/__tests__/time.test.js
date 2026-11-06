@@ -1,7 +1,21 @@
 // shared/__tests__/time.test.js
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blocksBy1030, swapBoundaryOptions } from '../time.js';
+import { blocksBy1030, swapBoundaryOptions, dateOnly } from '../time.js';
+
+test('dateOnly creates UTC midnight Date object without timezone skew (Section 2.2)', () => {
+  const d1 = dateOnly('2026-11-06');
+  assert.equal(d1.toISOString(), '2026-11-06T00:00:00.000Z');
+  // Day of week check via getUTCDay()
+  assert.equal(d1.getUTCDay(), 5); // 2026-11-06 is Friday
+
+  const d2 = dateOnly(new Date('2026-11-06T15:30:00+08:00'));
+  assert.equal(d2.toISOString(), '2026-11-06T00:00:00.000Z');
+  assert.equal(d2.getUTCDay(), 5);
+
+  const d3 = dateOnly('2026-11-08'); // Sunday
+  assert.equal(d3.getUTCDay(), 0);
+});
 
 test('10/30 rule verification table (Section 4.2.1)', () => {
   const table = [

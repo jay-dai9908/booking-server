@@ -2,7 +2,8 @@ import crypto from 'crypto';
 import prisma from '../../prismaClient.js';
 import { getActiveLayoutForDate } from '../seating/layoutService.js';
 import { computeBill, billingStatus } from '../../../../shared/billing.js';
-import { toTaipeiDateString } from '../../../../shared/time.js';
+import { toTaipeiDateString, dateOnly } from '../../../../shared/time.js';
+import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 
 /**
  * Split booking equipment with quantity > 1 into individual 1-unit records (spec 3.3 item 1)
@@ -105,28 +106,17 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
 export async function getLiveFloorData(dateStr = null) {
   const serverNow = new Date();
   const targetDateStr = dateStr || toTaipeiDateString(serverNow);
-  const targetDate = new Date(`${targetDateStr}T00:00:00+08:00`);
+  const targetDate = dateOnly(targetDateStr);
 
   // 1. Layout
   const layout = await getActiveLayoutForDate(prisma, targetDate);
 
   // 2. Pricing
-  const globalSetting = await prisma.globalSetting.findFirst() || {};
-  const dailySetting = await prisma.dailySetting.findUnique({
-    where: { date: targetDate }
-  });
-
-  const dayOfWeek = targetDate.getDay();
-  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-
-  const hourlyPrice = dailySetting?.hourly_price ?? (isWeekend ? globalSetting.weekend_hourly_price ?? 150 : globalSetting.weekday_hourly_price ?? 100);
-  const unlimitedPrice = dailySetting?.unlimited_price ?? (isWeekend ? globalSetting.weekend_unlimited_price ?? 800 : globalSetting.weekday_unlimited_price ?? 550);
-  const allowUnlimited = dailySetting?.allow_unlimited ?? true;
-
+  const { hourly_price, unlimited_price, allow_unlimited } = await getEffectiveDailyRates(prisma, targetDate);
   const pricing = {
-    hourly: hourlyPrice,
-    unlimited: unlimitedPrice,
-    allow_unlimited: allowUnlimited
+    hourly: hourly_price,
+    unlimited: unlimited_price,
+    allow_unlimited: allow_unlimited
   };
 
   // 3. Sessions on date

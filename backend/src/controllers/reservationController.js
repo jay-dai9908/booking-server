@@ -12,6 +12,7 @@ import {
 } from '../utils/lineMessaging.js';
 import { markUnpaid, collectPayment, saveDraft, getBookingBill } from '../services/billing/billService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+import { dateOnly } from '../../../shared/time.js';
 
 function mergeCustomerEquipments(rawList = []) {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
@@ -283,16 +284,16 @@ export const formatSessionsToTimeRange = (sessions = []) => {
 
 // Helper to resolve daily pricing rates
 export const getEffectiveDailyRates = async (tx, sessionDate) => {
+  const dOnly = dateOnly(sessionDate);
   const dailySetting = await tx.dailySetting.findUnique({
-    where: { date: sessionDate }
+    where: { date: dOnly }
   });
 
   let hourly_price = dailySetting?.hourly_price;
   let unlimited_price = dailySetting?.unlimited_price;
   const allow_unlimited = dailySetting?.allow_unlimited ?? true;
 
-  const dateObj = new Date(sessionDate);
-  const dayOfWeek = isNaN(dateObj.getTime()) ? 0 : dateObj.getUTCDay();
+  const dayOfWeek = dOnly.getUTCDay();
   const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
   if (hourly_price == null || unlimited_price == null) {

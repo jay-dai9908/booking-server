@@ -57,6 +57,21 @@ export function toTaipeiDateString(d) {
 }
 
 /**
+ * 產生 @db.Date 專用 UTC 零點 Date 物件（YYYY-MM-DDT00:00:00Z）
+ * 解決 +08:00 比對 @db.Date 導致 Prisma UTC 截斷讀到前一天的問題
+ * @param {Date|string|number} str
+ * @returns {Date}
+ */
+export function dateOnly(str) {
+  if (!str) return new Date();
+  if (typeof str === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return new Date(`${str}T00:00:00Z`);
+  }
+  const dateStr = toTaipeiDateString(str);
+  return new Date(`${dateStr}T00:00:00Z`);
+}
+
+/**
  * 格式化台北時間：HH:mm
  * @param {Date|string|number} d
  * @returns {string}

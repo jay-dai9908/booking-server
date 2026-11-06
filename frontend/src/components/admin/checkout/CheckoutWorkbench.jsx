@@ -179,7 +179,23 @@ export default function CheckoutWorkbench({
   if (!isOpen) return null;
 
   const booking = billData?.booking || {};
-  const pricing = billData?.pricing || { hourly: 150, unlimited: 750 };
+  const pricing = billData?.pricing;
+
+  if (!loading && (!pricing || pricing.hourly == null)) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-sg-ink/50 backdrop-blur-sm">
+        <div className="bg-white rounded-3xl p-6 max-w-md w-full text-center space-y-4 border border-sg-line shadow-xl">
+          <p className="text-sm font-bold text-sg-danger">
+            價格設定讀不到，暫時無法結帳，請重新整理
+          </p>
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            關閉
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const bill = billData?.bill || {};
   const persons = bill.persons || [];
   const unpaidPersons = persons.filter(p => !p.is_frozen);

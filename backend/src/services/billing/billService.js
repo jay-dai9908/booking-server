@@ -1,13 +1,13 @@
 import crypto from 'crypto';
 import prisma from '../../prismaClient.js';
 import { computeBill, billingStatus } from '../../../../shared/billing.js';
-import { toTaipeiDateString, blocksBy1030 } from '../../../../shared/time.js';
+import { toTaipeiDateString, blocksBy1030, dateOnly } from '../../../../shared/time.js';
+import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 import { log as auditLog } from '../audit/auditService.js';
 import { deductPass, restorePass } from './passTender.js';
 
 export async function getNextDailySeq(tx, key, date = new Date()) {
-  const dStr = toTaipeiDateString(date);
-  const d = new Date(`${dStr}T00:00:00+08:00`);
+  const d = dateOnly(date);
   const counter = await tx.dailyCounter.upsert({
     where: {
       date_key: {
@@ -49,22 +49,13 @@ export async function getBookingBill(booking_ref, tx = prisma) {
 
   // Pricing
   const globalSetting = await tx.globalSetting.findFirst() || {};
-  const dailySetting = await tx.dailySetting.findUnique({
-    where: { date: new Date(`${dStr}T00:00:00+08:00`) }
-  });
-
-  const dayOfWeek = new Date(sessionDate).getDay();
-  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-
-  const hourlyPrice = dailySetting?.hourly_price ?? (isWeekend ? globalSetting.weekend_hourly_price ?? 150 : globalSetting.weekday_hourly_price ?? 100);
-  const unlimitedPrice = dailySetting?.unlimited_price ?? (isWeekend ? globalSetting.weekend_unlimited_price ?? 800 : globalSetting.weekday_unlimited_price ?? 550);
-  const allowUnlimited = dailySetting?.allow_unlimited ?? true;
+  const { hourly_price, unlimited_price, allow_unlimited, is_weekend } = await getEffectiveDailyRates(tx, sessionDate);
 
   const pricing = {
-    hourly: hourlyPrice,
-    unlimited: unlimitedPrice,
-    allow_unlimited: allowUnlimited,
-    day_type: isWeekend ? 'weekend' : 'weekday',
+    hourly: hourly_price,
+    unlimited: unlimited_price,
+    allow_unlimited: allow_unlimited,
+    day_type: is_weekend ? 'weekend' : 'weekday',
     billing_grace_minutes: globalSetting.billing_grace_minutes ?? 10,
     billing_block_minutes: globalSetting.billing_block_minutes ?? 30,
     early_leave_mode: globalSetting.early_leave_mode || 'booked',

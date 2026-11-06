@@ -1,5 +1,5 @@
 import prisma from '../prismaClient.js';
-import { toTaipeiDateString } from '../../../shared/time.js';
+import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { queuePrintJob } from '../services/print/printService.js';
@@ -372,7 +372,7 @@ export const postClosing = async (req, res) => {
     const closing = await prisma.$transaction(async (tx) => {
       const created = await tx.cashClosing.create({
         data: {
-          business_date: new Date(`${targetDateStr}T00:00:00+08:00`),
+          business_date: dateOnly(targetDateStr),
           float_amount: previewData.floatAmt,
           expected_cash: previewData.expCash,
           counted_cash: counted,
@@ -438,8 +438,7 @@ export const getClosingsList = async (req, res) => {
 
 export const getUnpaidFollowUp = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = dateOnly(new Date());
 
     const unpaidRes = await prisma.reservation.findMany({
       where: {

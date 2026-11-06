@@ -1,7 +1,7 @@
 import '../loadEnv.js';
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
-import { toTaipeiDateString } from '../../../shared/time.js';
+import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
 
 const isDryRun = process.argv.includes('--dry-run');
 
@@ -55,8 +55,7 @@ async function run() {
   let migratedCount = 0;
   for (const r of toMigrate) {
     const createdAt = r.paid_at || r.created_at || new Date();
-    const dStr = toTaipeiDateString(createdAt);
-    const d = new Date(`${dStr}T00:00:00+08:00`);
+    const d = dateOnly(createdAt);
 
     const counter = await prisma.dailyCounter.upsert({
       where: { date_key: { date: d, key: 'payment' } },
