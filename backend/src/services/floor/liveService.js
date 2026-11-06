@@ -251,6 +251,30 @@ export async function getLiveFloorData(dateStr = null) {
   const bookings = [];
   const alerts = [];
 
+  const seatToTableLabel = new Map();
+  if (layout && layout.tables && layout.seats) {
+    const tableMap = new Map(layout.tables.map(t => [t.id, t.label]));
+    for (const s of layout.seats) {
+      if (s.table_id && tableMap.has(s.table_id)) {
+        seatToTableLabel.set(s.code, tableMap.get(s.table_id));
+      }
+    }
+  }
+
+  function getTableDisplay(assignedSeats = []) {
+    for (const code of assignedSeats) {
+      if (!code.startsWith('WAIT-') && seatToTableLabel.has(code)) {
+        const label = seatToTableLabel.get(code);
+        return label.startsWith('桌') ? label : `桌 ${label}`;
+      }
+    }
+    if (assignedSeats.length > 0 && !assignedSeats[0].startsWith('WAIT-')) {
+      const codePart = assignedSeats[0].split('-')[0];
+      return codePart.startsWith('桌') ? codePart : `桌 ${codePart}`;
+    }
+    return '座位';
+  }
+
   for (const [bRef, resList] of bookingsMap.entries()) {
     const firstRes = resList[0];
     const lastRes = resList[resList.length - 1];
@@ -356,36 +380,67 @@ export async function getLiveFloorData(dateStr = null) {
     // Alerts check for checked-in and active bookings
     if (firstRes.attendance === 'checked_in') {
       const nowMs = serverNow.getTime();
-      const endMs = endDt.getTime();
-      const diffMins = Math.floor((nowMs - endMs) / 60000);
-      const tableName = (firstRes.assigned_seats && firstRes.assigned_seats.length)
-        ? firstRes.assigned_seats[0].split('-')[0]
-        : '座位';
+      const bookedMinutes = Math.max(0, Math.floor((endDt.getTime() - startDt.getTime()) / 60000));
+      const tableDisplay = getTableDisplay(firstRes.assigned_seats);
 
-      if (diffMins > 10) {
-        // Overtime alert
-        const alertText = `${user.name || '客人'} · 桌 ${tableName} 超時 ${diffMins} 分`;
-        const alertHint = `預約到 ${lastRes.session.end_time}，問要不要加時或結帳`;
-        alerts.push({
-          type: 'overtime',
-          booking_ref: bRef,
-          title: alertText,
-          subtitle: alertHint,
-          text: alertText,
-          hint: alertHint
-        });
-      } else if (diffMins >= -30 && diffMins <= 0) {
-        // 30 min before end
-        const alertText = `${user.name || '客人'} · 桌 ${tableName} 即將到時`;
-        const alertHint = `${lastRes.session.end_time} 到時，提醒預留 10 分鐘壓平作品`;
-        alerts.push({
-          type: 'warning_30m',
-          booking_ref: bRef,
-          title: alertText,
-          subtitle: alertHint,
-          text: alertText,
-          hint: alertHint
-        });
+      // Only consider persons who are currently active (timer_started_at set, timer_ended_at null)
+      // and not paid (neither booking nor person paid)
+      const activeUnpaidPersons = bPersons.filter(p => {
+        if (!p.timer_started_at || p.timer_ended_at) return false;
+        if (firstRes.is_paid) return false;
+        const isPaid = bPayments.some(pay =>
+          pay.status === 'valid' &&
+          (pay.kind === 'charge' || pay.kind === 'waive') &&
+          (pay.person_nos?.includes(p.person_no) || !pay.person_nos)
+        );
+        return !isPaid;
+      });
+
+      if (activeUnpaidPersons.length > 0) {
+        let maxDiff = -Infinity;
+
+        for (const p of activeUnpaidPersons) {
+          const startAtMs = new Date(p.billing_start_at || startDt || p.timer_started_at).getTime();
+          const endAtMs = nowMs;
+          let pausedMinutes = Math.floor((p.paused_seconds || 0) / 60);
+          if (p.paused_at) {
+            const currentlyPausedMs = Math.max(0, endAtMs - new Date(p.paused_at).getTime());
+            pausedMinutes += Math.floor(currentlyPausedMs / 60000);
+          }
+          const rawElapsed = Math.max(0, endAtMs - startAtMs);
+          const actualMinutes = Math.max(0, Math.floor(rawElapsed / 60000) - pausedMinutes);
+          const diffMins = actualMinutes - bookedMinutes;
+
+          if (diffMins > maxDiff) {
+            maxDiff = diffMins;
+          }
+        }
+
+        if (maxDiff > 0) {
+          // Overtime alert (diff > 0)
+          const alertText = `${user.name || '客人'} · ${tableDisplay} 超時 ${maxDiff} 分`;
+          const alertHint = `預約到 ${lastRes.session.end_time}，問要不要加時或結帳`;
+          alerts.push({
+            type: 'overtime',
+            booking_ref: bRef,
+            title: alertText,
+            subtitle: alertHint,
+            text: alertText,
+            hint: alertHint
+          });
+        } else if (maxDiff >= -30 && maxDiff <= 0) {
+          // 30 min before end
+          const alertText = `${user.name || '客人'} · ${tableDisplay} 即將到時`;
+          const alertHint = `${lastRes.session.end_time} 到時，提醒預留 10 分鐘壓平作品`;
+          alerts.push({
+            type: 'warning_30m',
+            booking_ref: bRef,
+            title: alertText,
+            subtitle: alertHint,
+            text: alertText,
+            hint: alertHint
+          });
+        }
       }
     }
 
