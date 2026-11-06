@@ -142,4 +142,58 @@ test('Live floor alerts overtime and ended timer test', async (t) => {
     assert.equal(bAlerts[0].type, 'overtime');
     assert.ok(bAlerts[0].title.includes('超時 30 分'), `Expected title to have max overtime 30 分, got: ${bAlerts[0].title}`);
   });
+
+  await t.test('Order-level payment with empty person_nos array is recognized as paid and does not trigger overtime alert', async () => {
+    const bRef = `BK-ALERT-${ts}-ORDER-PAID`;
+    const now = new Date();
+    const startMs = now.getTime() - 90 * 60 * 1000;
+
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bRef,
+        user_id: user.id,
+        session_id: session.id,
+        pax: 1,
+        status: 'confirmed',
+        attendance: 'checked_in',
+        is_paid: false,
+        assigned_seats: ['A1-1'],
+        total_amount: 150
+      }
+    });
+
+    await prisma.bookingPerson.create({
+      data: {
+        booking_ref: bRef,
+        person_no: 1,
+        seat_code: 'A1-1',
+        status: 'active',
+        timer_started_at: new Date(startMs),
+        billing_start_at: new Date(startMs)
+      }
+    });
+
+    // Whole order payment with empty person_nos array (standard Postgres default)
+    await prisma.payment.create({
+      data: {
+        payment_no: `PAY-${ts}-ORD`,
+        batch_no: `B-${ts}-001`,
+        booking_ref: bRef,
+        amount: 150,
+        cash_received: 150,
+        change_given: 0,
+        method: 'cash',
+        kind: 'charge',
+        status: 'valid',
+        person_nos: [],
+        staff_name: '測試人員',
+        device_label: '櫃檯平板',
+        breakdown_json: { persons: [] }
+      }
+    });
+
+    const liveData = await getLiveFloorData(dStr);
+    const alert = liveData.alerts.find(a => a.booking_ref === bRef);
+    assert.equal(alert, undefined, 'Customer whose entire order was paid should not trigger overtime alert');
+  });
 });

@@ -359,7 +359,7 @@ export async function getLiveFloorData(dateStr = null) {
           person_no: p.person_no,
           seat_code: p.seat_code,
           status: p.status,
-          paid: bPayments.some(pay => pay.status === 'valid' && (pay.kind === 'charge' || pay.kind === 'waive') && pay.person_nos?.includes(p.person_no)),
+          paid: bPayments.some(pay => pay.status === 'valid' && (pay.kind === 'charge' || pay.kind === 'waive') && (pay.person_nos?.includes(p.person_no) || !pay.person_nos || pay.person_nos.length === 0)),
           timer: {
             billing_start_at: p.billing_start_at ? p.billing_start_at.toISOString() : null,
             timer_started_at: p.timer_started_at ? p.timer_started_at.toISOString() : null,
@@ -391,7 +391,7 @@ export async function getLiveFloorData(dateStr = null) {
         const isPaid = bPayments.some(pay =>
           pay.status === 'valid' &&
           (pay.kind === 'charge' || pay.kind === 'waive') &&
-          (pay.person_nos?.includes(p.person_no) || !pay.person_nos)
+          (pay.person_nos?.includes(p.person_no) || !pay.person_nos || pay.person_nos.length === 0)
         );
         return !isPaid;
       });

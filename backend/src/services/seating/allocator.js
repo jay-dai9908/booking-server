@@ -433,5 +433,6 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
     await assertNoSeatCollisions(tx, Array.from(allTouchedSessionIds));
   }
 
+  displaced.touchedSessionIds = Array.from(allTouchedSessionIds);
   return displaced;
 }

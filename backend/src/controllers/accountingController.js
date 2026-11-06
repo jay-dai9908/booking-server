@@ -446,7 +446,10 @@ export const getUnpaidFollowUp = async (req, res) => {
       where: {
         status: { not: 'cancelled' },
         session: { session_date: { lte: today } },
-        billing_status: { in: ['unpaid', 'partial'] }
+        OR: [
+          { billing_status: { in: ['unpaid', 'partial'] } },
+          { billing_status: null, is_paid: false }
+        ]
       },
       include: {
         user: true,
@@ -460,9 +463,14 @@ export const getUnpaidFollowUp = async (req, res) => {
       if (!map.has(r.booking_ref)) {
         map.set(r.booking_ref, {
           booking_ref: r.booking_ref,
+          ref_display: r.booking_ref,
           user: r.user,
+          name: r.user?.name || '現場貴賓',
+          pax: r.pax,
           date: r.session.session_date,
+          session_date: r.session.session_date,
           status: r.billing_status || 'unpaid',
+          billing_status: r.billing_status || 'unpaid',
           amount_due: r.amount_due ?? 0,
           amount_received: r.amount_received ?? 0,
           unpaid_amount: Math.max(0, (r.amount_due ?? 0) - (r.amount_received ?? 0))

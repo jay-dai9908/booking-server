@@ -181,7 +181,7 @@ export default function AccountingPage() {
     try {
       setLoadingUnpaid(true);
       const res = await api.get('/accounting/unpaid');
-      setUnpaidList(res.data?.reservations || []);
+      setUnpaidList(res.data?.unpaid || res.data?.reservations || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -994,6 +994,7 @@ export default function AccountingPage() {
                           <Button
                             variant="primary"
                             size="sm"
+                            data-testid={`checkout-btn-${r.booking_ref}`}
                             onClick={() => setCheckoutBookingRef(r.booking_ref)}
                           >
                             結帳

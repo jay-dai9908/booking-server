@@ -192,8 +192,9 @@ export async function checkIn(req, res) {
         }
       });
 
-      // Assert no collisions in these sessions
-      await assertNoSeatCollisions(tx, sessionIds);
+      // Assert no collisions across all touched sessions (primary + displaced)
+      const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
+      await assertNoSeatCollisions(tx, allSessionsToCheck);
 
       return {
         booking_ref,
@@ -276,6 +277,7 @@ export async function moveSeat(req, res) {
       }
 
       // Check target occupancy across all sessions of this reservation
+      let displaced = null;
       const conflictReservations = await tx.reservation.findMany({
         where: {
           session_id: { in: sessionIds },
@@ -332,7 +334,7 @@ export async function moveSeat(req, res) {
 
           // Displace using reseatBookings across all conflicting bookings
           const conflictRefs = [...new Set(conflictReservations.map(cr => cr.booking_ref))];
-          await reseatBookings(tx, {
+          displaced = await reseatBookings(tx, {
             bookingRefs: conflictRefs,
             reservedSeats: [to_seat],
             sessionIds,
@@ -354,8 +356,9 @@ export async function moveSeat(req, res) {
         data: { seat_code: to_seat }
       });
 
-      // Assert no collisions
-      await assertNoSeatCollisions(tx, sessionIds);
+      // Assert no collisions across all touched sessions
+      const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
+      await assertNoSeatCollisions(tx, allSessionsToCheck);
     });
 
     return res.json({ success: true, server_now: new Date().toISOString() });
@@ -505,6 +508,7 @@ export async function addPerson(req, res) {
           throw { status: 400, message: `座位 ${seat_code} 不存在或未啟用` };
         }
 
+        let displaced = null;
         const conflictReservations = await tx.reservation.findMany({
           where: {
             session_id: { in: sessionIds },
@@ -526,7 +530,7 @@ export async function addPerson(req, res) {
         }
 
         const conflictRefs = [...new Set(conflictReservations.map(cr => cr.booking_ref))];
-        await reseatBookings(tx, {
+        displaced = await reseatBookings(tx, {
           bookingRefs: conflictRefs,
           reservedSeats: [seat_code],
           sessionIds,
@@ -562,7 +566,8 @@ export async function addPerson(req, res) {
       });
 
       if (seat_code) {
-        await assertNoSeatCollisions(tx, sessionIds);
+        const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
+        await assertNoSeatCollisions(tx, allSessionsToCheck);
       }
 
       const existingPersons = await tx.bookingPerson.findMany({

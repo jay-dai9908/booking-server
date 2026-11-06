@@ -2,7 +2,10 @@ import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const isTest = process.execArgv.includes('--test') || process.env.NODE_ENV === 'test';
+const isTest = process.execArgv.includes('--test') ||
+  process.env.NODE_ENV === 'test' ||
+  /[\/\\]test[\/\\]/.test(process.argv[1] || '') ||
+  process.argv.some(arg => typeof arg === 'string' && (arg.endsWith('.test.js') || arg.includes('/test/') || arg.includes('\\test\\')));
 
 let url = process.env.DATABASE_URL;
 

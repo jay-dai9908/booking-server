@@ -54,7 +54,71 @@ async function run() {
       }, token);
     }
 
-    // 2. Section 4 Acceptance Flow: Seat Layout Editor
+    // 2. Section 1.1 Acceptance Flow: Checkout Workbench Addon Item Selection
+    console.log('\n--- Section 1.1 Acceptance Flow: Checkout Workbench Addon ---');
+    try {
+      const apiBase = process.env.API_BASE || 'http://localhost:3001/api';
+      const bookRes = await page.request.post(`${apiBase}/reservations/admin`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        data: {
+          name: '工作台加購客',
+          phone: '0988111222',
+          pax: 1,
+          session_ids: [474],
+          attendance: 'checked_in',
+          autoCheckIn: true
+        }
+      });
+      const bookJson = await bookRes.json();
+      const testRef = bookJson.booking_ref || bookJson.reservation?.booking_ref;
+      console.log('Test booking for checkout workbench:', testRef);
+
+      await page.goto(`${BASE_URL}/admin/accounting`, { waitUntil: 'networkidle', timeout: 15000 });
+      // Switch to unpaid tab
+      const unpaidTab = page.locator('[data-testid="tab-unpaid"], button:has-text("未結")').first();
+      await unpaidTab.click();
+      await page.waitForTimeout(600);
+
+      const checkoutBtn = testRef
+        ? page.locator(`[data-testid="checkout-btn-${testRef}"], button:has-text("結帳")`).first()
+        : page.locator('button:has-text("結帳")').first();
+      await checkoutBtn.waitFor({ state: 'visible', timeout: 10000 });
+      await checkoutBtn.click();
+
+      const netDueEl = page.locator('[data-testid="workbench-net-due"]');
+      await netDueEl.waitFor({ state: 'visible', timeout: 10000 });
+      const initialDueText = await netDueEl.innerText();
+      const initialAmount = parseInt(initialDueText.replace(/[^\d]/g, ''), 10) || 0;
+      console.log(`Initial due amount: NT$${initialAmount}`);
+
+      const presetBtn = page.locator('[data-testid^="addon-preset-"]').first();
+      await presetBtn.waitFor({ state: 'visible', timeout: 8000 });
+      const presetName = await presetBtn.locator('span').first().innerText();
+      console.log(`Clicking addon item: ${presetName}...`);
+      await presetBtn.click();
+
+      await page.waitForFunction(
+        ([selector, prev]) => {
+          const el = document.querySelector(selector);
+          return el && el.innerText !== prev;
+        },
+        ['[data-testid="workbench-net-due"]', initialDueText],
+        { timeout: 8000 }
+      );
+
+      const updatedDueText = await netDueEl.innerText();
+      const updatedAmount = parseInt(updatedDueText.replace(/[^\d]/g, ''), 10) || 0;
+      console.log(`Updated due amount: NT$${updatedAmount}`);
+      assert.ok(updatedAmount > initialAmount, `Amount due should increase after adding addon item (was ${initialAmount}, now ${updatedAmount})`);
+      console.log('✔ Section 1.1 Acceptance Flow PASSED!');
+    } catch (wbErr) {
+      console.error('Section 1.1 Acceptance Flow Warning:', wbErr.message);
+      throw wbErr;
+    }
+
+    // 3. Section 4 Acceptance Flow: Seat Layout Editor
     console.log('\n--- Section 4 Acceptance Flow: Seat Layout Editor ---');
     await page.goto(`${BASE_URL}/admin/seat-layout`, { waitUntil: 'networkidle', timeout: 15000 });
     await page.waitForSelector('[data-testid="seat-layout-svg"]', { timeout: 10000 });

@@ -416,8 +416,8 @@ export function computeBill({
       source_key: oa.key ? `order_addon:${oa.key}` : `order_addon:${oa.name}`,
       label: oa.name,
       totalAmount: totalAddonAmount,
-      splitMode: oa.split?.mode || 'proportional',
-      targetPersonNo: oa.split?.person_no,
+      splitMode: oa.split?.mode || oa.split_mode || 'proportional',
+      targetPersonNo: oa.split?.person_no || oa.target_person_no || oa.person_no,
       scope: 'all',
       addedAfterPayment: Boolean(oa.added_after_payment),
       includePaid: Boolean(oa.include_paid)
@@ -453,8 +453,8 @@ export function computeBill({
         source_key: `promo:${op.code}`,
         label: op.name || op.code,
         totalAmount: -promoDiscount,
-        splitMode: op.split?.mode || 'proportional',
-        targetPersonNo: op.split?.person_no,
+        splitMode: op.split?.mode || op.split_mode || 'proportional',
+        targetPersonNo: op.split?.person_no || op.target_person_no || op.person_no,
         scope: op.target_scope || 'all'
       });
     }
@@ -468,8 +468,8 @@ export function computeBill({
       source_key: 'manual',
       label: `手動折讓${reasonText}`,
       totalAmount: -dAmt,
-      splitMode: manualDiscount.split?.mode || 'proportional',
-      targetPersonNo: manualDiscount.split?.person_no,
+      splitMode: manualDiscount.split?.mode || manualDiscount.split_mode || 'proportional',
+      targetPersonNo: manualDiscount.split?.person_no || manualDiscount.target_person_no || manualDiscount.person_no,
       scope: 'all'
     });
   }

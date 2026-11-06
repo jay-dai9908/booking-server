@@ -92,6 +92,7 @@ export default function CheckoutWorkbench({
   // Debounce ref
   const saveTimeoutRef = useRef(null);
   const isInitialLoadRef = useRef(true);
+  const currentRevRef = useRef(0);
 
   // Load bill data
   const loadBill = async () => {
@@ -100,10 +101,12 @@ export default function CheckoutWorkbench({
       setLoading(true);
       setLoadError(null);
       const res = await api.get(`/billing/${bookingRef}`);
+      const rev = res.data?.draft?.rev ?? 0;
+      currentRevRef.current = rev;
       setBillData(res.data);
       setDraftState(res.data.draft || {
         version: 2,
-        rev: 0,
+        rev,
         split_mode: 'proportional',
         persons: [],
         order_addons: [],
@@ -145,13 +148,14 @@ export default function CheckoutWorkbench({
       try {
         setIsSavingDraft(true);
         setDraftConflictMsg(null);
-        const currentRev = billData.draft?.rev ?? 0;
+        const currentRev = currentRevRef.current ?? billData.draft?.rev ?? 0;
         const res = await api.put(`/billing/${bookingRef}/draft`, {
           base_rev: currentRev,
           draft: newDraft
         });
         if (res.data?.bill) {
           const nextRev = res.data.rev ?? res.data.draft?.rev ?? (currentRev + 1);
+          currentRevRef.current = nextRev;
           setBillData(prev => ({
             ...prev,
             bill: res.data.bill,
@@ -168,6 +172,7 @@ export default function CheckoutWorkbench({
             const freshBillData = freshRes.data;
             const freshDraft = freshBillData?.draft || {};
             const freshRev = freshDraft.rev ?? 0;
+            currentRevRef.current = freshRev;
             const mergedDraft = {
               ...freshDraft,
               order_addons: newDraft.order_addons !== undefined ? newDraft.order_addons : freshDraft.order_addons,
@@ -189,6 +194,7 @@ export default function CheckoutWorkbench({
             });
             if (retryRes.data?.bill) {
               const retryRev = retryRes.data.rev ?? retryRes.data.draft?.rev ?? (freshRev + 1);
+              currentRevRef.current = retryRev;
               setBillData(prev => ({
                 ...prev,
                 bill: retryRes.data.bill,
@@ -284,6 +290,7 @@ export default function CheckoutWorkbench({
             name: preset.name,
             price: Number(preset.price) || 0,
             qty: 1,
+            split: { mode: prev.split_mode || 'proportional' },
             split_mode: prev.split_mode || 'proportional'
           });
         }
@@ -854,6 +861,7 @@ export default function CheckoutWorkbench({
                 {(billData?.addon_presets || []).map((preset) => (
                   <button
                     key={preset.id || preset.name}
+                    data-testid={`addon-preset-${preset.name}`}
                     type="button"
                     onClick={() => handleAddPreset(preset)}
                     className="px-3 py-1.5 rounded-xl border border-sg-line bg-sg-paper/60 hover:bg-sg-brown-soft hover:border-sg-brown text-[12px] font-bold text-sg-ink flex items-center gap-1.5 transition"
@@ -1170,7 +1178,7 @@ export default function CheckoutWorkbench({
           <div className="flex items-center gap-3">
             <div className="text-right">
               <span className="text-[11px] text-sg-muted block">未收 {unpaidPersons.length} 位</span>
-              <span className="text-[16px] font-bold text-sg-ink font-num">NT${netDue}</span>
+              <span data-testid="workbench-net-due" className="text-[16px] font-bold text-sg-ink font-num">NT${netDue}</span>
             </div>
             <Button
               variant="primary"

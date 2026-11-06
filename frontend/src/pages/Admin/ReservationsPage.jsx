@@ -388,9 +388,15 @@ export default function ReservationsPage() {
                         </span>
                         <span className="text-xs text-gray-500">· {r.pax} 位</span>
                       </div>
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                        {statusUI.icon} {statusUI.text}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                          {statusUI.icon} {statusUI.text}
+                        </span>
+                        {r.status !== 'cancelled' && (() => {
+                          const pill = getBillingStatusPillProps(r);
+                          return <StatusPill status={pill.status} label={pill.label} />;
+                        })()}
+                      </div>
                     </div>
                     <div className="text-xs text-gray-500">
                       {format(new Date(r.session_date), 'yyyy/MM/dd')} · {r.time_blocks ? r.time_blocks.map(b => `${b.start_time}-${b.end_time}`).join(', ') : `${r.start_time}-${r.end_time}`}

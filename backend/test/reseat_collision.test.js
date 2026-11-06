@@ -383,4 +383,70 @@ test('Reseat collision and displacement tests (Section 1.2)', async (t) => {
     // Clean up
     await prisma.reservation.deleteMany({ where: { booking_ref: { in: [bG1, bG7, bWang] } } });
   });
+
+  await t.test('4. 單時段報到挪動多時段預約，防線涵蓋所有涉及時段且無任何碰撞', async () => {
+    const bG1 = `BK-RESEAT-${TS}-CROSS-G1`;
+    const bG7 = `BK-RESEAT-${TS}-CROSS-G7`;
+    const bWang = `BK-RESEAT-${TS}-CROSS-WANG`;
+
+    // G1: 2 pax across sess21 and sess22 on 1-1, 1-2
+    for (const sid of [sess21.id, sess22.id]) {
+      await prisma.reservation.create({
+        data: {
+          booking_ref: bG1,
+          user_id: user1.id,
+          session_id: sid,
+          pax: 2,
+          assigned_seats: ['1-1', '1-2'],
+          status: 'confirmed',
+          seat_source: 'auto'
+        }
+      });
+    }
+
+    // G7: 1 pax across sess21 and sess22 on 3-3
+    for (const sid of [sess21.id, sess22.id]) {
+      await prisma.reservation.create({
+        data: {
+          booking_ref: bG7,
+          user_id: user7.id,
+          session_id: sid,
+          pax: 1,
+          assigned_seats: ['3-3'],
+          status: 'confirmed',
+          seat_source: 'auto'
+        }
+      });
+    }
+
+    // Wang: only in sess21! Takes 1-1
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bWang,
+        user_id: userWang.id,
+        session_id: sess21.id,
+        pax: 1,
+        assigned_seats: ['WAIT-1'],
+        status: 'confirmed'
+      }
+    });
+
+    const { req, res } = createMockReqRes({
+      params: { booking_ref: bWang },
+      body: { seats: ['1-1'] }
+    });
+
+    await checkIn(req, res);
+    assert.equal(res.getStatusCode(), 200);
+
+    // G1 must be consistent across sess21 and sess22
+    const g1Resvs = await prisma.reservation.findMany({ where: { booking_ref: bG1 } });
+    assert.equal(g1Resvs.length, 2);
+    assert.deepEqual(g1Resvs[0].assigned_seats.sort(), g1Resvs[1].assigned_seats.sort());
+
+    await assertZeroCollisions();
+
+    // Clean up
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [bG1, bG7, bWang] } } });
+  });
 });
