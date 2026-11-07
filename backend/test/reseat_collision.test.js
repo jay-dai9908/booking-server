@@ -449,4 +449,230 @@ test('Reseat collision and displacement tests (Section 1.2)', async (t) => {
     // Clean up
     await prisma.reservation.deleteMany({ where: { booking_ref: { in: [bG1, bG7, bWang] } } });
   });
+
+  await t.test('5. 重現情境：22:00 有 9 組預約，16 個座位只剩 1 個空位。現場王報到選 1-1，被改座位的預約不超過 2 組且無重複劃位', async () => {
+    const testDate16 = dateOnly('2026-11-29');
+    // Create layout with 16 seats (Table 1, Table 2, Table 3, Table L)
+    const layout16 = await prisma.seatLayout.create({
+      data: {
+        name: `測試16座格局_${TS}`,
+        status: 'published',
+        effective_from: testDate16,
+        canvas_w: 1200,
+        canvas_h: 625,
+        capacity: 16,
+        rules_json: {
+          spread_tables: false,
+          avoid_opposite: false,
+          avoid_beside: false,
+          zone_mode: 'empty_tables_first',
+          weights: { zone: 1, zone_fill_first: 50, opposite: 3, beside: 6, second: 20, last: 100, split: 4 }
+        },
+        zones: {
+          create: [{ name: '一般區', sort_order: 0 }]
+        }
+      },
+      include: { zones: true }
+    });
+    const zId = layout16.zones[0].id;
+
+    const t1 = await prisma.seatTable.create({
+      data: { layout_id: layout16.id, zone_id: zId, label: '桌1', shape: 'rect', arrangement: 'one_side', cx: 200, cy: 200, w: 80, h: 200, sort_order: 1 }
+    });
+    const t2 = await prisma.seatTable.create({
+      data: { layout_id: layout16.id, zone_id: zId, label: '桌2', shape: 'rect', arrangement: 'one_side', cx: 400, cy: 200, w: 80, h: 200, sort_order: 2 }
+    });
+    const t3 = await prisma.seatTable.create({
+      data: { layout_id: layout16.id, zone_id: zId, label: '桌3', shape: 'rect', arrangement: 'one_side', cx: 600, cy: 200, w: 80, h: 200, sort_order: 3 }
+    });
+    const tL = await prisma.seatTable.create({
+      data: { layout_id: layout16.id, zone_id: zId, label: '桌L', shape: 'rect', arrangement: 'one_side', cx: 800, cy: 200, w: 80, h: 200, sort_order: 4 }
+    });
+
+    const seatData = [
+      { layout_id: layout16.id, table_id: t1.id, zone_id: zId, code: '1-1', lx: -40, ly: -75, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
+      { layout_id: layout16.id, table_id: t1.id, zone_id: zId, code: '1-2', lx: -40, ly: -25, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
+      { layout_id: layout16.id, table_id: t1.id, zone_id: zId, code: '1-3', lx: -40, ly: 25, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
+      { layout_id: layout16.id, table_id: t1.id, zone_id: zId, code: '1-4', lx: -40, ly: 75, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
+
+      { layout_id: layout16.id, table_id: t2.id, zone_id: zId, code: '2-1', lx: -40, ly: -75, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
+      { layout_id: layout16.id, table_id: t2.id, zone_id: zId, code: '2-2', lx: -40, ly: -25, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
+      { layout_id: layout16.id, table_id: t2.id, zone_id: zId, code: '2-3', lx: -40, ly: 25, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
+      { layout_id: layout16.id, table_id: t2.id, zone_id: zId, code: '2-4', lx: -40, ly: 75, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
+
+      { layout_id: layout16.id, table_id: t3.id, zone_id: zId, code: '3-1', lx: -40, ly: -75, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
+      { layout_id: layout16.id, table_id: t3.id, zone_id: zId, code: '3-2', lx: -40, ly: -25, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
+      { layout_id: layout16.id, table_id: t3.id, zone_id: zId, code: '3-3', lx: -40, ly: 25, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
+      { layout_id: layout16.id, table_id: t3.id, zone_id: zId, code: '3-4', lx: -40, ly: 75, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
+
+      { layout_id: layout16.id, table_id: tL.id, zone_id: zId, code: 'L-1', lx: -40, ly: -75, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
+      { layout_id: layout16.id, table_id: tL.id, zone_id: zId, code: 'L-2', lx: -40, ly: -25, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
+      { layout_id: layout16.id, table_id: tL.id, zone_id: zId, code: 'L-3', lx: -40, ly: 25, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
+      { layout_id: layout16.id, table_id: tL.id, zone_id: zId, code: 'L-4', lx: -40, ly: 75, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 }
+    ];
+    await prisma.seat.createMany({ data: seatData });
+
+    // Session sess16 (22:00)
+    const oldSessions = await prisma.session.findMany({ where: { session_date: testDate16 } });
+    const oldSids = oldSessions.map(s => s.id);
+    const oldResvs = await prisma.reservation.findMany({ where: { session_id: { in: oldSids } } });
+    const oldRefs = oldResvs.map(r => r.booking_ref);
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: oldRefs } } });
+    await prisma.reservation.deleteMany({ where: { session_id: { in: oldSids } } });
+    await prisma.session.deleteMany({ where: { id: { in: oldSids } } });
+    const sess16 = await prisma.session.create({
+      data: { session_date: testDate16, start_time: '22:00', end_time: '23:00', max_capacity: 16 }
+    });
+
+    // 9 groups with 15 pax total (3-4 is empty)
+    // Group 1: 2 pax on 1-1, 1-2
+    // Group 2: 2 pax on 1-3, 1-4
+    // Group 3: 2 pax on 2-1, 2-2
+    // Group 4: 2 pax on 2-3, 2-4
+    // Group 5: 2 pax on 3-1, 3-2
+    // Group 6: 2 pax on L-1, L-2
+    // Group 7: 1 pax on 3-3
+    // Group 8: 1 pax on L-3
+    // Group 9: 1 pax on L-4
+    const groups = [
+      { no: 1, pax: 2, seats: ['1-1', '1-2'] },
+      { no: 2, pax: 2, seats: ['1-3', '1-4'] },
+      { no: 3, pax: 2, seats: ['2-1', '2-2'] },
+      { no: 4, pax: 2, seats: ['2-3', '2-4'] },
+      { no: 5, pax: 2, seats: ['3-1', '3-2'] },
+      { no: 6, pax: 2, seats: ['L-1', 'L-2'] },
+      { no: 7, pax: 1, seats: ['3-3'] },
+      { no: 8, pax: 1, seats: ['L-3'] },
+      { no: 9, pax: 1, seats: ['L-4'] }
+    ];
+
+    const groupRefs = [];
+    for (const g of groups) {
+      const ref = `BK-RESEAT-${TS}-9G-${g.no}`;
+      groupRefs.push(ref);
+      await prisma.reservation.create({
+        data: {
+          booking_ref: ref,
+          user_id: user1.id,
+          session_id: sess16.id,
+          pax: g.pax,
+          assigned_seats: g.seats,
+          status: 'confirmed',
+          attendance: 'confirmed',
+          seat_source: 'auto',
+          is_seat_locked: false
+        }
+      });
+    }
+
+    const bWang = `BK-RESEAT-${TS}-9G-WANG`;
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bWang,
+        user_id: userWang.id,
+        session_id: sess16.id,
+        pax: 1,
+        assigned_seats: ['WAIT-1'],
+        status: 'confirmed',
+        is_walk_in: true
+      }
+    });
+
+    const { req, res } = createMockReqRes({
+      params: { booking_ref: bWang },
+      body: { seats: ['1-1'] }
+    });
+
+    await checkIn(req, res);
+    assert.equal(res.getStatusCode(), 200, 'Check in should succeed');
+
+    const respData = res.getResponseData();
+    assert.ok(respData.displaced, 'Displaced list should exist');
+    // Displaced should move at most 2 groups (e.g. Group 1 and Group 9)
+    assert.ok(respData.displaced.length <= 2, `Expected at most 2 displaced groups, but got ${respData.displaced.length}`);
+
+    await assertZeroCollisions();
+
+    // Clean up
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [...groupRefs, bWang] } } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [...groupRefs, bWang] } } });
+    await prisma.session.delete({ where: { id: sess16.id } });
+    await prisma.seat.deleteMany({ where: { layout_id: layout16.id } });
+    await prisma.seatTable.deleteMany({ where: { layout_id: layout16.id } });
+    await prisma.seatZone.deleteMany({ where: { layout_id: layout16.id } });
+    await prisma.seatLayout.delete({ where: { id: layout16.id } });
+  });
+
+  await t.test('6. 有空位可以直接放時，只有被擠走的那一組改座位', async () => {
+    const bG1 = `BK-RESEAT-${TS}-DIRECT-G1`;
+    const bG7 = `BK-RESEAT-${TS}-DIRECT-G7`;
+    const bWang = `BK-RESEAT-${TS}-DIRECT-WANG`;
+
+    // Group 1: 1 pax on 1-1
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bG1,
+        user_id: user1.id,
+        session_id: sess21.id,
+        pax: 1,
+        assigned_seats: ['1-1'],
+        status: 'confirmed',
+        attendance: 'confirmed',
+        seat_source: 'auto',
+        is_seat_locked: false
+      }
+    });
+
+    // Group 7: 1 pax on 1-2
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bG7,
+        user_id: user7.id,
+        session_id: sess21.id,
+        pax: 1,
+        assigned_seats: ['1-2'],
+        status: 'confirmed',
+        attendance: 'confirmed',
+        seat_source: 'auto',
+        is_seat_locked: false
+      }
+    });
+
+    // Wang: 1 pax walk-in, chooses 1-1
+    // Notice 3-3 and 3-4 are EMPTY in sess21!
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bWang,
+        user_id: userWang.id,
+        session_id: sess21.id,
+        pax: 1,
+        assigned_seats: ['WAIT-1'],
+        status: 'confirmed',
+        is_walk_in: true
+      }
+    });
+
+    const { req, res } = createMockReqRes({
+      params: { booking_ref: bWang },
+      body: { seats: ['1-1'] }
+    });
+
+    await checkIn(req, res);
+    assert.equal(res.getStatusCode(), 200, 'Check in should succeed');
+
+    const respData = res.getResponseData();
+    // Only Group 1 should be displaced!
+    assert.equal(respData.displaced.length, 1, `Expected only 1 displaced group, got ${respData.displaced.length}`);
+    assert.equal(respData.displaced[0].booking_ref, bG1);
+
+    // Group 7 seats should remain 1-2 unchanged
+    const resG7 = await prisma.reservation.findFirst({ where: { booking_ref: bG7, session_id: sess21.id } });
+    assert.deepEqual(resG7.assigned_seats, ['1-2']);
+
+    await assertZeroCollisions();
+
+    // Clean up
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [bG1, bG7, bWang] } } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [bG1, bG7, bWang] } } });
+  });
 });

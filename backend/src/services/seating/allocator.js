@@ -87,40 +87,31 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
 
   const initialOccupancy = buildOccupancy(allBlocks);
 
-  // 1. 常規排位（直接分配）
-  const directAlloc = allocate({
-    layout,
-    rules,
-    pax: newReservationBlock.pax,
-    sessionIds: targetSessionIds,
-    occupancy: initialOccupancy,
-    allowSplit: Boolean(forceSplit)
-  });
+  const seatMap = new Map((layout?.seats || []).map(s => [s.code, s]));
 
-  if (directAlloc && directAlloc.seats && !directAlloc.error) {
-    return {
-      success: true,
-      updates: [
-        {
-          booking_ref: newReservationBlock.booking_ref || newReservationBlock.id,
-          assigned_seats: directAlloc.seats
-        }
-      ]
-    };
-  }
+  const getSeatGroupCenter = (seatCodes) => {
+    if (!seatCodes || !seatCodes.length) return null;
+    let sumX = 0, sumY = 0, count = 0;
+    for (const code of seatCodes) {
+      const seat = seatMap.get(code);
+      if (seat && typeof seat.abs_x === 'number' && typeof seat.abs_y === 'number') {
+        sumX += seat.abs_x;
+        sumY += seat.abs_y;
+        count++;
+      }
+    }
+    if (count === 0) return null;
+    return { x: sumX / count, y: sumY / count };
+  };
 
-  // 2. 局部洗牌（Reshuffle）
-  // 找出重疊時段中可以挪動（非 pinned）且已佔用實體座位的預約
-  const overlappingMovable = allBlocks.filter(b => {
-    if (b.is_pinned) return false;
-    if (!b.assigned_seats || !b.assigned_seats.some(s => s && !s.startsWith('WAIT-'))) return false;
-    return b.session_ids.some(sid => targetSessionIds.includes(sid));
-  });
+  const getDistance = (c1, c2) => {
+    if (!c1 || !c2) return Infinity;
+    return Math.hypot(c1.x - c2.x, c1.y - c2.y);
+  };
 
-  // 如果有可挪動預約，進行動態洗牌
-  if (overlappingMovable.length > 0) {
+  const tryAllocateSubset = (subset) => {
     const queueToAllocate = [
-      ...overlappingMovable,
+      ...subset,
       {
         booking_ref: newReservationBlock.booking_ref || newReservationBlock.id,
         pax: newReservationBlock.pax,
@@ -141,8 +132,7 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
       return (a.created_at || 0) - (b.created_at || 0);
     });
 
-    // 以 pinned reservations 為底座建立虛擬排位表
-    const pinnedBlocks = allBlocks.filter(b => !overlappingMovable.some(m => m.booking_ref === b.booking_ref));
+    const pinnedBlocks = allBlocks.filter(b => !subset.some(m => m.booking_ref === b.booking_ref));
     const virtualOccupancy = buildOccupancy(pinnedBlocks);
 
     let reshuffleSuccess = true;
@@ -160,7 +150,6 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
 
       if (res && res.seats && !res.error) {
         virtualAssigned.set(reqBlock.booking_ref, res.seats);
-        // Occupy in virtual occupancy
         for (const sid of reqBlock.session_ids) {
           if (!virtualOccupancy[sid]) virtualOccupancy[sid] = {};
           for (const s of res.seats) {
@@ -181,7 +170,6 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
           // New booking
           updates.push({ booking_ref: ref, assigned_seats: seats });
         } else {
-          // Compare with original seats
           const origSeats = orig.assigned_seats || [];
           const changed = seats.length !== origSeats.length || !seats.every(s => origSeats.includes(s));
           if (changed) {
@@ -190,6 +178,73 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
         }
       }
       return { success: true, updates };
+    }
+    return null;
+  };
+
+  // 1. 只動被擠走的那一組：其他預約都不動，直接替它找座位。成功就結束。
+  const directResult = tryAllocateSubset([]);
+  if (directResult) {
+    return directResult;
+  }
+
+  // 找出重疊時段中可以挪動（非 pinned）且已佔用實體座位的預約
+  const overlappingMovable = allBlocks.filter(b => {
+    if (b.is_pinned) return false;
+    if (!b.assigned_seats || !b.assigned_seats.some(s => s && !s.startsWith('WAIT-'))) return false;
+    return b.session_ids.some(sid => targetSessionIds.includes(sid));
+  });
+
+  // 2. 再多動一組：從同時段可以挪動的預約裡，依「人數少 → 時段數少 → 離被擠走的座位最近」排序
+  if (overlappingMovable.length > 0) {
+    const origDisplacedSeats = newReservationBlock.original_seats ||
+      (newReservationBlock.original_sessions?.[0]?.assigned_seats) || [];
+    const refPosition = getSeatGroupCenter(origDisplacedSeats);
+
+    const sortedMovable = [...overlappingMovable].sort((a, b) => {
+      // 1. 人數少 (ascending)
+      if (a.pax !== b.pax) return a.pax - b.pax;
+      // 2. 時段數少 (ascending)
+      if (a.session_ids.length !== b.session_ids.length) return a.session_ids.length - b.session_ids.length;
+      // 3. 離被擠走的座位最近 (ascending)
+      const distA = getDistance(getSeatGroupCenter(a.assigned_seats || []), refPosition);
+      const distB = getDistance(getSeatGroupCenter(b.assigned_seats || []), refPosition);
+      if (distA !== distB) return distA - distB;
+      return (a.created_at || 0) - (b.created_at || 0);
+    });
+
+    // 2.1 試動 1 組
+    for (let i = 0; i < sortedMovable.length; i++) {
+      const res = tryAllocateSubset([sortedMovable[i]]);
+      if (res) return res;
+    }
+
+    // 2.2 試動 2 組
+    if (sortedMovable.length >= 2) {
+      for (let i = 0; i < sortedMovable.length; i++) {
+        for (let j = i + 1; j < sortedMovable.length; j++) {
+          const res = tryAllocateSubset([sortedMovable[i], sortedMovable[j]]);
+          if (res) return res;
+        }
+      }
+    }
+
+    // 2.3 試動 3 組
+    if (sortedMovable.length >= 3) {
+      for (let i = 0; i < sortedMovable.length; i++) {
+        for (let j = i + 1; j < sortedMovable.length; j++) {
+          for (let k = j + 1; k < sortedMovable.length; k++) {
+            const res = tryAllocateSubset([sortedMovable[i], sortedMovable[j], sortedMovable[k]]);
+            if (res) return res;
+          }
+        }
+      }
+    }
+
+    // 3. 還是排不下，才用整批洗牌
+    if (sortedMovable.length > 3) {
+      const fullRes = tryAllocateSubset(sortedMovable);
+      if (fullRes) return fullRes;
     }
   }
 
@@ -360,7 +415,8 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
       booking_ref: bRef,
       pax: bPax,
       session_ids: bSessionIds,
-      original_sessions: bResvs
+      original_sessions: bResvs,
+      original_seats: firstRes.assigned_seats || reservedSeats
     };
 
     const allocResult = allocateWithLayout(currentReservations, newReservationBlock, bForceSplit, ctx);
@@ -394,6 +450,12 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
       });
       if (!targetResvs.length) continue;
       const origSeats = targetResvs[0].assigned_seats || [];
+
+      // Only update and displace if seats actually changed!
+      const hasChanged = origSeats.length !== newSeats.length ||
+        !origSeats.every(s => newSeats.includes(s)) ||
+        !newSeats.every(s => origSeats.includes(s));
+      if (!hasChanged) continue;
 
       // Update reservation seats across ALL sessions of this booking
       await tx.reservation.updateMany({
