@@ -6,6 +6,11 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
 
 async function run() {
+  if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+    console.error('請設定 ADMIN_PASSWORD 環境變數');
+    process.exit(1);
+  }
+
   console.log(`Starting Acceptance Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
   const launchOptions = { headless: HEADLESS };
   if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
@@ -36,11 +41,6 @@ async function run() {
       apiErrors.push({ url: res.url(), status: res.status() });
     }
   });
-
-  if (!process.env.ADMIN_PASSWORD) {
-    console.error('請設定 ADMIN_PASSWORD 環境變數');
-    process.exit(1);
-  }
 
   try {
     // 1. Login as admin
@@ -287,15 +287,30 @@ async function run() {
     await t1.waitFor({ state: 'visible', timeout: 5000 });
     await t2.waitFor({ state: 'visible', timeout: 5000 });
 
-    // Item 7.1 Test 1: Marquee/Shift-select Table 1 and Table 2, click "靠上", cy must be identical
-    console.log('Item 7.1 Test 1: Select Table 1 & Table 2, align-top...');
+    // Item 7.1 Test 1: Marquee-select Table 1 and Table 2, click "靠上", cy must be identical
+    console.log('Item 7.1 Test 1: Marquee box-select Table 1 & Table 2, align-top...');
     const cy1Before = await t1.getAttribute('data-cy');
     const cy2Before = await t2.getAttribute('data-cy');
 
-    // Select both using Shift+click
-    await t1.click({ force: true });
+    // Perform true marquee box drag across Table 1 and Table 2
+    const box1 = await t1.boundingBox();
+    const box2 = await t2.boundingBox();
+    assert.ok(box1 && box2, 'Table 1 and Table 2 must have valid bounding boxes for marquee selection');
+
+    const mStartX = Math.min(box1.x, box2.x) - 20;
+    const mStartY = Math.min(box1.y, box2.y) - 20;
+    const mEndX = Math.max(box1.x + box1.width, box2.x + box2.width) + 20;
+    const mEndY = Math.max(box1.y + box1.height, box2.y + box2.height) + 20;
+
+    // Deselect first by clicking canvas background
+    await page.locator('#canvas-bg').click({ position: { x: 20, y: 20 }, force: true });
     await page.waitForTimeout(200);
-    await t2.click({ modifiers: ['Shift'], force: true });
+
+    // Drag marquee box
+    await page.mouse.move(mStartX, mStartY);
+    await page.mouse.down();
+    await page.mouse.move(mEndX, mEndY, { steps: 5 });
+    await page.mouse.up();
     await page.waitForTimeout(300);
 
     // Verify multi-selection inspector appears
@@ -321,6 +336,28 @@ async function run() {
     assert.equal(cy1Reverted, cy1Before, 'Table 1 cy reverted after undo');
     assert.equal(cy2Reverted, cy2Before, 'Table 2 cy reverted after undo');
     console.log('  ✔ Undo single-step alignment verified');
+
+    // Test Batch Copy and Batch Delete (Item 7.1)
+    console.log('Item 7.1 Batch Copy & Delete: Copying selection and single-step undo...');
+    // Re-select Table 1 and Table 2 using Shift-click
+    await t1.click({ force: true });
+    await page.waitForTimeout(200);
+    await t2.click({ modifiers: ['Shift'], force: true });
+    await page.waitForTimeout(300);
+    await multiInspector.waitFor({ state: 'visible', timeout: 5000 });
+
+    const initialTableCount = await page.locator('[data-testid^="table-node-"]').count();
+    await page.locator('[data-testid="batch-copy-btn"]').click();
+    await page.waitForTimeout(400);
+    const afterCopyCount = await page.locator('[data-testid^="table-node-"]').count();
+    assert.equal(afterCopyCount, initialTableCount + 2, 'Batch copy should duplicate 2 tables');
+
+    // Undo batch copy in 1 step
+    await page.locator('[data-testid="undo-btn"]').click();
+    await page.waitForTimeout(400);
+    const afterUndoCopyCount = await page.locator('[data-testid^="table-node-"]').count();
+    assert.equal(afterUndoCopyCount, initialTableCount, 'Undo should revert batch copy in 1 single step');
+    console.log('  ✔ Batch copy and single-step undo verified');
 
     // Item 7.1 Test 2: Select 3 tables, click "水平平均分布", spacing equal within 1 unit
     console.log('Item 7.1 Test 2: Select 3 tables, horizontal distribute...');
@@ -354,6 +391,22 @@ async function run() {
     const gap2 = sortedCx[2] - sortedCx[1];
     assert.ok(Math.abs(gap1 - gap2) <= 1, `Spacing between adjacent tables must be equal within 1 unit (gaps: ${gap1}, ${gap2})`);
     console.log(`  ✔ Horizontal distribute verified: sorted cx=${sortedCx.join(', ')}, gaps: ${gap1}, ${gap2}`);
+
+    // Verify Table Seat Inspector displays "另外指定相鄰" and "另外指定對面" (Item 7.2)
+    console.log('Item 7.2: Verifying table seat inspector displays "另外指定相鄰" and "另外指定對面"...');
+    await page.locator('#canvas-bg').click({ position: { x: 20, y: 20 }, force: true });
+    await page.waitForTimeout(200);
+
+    const seat11 = page.locator('[data-testid="seat-node-1-1"]').first();
+    await seat11.waitFor({ state: 'visible', timeout: 5000 });
+    await seat11.click({ force: true });
+    await page.waitForTimeout(300);
+
+    const customAdjLabel = page.locator('text=另外指定相鄰');
+    await customAdjLabel.waitFor({ state: 'visible', timeout: 5000 });
+    const customOppLabel = page.locator('text=另外指定對面');
+    await customOppLabel.waitFor({ state: 'visible', timeout: 5000 });
+    console.log('  ✔ Table seat inspector renders "另外指定相鄰" and "另外指定對面"');
 
     // Item 7.2 Test 3: Standalone seats S-1, S-2 adjacent setting & allocation preview
     console.log('Item 7.2 Test 3: Standalone seats S-1, S-2 adjacent setting & allocation preview...');

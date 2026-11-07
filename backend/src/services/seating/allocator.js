@@ -2,6 +2,7 @@
 // 結合資料庫版面與排位計分演算法（含鎖定判定、局部洗牌與拆桌容錯）
 
 import { allocate } from '../../../../shared/allocator/score.js';
+import { resolveLayoutGeometry } from '../../../../shared/allocator/geometry.js';
 import { loadAllocatorContext } from './layoutService.js';
 
 export function isReservationPinned(r) {
@@ -23,10 +24,12 @@ export function isReservationPinned(r) {
  * @returns {{ success: boolean, updates: Array<{ booking_ref: string, assigned_seats: string[] }>, error?: string }}
  */
 export function allocateWithLayout(currentReservations = [], newReservationBlock, forceSplit = false, ctx = {}) {
-  const { layout, rules = {} } = ctx;
-  if (!layout) {
+  const rawLayout = ctx?.layout;
+  if (!rawLayout) {
     return { success: false, error: 'INSUFFICIENT_SEATS' };
   }
+  const layout = resolveLayoutGeometry(rawLayout);
+  const rules = ctx?.rules || {};
 
   // 整理目標時段
   let targetSessionIds = [];
@@ -94,10 +97,14 @@ export function allocateWithLayout(currentReservations = [], newReservationBlock
     let sumX = 0, sumY = 0, count = 0;
     for (const code of seatCodes) {
       const seat = seatMap.get(code);
-      if (seat && typeof seat.abs_x === 'number' && typeof seat.abs_y === 'number') {
-        sumX += seat.abs_x;
-        sumY += seat.abs_y;
-        count++;
+      if (seat) {
+        const posX = typeof seat.abs_x === 'number' ? seat.abs_x : (typeof seat.lx === 'number' ? seat.lx : null);
+        const posY = typeof seat.abs_y === 'number' ? seat.abs_y : (typeof seat.ly === 'number' ? seat.ly : null);
+        if (posX !== null && posY !== null) {
+          sumX += posX;
+          sumY += posY;
+          count++;
+        }
       }
     }
     if (count === 0) return null;

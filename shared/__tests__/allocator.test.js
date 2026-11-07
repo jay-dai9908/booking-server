@@ -194,3 +194,32 @@ test('Section 12: Change vent seat 3-4 to normal alters Group 9 to 3-4', () => {
   assert.deepEqual(res.seats, ['3-4']);
 });
 
+test('Item 7.2: Standalone seats configured as adjacent can be allocated to 2 pax', () => {
+  const zones = [{ id: 1, name: '一般區', sort_order: 0 }];
+  const tables = [];
+  const seats = [
+    { id: 101, layout_id: 1, zone_id: 1, table_id: null, code: 'S-1', lx: 100, ly: 100, priority: 'normal', is_active: true, adjacent_codes: ['S-2'] },
+    { id: 102, layout_id: 1, zone_id: 1, table_id: null, code: 'S-2', lx: 160, ly: 100, priority: 'normal', is_active: true, adjacent_codes: ['S-1'] },
+    { id: 103, layout_id: 1, zone_id: 1, table_id: null, code: 'S-3', lx: 300, ly: 100, priority: 'normal', is_active: true, adjacent_codes: [] }
+  ];
+  const layout = { id: 1, zones, tables, seats };
+  const rules = {
+    spread_tables: false,
+    avoid_opposite: false,
+    avoid_beside: false,
+    zone_mode: 'empty_tables_first',
+    weights: { zone: 1, zone_fill_first: 50, opposite: 3, beside: 6, second: 20, last: 100, split: 4 }
+  };
+  const res = allocate({
+    layout,
+    rules,
+    pax: 2,
+    sessionIds: [1],
+    occupancy: {},
+    allowSplit: false
+  });
+  assert.ok(res.seats, 'Allocation should succeed');
+  assert.deepEqual(res.seats.sort(), ['S-1', 'S-2'].sort(), '2 pax should be allocated to adjacent standalone seats S-1, S-2');
+});
+
+

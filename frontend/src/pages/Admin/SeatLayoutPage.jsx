@@ -143,6 +143,24 @@ export default function SeatLayoutPage() {
     const target = newLayout || layoutRef.current;
     if (!target) return;
     const cloned = JSON.parse(JSON.stringify(target));
+
+    // Guard against identical commits
+    if (history.length > 0 && historyIndex >= 0 && historyIndex < history.length) {
+      const currentHead = history[historyIndex];
+      if (
+        JSON.stringify(currentHead.tables) === JSON.stringify(cloned.tables) &&
+        JSON.stringify(currentHead.seats) === JSON.stringify(cloned.seats) &&
+        JSON.stringify(currentHead.elements_json) === JSON.stringify(cloned.elements_json) &&
+        JSON.stringify(currentHead.rules_json) === JSON.stringify(cloned.rules_json) &&
+        currentHead.canvas_w === cloned.canvas_w &&
+        currentHead.canvas_h === cloned.canvas_h &&
+        currentHead.background_image === cloned.background_image &&
+        currentHead.background_opacity === cloned.background_opacity
+      ) {
+        return;
+      }
+    }
+
     setHistory(prev => {
       const next = prev.slice(0, historyIndex + 1);
       if (next.length >= 50) next.shift();
@@ -151,7 +169,7 @@ export default function SeatLayoutPage() {
     });
     setHistoryIndex(prev => Math.min(prev + 1, 49));
     setLayout(cloned);
-  }, [historyIndex]);
+  }, [historyIndex, history]);
 
   // Undo
   const handleUndo = useCallback(() => {
@@ -358,7 +376,13 @@ export default function SeatLayoutPage() {
     }
 
     // If clicking on empty canvas, start marquee or deselect
-    if (e.target === svgRef.current || e.target.id === 'canvas-bg') {
+    const isInteractive = e.target.closest('[data-testid^="table-node-"]') ||
+      e.target.closest('[data-testid^="seat-node-"]') ||
+      e.target.closest('polyline') ||
+      e.target.closest('g[cursor="move"]') ||
+      e.target.closest('g[cursor="grab"]');
+
+    if (!isInteractive) {
       if (!e.shiftKey) {
         setSelectedTableId(null);
         setSelectedSeatCode(null);
@@ -550,8 +574,8 @@ export default function SeatLayoutPage() {
           setSelectedTableId(null);
           setSelectedTableIds([]);
         }
-      } else {
-        commitLayoutChange(layout);
+      } else if (dragInfo.hasMoved) {
+        commitLayoutChange();
       }
       setDragInfo(null);
     }
@@ -625,10 +649,10 @@ export default function SeatLayoutPage() {
         sort_order: layout.tables?.length || 0
       };
       newSeats = [
-        { code: `${nextNum}-1`, table_id: newTable.id, zone_id: zoneId, lx: -45, ly: -35, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
-        { code: `${nextNum}-2`, table_id: newTable.id, zone_id: zoneId, lx: -45, ly: 35, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
-        { code: `${nextNum}-3`, table_id: newTable.id, zone_id: zoneId, lx: 45, ly: -35, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
-        { code: `${nextNum}-4`, table_id: newTable.id, zone_id: zoneId, lx: 45, ly: 35, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
+        { code: `${nextNum}-1`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: -45, ly: -35, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
+        { code: `${nextNum}-2`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: -45, ly: 35, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
+        { code: `${nextNum}-3`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: 45, ly: -35, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
+        { code: `${nextNum}-4`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: 45, ly: 35, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
       ];
     } else if (type === 'long') {
       // Long table (one_side)
@@ -647,10 +671,10 @@ export default function SeatLayoutPage() {
         sort_order: layout.tables?.length || 0
       };
       newSeats = [
-        { code: `${nextNum}-1`, table_id: newTable.id, zone_id: zoneId, lx: -40, ly: -90, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
-        { code: `${nextNum}-2`, table_id: newTable.id, zone_id: zoneId, lx: -40, ly: -30, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
-        { code: `${nextNum}-3`, table_id: newTable.id, zone_id: zoneId, lx: -40, ly: 30, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
-        { code: `${nextNum}-4`, table_id: newTable.id, zone_id: zoneId, lx: -40, ly: 90, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
+        { code: `${nextNum}-1`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: -40, ly: -90, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
+        { code: `${nextNum}-2`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: -40, ly: -30, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
+        { code: `${nextNum}-3`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: -40, ly: 30, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
+        { code: `${nextNum}-4`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: -40, ly: 90, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
       ];
     } else if (type === 'round') {
       // Round table
@@ -670,10 +694,10 @@ export default function SeatLayoutPage() {
       };
       const r = 45;
       newSeats = [
-        { code: `${nextNum}-1`, table_id: newTable.id, zone_id: zoneId, lx: -r, ly: 0, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
-        { code: `${nextNum}-2`, table_id: newTable.id, zone_id: zoneId, lx: 0, ly: -r, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
-        { code: `${nextNum}-3`, table_id: newTable.id, zone_id: zoneId, lx: r, ly: 0, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
-        { code: `${nextNum}-4`, table_id: newTable.id, zone_id: zoneId, lx: 0, ly: r, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
+        { code: `${nextNum}-1`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: -r, ly: 0, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 },
+        { code: `${nextNum}-2`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: 0, ly: -r, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 1 },
+        { code: `${nextNum}-3`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: r, ly: 0, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 2 },
+        { code: `${nextNum}-4`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: 0, ly: r, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 3 },
       ];
     } else if (type === 'single') {
       // Single seat
@@ -692,7 +716,7 @@ export default function SeatLayoutPage() {
         sort_order: layout.tables?.length || 0
       };
       newSeats = [
-        { code: `${nextNum}-1`, table_id: newTable.id, zone_id: zoneId, lx: 0, ly: 0, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 }
+        { code: `${nextNum}-1`, table_id: newTable.id, table_key: tableKey, zone_id: zoneId, lx: 0, ly: 0, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 }
       ];
     } else if (type === 'standalone') {
       // Standalone seat (table_id: null)
@@ -916,6 +940,7 @@ export default function SeatLayoutPage() {
           ...s,
           id: Date.now() + Math.floor(Math.random() * 100000) + idx,
           table_id: newId,
+          table_key: `table_${newId}`,
           code: `${num}-${idx + 1}`,
           origin_code: `${num}-${idx + 1}`
         });
@@ -1373,9 +1398,9 @@ export default function SeatLayoutPage() {
           )}
 
           {/* Multi-selection Alignment Bar */}
-          {multiSelectedTableIds.length >= 2 && (
+          {(selectedTableIds.length + selectedSeatCodes.length >= 2) && (
             <div className="bg-white p-2.5 rounded-xl border border-sg-brown/40 shadow-xs flex items-center justify-between text-[12px] animate-fade-in">
-              <span className="font-bold text-sg-ink">已選取 {multiSelectedTableIds.length} 張桌子</span>
+              <span className="font-bold text-sg-ink">已選取 {selectedTableIds.length + selectedSeatCodes.length} 個物件</span>
               <div className="flex items-center gap-1">
                 <button type="button" onClick={() => handleAlign('left')} title="靠左對齊" className="p-1.5 hover:bg-sg-paper rounded"><AlignLeft className="w-4 h-4" /></button>
                 <button type="button" onClick={() => handleAlign('center_h')} title="水平置中" className="p-1.5 hover:bg-sg-paper rounded"><AlignCenter className="w-4 h-4" /></button>
@@ -1385,7 +1410,8 @@ export default function SeatLayoutPage() {
                 <button type="button" onClick={() => handleAlign('center_v')} title="垂直置中" className="p-1.5 hover:bg-sg-paper rounded"><AlignVerticalJustifyCenter className="w-4 h-4" /></button>
                 <button type="button" onClick={() => handleAlign('bottom')} title="靠底對齊" className="p-1.5 hover:bg-sg-paper rounded rotate-90"><AlignRight className="w-4 h-4" /></button>
                 <div className="h-3 w-px bg-sg-line mx-1" />
-                <button type="button" onClick={() => handleAlign('dist_h')} title="水平平均分布" className="p-1.5 hover:bg-sg-paper rounded"><AlignHorizontalJustifyCenter className="w-4 h-4" /></button>
+                <button type="button" disabled={selectedTableIds.length + selectedSeatCodes.length < 3} onClick={() => handleAlign('dist_h')} title="水平平均分布" className="p-1.5 hover:bg-sg-paper rounded disabled:opacity-40"><AlignHorizontalJustifyCenter className="w-4 h-4" /></button>
+                <button type="button" disabled={selectedTableIds.length + selectedSeatCodes.length < 3} onClick={() => handleAlign('dist_v')} title="垂直平均分布" className="p-1.5 hover:bg-sg-paper rounded disabled:opacity-40"><AlignVerticalJustifyCenter className="w-4 h-4" /></button>
               </div>
             </div>
           )}
@@ -1454,6 +1480,7 @@ export default function SeatLayoutPage() {
                           stroke="#A78B71"
                           strokeWidth="1.5"
                           strokeDasharray="4,4"
+                          pointerEvents="none"
                         />
                         <text
                           x={zone.polygon[0][0] + 8}
@@ -1843,7 +1870,7 @@ export default function SeatLayoutPage() {
                               setSelectedSeatCode(seat.code);
                               setSelectedSeatCodes([seat.code]);
                               setSelectedTableId(seat.table_id || null);
-                              setSelectedTableIds(seat.table_id ? [seat.table_id] : []);
+                              setSelectedTableIds([]);
                               setSelectedElementId(null);
                             }
                           }

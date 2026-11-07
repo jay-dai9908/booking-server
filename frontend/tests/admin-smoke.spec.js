@@ -33,6 +33,11 @@ const ADMIN_ROUTES = [
 ];
 
 export async function runAdminSmoke() {
+  if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+    console.error('請設定 ADMIN_PASSWORD 環境變數');
+    process.exit(1);
+  }
+
   console.log(`Starting Admin Smoke Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
 
   const launchOptions = { headless: HEADLESS };
@@ -71,10 +76,6 @@ export async function runAdminSmoke() {
       });
 
       // Login as admin to ensure session
-      if (!process.env.ADMIN_PASSWORD) {
-        console.error('請設定 ADMIN_PASSWORD 環境變數');
-        process.exit(1);
-      }
       try {
         await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle', timeout: 15000 });
         const passInput = page.locator('input[type="password"]');

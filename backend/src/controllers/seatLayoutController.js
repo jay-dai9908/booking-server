@@ -242,6 +242,29 @@ export async function updateLayoutDraft(req, res) {
       seenCodes.add(s.code);
     }
 
+    // Ensure bidirectional link for adjacent_codes and opposite_codes (Item 7.2)
+    const seatMap = new Map(seats.map(s => [s.code, s]));
+    for (const s of seats) {
+      for (const adjCode of (s.adjacent_codes || [])) {
+        const neighbor = seatMap.get(adjCode);
+        if (neighbor) {
+          if (!Array.isArray(neighbor.adjacent_codes)) neighbor.adjacent_codes = [];
+          if (!neighbor.adjacent_codes.includes(s.code)) {
+            neighbor.adjacent_codes.push(s.code);
+          }
+        }
+      }
+      for (const oppCode of (s.opposite_codes || [])) {
+        const neighbor = seatMap.get(oppCode);
+        if (neighbor) {
+          if (!Array.isArray(neighbor.opposite_codes)) neighbor.opposite_codes = [];
+          if (!neighbor.opposite_codes.includes(s.code)) {
+            neighbor.opposite_codes.push(s.code);
+          }
+        }
+      }
+    }
+
     // Save in transaction: replace zones, tables, seats
     await prisma.$transaction(async (tx) => {
       // 1. Update Layout details
@@ -283,14 +306,22 @@ export async function updateLayoutDraft(req, res) {
             polygon: z.polygon || null
           }
         });
-        const key = z.key || z.id;
-        zoneKeyMap.set(key, created.id);
+        if (z.id != null) {
+          zoneKeyMap.set(z.id, created.id);
+          zoneKeyMap.set(String(z.id), created.id);
+        }
+        if (z.key) {
+          zoneKeyMap.set(z.key, created.id);
+          zoneKeyMap.set(String(z.key), created.id);
+        }
       }
 
       // 4. Insert tables
       const tableKeyMap = new Map();
       for (const t of tables) {
-        const zoneId = zoneKeyMap.get(t.zone_key || t.zone_id) || Array.from(zoneKeyMap.values())[0];
+        const zoneId = (t.zone_key ? zoneKeyMap.get(t.zone_key) : null) ||
+                       (t.zone_id != null ? (zoneKeyMap.get(t.zone_id) || zoneKeyMap.get(String(t.zone_id))) : null) ||
+                       Array.from(zoneKeyMap.values())[0];
         // Normalize rotation to -180 ~ 180
         let rot = (Number(t.rotation) || 0) % 360;
         if (rot > 180) rot -= 360;
@@ -311,8 +342,14 @@ export async function updateLayoutDraft(req, res) {
             sort_order: Number(t.sort_order) || 0
           }
         });
-        const key = t.key || t.id;
-        tableKeyMap.set(key, created.id);
+        if (t.id != null) {
+          tableKeyMap.set(t.id, created.id);
+          tableKeyMap.set(String(t.id), created.id);
+        }
+        if (t.key) {
+          tableKeyMap.set(t.key, created.id);
+          tableKeyMap.set(String(t.key), created.id);
+        }
       }
 
       // 5. Insert seats
@@ -320,19 +357,29 @@ export async function updateLayoutDraft(req, res) {
         let tableId = null;
         let zoneId = null;
 
-        if (s.table_key || s.table_id) {
-          tableId = tableKeyMap.get(s.table_key || s.table_id) || null;
+        if (s.table_key != null && tableKeyMap.has(s.table_key)) {
+          tableId = tableKeyMap.get(s.table_key);
+        } else if (s.table_id != null && tableKeyMap.has(s.table_id)) {
+          tableId = tableKeyMap.get(s.table_id);
+        } else if (s.table_id != null && tableKeyMap.has(String(s.table_id))) {
+          tableId = tableKeyMap.get(String(s.table_id));
         }
 
         if (tableId) {
           // Table seat zone must match table's zone
-          const tObj = tables.find(t => (t.key || t.id) === (s.table_key || s.table_id));
+          const tObj = tables.find(t =>
+            (t.key && (t.key === s.table_key || t.key === s.table_id)) ||
+            (t.id != null && (t.id === s.table_id || String(t.id) === String(s.table_id)))
+          );
           if (tObj) {
-            zoneId = zoneKeyMap.get(tObj.zone_key || tObj.zone_id);
+            zoneId = (tObj.zone_key ? zoneKeyMap.get(tObj.zone_key) : null) ||
+                     (tObj.zone_id != null ? (zoneKeyMap.get(tObj.zone_id) || zoneKeyMap.get(String(tObj.zone_id))) : null);
           }
         }
         if (!zoneId) {
-          zoneId = zoneKeyMap.get(s.zone_key || s.zone_id) || Array.from(zoneKeyMap.values())[0];
+          zoneId = (s.zone_key ? zoneKeyMap.get(s.zone_key) : null) ||
+                   (s.zone_id != null ? (zoneKeyMap.get(s.zone_id) || zoneKeyMap.get(String(s.zone_id))) : null) ||
+                   Array.from(zoneKeyMap.values())[0];
         }
 
         await tx.seat.create({
