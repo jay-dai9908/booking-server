@@ -64,11 +64,15 @@ export async function runAdminSmoke() {
       });
 
       // Login as admin to ensure session
+      if (!process.env.ADMIN_PASSWORD) {
+        console.error('請設定 ADMIN_PASSWORD 環境變數');
+        process.exit(1);
+      }
       try {
         await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'domcontentloaded', timeout: 8000 });
         const passInput = page.locator('input[type="password"], input[type="text"]').first();
         if (await passInput.isVisible()) {
-          const adminPwd = process.env.ADMIN_PASSWORD || 'gathering.light2609';
+          const adminPwd = process.env.ADMIN_PASSWORD;
           await passInput.fill(adminPwd);
           await page.keyboard.press('Enter');
           await page.waitForTimeout(1500);

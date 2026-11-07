@@ -32,13 +32,18 @@ async function run() {
     }
   });
 
+  if (!process.env.ADMIN_PASSWORD) {
+    console.error('請設定 ADMIN_PASSWORD 環境變數');
+    process.exit(1);
+  }
+
   try {
     // 1. Login as admin
     console.log('Logging in as admin...');
     await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
     const passInput = page.locator('input[type="password"]');
     await passInput.waitFor({ state: 'visible', timeout: 15000 });
-    await passInput.fill(process.env.ADMIN_PASSWORD || 'gathering.light2609');
+    await passInput.fill(process.env.ADMIN_PASSWORD);
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
     await page.waitForTimeout(1000);
