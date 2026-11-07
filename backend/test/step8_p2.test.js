@@ -18,6 +18,11 @@ test('Step 8 P2 Tests: Test station print & PUBLIC_SITE_URL', async (t) => {
     }
   });
 
+  t.after(async () => {
+    await prisma.printJob.deleteMany({ where: { title: '測試頁' } });
+    await prisma.printStation.deleteMany({ where: { id: station.id } });
+  });
+
   await t.test('8.1 queuePrintJob type=test builds test page and job with station info', async () => {
     const job = await queuePrintJob({
       type: 'test',

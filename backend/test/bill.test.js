@@ -77,8 +77,30 @@ test('Section 3.4 Integration Tests with Real Database', async (t) => {
     }
   });
 
+  const TS = Date.now();
+  const refLin = `BK-LIN-${TS}`;
+  const refChen = `BK-CHEN-${TS}`;
+  const refPause = `BK-PAUSE-${TS}`;
+
+  t.after(async () => {
+    const filter = {
+      OR: [
+        { booking_ref: { in: [refLin, refChen, refPause] } },
+        { booking_ref: { startsWith: 'BK-LIN-' } },
+        { booking_ref: { startsWith: 'BK-CHEN-' } },
+        { booking_ref: { startsWith: 'BK-PAUSE-' } }
+      ]
+    };
+    await prisma.bookingEquipment.deleteMany({ where: filter });
+    await prisma.timerPause.deleteMany({ where: { person: { booking_ref: { startsWith: 'BK-' } } } });
+    await prisma.bookingPerson.deleteMany({ where: filter });
+    await prisma.payment.deleteMany({ where: filter });
+    await prisma.printJob.deleteMany({ where: filter });
+    await prisma.reservation.deleteMany({ where: filter });
+  });
+
   await t.test('1. 林小美 2 位帳單計算 (Section 4.5.4)', async () => {
-    const bookingRef = 'BK-LIN-0001';
+    const bookingRef = refLin;
 
     // Clean up any previous test data
     await prisma.payment.deleteMany({ where: { booking_ref: bookingRef } });
@@ -189,7 +211,7 @@ test('Section 3.4 Integration Tests with Real Database', async (t) => {
   });
 
   await t.test('2. 陳大明 4 位預約，第 3 位提早離開 (Section 4.3.5, 4.4.2)', async () => {
-    const bookingRef = 'BK-CHEN-0002';
+    const bookingRef = refChen;
 
     await prisma.payment.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.bookingEquipment.deleteMany({ where: { booking_ref: bookingRef } });
@@ -312,7 +334,7 @@ test('Section 3.4 Integration Tests with Real Database', async (t) => {
   });
 
   await t.test('3. 第 1 位付款後，第 2 位加購鑰匙圈並抹零 −17 (Section 4.5.5)', async () => {
-    const bookingRef = 'BK-LIN-0001';
+    const bookingRef = refLin;
 
     // Mock payment 1 for person 1 ($593)
     const p1Snapshot = {
@@ -335,8 +357,8 @@ test('Section 3.4 Integration Tests with Real Database', async (t) => {
     await prisma.payment.create({
       data: {
         booking_ref: bookingRef,
-        payment_no: 'R-TEST-0001',
-        batch_no: 'B-TEST-0001',
+        payment_no: `R-TEST-${TS}-0001`,
+        batch_no: `B-TEST-${TS}-0001`,
         kind: 'charge',
         status: 'valid',
         method: 'cash',
@@ -390,7 +412,7 @@ test('Section 3.4 Integration Tests with Real Database', async (t) => {
   });
 
   await t.test('4. 付款後才加代燙大板 NT$80，選「也分給已付的人」 (Section 4.5.5)', async () => {
-    const bookingRef = 'BK-LIN-0001';
+    const bookingRef = refLin;
 
     // Update draft with order addon added after payment with include_paid = true
     await prisma.reservation.updateMany({
@@ -441,7 +463,7 @@ test('Section 3.4 Integration Tests with Real Database', async (t) => {
   });
 
   await t.test('5. 暫停中直接結帳 (Section 3.3)', async () => {
-    const bookingRef = 'BK-PAUSE-0001';
+    const bookingRef = refPause;
 
     await prisma.payment.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } });

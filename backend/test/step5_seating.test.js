@@ -468,6 +468,13 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
   });
 
   // Cleanup test data
+  await prisma.bookingPerson.deleteMany({
+    where: {
+      booking_ref: {
+        startsWith: 'BK-TEST-5-'
+      }
+    }
+  });
   await prisma.reservation.deleteMany({
     where: {
       booking_ref: {

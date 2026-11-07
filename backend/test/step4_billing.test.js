@@ -438,5 +438,9 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
     await prisma.payment.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
     await prisma.reservation.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
+    await prisma.userPass.deleteMany({ where: { pass_code: { startsWith: 'PASS-' } } });
+    await prisma.passPlan.deleteMany({ where: { code: 'TEST_PLAN' } });
+    await prisma.promoCode.deleteMany({ where: { code: { startsWith: 'TEST_PROMO_' } } });
+    await prisma.dailyCounter.deleteMany();
   });
 });
