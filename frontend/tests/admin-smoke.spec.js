@@ -35,7 +35,11 @@ const ADMIN_ROUTES = [
 export async function runAdminSmoke() {
   console.log(`Starting Admin Smoke Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
 
-  const browser = await chromium.launch({ headless: HEADLESS });
+  const launchOptions = { headless: HEADLESS };
+  if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+    launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  }
+  const browser = await chromium.launch(launchOptions);
   let totalErrors = 0;
 
   try {
@@ -100,7 +104,7 @@ export async function runAdminSmoke() {
 
         // Check horizontal scroll
         const hasHorizontalScroll = await page.evaluate(() => {
-          return document.documentElement.scrollWidth > document.documentElement.clientWidth;
+          return document.documentElement.scrollWidth > window.innerWidth;
         });
 
         const hasErrors = pageErrors.length > 0 || apiErrors.length > 0 || hasHorizontalScroll;

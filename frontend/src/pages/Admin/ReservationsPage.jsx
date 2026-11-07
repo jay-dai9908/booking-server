@@ -298,14 +298,14 @@ export default function ReservationsPage() {
 
   return (
     <>
-      <div className="p-4 md:p-8 space-y-8 animate-fade-in">
+      <div className="p-4 md:p-8 space-y-6 md:space-y-8 animate-fade-in max-w-full overflow-x-hidden">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">預約訂單總覽</h1>
           <p className="text-gray-500 mt-1 text-sm">查看所有顧客的預約明細與狀態。</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full md:w-auto">
+          <div className="relative flex-1 min-w-[160px] sm:min-w-[200px]">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search className="h-4 w-4 text-gray-400" />
             </div>
@@ -317,52 +317,56 @@ export default function ReservationsPage() {
                 setSearchQuery(e.target.value);
                 setPage(1);
               }}
-              className="pl-10 pr-4 py-2 border-none bg-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 w-full md:w-64 transition-shadow"
+              className="pl-10 pr-4 py-2 border border-gray-200 bg-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 w-full md:w-64 transition-shadow"
             />
           </div>
-          <input
-            type="month"
-            value={currentMonth}
-            onChange={(e) => {
-              setCurrentMonth(e.target.value);
-              setPage(1);
-            }}
-            className="px-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 bg-white"
-          />
-          <button 
-            onClick={() => setShowManualBooking(true)}
-            className="bg-sg-brown hover:bg-sg-brown-hover text-white px-4 py-2 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-colors shadow-sm whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4"/> 新增手動預約
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <input
+              type="month"
+              value={currentMonth}
+              onChange={(e) => {
+                setCurrentMonth(e.target.value);
+                setPage(1);
+              }}
+              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 bg-white"
+            />
+            <button 
+              onClick={() => setShowManualBooking(true)}
+              className="bg-sg-brown hover:bg-sg-brown-hover text-white px-3 sm:px-4 py-2 flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl text-sm font-medium transition-colors shadow-sm whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4"/> <span className="hidden sm:inline">新增手動預約</span><span className="sm:hidden">手動預約</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Quick Status Filter Pills */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-bold">
-        {[
-          { key: 'all', label: `本頁全部 (${filterCounts.all})` },
-          { key: 'pending_checkin', label: `待報到 (${filterCounts.pending_checkin})` },
-          { key: 'checked_in', label: `已報到 (${filterCounts.checked_in})` },
-          { key: 'unpaid', label: `待結帳 (${filterCounts.unpaid})` },
-          { key: 'cancelled', label: `已取消 (${filterCounts.cancelled})` }
-        ].map(tab => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setStatusFilter(tab.key)}
-            className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
-              statusFilter === tab.key
-                ? 'bg-sg-brown text-white shadow-xs'
-                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="w-full max-w-full overflow-x-auto pb-1 text-xs font-bold">
+        <div className="inline-flex items-center gap-1.5 min-w-max">
+          {[
+            { key: 'all', label: `本頁全部 (${filterCounts.all})` },
+            { key: 'pending_checkin', label: `待報到 (${filterCounts.pending_checkin})` },
+            { key: 'checked_in', label: `已報到 (${filterCounts.checked_in})` },
+            { key: 'unpaid', label: `待結帳 (${filterCounts.unpaid})` },
+            { key: 'cancelled', label: `已取消 (${filterCounts.cancelled})` }
+          ].map(tab => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setStatusFilter(tab.key)}
+              className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
+                statusFilter === tab.key
+                  ? 'bg-sg-brown text-white shadow-xs'
+                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden max-w-full">
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="p-12 text-center text-gray-400">載入中...</div>
@@ -370,41 +374,53 @@ export default function ReservationsPage() {
             <div className="p-12 text-center text-gray-400 font-medium">此月份尚無預約紀錄或找不到符合的篩選結果</div>
           ) : (
             <>
-            {/* Mobile / Tablet Card View */}
-            <div className="lg:hidden divide-y divide-gray-100">
+            {/* Mobile / Tablet Card View (< 768px) */}
+            <div className="md:hidden divide-y divide-gray-100">
               {filteredReservations.map(r => {
                 const isCancelled = r.status === 'cancelled';
                 const statusUI = getReservationStatusUI(r);
+                const pill = getBillingStatusPillProps(r);
                 return (
                   <div
                     key={r.booking_ref}
                     onClick={() => setSelectedReservation(r)}
-                    className="p-4 hover:bg-gray-50 transition-colors cursor-pointer space-y-2"
+                    className="p-4 hover:bg-gray-50/80 transition-colors cursor-pointer space-y-3"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`font-bold text-[15px] ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
-                          {r.user?.name || '未設定'}
-                        </span>
-                        <span className="text-xs text-gray-500">· {r.pax} 位</span>
+                    <div className="flex items-start justify-between gap-3">
+                      {/* Left: 2 lines */}
+                      <div className="space-y-1 min-w-0 flex-1">
+                        {/* 第一行：日期、時段 */}
+                        <div className="text-xs font-semibold text-gray-500 truncate">
+                          {format(new Date(r.session_date), 'yyyy/MM/dd')} · {r.time_blocks ? r.time_blocks.map(b => `${b.start_time}-${b.end_time}`).join(', ') : `${r.start_time}-${r.end_time}`}
+                          {r.is_unlimited && <span className="ml-1.5 font-bold text-sg-brown">(不限時)</span>}
+                        </div>
+                        {/* 第二行：姓名、人數 */}
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold text-[15px] truncate ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                            {r.user?.name || '未設定'}
+                          </span>
+                          <span className="text-xs font-medium text-gray-500 shrink-0">· {r.pax} 位</span>
+                          {r.user?.phone && (
+                            <span className="text-xs text-gray-400 truncate hidden xs:inline">· {r.user.phone}</span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
+
+                      {/* 右邊：StatusPill */}
+                      <div className="flex flex-col items-end gap-1 shrink-0">
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
                           {statusUI.icon} {statusUI.text}
                         </span>
-                        {r.status !== 'cancelled' && (() => {
-                          const pill = getBillingStatusPillProps(r);
-                          return <StatusPill status={pill.status} label={pill.label} />;
-                        })()}
+                        {r.status !== 'cancelled' && (
+                          <StatusPill status={pill.status} label={pill.label} />
+                        )}
                       </div>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {format(new Date(r.session_date), 'yyyy/MM/dd')} · {r.time_blocks ? r.time_blocks.map(b => `${b.start_time}-${b.end_time}`).join(', ') : `${r.start_time}-${r.end_time}`}
-                      {r.is_unlimited && <span className="ml-2 font-bold text-sg-brown">(不限時)</span>}
-                    </div>
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-xs text-gray-400">
-                        {r.user?.phone || '未提供電話'}
+
+                    {/* 下方：操作按鈕 */}
+                    <div className="flex items-center justify-between pt-1 border-t border-gray-100/80">
+                      <span className="text-[11px] text-gray-400 font-mono truncate max-w-[120px]">
+                        {r.booking_ref.slice(0, 8)}...
                       </span>
                       <div className="flex items-center gap-2">
                         {!isCancelled && r.attendance !== 'checked_in' && (
@@ -412,7 +428,7 @@ export default function ReservationsPage() {
                             type="button"
                             disabled={checkingInRef === r.booking_ref}
                             onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
-                            className="px-2.5 py-1 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold"
+                            className="px-3 py-1 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold transition shadow-2xs"
                           >
                             報到
                           </button>
@@ -421,11 +437,18 @@ export default function ReservationsPage() {
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setSelectedReservation(r); }}
-                            className="px-2.5 py-1 bg-sg-honey hover:bg-sg-honey-ink text-white rounded-lg text-xs font-bold"
+                            className="px-3 py-1 bg-sg-honey hover:bg-sg-honey-ink text-white rounded-lg text-xs font-bold transition shadow-2xs"
                           >
                             結帳
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setSelectedReservation(r); }}
+                          className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium transition"
+                        >
+                          詳情
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -433,8 +456,8 @@ export default function ReservationsPage() {
               })}
             </div>
 
-            {/* Desktop Table */}
-            <table className="hidden lg:table w-full text-left whitespace-nowrap">
+            {/* Desktop Table (>= 768px) */}
+            <table className="hidden md:table w-full text-left whitespace-nowrap">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
                   <th className="px-6 py-4 font-medium">預約日期 / 時段</th>
