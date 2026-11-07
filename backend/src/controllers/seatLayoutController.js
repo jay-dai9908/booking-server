@@ -553,8 +553,10 @@ export async function publishLayout(req, res) {
       });
 
       // 4. Enable seat_layout_enabled in GlobalSetting
-      await tx.globalSetting.updateMany({
-        data: { seat_layout_enabled: true }
+      await tx.globalSetting.upsert({
+        where: { id: 1 },
+        update: { seat_layout_enabled: true },
+        create: { id: 1, seat_layout_enabled: true }
       });
 
       // 5. Renamed seats update in future reservations
