@@ -268,6 +268,186 @@ async function run() {
     assert.equal(reloadedRot, '-10', `Expected rotation -10, got ${reloadedRot}`);
     console.log('✔ Section 4 Acceptance Flow PASSED!');
 
+    // -------------------------------------------------------------
+    // Section 7 Acceptance Flow: Multi-select, Align & Adjacent Seats
+    // -------------------------------------------------------------
+    console.log('\n--- Section 7 Acceptance Flow: Multi-select, Align & Adjacent Seats ---');
+    
+    // Ensure Table 1 and Table 2 are present on the canvas
+    let t1 = page.locator('[data-testid="table-node-桌 1"], [data-testid="table-node-1"]').first();
+    let t2 = page.locator('[data-testid="table-node-桌 2"], [data-testid="table-node-2"]').first();
+    if (!await t1.isVisible() || !await t2.isVisible()) {
+      await page.locator('[data-testid="preset-4p"]').click();
+      await page.waitForTimeout(400);
+      await page.locator('[data-testid="preset-4p"]').click();
+      await page.waitForTimeout(400);
+      t1 = page.locator('[data-testid="table-node-桌 1"], [data-testid="table-node-1"]').first();
+      t2 = page.locator('[data-testid="table-node-桌 2"], [data-testid="table-node-2"]').first();
+    }
+    await t1.waitFor({ state: 'visible', timeout: 5000 });
+    await t2.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Item 7.1 Test 1: Marquee/Shift-select Table 1 and Table 2, click "靠上", cy must be identical
+    console.log('Item 7.1 Test 1: Select Table 1 & Table 2, align-top...');
+    const cy1Before = await t1.getAttribute('data-cy');
+    const cy2Before = await t2.getAttribute('data-cy');
+
+    // Select both using Shift+click
+    await t1.click({ force: true });
+    await page.waitForTimeout(200);
+    await t2.click({ modifiers: ['Shift'], force: true });
+    await page.waitForTimeout(300);
+
+    // Verify multi-selection inspector appears
+    const multiInspector = page.locator('[data-testid="multi-selection-inspector"]');
+    await multiInspector.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Click "靠上"
+    const alignTopBtn = page.locator('[data-testid="align-top"], button:has-text("靠上")').first();
+    await alignTopBtn.click();
+    await page.waitForTimeout(400);
+
+    const cy1After = await t1.getAttribute('data-cy');
+    const cy2After = await t2.getAttribute('data-cy');
+    assert.equal(cy1After, cy2After, `Table 1 and Table 2 cy must be identical after align-top (got t1: ${cy1After}, t2: ${cy2After})`);
+    console.log(`  ✔ Align-top verified: cy1=${cy1After}, cy2=${cy2After}`);
+
+    // Item 7.1 Test 4: Undo once, alignment reverted
+    console.log('Item 7.1 Test 4: Undo once, alignment reverted...');
+    await page.locator('[data-testid="undo-btn"]').click();
+    await page.waitForTimeout(400);
+    const cy1Reverted = await t1.getAttribute('data-cy');
+    const cy2Reverted = await t2.getAttribute('data-cy');
+    assert.equal(cy1Reverted, cy1Before, 'Table 1 cy reverted after undo');
+    assert.equal(cy2Reverted, cy2Before, 'Table 2 cy reverted after undo');
+    console.log('  ✔ Undo single-step alignment verified');
+
+    // Item 7.1 Test 2: Select 3 tables, click "水平平均分布", spacing equal within 1 unit
+    console.log('Item 7.1 Test 2: Select 3 tables, horizontal distribute...');
+    let t3 = page.locator('[data-testid="table-node-桌 3"], [data-testid="table-node-3"]').first();
+    if (!await t3.isVisible()) {
+      await page.locator('[data-testid="preset-4p"]').click();
+      await page.waitForTimeout(400);
+      t3 = page.locator('[data-testid="table-node-桌 3"], [data-testid="table-node-3"]').first();
+    }
+    await t3.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Deselect all by clicking empty canvas, then select Table 1, Table 2, Table 3
+    await page.locator('#canvas-bg').click({ position: { x: 50, y: 50 }, force: true });
+    await page.waitForTimeout(200);
+    await t1.click({ force: true });
+    await page.waitForTimeout(200);
+    await t2.click({ modifiers: ['Shift'], force: true });
+    await page.waitForTimeout(200);
+    await t3.click({ modifiers: ['Shift'], force: true });
+    await page.waitForTimeout(300);
+
+    const distHBtn = page.locator('[data-testid="dist-h"], button:has-text("水平平均分布")').first();
+    await distHBtn.click();
+    await page.waitForTimeout(400);
+
+    const cx1 = Number(await t1.getAttribute('data-cx'));
+    const cx2 = Number(await t2.getAttribute('data-cx'));
+    const cx3 = Number(await t3.getAttribute('data-cx'));
+    const sortedCx = [cx1, cx2, cx3].sort((a, b) => a - b);
+    const gap1 = sortedCx[1] - sortedCx[0];
+    const gap2 = sortedCx[2] - sortedCx[1];
+    assert.ok(Math.abs(gap1 - gap2) <= 1, `Spacing between adjacent tables must be equal within 1 unit (gaps: ${gap1}, ${gap2})`);
+    console.log(`  ✔ Horizontal distribute verified: sorted cx=${sortedCx.join(', ')}, gaps: ${gap1}, ${gap2}`);
+
+    // Item 7.2 Test 3: Standalone seats S-1, S-2 adjacent setting & allocation preview
+    console.log('Item 7.2 Test 3: Standalone seats S-1, S-2 adjacent setting & allocation preview...');
+    // Click "單獨座位" preset if S-1 or S-2 do not yet exist
+    const standalonePreset = page.locator('[data-testid="preset-standalone"], button:has-text("單獨座位")').first();
+    let s1 = page.locator('[data-testid="seat-node-S-1"]').first();
+    let s2 = page.locator('[data-testid="seat-node-S-2"]').first();
+    if (!await s1.isVisible()) {
+      await standalonePreset.click();
+      await page.waitForTimeout(300);
+    }
+    if (!await s2.isVisible()) {
+      await standalonePreset.click();
+      await page.waitForTimeout(400);
+    }
+
+    s1 = page.locator('[data-testid="seat-node-S-1"]').first();
+    s2 = page.locator('[data-testid="seat-node-S-2"]').first();
+    await s1.waitFor({ state: 'visible', timeout: 5000 });
+    await s2.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Select S-1, ensure S-2 is set as adjacent
+    await s1.click({ force: true });
+    await page.waitForTimeout(300);
+
+    const chipS2onS1 = page.locator('[data-testid="adjacent-chip-S-2"]');
+    if (await chipS2onS1.isVisible()) {
+      // Remove it first to explicitly test adding it via the dropdown
+      await chipS2onS1.locator('button').click();
+      await page.waitForTimeout(300);
+    }
+
+    const adjSelect = page.locator('[data-testid="adjacent-seat-select"]');
+    await adjSelect.waitFor({ state: 'visible', timeout: 5000 });
+    await adjSelect.selectOption('S-2');
+    await page.waitForTimeout(300);
+
+    // Verify S-1 inspector shows S-2 chip
+    await chipS2onS1.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Click S-2, verify S-2 inspector shows S-1 chip (bidirectional)
+    await s2.click({ force: true });
+    await page.waitForTimeout(300);
+    const chipS1onS2 = page.locator('[data-testid="adjacent-chip-S-1"]');
+    await chipS1onS2.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Save draft and reload
+    console.log('  Saving draft and reloading to verify bidirectional persistence...');
+    await page.locator('[data-testid="save-draft-btn"]').click();
+    await page.waitForTimeout(1500);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('[data-testid="seat-layout-svg"]', { timeout: 10000 });
+
+    // Check S-1 has S-2 after reload
+    const reloadedS1 = page.locator('[data-testid="seat-node-S-1"]').first();
+    await reloadedS1.click({ force: true });
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="adjacent-chip-S-2"]').waitFor({ state: 'visible', timeout: 5000 });
+
+    // Check S-2 has S-1 after reload
+    const reloadedS2 = page.locator('[data-testid="seat-node-S-2"]').first();
+    await reloadedS2.click({ force: true });
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="adjacent-chip-S-1"]').waitFor({ state: 'visible', timeout: 5000 });
+    console.log('  ✔ Bidirectional adjacent link persisted across reload');
+
+    // Publish layout
+    console.log('  Publishing layout with standalone seats...');
+    await page.locator('button:has-text("發布生效")').click();
+    await page.waitForTimeout(500);
+    const confirmPublishBtn = page.locator('button:has-text("確認發布並排位")').first();
+    await confirmPublishBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await confirmPublishBtn.click();
+    await page.waitForTimeout(1500);
+
+    // Switch to Rules tab and test allocation preview for 2 pax
+    console.log('  Testing allocation preview for 2 pax in Rules tab...');
+    const rulesTab = page.locator('[data-testid="tab-rules"], button:has-text("排位規則與試算")').first();
+    await rulesTab.click();
+    await page.waitForTimeout(500);
+
+    const paxInput = page.locator('[data-testid="preview-pax-input"]');
+    await paxInput.waitFor({ state: 'visible', timeout: 5000 });
+    await paxInput.fill('2');
+    await page.locator('[data-testid="run-preview-alloc-btn"]').click();
+    await page.waitForTimeout(1000);
+
+    const resultBox = page.locator('[data-testid="preview-alloc-result"]');
+    await resultBox.waitFor({ state: 'visible', timeout: 5000 });
+    const resultText = await resultBox.innerText();
+    assert.ok(resultText.includes('S-1') && resultText.includes('S-2'), `Allocation preview for 2 pax should allocate S-1 and S-2 (got: ${resultText})`);
+    console.log(`  ✔ Allocation preview allocated 2 pax to S-1, S-2 successfully: ${resultText.replace(/\n/g, ' ')}`);
+    console.log('✔ Section 7 Acceptance Flow PASSED!');
+
     // 3. Section 5 Requirements: All /admin/* pages at 1024x768 and 375x812
     console.log('\n--- Section 5 Verification: All Admin Pages Smoke ---');
     const viewports = [

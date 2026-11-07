@@ -510,11 +510,11 @@ export function allocate({
     const zRankB = sB0 && zoneRankMap.has(sB0.zone_id) ? zoneRankMap.get(sB0.zone_id) : 0;
     if (zRankA !== zRankB) return zRankA - zRankB;
 
-    // 3. First table's sort_order smaller is better
+    // 3. First table's sort_order smaller is better (standalone seats without table use -1)
     const tA0 = sA0?.table_id ? tableMap.get(sA0.table_id) : null;
     const tB0 = sB0?.table_id ? tableMap.get(sB0.table_id) : null;
-    const tSortA = tA0?.sort_order ?? 999;
-    const tSortB = tB0?.sort_order ?? 999;
+    const tSortA = tA0 ? (tA0.sort_order ?? 0) : -1;
+    const tSortB = tB0 ? (tB0.sort_order ?? 0) : -1;
     if (tSortA !== tSortB) return tSortA - tSortB;
 
     // 4. spread_tables: Table index i in zone is even -> prefer L, odd -> prefer R

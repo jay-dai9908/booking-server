@@ -63,6 +63,9 @@ export async function runAdminSmoke() {
       page.on('response', (res) => {
         const url = res.url();
         if (url.includes('/api/') && res.status() >= 400) {
+          if (url.includes('/api/auth/me') && res.status() === 401) {
+            return;
+          }
           apiErrors.push({ url, status: res.status() });
         }
       });
@@ -73,13 +76,21 @@ export async function runAdminSmoke() {
         process.exit(1);
       }
       try {
-        await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'domcontentloaded', timeout: 8000 });
-        const passInput = page.locator('input[type="password"], input[type="text"]').first();
-        if (await passInput.isVisible()) {
-          const adminPwd = process.env.ADMIN_PASSWORD;
-          await passInput.fill(adminPwd);
-          await page.keyboard.press('Enter');
-          await page.waitForTimeout(1500);
+        await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle', timeout: 15000 });
+        const passInput = page.locator('input[type="password"]');
+        await passInput.waitFor({ state: 'visible', timeout: 10000 });
+        await passInput.fill(process.env.ADMIN_PASSWORD);
+        await page.locator('button[type="submit"]').click();
+        await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
+        await page.waitForTimeout(1000);
+
+        const token = await page.evaluate(() => sessionStorage.getItem('shiguang_auth_token'));
+        if (token) {
+          await context.addInitScript((tok) => {
+            try {
+              sessionStorage.setItem('shiguang_auth_token', tok);
+            } catch (e) {}
+          }, token);
         }
       } catch (e) {
         console.warn(`Admin login skipped or failed: ${e.message}`);

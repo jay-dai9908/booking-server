@@ -58,7 +58,9 @@ export default function SeatLayoutPage() {
   const [selectedTableId, setSelectedTableId] = useState(null);
   const [selectedSeatCode, setSelectedSeatCode] = useState(null);
   const [selectedElementId, setSelectedElementId] = useState(null);
-  const [multiSelectedTableIds, setMultiSelectedTableIds] = useState([]);
+  const [selectedTableIds, setSelectedTableIds] = useState([]);
+  const [selectedSeatCodes, setSelectedSeatCodes] = useState([]);
+  const multiSelectedTableIds = selectedTableIds;
 
   // Editor tools & preferences
   const [activeTool, setActiveTool] = useState('select'); // 'select' | 'draw_wall' | 'draw_window' | 'draw_zone'
@@ -207,6 +209,30 @@ export default function SeatLayoutPage() {
     if (!current) return;
     try {
       setSaving(true);
+
+      // Ensure bidirectional link for adjacent_codes and opposite_codes
+      const seatMap = new Map((current.seats || []).map(s => [s.code, s]));
+      for (const s of current.seats || []) {
+        for (const adjCode of (s.adjacent_codes || [])) {
+          const neighbor = seatMap.get(adjCode);
+          if (neighbor) {
+            if (!Array.isArray(neighbor.adjacent_codes)) neighbor.adjacent_codes = [];
+            if (!neighbor.adjacent_codes.includes(s.code)) {
+              neighbor.adjacent_codes.push(s.code);
+            }
+          }
+        }
+        for (const oppCode of (s.opposite_codes || [])) {
+          const neighbor = seatMap.get(oppCode);
+          if (neighbor) {
+            if (!Array.isArray(neighbor.opposite_codes)) neighbor.opposite_codes = [];
+            if (!neighbor.opposite_codes.includes(s.code)) {
+              neighbor.opposite_codes.push(s.code);
+            }
+          }
+        }
+      }
+
       let targetId = current.id;
       // If active layout is published or legacy (id: 0), create draft on backend first
       if (current.status === 'published' || !targetId) {
@@ -224,6 +250,27 @@ export default function SeatLayoutPage() {
       setMessage({ type: 'error', text: err.response?.data?.error || '儲存失敗' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Allocation test handler
+  const handleTestAllocation = async (paxToTest = testPax) => {
+    if (!layout) return;
+    try {
+      setTesting(true);
+      const res = await api.post('/seat-layouts/allocate-preview', {
+        layout_id: layout.id,
+        draft: layout,
+        pax: paxToTest,
+        date: new Date().toISOString().slice(0, 10)
+      });
+      setTestResult(res.data);
+      return res.data;
+    } catch (err) {
+      console.error(err);
+      setMessage({ type: 'error', text: '排位試算失敗' });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -252,7 +299,11 @@ export default function SeatLayoutPage() {
         confirm: true
       });
       setShowPublishConfirm(false);
-      setLayout(res.data.layout);
+      if (res.data?.layout) {
+        setLayout(res.data.layout);
+      } else {
+        setLayout(prev => ({ ...prev, status: 'published', effective_from: publishDate }));
+      }
       setMessage({ type: 'success', text: '版面發布成功！' });
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.error || '發布失敗' });
@@ -312,9 +363,10 @@ export default function SeatLayoutPage() {
         setSelectedTableId(null);
         setSelectedSeatCode(null);
         setSelectedElementId(null);
-        setMultiSelectedTableIds([]);
+        setSelectedTableIds([]);
+        setSelectedSeatCodes([]);
       }
-      setMarquee({ startX: x, startY: y, currentX: x, currentY: y });
+      setMarquee({ startX: x, startY: y, currentX: x, currentY: y, shiftKey: e.shiftKey });
     }
   };
 
@@ -331,7 +383,42 @@ export default function SeatLayoutPage() {
     // Handle Dragging
     if (!dragInfo) return;
 
-    if (dragInfo.mode === 'move_table') {
+    if (Math.abs(x - dragInfo.startX) > 3 || Math.abs(y - dragInfo.startY) > 3) {
+      dragInfo.hasMoved = true;
+    }
+
+    if (dragInfo.mode === 'move_selection') {
+      const dx = x - dragInfo.startX;
+      const dy = y - dragInfo.startY;
+
+      setLayout(prev => {
+        const updatedTables = prev.tables.map(t => {
+          const init = dragInfo.initTables.find(it => it.id === t.id);
+          if (!init) return t;
+          return {
+            ...t,
+            cx: snapValue(init.cx + dx),
+            cy: snapValue(init.cy + dy)
+          };
+        });
+
+        const updatedSeats = prev.seats.map(s => {
+          const init = dragInfo.initSeats.find(is => is.code === s.code);
+          if (!init) return s;
+          return {
+            ...s,
+            lx: snapValue(init.lx + dx),
+            ly: snapValue(init.ly + dy)
+          };
+        });
+
+        return {
+          ...prev,
+          tables: updatedTables,
+          seats: updatedSeats
+        };
+      });
+    } else if (dragInfo.mode === 'move_table') {
       const dx = x - dragInfo.startX;
       const dy = y - dragInfo.startY;
       const newCx = snapValue(dragInfo.initCx + dx);
@@ -366,21 +453,33 @@ export default function SeatLayoutPage() {
       }));
     } else if (dragInfo.mode === 'move_seat') {
       const { table, seatCode } = dragInfo;
-      // Offset relative to table center
-      const dx = x - table.cx;
-      const dy = y - table.cy;
-      // Unrotate
-      const rad = (-table.rotation * Math.PI) / 180;
-      const unrotLx = dx * Math.cos(rad) - dy * Math.sin(rad);
-      const unrotLy = dx * Math.sin(rad) + dy * Math.cos(rad);
+      if (!table) {
+        // Standalone seat move
+        const dx = x - dragInfo.startX;
+        const dy = y - dragInfo.startY;
+        const newLx = snapValue(dragInfo.initLx + dx);
+        const newLy = snapValue(dragInfo.initLy + dy);
+        setLayout(prev => ({
+          ...prev,
+          seats: prev.seats.map(s => s.code === seatCode ? { ...s, lx: newLx, ly: newLy } : s)
+        }));
+      } else {
+        // Offset relative to table center
+        const dx = x - table.cx;
+        const dy = y - table.cy;
+        // Unrotate
+        const rad = (-table.rotation * Math.PI) / 180;
+        const unrotLx = dx * Math.cos(rad) - dy * Math.sin(rad);
+        const unrotLy = dx * Math.sin(rad) + dy * Math.cos(rad);
 
-      const newLx = snapValue(Math.round(unrotLx), 5);
-      const newLy = snapValue(Math.round(unrotLy), 5);
+        const newLx = snapValue(Math.round(unrotLx), 5);
+        const newLy = snapValue(Math.round(unrotLy), 5);
 
-      setLayout(prev => ({
-        ...prev,
-        seats: prev.seats.map(s => s.code === seatCode ? { ...s, lx: newLx, ly: newLy } : s)
-      }));
+        setLayout(prev => ({
+          ...prev,
+          seats: prev.seats.map(s => s.code === seatCode ? { ...s, lx: newLx, ly: newLy } : s)
+        }));
+      }
     } else if (dragInfo.mode === 'move_element') {
       const dx = x - dragInfo.startX;
       const dy = y - dragInfo.startY;
@@ -403,12 +502,35 @@ export default function SeatLayoutPage() {
       const maxY = Math.max(marquee.startY, marquee.currentY);
 
       if (Math.abs(maxX - minX) > 10 || Math.abs(maxY - minY) > 10) {
-        const selected = (layout?.tables || []).filter(t => {
+        const boxedTableIds = (layout?.tables || []).filter(t => {
           return t.cx >= minX && t.cx <= maxX && t.cy >= minY && t.cy <= maxY;
         }).map(t => t.id);
-        setMultiSelectedTableIds(selected);
-        if (selected.length === 1) {
-          setSelectedTableId(selected[0]);
+
+        const boxedSeatCodes = (layout?.seats || []).filter(s => {
+          if (s.table_id != null) return false;
+          return s.lx >= minX && s.lx <= maxX && s.ly >= minY && s.ly <= maxY;
+        }).map(s => s.code);
+
+        let newTableIds = boxedTableIds;
+        let newSeatCodes = boxedSeatCodes;
+
+        if (marquee.shiftKey) {
+          newTableIds = Array.from(new Set([...selectedTableIds, ...boxedTableIds]));
+          newSeatCodes = Array.from(new Set([...selectedSeatCodes, ...boxedSeatCodes]));
+        }
+
+        setSelectedTableIds(newTableIds);
+        setSelectedSeatCodes(newSeatCodes);
+
+        if (newTableIds.length === 1 && newSeatCodes.length === 0) {
+          setSelectedTableId(newTableIds[0]);
+          setSelectedSeatCode(null);
+        } else if (newSeatCodes.length === 1 && newTableIds.length === 0) {
+          setSelectedSeatCode(newSeatCodes[0]);
+          setSelectedTableId(null);
+        } else {
+          setSelectedTableId(null);
+          setSelectedSeatCode(null);
         }
       }
       setMarquee(null);
@@ -416,7 +538,21 @@ export default function SeatLayoutPage() {
 
     // End Drag
     if (dragInfo) {
-      commitLayoutChange(layout);
+      if (dragInfo.mode === 'move_selection' && !dragInfo.hasMoved) {
+        if (dragInfo.tableId) {
+          setSelectedTableId(dragInfo.tableId);
+          setSelectedTableIds([dragInfo.tableId]);
+          setSelectedSeatCode(null);
+          setSelectedSeatCodes([]);
+        } else if (dragInfo.seatCode) {
+          setSelectedSeatCode(dragInfo.seatCode);
+          setSelectedSeatCodes([dragInfo.seatCode]);
+          setSelectedTableId(null);
+          setSelectedTableIds([]);
+        }
+      } else {
+        commitLayoutChange(layout);
+      }
       setDragInfo(null);
     }
   };
@@ -450,10 +586,15 @@ export default function SeatLayoutPage() {
   const handleAddPreset = (type) => {
     if (!layout) return;
     const existingTableLabels = (layout.tables || []).map(t => t.label);
+    const existingSeatCodes = (layout.seats || []).map(s => s.code);
     
     // Find next table number / label
     let nextNum = 1;
-    while (existingTableLabels.includes(String(nextNum)) || existingTableLabels.includes(`桌 ${nextNum}`)) {
+    while (
+      existingTableLabels.includes(String(nextNum)) ||
+      existingTableLabels.includes(`桌 ${nextNum}`) ||
+      existingSeatCodes.some(c => c.startsWith(`${nextNum}-`))
+    ) {
       nextNum++;
     }
     const tableLabel = `桌 ${nextNum}`;
@@ -463,8 +604,9 @@ export default function SeatLayoutPage() {
     let newTable = null;
     let newSeats = [];
 
-    const cx = 300 + (layout.tables?.length || 0) * 20;
-    const cy = 250;
+    const tblCount = layout.tables?.length || 0;
+    const cx = 160 + (tblCount % 4) * 160;
+    const cy = 180 + Math.floor(tblCount / 4) * 180;
 
     if (type === '4p') {
       // 4-person facing table
@@ -552,6 +694,41 @@ export default function SeatLayoutPage() {
       newSeats = [
         { code: `${nextNum}-1`, table_id: newTable.id, zone_id: zoneId, lx: 0, ly: 0, side_mode: 'auto', priority: 'normal', is_active: true, sort_order: 0 }
       ];
+    } else if (type === 'standalone') {
+      // Standalone seat (table_id: null)
+      const existingCodes = (layout.seats || []).map(s => s.code);
+      let sNum = 1;
+      while (existingCodes.includes(`S-${sNum}`)) {
+        sNum++;
+      }
+      const sCode = `S-${sNum}`;
+      const zoneId = currentZoneId || layout.zones?.[0]?.id || 1;
+      const standaloneCount = (layout.seats || []).filter(s => s.table_id == null).length;
+      const newSeat = {
+        id: Date.now(),
+        code: sCode,
+        table_id: null,
+        zone_id: zoneId,
+        lx: 200 + (standaloneCount % 6) * 60,
+        ly: 200 + Math.floor(standaloneCount / 6) * 60,
+        side_mode: 'auto',
+        priority: 'normal',
+        is_active: true,
+        adjacent_codes: [],
+        opposite_codes: [],
+        sort_order: layout.seats?.length || 0,
+        origin_code: sCode
+      };
+      commitLayoutChange({
+        ...layout,
+        seats: [...(layout.seats || []), newSeat]
+      });
+      setSelectedSeatCode(sCode);
+      setSelectedTableId(null);
+      setSelectedTableIds([]);
+      setSelectedSeatCodes([sCode]);
+      setMessage({ type: 'success', text: `已新增單獨座位 ${sCode}` });
+      return;
     }
 
     if (newTable) {
@@ -665,6 +842,7 @@ export default function SeatLayoutPage() {
       seats: [...layout.seats, ...newSeats]
     });
     setSelectedTableId(newId);
+    setSelectedTableIds([newId]);
     setMessage({ type: 'success', text: `已複製為 ${newLabel}` });
   };
 
@@ -675,8 +853,19 @@ export default function SeatLayoutPage() {
       seats: layout.seats.filter(s => s.table_id !== tableId)
     });
     setSelectedTableId(null);
+    setSelectedTableIds(prev => prev.filter(id => id !== tableId));
     setSelectedSeatCode(null);
     setMessage({ type: 'success', text: '已刪除桌子' });
+  };
+
+  const handleDeleteSeat = (seatCode) => {
+    commitLayoutChange({
+      ...layout,
+      seats: (layout.seats || []).filter(s => s.code !== seatCode)
+    });
+    setSelectedSeatCode(null);
+    setSelectedSeatCodes(prev => prev.filter(c => c !== seatCode));
+    setMessage({ type: 'success', text: '已刪除座位' });
   };
 
   const handleDeleteElement = (elementId) => {
@@ -688,52 +877,251 @@ export default function SeatLayoutPage() {
     setMessage({ type: 'success', text: '已刪除環境物件' });
   };
 
-  // Alignment Tools (multi-selected tables)
-  const handleAlign = (type) => {
-    const selected = (layout.tables || []).filter(t => multiSelectedTableIds.includes(t.id));
-    if (selected.length < 2) return;
+  // Multi-selection Batch Operations
+  const handleCopySelection = () => {
+    const tablesToCopy = (layout.tables || []).filter(t => selectedTableIds.includes(t.id));
+    const seatsToCopy = (layout.seats || []).filter(s => s.table_id == null && selectedSeatCodes.includes(s.code));
 
-    let updatedTables = [...layout.tables];
+    let nextTableNum = 1;
+    const existingLabels = (layout.tables || []).map(t => t.label);
+    const getNextTableLabel = () => {
+      while (existingLabels.includes(String(nextTableNum)) || existingLabels.includes(`桌 ${nextTableNum}`)) {
+        nextTableNum++;
+      }
+      const lbl = `桌 ${nextTableNum}`;
+      existingLabels.push(lbl);
+      return { num: nextTableNum++, label: lbl };
+    };
 
-    if (type === 'left') {
-      const minLeft = Math.min(...selected.map(t => t.cx - t.w / 2));
-      updatedTables = updatedTables.map(t => multiSelectedTableIds.includes(t.id) ? { ...t, cx: minLeft + t.w / 2 } : t);
-    } else if (type === 'center_h') {
-      const avgCx = Math.round(selected.reduce((sum, t) => sum + t.cx, 0) / selected.length);
-      updatedTables = updatedTables.map(t => multiSelectedTableIds.includes(t.id) ? { ...t, cx: avgCx } : t);
-    } else if (type === 'right') {
-      const maxRight = Math.max(...selected.map(t => t.cx + t.w / 2));
-      updatedTables = updatedTables.map(t => multiSelectedTableIds.includes(t.id) ? { ...t, cx: maxRight - t.w / 2 } : t);
-    } else if (type === 'top') {
-      const minTop = Math.min(...selected.map(t => t.cy - t.h / 2));
-      updatedTables = updatedTables.map(t => multiSelectedTableIds.includes(t.id) ? { ...t, cy: minTop + t.h / 2 } : t);
-    } else if (type === 'center_v') {
-      const avgCy = Math.round(selected.reduce((sum, t) => sum + t.cy, 0) / selected.length);
-      updatedTables = updatedTables.map(t => multiSelectedTableIds.includes(t.id) ? { ...t, cy: avgCy } : t);
-    } else if (type === 'bottom') {
-      const maxBottom = Math.max(...selected.map(t => t.cy + t.h / 2));
-      updatedTables = updatedTables.map(t => multiSelectedTableIds.includes(t.id) ? { ...t, cy: maxBottom - t.h / 2 } : t);
-    } else if (type === 'dist_h') {
-      const sorted = [...selected].sort((a, b) => a.cx - b.cx);
-      const minCx = sorted[0].cx;
-      const maxCx = sorted[sorted.length - 1].cx;
-      const step = (maxCx - minCx) / (sorted.length - 1);
-      sorted.forEach((t, i) => {
-        const targetCx = Math.round(minCx + step * i);
-        updatedTables = updatedTables.map(orig => orig.id === t.id ? { ...orig, cx: targetCx } : orig);
+    const newTables = [];
+    const newAttachedSeats = [];
+    const newTableIds = [];
+
+    for (const origTable of tablesToCopy) {
+      const newId = Date.now() + Math.floor(Math.random() * 10000);
+      const { num, label } = getNextTableLabel();
+      newTableIds.push(newId);
+      newTables.push({
+        ...origTable,
+        id: newId,
+        key: `table_${newId}`,
+        label,
+        cx: origTable.cx + 40,
+        cy: origTable.cy + 40
       });
-    } else if (type === 'dist_v') {
-      const sorted = [...selected].sort((a, b) => a.cy - b.cy);
-      const minCy = sorted[0].cy;
-      const maxCy = sorted[sorted.length - 1].cy;
-      const step = (maxCy - minCy) / (sorted.length - 1);
-      sorted.forEach((t, i) => {
-        const targetCy = Math.round(minCy + step * i);
-        updatedTables = updatedTables.map(orig => orig.id === t.id ? { ...orig, cy: targetCy } : orig);
+
+      const attached = (layout.seats || []).filter(s => s.table_id === origTable.id);
+      attached.forEach((s, idx) => {
+        newAttachedSeats.push({
+          ...s,
+          id: Date.now() + Math.floor(Math.random() * 100000) + idx,
+          table_id: newId,
+          code: `${num}-${idx + 1}`,
+          origin_code: `${num}-${idx + 1}`
+        });
       });
     }
 
-    commitLayoutChange({ ...layout, tables: updatedTables });
+    const existingCodes = (layout.seats || []).map(s => s.code);
+    let sNum = 1;
+    const getNextStandaloneCode = () => {
+      while (existingCodes.includes(`S-${sNum}`)) {
+        sNum++;
+      }
+      const code = `S-${sNum}`;
+      existingCodes.push(code);
+      return code;
+    };
+
+    const newStandaloneSeats = [];
+    const newSeatCodes = [];
+    for (const origSeat of seatsToCopy) {
+      const newCode = getNextStandaloneCode();
+      newSeatCodes.push(newCode);
+      newStandaloneSeats.push({
+        ...origSeat,
+        id: Date.now() + Math.floor(Math.random() * 100000),
+        code: newCode,
+        lx: origSeat.lx + 40,
+        ly: origSeat.ly + 40,
+        adjacent_codes: [],
+        opposite_codes: [],
+        origin_code: newCode
+      });
+    }
+
+    commitLayoutChange({
+      ...layout,
+      tables: [...(layout.tables || []), ...newTables],
+      seats: [...(layout.seats || []), ...newAttachedSeats, ...newStandaloneSeats]
+    });
+
+    setSelectedTableIds(newTableIds);
+    setSelectedSeatCodes(newSeatCodes);
+    setMessage({ type: 'success', text: `已複製 ${newTables.length + newStandaloneSeats.length} 個物件` });
+  };
+
+  const handleDeleteSelection = () => {
+    const tableIdsToDelete = new Set(selectedTableIds);
+    const seatCodesToDelete = new Set(selectedSeatCodes);
+
+    const updatedTables = (layout.tables || []).filter(t => !tableIdsToDelete.has(t.id));
+    const updatedSeats = (layout.seats || []).filter(s => {
+      if (s.table_id != null && tableIdsToDelete.has(s.table_id)) return false;
+      if (seatCodesToDelete.has(s.code)) return false;
+      return true;
+    });
+
+    commitLayoutChange({
+      ...layout,
+      tables: updatedTables,
+      seats: updatedSeats
+    });
+
+    setSelectedTableIds([]);
+    setSelectedSeatCodes([]);
+    setSelectedTableId(null);
+    setSelectedSeatCode(null);
+    setMessage({ type: 'success', text: '已刪除選取的物件' });
+  };
+
+  // Toggle Adjacent Seat (Bidirectional)
+  const handleToggleAdjacent = (targetCode) => {
+    if (!selectedSeat) return;
+    const currentAdj = selectedSeat.adjacent_codes || [];
+    const willInclude = !currentAdj.includes(targetCode);
+
+    const updatedSeats = (layout.seats || []).map(s => {
+      if (s.code === selectedSeat.code) {
+        const next = willInclude
+          ? (currentAdj.includes(targetCode) ? currentAdj : [...currentAdj, targetCode])
+          : currentAdj.filter(c => c !== targetCode);
+        return { ...s, adjacent_codes: next };
+      }
+      if (s.code === targetCode) {
+        const tAdj = s.adjacent_codes || [];
+        const next = willInclude
+          ? (tAdj.includes(selectedSeat.code) ? tAdj : [...tAdj, selectedSeat.code])
+          : tAdj.filter(c => c !== selectedSeat.code);
+        return { ...s, adjacent_codes: next };
+      }
+      return s;
+    });
+
+    commitLayoutChange({ ...layout, seats: updatedSeats });
+  };
+
+  // Toggle Opposite Seat (Bidirectional)
+  const handleToggleOpposite = (targetCode) => {
+    if (!selectedSeat) return;
+    const currentOpp = selectedSeat.opposite_codes || [];
+    const willInclude = !currentOpp.includes(targetCode);
+
+    const updatedSeats = (layout.seats || []).map(s => {
+      if (s.code === selectedSeat.code) {
+        const next = willInclude
+          ? (currentOpp.includes(targetCode) ? currentOpp : [...currentOpp, targetCode])
+          : currentOpp.filter(c => c !== targetCode);
+        return { ...s, opposite_codes: next };
+      }
+      if (s.code === targetCode) {
+        const tOpp = s.opposite_codes || [];
+        const next = willInclude
+          ? (tOpp.includes(selectedSeat.code) ? tOpp : [...tOpp, selectedSeat.code])
+          : tOpp.filter(c => c !== selectedSeat.code);
+        return { ...s, opposite_codes: next };
+      }
+      return s;
+    });
+
+    commitLayoutChange({ ...layout, seats: updatedSeats });
+  };
+
+  // Alignment Tools (Center-Point Based for Tables & Standalone Seats)
+  const handleAlign = (type) => {
+    const selectedObjects = [
+      ...(layout.tables || []).filter(t => selectedTableIds.includes(t.id)).map(t => ({
+        type: 'table',
+        id: t.id,
+        cx: t.cx,
+        cy: t.cy,
+        w: t.w,
+        h: t.h
+      })),
+      ...(layout.seats || []).filter(s => s.table_id == null && selectedSeatCodes.includes(s.code)).map(s => ({
+        type: 'seat',
+        id: s.code,
+        cx: s.lx,
+        cy: s.ly,
+        w: 36,
+        h: 28
+      }))
+    ];
+
+    if (selectedObjects.length < 2) return;
+
+    let updatedTables = [...(layout.tables || [])];
+    let updatedSeats = [...(layout.seats || [])];
+
+    const applyCenter = (objId, objType, newCx, newCy) => {
+      if (objType === 'table') {
+        updatedTables = updatedTables.map(t => t.id === objId ? {
+          ...t,
+          cx: newCx !== undefined ? newCx : t.cx,
+          cy: newCy !== undefined ? newCy : t.cy
+        } : t);
+      } else {
+        updatedSeats = updatedSeats.map(s => s.code === objId ? {
+          ...s,
+          lx: newCx !== undefined ? newCx : s.lx,
+          ly: newCy !== undefined ? newCy : s.ly
+        } : s);
+      }
+    };
+
+    if (type === 'left') {
+      const minCx = Math.min(...selectedObjects.map(o => o.cx));
+      selectedObjects.forEach(o => applyCenter(o.id, o.type, minCx, undefined));
+    } else if (type === 'center_h') {
+      const avgCx = Math.round(selectedObjects.reduce((sum, o) => sum + o.cx, 0) / selectedObjects.length);
+      selectedObjects.forEach(o => applyCenter(o.id, o.type, avgCx, undefined));
+    } else if (type === 'right') {
+      const maxCx = Math.max(...selectedObjects.map(o => o.cx));
+      selectedObjects.forEach(o => applyCenter(o.id, o.type, maxCx, undefined));
+    } else if (type === 'top') {
+      const minCy = Math.min(...selectedObjects.map(o => o.cy));
+      selectedObjects.forEach(o => applyCenter(o.id, o.type, undefined, minCy));
+    } else if (type === 'center_v') {
+      const avgCy = Math.round(selectedObjects.reduce((sum, o) => sum + o.cy, 0) / selectedObjects.length);
+      selectedObjects.forEach(o => applyCenter(o.id, o.type, undefined, avgCy));
+    } else if (type === 'bottom') {
+      const maxCy = Math.max(...selectedObjects.map(o => o.cy));
+      selectedObjects.forEach(o => applyCenter(o.id, o.type, undefined, maxCy));
+    } else if (type === 'dist_h') {
+      if (selectedObjects.length >= 3) {
+        const sorted = [...selectedObjects].sort((a, b) => a.cx - b.cx);
+        const minCx = sorted[0].cx;
+        const maxCx = sorted[sorted.length - 1].cx;
+        const step = (maxCx - minCx) / (sorted.length - 1);
+        sorted.forEach((o, i) => {
+          const targetCx = Math.round(minCx + step * i);
+          applyCenter(o.id, o.type, targetCx, undefined);
+        });
+      }
+    } else if (type === 'dist_v') {
+      if (selectedObjects.length >= 3) {
+        const sorted = [...selectedObjects].sort((a, b) => a.cy - b.cy);
+        const minCy = sorted[0].cy;
+        const maxCy = sorted[sorted.length - 1].cy;
+        const step = (maxCy - minCy) / (sorted.length - 1);
+        sorted.forEach((o, i) => {
+          const targetCy = Math.round(minCy + step * i);
+          applyCenter(o.id, o.type, undefined, targetCy);
+        });
+      }
+    }
+
+    commitLayoutChange({ ...layout, tables: updatedTables, seats: updatedSeats });
     setMessage({ type: 'success', text: '對齊完成' });
   };
 
@@ -820,7 +1208,8 @@ export default function SeatLayoutPage() {
         <SegmentedTabs
           tabs={[
             { id: 'editor', label: '平面圖畫布', icon: <Layers className="w-4 h-4" /> },
-            { id: 'mobile_list', label: '清單模式', icon: <Sliders className="w-4 h-4" /> }
+            { id: 'rules', label: '排位規則與試算', icon: <Sliders className="w-4 h-4" /> },
+            { id: 'mobile_list', label: '清單模式', icon: <Columns className="w-4 h-4" /> }
           ]}
           activeTab={activeTab}
           onChange={setActiveTab}
@@ -881,6 +1270,14 @@ export default function SeatLayoutPage() {
                 className="px-2.5 py-1 rounded-xl bg-sg-paper hover:bg-sg-paper/70 border border-sg-line font-bold flex items-center gap-1 text-sg-ink transition active:scale-95"
               >
                 <Plus className="w-3 h-3 text-sg-brown" /> 單人座位
+              </button>
+              <button
+                type="button"
+                data-testid="preset-standalone"
+                onClick={() => handleAddPreset('standalone')}
+                className="px-2.5 py-1 rounded-xl bg-sg-paper hover:bg-sg-paper/70 border border-sg-line font-bold flex items-center gap-1 text-sg-ink transition active:scale-95"
+              >
+                <Plus className="w-3 h-3 text-sg-brown" /> 單獨座位
               </button>
             </div>
 
@@ -1190,27 +1587,52 @@ export default function SeatLayoutPage() {
 
                   {/* Tables */}
                   {(layout.tables || []).map((t) => {
-                    const isSelected = selectedTableId === t.id || multiSelectedTableIds.includes(t.id);
+                    const isSelected = selectedTableId === t.id || selectedTableIds.includes(t.id);
                     const isRound = t.shape === 'round';
 
                     return (
                       <g
                         key={t.id}
                         data-testid={`table-node-${t.label}`}
+                        data-cx={t.cx}
+                        data-cy={t.cy}
                         transform={`rotate(${t.rotation || 0} ${t.cx} ${t.cy})`}
                         cursor="move"
                         onPointerDown={(e) => {
                           e.stopPropagation();
-                          if (e.shiftKey) {
-                            setMultiSelectedTableIds(prev =>
-                              prev.includes(t.id) ? prev.filter(id => id !== t.id) : [...prev, t.id]
-                            );
-                          } else {
-                            setSelectedTableId(t.id);
-                            setSelectedSeatCode(null);
-                            setSelectedElementId(null);
-                          }
                           const coords = getCanvasCoords(e);
+                          if (e.shiftKey) {
+                            setSelectedTableIds(prev => {
+                              const next = prev.includes(t.id) ? prev.filter(id => id !== t.id) : [...prev, t.id];
+                              if (next.length === 1 && selectedSeatCodes.length === 0) {
+                                setSelectedTableId(next[0]);
+                              } else {
+                                setSelectedTableId(null);
+                              }
+                              return next;
+                            });
+                          } else {
+                            if (selectedTableIds.includes(t.id) && (selectedTableIds.length + selectedSeatCodes.length >= 2)) {
+                              const initTables = (layout.tables || []).filter(tbl => selectedTableIds.includes(tbl.id)).map(tbl => ({ id: tbl.id, cx: tbl.cx, cy: tbl.cy }));
+                              const initSeats = (layout.seats || []).filter(st => selectedSeatCodes.includes(st.code)).map(st => ({ code: st.code, lx: st.lx, ly: st.ly }));
+                              setDragInfo({
+                                mode: 'move_selection',
+                                tableId: t.id,
+                                hasMoved: false,
+                                startX: coords.x,
+                                startY: coords.y,
+                                initTables,
+                                initSeats
+                              });
+                              return;
+                            } else {
+                              setSelectedTableId(t.id);
+                              setSelectedTableIds([t.id]);
+                              setSelectedSeatCode(null);
+                              setSelectedSeatCodes([]);
+                              setSelectedElementId(null);
+                            }
+                          }
                           setDragInfo({
                             mode: 'move_table',
                             tableId: t.id,
@@ -1221,6 +1643,22 @@ export default function SeatLayoutPage() {
                           });
                         }}
                       >
+                        {/* Selection outline */}
+                        {isSelected && (
+                          <rect
+                            x={t.cx - t.w / 2 - 6}
+                            y={t.cy - t.h / 2 - 6}
+                            width={t.w + 12}
+                            height={t.h + 12}
+                            rx={isRound ? (t.w + 12) / 2 : 14}
+                            fill="none"
+                            stroke="#B45309"
+                            strokeWidth="2"
+                            strokeDasharray="4,4"
+                            pointerEvents="none"
+                          />
+                        )}
+
                         {/* Table body */}
                         {isRound ? (
                           <circle
@@ -1357,28 +1795,70 @@ export default function SeatLayoutPage() {
                     const tRot = ((table?.rotation || 0) * Math.PI) / 180;
                     const lx = seat.lx || 0;
                     const ly = seat.ly || 0;
-                    const rotLx = lx * Math.cos(tRot) - ly * Math.sin(tRot);
-                    const rotLy = lx * Math.sin(tRot) + ly * Math.cos(tRot);
+                    const rotLx = table ? (lx * Math.cos(tRot) - ly * Math.sin(tRot)) : lx;
+                    const rotLy = table ? (lx * Math.sin(tRot) + ly * Math.cos(tRot)) : ly;
 
                     const cx = (table?.cx || 0) + rotLx;
                     const cy = (table?.cy || 0) + rotLy;
 
-                    const isSelected = selectedSeatCode === seat.code;
+                    const isSelected = selectedSeatCode === seat.code || selectedSeatCodes.includes(seat.code);
                     const isInactive = seat.is_active === false;
 
                     return (
                       <g
                         key={seat.code}
                         data-testid={`seat-node-${seat.code}`}
+                        data-cx={cx}
+                        data-cy={cy}
                         transform={`rotate(${table?.rotation || 0} ${cx} ${cy})`}
                         cursor="grab"
                         onPointerDown={(e) => {
                           e.stopPropagation();
-                          setSelectedSeatCode(seat.code);
-                          setSelectedTableId(seat.table_id || null);
-                          setSelectedElementId(null);
-                          if (table) {
-                            const coords = getCanvasCoords(e);
+                          const coords = getCanvasCoords(e);
+                          if (e.shiftKey) {
+                            setSelectedSeatCodes(prev => {
+                              const next = prev.includes(seat.code) ? prev.filter(c => c !== seat.code) : [...prev, seat.code];
+                              if (next.length === 1 && selectedTableIds.length === 0) {
+                                setSelectedSeatCode(next[0]);
+                              } else {
+                                setSelectedSeatCode(null);
+                              }
+                              return next;
+                            });
+                          } else {
+                            if (selectedSeatCodes.includes(seat.code) && (selectedTableIds.length + selectedSeatCodes.length >= 2)) {
+                              const initTables = (layout.tables || []).filter(tbl => selectedTableIds.includes(tbl.id)).map(tbl => ({ id: tbl.id, cx: tbl.cx, cy: tbl.cy }));
+                              const initSeats = (layout.seats || []).filter(st => selectedSeatCodes.includes(st.code)).map(st => ({ code: st.code, lx: st.lx, ly: st.ly }));
+                              setDragInfo({
+                                mode: 'move_selection',
+                                seatCode: seat.code,
+                                hasMoved: false,
+                                startX: coords.x,
+                                startY: coords.y,
+                                initTables,
+                                initSeats
+                              });
+                              return;
+                            } else {
+                              setSelectedSeatCode(seat.code);
+                              setSelectedSeatCodes([seat.code]);
+                              setSelectedTableId(seat.table_id || null);
+                              setSelectedTableIds(seat.table_id ? [seat.table_id] : []);
+                              setSelectedElementId(null);
+                            }
+                          }
+
+                          if (!table) {
+                            setDragInfo({
+                              mode: 'move_seat',
+                              seatCode: seat.code,
+                              table: null,
+                              startX: coords.x,
+                              startY: coords.y,
+                              initLx: seat.lx,
+                              initLy: seat.ly
+                            });
+                          } else {
                             setDragInfo({
                               mode: 'move_seat',
                               seatCode: seat.code,
@@ -1391,6 +1871,20 @@ export default function SeatLayoutPage() {
                           }
                         }}
                       >
+                        {isSelected && (
+                          <rect
+                            x={cx - 22}
+                            y={cy - 18}
+                            width="44"
+                            height="36"
+                            rx="12"
+                            fill="none"
+                            stroke="#B45309"
+                            strokeWidth="2"
+                            strokeDasharray="4,4"
+                            pointerEvents="none"
+                          />
+                        )}
                         <rect
                           x={cx - 18}
                           y={cy - 14}
@@ -1438,8 +1932,119 @@ export default function SeatLayoutPage() {
 
             {/* Right Inspector Sidebar */}
             <div className="lg:col-span-4 bg-white rounded-3xl border border-sg-line p-4 space-y-4 shadow-xs">
+              {/* Properties for Multi-selection */}
+              {(selectedTableIds.length + selectedSeatCodes.length >= 2) && (
+                <div className="space-y-4" data-testid="multi-selection-inspector">
+                  <div className="flex items-center justify-between pb-2 border-b border-sg-line">
+                    <h3 className="text-[15px] font-bold text-sg-ink">多選設定</h3>
+                    <span className="text-[12px] bg-sg-peach/30 text-sg-brown px-2 py-0.5 rounded-full font-bold font-num">
+                      {selectedTableIds.length + selectedSeatCodes.length} 個物件
+                    </span>
+                  </div>
+
+                  <div className="text-[12px] text-sg-muted">
+                    已選取 {selectedTableIds.length} 張桌子、{selectedSeatCodes.length} 個單獨座位
+                  </div>
+
+                  {/* Batch Actions */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="batch-copy-btn"
+                      onClick={handleCopySelection}
+                      className="flex-1 py-1.5 px-3 rounded-xl border border-sg-line bg-sg-paper hover:bg-sg-paper/70 font-bold text-[13px] text-sg-ink flex items-center justify-center gap-1.5 transition"
+                    >
+                      <Copy className="w-4 h-4 text-sg-brown" /> 複製全部
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="batch-delete-btn"
+                      onClick={handleDeleteSelection}
+                      className="flex-1 py-1.5 px-3 rounded-xl border border-sg-danger/30 bg-sg-danger-soft hover:bg-sg-danger-soft/70 font-bold text-[13px] text-sg-danger flex items-center justify-center gap-1.5 transition"
+                    >
+                      <Trash2 className="w-4 h-4" /> 刪除全部
+                    </button>
+                  </div>
+
+                  {/* Alignments (Based on center point) */}
+                  <div className="space-y-2 pt-2 border-t border-sg-line">
+                    <label className="block text-sg-muted font-medium text-[12px]">
+                      中心點對齊與分布
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 text-[12px]">
+                      <button
+                        type="button"
+                        data-testid="align-left"
+                        onClick={() => handleAlign('left')}
+                        className="py-1.5 px-2.5 rounded-xl border border-sg-line bg-white hover:bg-sg-paper font-bold flex items-center justify-center gap-1.5 transition"
+                      >
+                        <AlignLeft className="w-3.5 h-3.5" /> 靠左
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="align-center-h"
+                        onClick={() => handleAlign('center_h')}
+                        className="py-1.5 px-2.5 rounded-xl border border-sg-line bg-white hover:bg-sg-paper font-bold flex items-center justify-center gap-1.5 transition"
+                      >
+                        <AlignCenter className="w-3.5 h-3.5" /> 水平置中
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="align-right"
+                        onClick={() => handleAlign('right')}
+                        className="py-1.5 px-2.5 rounded-xl border border-sg-line bg-white hover:bg-sg-paper font-bold flex items-center justify-center gap-1.5 transition"
+                      >
+                        <AlignRight className="w-3.5 h-3.5" /> 靠右
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="align-top"
+                        onClick={() => handleAlign('top')}
+                        className="py-1.5 px-2.5 rounded-xl border border-sg-line bg-white hover:bg-sg-paper font-bold flex items-center justify-center gap-1.5 transition"
+                      >
+                        <AlignLeft className="w-3.5 h-3.5 rotate-90" /> 靠上
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="align-center-v"
+                        onClick={() => handleAlign('center_v')}
+                        className="py-1.5 px-2.5 rounded-xl border border-sg-line bg-white hover:bg-sg-paper font-bold flex items-center justify-center gap-1.5 transition"
+                      >
+                        <AlignVerticalJustifyCenter className="w-3.5 h-3.5" /> 垂直置中
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="align-bottom"
+                        onClick={() => handleAlign('bottom')}
+                        className="py-1.5 px-2.5 rounded-xl border border-sg-line bg-white hover:bg-sg-paper font-bold flex items-center justify-center gap-1.5 transition"
+                      >
+                        <AlignRight className="w-3.5 h-3.5 rotate-90" /> 靠下
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="dist-h"
+                        disabled={selectedTableIds.length + selectedSeatCodes.length < 3}
+                        onClick={() => handleAlign('dist_h')}
+                        className="col-span-2 py-1.5 px-2.5 rounded-xl border border-sg-line bg-white hover:bg-sg-paper font-bold flex items-center justify-center gap-1.5 transition disabled:opacity-40"
+                      >
+                        <AlignHorizontalJustifyCenter className="w-3.5 h-3.5" /> 水平平均分布
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="dist-v"
+                        disabled={selectedTableIds.length + selectedSeatCodes.length < 3}
+                        onClick={() => handleAlign('dist_v')}
+                        className="col-span-2 py-1.5 px-2.5 rounded-xl border border-sg-line bg-white hover:bg-sg-paper font-bold flex items-center justify-center gap-1.5 transition disabled:opacity-40"
+                      >
+                        <AlignVerticalJustifyCenter className="w-3.5 h-3.5" /> 垂直平均分布
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Properties for Selected Table */}
-              {selectedTable && (
+              {selectedTable && (selectedTableIds.length + selectedSeatCodes.length < 2) && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between pb-2 border-b border-sg-line">
                     <h3 className="text-[15px] font-bold text-sg-ink">桌子設定 ({selectedTable.label})</h3>
@@ -1582,24 +2187,38 @@ export default function SeatLayoutPage() {
               )}
 
               {/* Properties for Selected Seat */}
-              {selectedSeat && (
+              {selectedSeat && (selectedTableIds.length + selectedSeatCodes.length < 2) && (
                 <div className="space-y-4 pt-2 border-t border-sg-line">
                   <div className="flex items-center justify-between pb-2 border-b border-sg-line">
                     <h3 className="text-[15px] font-bold text-sg-ink">座位設定 ({selectedSeat.code})</h3>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // Detach seat from table
-                        commitLayoutChange({
-                          ...layout,
-                          seats: layout.seats.map(s => s.code === selectedSeat.code ? { ...s, table_id: null } : s)
-                        });
-                        setMessage({ type: 'success', text: '已移出這張桌' });
-                      }}
-                      className="text-[11px] font-bold text-sg-brown hover:underline"
-                    >
-                      移出這張桌
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {selectedSeat.table_id ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Detach seat from table
+                            commitLayoutChange({
+                              ...layout,
+                              seats: layout.seats.map(s => s.code === selectedSeat.code ? { ...s, table_id: null } : s)
+                            });
+                            setMessage({ type: 'success', text: '已移出這張桌' });
+                          }}
+                          className="text-[11px] font-bold text-sg-brown hover:underline"
+                        >
+                          移出這張桌
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="delete-seat-btn"
+                          onClick={() => handleDeleteSeat(selectedSeat.code)}
+                          title="刪除單獨座位"
+                          className="p-1 hover:bg-sg-danger-soft rounded text-sg-danger"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-3 text-[13px]">
@@ -1659,6 +2278,102 @@ export default function SeatLayoutPage() {
                       >
                         <option value="auto">自動判定側邊</option>
                         <option value="manual">手動指定 (L/R)</option>
+                      </select>
+                    </div>
+
+                    {/* Adjacent Seats Setting (相鄰座位 / 另外指定相鄰) */}
+                    <div>
+                      <label className="block text-sg-muted mb-1 font-medium text-[12px]">
+                        {selectedSeat.table_id == null ? '相鄰座位' : '另外指定相鄰'}
+                      </label>
+                      <div className="flex flex-wrap gap-1 mb-1.5">
+                        {(selectedSeat.adjacent_codes || []).map(code => (
+                          <span
+                            key={code}
+                            data-testid={`adjacent-chip-${code}`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sg-peach/30 text-sg-brown text-[11px] font-bold"
+                          >
+                            {code}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAdjacent(code)}
+                              className="hover:text-sg-danger"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                        {(!selectedSeat.adjacent_codes || selectedSeat.adjacent_codes.length === 0) && (
+                          <span className="text-[11px] text-sg-muted italic">無相鄰設定</span>
+                        )}
+                      </div>
+                      <select
+                        data-testid="adjacent-seat-select"
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            handleToggleAdjacent(e.target.value);
+                            e.target.value = '';
+                          }
+                        }}
+                        className="w-full px-2.5 py-1 rounded-xl border border-sg-line text-[12px] font-bold bg-white"
+                      >
+                        <option value="">+ 新增相鄰座位...</option>
+                        {(layout.seats || [])
+                          .filter(s => s.code !== selectedSeat.code && !(selectedSeat.adjacent_codes || []).includes(s.code))
+                          .map(s => (
+                            <option key={s.code} value={s.code}>
+                              {s.code} {s.table_id == null ? '(單獨)' : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* Opposite Seats Setting (另外指定對面) */}
+                    <div>
+                      <label className="block text-sg-muted mb-1 font-medium text-[12px]">
+                        另外指定對面
+                      </label>
+                      <div className="flex flex-wrap gap-1 mb-1.5">
+                        {(selectedSeat.opposite_codes || []).map(code => (
+                          <span
+                            key={code}
+                            data-testid={`opposite-chip-${code}`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sg-paper border border-sg-line text-sg-ink text-[11px] font-bold"
+                          >
+                            {code}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleOpposite(code)}
+                              className="hover:text-sg-danger"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                        {(!selectedSeat.opposite_codes || selectedSeat.opposite_codes.length === 0) && (
+                          <span className="text-[11px] text-sg-muted italic">無指定對面</span>
+                        )}
+                      </div>
+                      <select
+                        data-testid="opposite-seat-select"
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            handleToggleOpposite(e.target.value);
+                            e.target.value = '';
+                          }
+                        }}
+                        className="w-full px-2.5 py-1 rounded-xl border border-sg-line text-[12px] font-bold bg-white"
+                      >
+                        <option value="">+ 新增對面座位...</option>
+                        {(layout.seats || [])
+                          .filter(s => s.code !== selectedSeat.code && !(selectedSeat.opposite_codes || []).includes(s.code))
+                          .map(s => (
+                            <option key={s.code} value={s.code}>
+                              {s.code} {s.table_id == null ? '(單獨)' : ''}
+                            </option>
+                          ))}
                       </select>
                     </div>
 
@@ -1759,6 +2474,91 @@ export default function SeatLayoutPage() {
                   <div className="text-[12px] text-sg-muted">尚未上傳底圖（可匯入店內建築設計圖做為對齊依據）</div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: RULES & ALLOCATION PREVIEW (排位規則與試算) */}
+      {activeTab === 'rules' && layout && (
+        <div className="bg-white rounded-3xl border border-sg-line p-6 space-y-6 shadow-xs max-w-4xl mx-auto">
+          <div className="border-b border-sg-line pb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-[17px] font-bold text-sg-ink">排位規則與試算預覽</h2>
+              <p className="text-[12px] text-sg-muted mt-0.5">
+                測試當前版面草稿在不同人數時的自動排位結果，驗證相鄰座位與排位優先度。
+              </p>
+            </div>
+          </div>
+
+          {/* Allocation Preview Tester */}
+          <div className="bg-sg-paper rounded-2xl p-5 border border-sg-line space-y-4">
+            <h3 className="text-[14px] font-bold text-sg-ink flex items-center gap-2">
+              <Eye className="w-4 h-4 text-sg-brown" /> 排位即時試算預覽
+            </h3>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-[13px] font-bold text-sg-ink">預約人數 (pax)：</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="12"
+                  data-testid="preview-pax-input"
+                  value={testPax}
+                  onChange={(e) => setTestPax(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-20 px-3 py-1.5 rounded-xl border border-sg-line font-bold bg-white text-center"
+                />
+              </div>
+
+              <button
+                type="button"
+                data-testid="run-preview-alloc-btn"
+                onClick={() => handleTestAllocation(testPax)}
+                disabled={testing}
+                className="px-4 py-1.5 rounded-xl bg-sg-brown text-white font-bold text-[13px] hover:bg-sg-brown/90 transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+              >
+                {testing ? '試算中...' : '執行排位試算'}
+              </button>
+            </div>
+
+            {/* Test Result Display */}
+            <div data-testid="preview-alloc-result" className="p-4 rounded-xl bg-white border border-sg-line min-h-[60px] flex flex-col justify-center">
+              {testResult ? (
+                (testResult.seats || testResult.allocatedSeats || []).length > 0 ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-bold text-sg-muted">試算分配座位：</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {(testResult.seats || testResult.allocatedSeats || []).map(item => {
+                          const code = typeof item === 'string' ? item : item.code;
+                          return (
+                            <span
+                              key={code}
+                              data-testid={`alloc-seat-tag-${code}`}
+                              className="px-2.5 py-1 rounded-lg bg-sg-sage-soft text-sg-sage-ink font-bold text-[13px] border border-sg-sage-ink/20"
+                            >
+                              {code}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="text-[12px] text-sg-muted">
+                      排位得分：<span className="font-bold text-sg-ink font-num">{testResult.score ?? 0}</span>
+                      {testResult.reason && ` · ${testResult.reason}`}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[13px] font-bold text-sg-danger flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4" /> 無法排位（無符合人數之連續或相鄰空位）
+                  </div>
+                )
+              ) : (
+                <div className="text-[12px] text-sg-muted italic">
+                  請輸入人數並點擊「執行排位試算」以檢驗相鄰或包桌排位效果。
+                </div>
+              )}
             </div>
           </div>
         </div>
