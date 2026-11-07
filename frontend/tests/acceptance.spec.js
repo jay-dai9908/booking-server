@@ -1,3 +1,4 @@
+// 注意：執行前請先跑 npx playwright install chromium
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 
@@ -6,7 +7,11 @@ const HEADLESS = process.env.HEADLESS !== 'false';
 
 async function run() {
   console.log(`Starting Acceptance Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
-  const browser = await chromium.launch({ headless: HEADLESS });
+  const launchOptions = { headless: HEADLESS };
+  if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+    launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  }
+  const browser = await chromium.launch(launchOptions);
   const context = await browser.newContext({
     viewport: { width: 1024, height: 768 }
   });
@@ -179,16 +184,47 @@ async function run() {
     console.log('Step 3: Drawing diagonal wall...');
     await page.locator('[data-testid="draw-wall-btn"]').click();
     await page.waitForTimeout(300);
-    const svgEl = page.locator('[data-testid="seat-layout-svg"]');
-    const svgBox = await svgEl.boundingBox();
-    if (svgBox) {
-      await page.mouse.click(svgBox.x + 80, svgBox.y + 80);
-      await page.waitForTimeout(200);
-      await page.mouse.click(svgBox.x + 220, svgBox.y + 220);
-      await page.waitForTimeout(200);
-      await page.locator('[data-testid="finish-wall-btn"]').click();
-      await page.waitForTimeout(300);
-    }
+
+    const blankPoints = await page.evaluate(() => {
+      const svg = document.querySelector('[data-testid="seat-layout-svg"]');
+      if (!svg) return null;
+      const rect = svg.getBoundingClientRect();
+      const pts = [];
+      for (let y = rect.bottom - 30; y > rect.top + 50; y -= 40) {
+        for (let x = rect.right - 30; x > rect.left + 50; x -= 40) {
+          const el = document.elementFromPoint(x, y);
+          if (el && (el.id === 'canvas-bg' || el === svg || el.tagName.toLowerCase() === 'svg' || el.tagName.toLowerCase() === 'rect')) {
+            if (!el.closest('[data-testid^="table-node-"]') && !el.closest('[data-testid^="seat-node-"]')) {
+              pts.push({ x, y });
+              if (pts.length >= 2) return pts;
+            }
+          }
+        }
+      }
+      return [
+        { x: rect.left + rect.width * 0.82, y: rect.top + rect.height * 0.82 },
+        { x: rect.left + rect.width * 0.92, y: rect.top + rect.height * 0.75 }
+      ];
+    });
+
+    assert.ok(blankPoints && blankPoints.length >= 2, 'Must locate 2 blank points on canvas');
+
+    // Click point 1
+    await page.mouse.click(blankPoints[0].x, blankPoints[0].y);
+    await page.waitForTimeout(300);
+    const count1 = page.locator('text=目前已點 1 個點');
+    await count1.waitFor({ state: 'visible', timeout: 4000 });
+
+    // Click point 2
+    await page.mouse.click(blankPoints[1].x, blankPoints[1].y);
+    await page.waitForTimeout(300);
+    const count2 = page.locator('text=目前已點 2 個點');
+    await count2.waitFor({ state: 'visible', timeout: 4000 });
+
+    const finishBtn = page.locator('[data-testid="finish-wall-btn"]');
+    assert.equal(await finishBtn.isDisabled(), false, 'Finish wall button should be enabled after 2 points');
+    await finishBtn.click();
+    await page.waitForTimeout(300);
 
     // Step 4: 放一張底圖並調透明度
     console.log('Step 4: Setting background image and opacity...');
