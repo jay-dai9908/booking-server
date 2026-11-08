@@ -11,6 +11,7 @@ import Skeleton from '../../components/customer/Skeleton';
 import EmptyState from '../../components/customer/EmptyState';
 import { AnnouncementBar, ErrorBanner } from '../../components/customer/Banners';
 import { BeadLoader } from '../../components/customer/Bead';
+import GuestLineLoginButton from '../../components/customer/GuestLineLoginButton';
 import PriceInfoSheet from '../../components/customer/sheets/PriceInfoSheet';
 import api from '../../api/axios';
 import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
@@ -375,14 +376,14 @@ export default function Home({ userRole }) {
 
         {/* 3. Fixed Bottom Area */}
         <div className="sticky bottom-0 z-40 bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))] grid gap-2">
-          <Button
-            variant="line"
-            size="md"
-            onClick={initiateLineLogin}
-            className="w-full"
-          >
-            使用 LINE 登入預約
-          </Button>
+          <GuestLineLoginButton
+            globalSettings={globalSettings}
+            returnPath="/booking"
+            onClick={() => {
+              hasProcessedRef.current = false;
+              setAuthErrorMsg('');
+            }}
+          />
 
           {globalSettings?.enable_preview_page !== false && (
             <Button

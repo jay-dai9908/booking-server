@@ -23,6 +23,7 @@ import EmptyState from '../../components/customer/EmptyState';
 import { BeadLoader, BeadRow } from '../../components/customer/Bead';
 import { SoftBox, ErrorBanner } from '../../components/customer/Banners';
 import BeadPickerSheet from '../../components/customer/sheets/BeadPickerSheet';
+import GuestLineLoginButton from '../../components/customer/GuestLineLoginButton';
 import { useToast } from '../../components/customer/Toast';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
@@ -337,7 +338,12 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
   // Handle Checkout Button
   const handleGoToCheckout = () => {
     if (!isLoggedInCustomer) {
-      initiateLineOAuth({ prefix: 'preorder_', returnPath: '/shop?view=checkout' });
+      if (globalSettings?.official_line_url) {
+        window.open(globalSettings.official_line_url, '_blank');
+      } else {
+        console.warn('official_line_url is not configured, falling back to LINE Login');
+        initiateLineOAuth({ prefix: 'preorder_', returnPath: '/shop?view=checkout' });
+      }
       return;
     }
     setSearchParams({ view: 'checkout' });
@@ -844,24 +850,39 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
         />
       }
       bottom={
-        (totalItemsCount > 0 || isLoggedInCustomer) && (
-          <div>
-            {totalItemsCount > 0 && (
+        <div>
+          {totalItemsCount > 0 ? (
+            <div>
               <BottomActionBar
                 summary={summaryBottomText}
                 price={totalAmount}
-                actionLabel="去結帳"
+                actionLabel={isLoggedInCustomer ? '去結帳' : '加入官方 LINE 預約'}
+                actionVariant={isLoggedInCustomer ? 'primary' : 'line'}
+                actionHref={!isLoggedInCustomer ? (globalSettings?.official_line_url || undefined) : undefined}
+                target={!isLoggedInCustomer && globalSettings?.official_line_url ? '_blank' : undefined}
+                rel={!isLoggedInCustomer && globalSettings?.official_line_url ? 'noopener noreferrer' : undefined}
                 onAction={handleGoToCheckout}
                 hasTabBarBelow={isLoggedInCustomer}
               />
-            )}
-            {isLoggedInCustomer && (
-              <BottomTabBar
-                shopEnabled={globalSettings?.shop_enabled !== false && globalSettings?.show_shop_button !== false}
-              />
-            )}
-          </div>
-        )
+              {!isLoggedInCustomer && (
+                <div className="bg-sg-paper px-4 pb-2 text-center border-b border-sg-line">
+                  <div className="sg-small text-sg-muted">
+                    {globalSettings?.guest_line_hint_text || '會打開拾光製所的官方 LINE，從選單點『預約』就能登入'}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : !isLoggedInCustomer ? (
+            <div className="bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))]">
+              <GuestLineLoginButton globalSettings={globalSettings} returnPath="/shop" />
+            </div>
+          ) : null}
+          {isLoggedInCustomer && (
+            <BottomTabBar
+              shopEnabled={globalSettings?.shop_enabled !== false && globalSettings?.show_shop_button !== false}
+            />
+          )}
+        </div>
       }
     >
       <div className="grid gap-3 pb-8 overflow-x-hidden">

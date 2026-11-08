@@ -17,6 +17,10 @@ export default function BottomActionBar({
   loading = false,
   hasTabBarBelow = false,
   className = '',
+  actionVariant = 'primary',
+  actionHref,
+  target,
+  rel,
 }) {
   const pbClass = hasTabBarBelow
     ? 'pb-[10px]'
@@ -51,10 +55,13 @@ export default function BottomActionBar({
       </div>
 
       <Button
-        variant="primary"
+        variant={actionVariant}
         size="sm"
         loading={loading}
         disabled={disabled}
+        href={actionHref}
+        target={target}
+        rel={rel}
         onClick={onAction}
         className="min-h-[44px] px-[22px] min-w-[104px] shrink-0"
       >

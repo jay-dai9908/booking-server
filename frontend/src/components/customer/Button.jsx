@@ -12,6 +12,10 @@ export default function Button({
   className = '',
   type = 'button',
   onClick,
+  href,
+  target,
+  rel,
+  as: Component = href ? 'a' : 'button',
   ...props
 }) {
   const isDisabled = disabled || loading;
@@ -59,28 +63,47 @@ export default function Button({
     ? 'min-h-[44px] px-4 text-[14px]'
     : 'min-h-[48px] px-5 text-[16px]';
 
+  const commonClasses = `inline-flex items-center justify-center gap-2 rounded-full font-bold font-body select-none transition whitespace-nowrap ${
+    isDisabled ? '' : 'active:scale-[0.98]'
+  } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sg-brown ${sizeClasses} ${variantClasses} ${className}`;
+
+  const innerContent = loading ? (
+    <span className="flex items-center justify-center min-w-[72px]">
+      <BeadLoader size="sm" />
+    </span>
+  ) : (
+    <>
+      {variant === 'line' && !icon && <LineIcon className="w-5 h-5 shrink-0" />}
+      {icon && <span className="shrink-0">{icon}</span>}
+      <span className="inline-flex items-center gap-2">{children}</span>
+    </>
+  );
+
+  if (href || Component === 'a') {
+    return (
+      <a
+        href={isDisabled ? undefined : href}
+        target={target}
+        rel={target === '_blank' && !rel ? 'noopener noreferrer' : rel}
+        onClick={isDisabled ? (e) => e.preventDefault() : onClick}
+        className={commonClasses}
+        {...props}
+      >
+        {innerContent}
+      </a>
+    );
+  }
+
   return (
     <button
       type={type}
       disabled={isDisabled}
       aria-busy={loading ? 'true' : undefined}
       onClick={isDisabled ? undefined : onClick}
-      className={`inline-flex items-center justify-center gap-2 rounded-full font-bold font-body select-none transition whitespace-nowrap ${
-        isDisabled ? '' : 'active:scale-[0.98]'
-      } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sg-brown ${sizeClasses} ${variantClasses} ${className}`}
+      className={commonClasses}
       {...props}
     >
-      {loading ? (
-        <span className="flex items-center justify-center min-w-[72px]">
-          <BeadLoader size="sm" />
-        </span>
-      ) : (
-        <>
-          {variant === 'line' && !icon && <LineIcon className="w-5 h-5 shrink-0" />}
-          {icon && <span className="shrink-0">{icon}</span>}
-          <span className="inline-flex items-center gap-2">{children}</span>
-        </>
-      )}
+      {innerContent}
     </button>
   );
 }

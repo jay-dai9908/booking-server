@@ -12,6 +12,7 @@ import Skeleton from '../../components/customer/Skeleton';
 import EmptyState from '../../components/customer/EmptyState';
 import { InfoBanner, AnnouncementBar } from '../../components/customer/Banners';
 import PriceInfoSheet from '../../components/customer/sheets/PriceInfoSheet';
+import GuestLineLoginButton from '../../components/customer/GuestLineLoginButton';
 import { initiateLineOAuth } from '../../utils/lineAuth';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useDayPricing } from '../../hooks/customer/useDayPricing';
@@ -95,14 +96,7 @@ export default function Preview() {
       }
       bottom={
         <div className="bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))]">
-          <Button
-            variant="line"
-            size="md"
-            onClick={handleLogin}
-            className="w-full"
-          >
-            使用 LINE 登入預約
-          </Button>
+          <GuestLineLoginButton globalSettings={globalSettings} returnPath="/booking" />
         </div>
       }
     >
