@@ -18,7 +18,11 @@ if (!fs.existsSync(SCREENSHOT_DIR)) {
 const prisma = new PrismaClient();
 
 async function run() {
-  const adminPassword = process.env.ADMIN_PASSWORD || 'gathering.light2609';
+  if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+    console.error('請設定 ADMIN_PASSWORD 環境變數');
+    process.exit(1);
+  }
+  const adminPassword = process.env.ADMIN_PASSWORD.trim();
   console.log(`Starting UX Fixes Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
 
   // Setup test customer token

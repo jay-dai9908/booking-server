@@ -9,7 +9,11 @@ const prisma = new PrismaClient();
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const API_BASE = process.env.API_BASE || 'http://localhost:3001/api';
 const HEADLESS = process.env.HEADLESS !== 'false';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'gathering.light2609';
+if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
 
 const VIEWPORTS = [
   { name: 'mobile', width: 375, height: 812 },

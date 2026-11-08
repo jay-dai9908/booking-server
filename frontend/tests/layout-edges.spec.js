@@ -13,9 +13,13 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 
+if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'gathering.light2609';
 
 const VIEWPORTS = [
   { name: 'phone-narrow', width: 360, height: 780, isMobile: true },
