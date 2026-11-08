@@ -4,6 +4,7 @@ import { getActiveLayoutForDate } from '../seating/layoutService.js';
 import { computeBill, billingStatus } from '../../../../shared/billing.js';
 import { toTaipeiDateString, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
+import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
 
 /**
  * Split booking equipment with quantity > 1 into individual 1-unit records (spec 3.3 item 1)
@@ -328,9 +329,29 @@ export async function getLiveFloorData(dateStr = null) {
     const activePersons = bPersons.filter(p => p.status === 'active');
     const personsTotal = activePersons.length || firstRes.pax;
 
-    const allPersonsEnded = bPersons.length > 0 && bPersons.every(p => p.timer_ended_at);
+    const personsWithPayment = bPersons.map(p => {
+      const isPaid = bPayments.some(pay =>
+        pay.status === 'valid' &&
+        (pay.kind === 'charge' || pay.kind === 'waive') &&
+        (!pay.person_nos || pay.person_nos.length === 0 || pay.person_nos.includes(p.person_no))
+      );
+      return { ...p, paid: isPaid, is_paid: isPaid };
+    });
+
     let resolvedAttendance = firstRes.attendance || null;
-    if (resolvedAttendance === 'checked_in' && allPersonsEnded) {
+    const completed = isBookingCompleted({
+      ...firstRes,
+      attendance: resolvedAttendance,
+      billing: { status: statusObj.code },
+      billing_status: statusObj.code,
+      status: firstRes.status,
+      is_paid: Boolean(firstRes.is_paid),
+      end_at: endAtStr,
+      sessions: resList.map(r => r.session),
+      persons: personsWithPayment
+    }, serverNow);
+
+    if (resolvedAttendance === 'checked_in' && completed) {
       resolvedAttendance = 'completed';
     }
 
@@ -395,7 +416,7 @@ export async function getLiveFloorData(dateStr = null) {
       // and not paid (neither booking nor person paid)
       const activeUnpaidPersons = bPersons.filter(p => {
         if (!p.timer_started_at || p.timer_ended_at) return false;
-        if (firstRes.is_paid) return false;
+        if (firstRes.is_paid || firstRes.billing_status === 'paid' || firstRes.billing_status === 'waived' || statusObj.code === 'paid' || statusObj.code === 'waived') return false;
         const isPaid = bPayments.some(pay =>
           pay.status === 'valid' &&
           (pay.kind === 'charge' || pay.kind === 'waive') &&

@@ -129,18 +129,44 @@ export async function checkIn(req, res) {
         : firstRes.session.session_date.toISOString().slice(0, 10);
       const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
 
+      // Query valid payments to check coverage (Spec 2.2 item 2)
+      const validPayments = await tx.payment.findMany({
+        where: {
+          booking_ref,
+          status: 'valid',
+          kind: { in: ['charge', 'waive'] }
+        }
+      });
+
+      const isBookingPaid =
+        firstRes.is_paid === true ||
+        firstRes.billing_status === 'paid' ||
+        firstRes.billing_status === 'waived' ||
+        validPayments.some(pay => !pay.person_nos || pay.person_nos.length === 0);
+
       const targetCount = Math.max(pax, seats.length);
+      let allPersonsCovered = true;
+
       for (let i = 0; i < targetCount; i++) {
         const personNo = i + 1;
         const seatCode = seats[i] || null;
         const exPerson = existingPersons.find(p => p.person_no === personNo);
+
+        const isPersonPaid =
+          isBookingPaid ||
+          validPayments.some(pay => Array.isArray(pay.person_nos) && pay.person_nos.includes(personNo));
+
+        if (!isPersonPaid) {
+          allPersonsCovered = false;
+        }
 
         const personData = {
           seat_code: seatCode,
           status: 'active'
         };
 
-        if (start_timer) {
+        // If person is already covered by payment, do NOT start timer (Spec 2.2 item 2)
+        if (start_timer && !isPersonPaid) {
           if (!exPerson?.timer_started_at) {
             personData.timer_started_at = now;
           }
@@ -179,6 +205,9 @@ export async function checkIn(req, res) {
         }
       }
 
+      const isWholeGroupPaid = isBookingPaid || (allPersonsCovered && targetCount >= pax);
+      const finalAttendance = isWholeGroupPaid ? 'completed' : 'checked_in';
+
       // Update reservation rows
       await tx.reservation.updateMany({
         where: { booking_ref },
@@ -186,7 +215,7 @@ export async function checkIn(req, res) {
           assigned_seats: seats,
           seat_source: 'staff',
           is_seat_locked: true,
-          attendance: 'checked_in',
+          attendance: finalAttendance,
           checked_in_at: firstRes.checked_in_at || now,
           checked_in_by: staffName
         }
@@ -452,43 +481,74 @@ export async function handleTimer(req, res) {
             });
           }
         } else if (action === 'restart') {
-          // Check if person has valid payment
-          const isPaid = await tx.payment.findFirst({
-            where: {
-              booking_ref,
-              status: 'valid',
-              kind: { in: ['charge', 'waive'] },
-              person_nos: { has: p.person_no }
-            }
+          // Spec 2.2 item 1: 只限當天而且還沒付款
+          const firstRes = await tx.reservation.findFirst({
+            where: { booking_ref },
+            include: { session: true }
           });
-          if (!isPaid) {
-            await tx.bookingPerson.update({
-              where: { id: p.id },
-              data: { timer_ended_at: null }
-            });
+          const todayTaipeiStr = toTaipeiDateString(now);
+          const resvDateStr = firstRes?.session?.session_date
+            ? toTaipeiDateString(firstRes.session.session_date)
+            : todayTaipeiStr;
+
+          if (resvDateStr === todayTaipeiStr) {
+            const isBookingPaid =
+              firstRes?.is_paid === true ||
+              firstRes?.billing_status === 'paid' ||
+              firstRes?.billing_status === 'waived';
+
+            const personPaid = isBookingPaid || Boolean(await tx.payment.findFirst({
+              where: {
+                booking_ref,
+                status: 'valid',
+                kind: { in: ['charge', 'waive'] },
+                OR: [
+                  { person_nos: { has: p.person_no } },
+                  { person_nos: { equals: [] } }
+                ]
+              }
+            }));
+
+            if (!personPaid) {
+              await tx.bookingPerson.update({
+                where: { id: p.id },
+                data: { timer_ended_at: null }
+              });
+            }
           }
         }
       }
 
       if (action === 'end') {
-        const remainingActive = await tx.bookingPerson.count({
+        const remainingRunning = await tx.bookingPerson.count({
           where: {
             booking_ref,
+            timer_started_at: { not: null },
             timer_ended_at: null,
             status: 'active'
           }
         });
-        if (remainingActive === 0) {
+        if (remainingRunning === 0) {
           await tx.reservation.updateMany({
             where: { booking_ref },
             data: { attendance: 'completed' }
           });
         }
       } else if (action === 'restart') {
-        await tx.reservation.updateMany({
-          where: { booking_ref, attendance: 'completed' },
-          data: { attendance: 'checked_in' }
+        const hasRunningPerson = await tx.bookingPerson.findFirst({
+          where: {
+            booking_ref,
+            timer_started_at: { not: null },
+            timer_ended_at: null,
+            status: 'active'
+          }
         });
+        if (hasRunningPerson) {
+          await tx.reservation.updateMany({
+            where: { booking_ref, attendance: 'completed' },
+            data: { attendance: 'checked_in' }
+          });
+        }
       }
     });
 

@@ -314,4 +314,32 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(isSessionPast({ start_time: '14:00', end_time: '15:00', session_date: dateObjUtc }, now2000), true);
     assert.strictEqual(isSessionPast({ start_time: '20:00', end_time: '21:00', session_date: dateObjUtc }, now2000), false);
   });
+
+  await t.test('13. Spec 2.2 item 4: paid booking displays 已結清 instead of 超時 x 分', () => {
+    const paidOverdueBooking = {
+      start_at: '2026-11-08T10:00:00+08:00',
+      end_at: '2026-11-08T12:00:00+08:00', // 2 hours
+      attendance: 'checked_in',
+      pax: 1,
+      billing: { status: 'paid' },
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-1',
+          timer: {
+            billing_start_at: '2026-11-08T10:00:00+08:00',
+            timer_started_at: '2026-11-08T10:00:00+08:00',
+            timer_ended_at: null,
+            paused_at: null,
+            paused_seconds: 0
+          }
+        }
+      ]
+    };
+    // 4 hours later (2 hours overdue)
+    const now1400 = new Date('2026-11-08T14:00:00+08:00');
+    const pill = groupTimerPill(paidOverdueBooking, now1400);
+    assert.strictEqual(pill.variant, 'muted');
+    assert.strictEqual(pill.label, '已結清');
+  });
 });

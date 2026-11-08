@@ -21,7 +21,9 @@ import {
   Search,
   MessageSquare,
   Lock,
-  UserX
+  UserX,
+  MoreHorizontal,
+  LogOut
 } from 'lucide-react';
 import api from '../../api/axios';
 import { useLiveFloor } from '../../hooks/admin/useLiveFloor';
@@ -133,6 +135,8 @@ export default function SeatingPage() {
   // Seating-specific interactive sheets
   const [checkInTarget, setCheckInTarget] = useState(null); // booking
   const [timerTarget, setTimerTarget] = useState(null); // booking
+  const [personMenuOpen, setPersonMenuOpen] = useState(null); // person_no
+  const [showAllLeaveConfirm, setShowAllLeaveConfirm] = useState(false);
 
   // Keep timerTarget in sync with live floor data
   useEffect(() => {
@@ -1076,7 +1080,7 @@ export default function SeatingPage() {
                   <div className="py-4 text-center text-sg-muted text-[13px]">尚無已離場紀錄</div>
                 ) : (
                   searchedCompleted.map((b) => (
-                    <div key={b.booking_ref} className="py-2.5 flex items-center justify-between text-[13px]">
+                    <div key={b.booking_ref} data-booking-ref={b.booking_ref} className="py-2.5 flex items-center justify-between text-[13px]">
                       <div>
                         <span className="font-bold text-sg-ink mr-2">{b.name}</span>
                         <span className="text-sg-muted">{bookingTimeRange(b.start_at, b.end_at)} · {b.pax} 位</span>
@@ -1438,22 +1442,33 @@ export default function SeatingPage() {
             const hasActive = activePersons.length > 0;
 
             return (
-              <div className="flex items-center justify-between">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={!hasActive}
-                  onClick={() => {
-                    handleTimerAction(
-                      timerTarget.booking_ref,
-                      'all',
-                      isAllPaused ? 'resume' : 'pause',
-                      isAllPaused ? null : '全組暫停'
-                    );
-                  }}
-                >
-                  {isAllPaused ? '全組繼續' : '全組暫停'}
-                </Button>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!hasActive}
+                    onClick={() => {
+                      handleTimerAction(
+                        timerTarget.booking_ref,
+                        'all',
+                        isAllPaused ? 'resume' : 'pause',
+                        isAllPaused ? null : '全組暫停'
+                      );
+                    }}
+                  >
+                    {isAllPaused ? '全組繼續' : '全組暫停'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    data-testid="all-leave-btn"
+                    disabled={!hasActive}
+                    onClick={() => setShowAllLeaveConfirm(true)}
+                  >
+                    全組離場
+                  </Button>
+                </div>
                 <Button
                   variant="primary"
                   size="md"
@@ -1542,6 +1557,19 @@ export default function SeatingPage() {
                 ? (p.seat_code.startsWith('WAIT-') ? '等待區' : p.seat_code)
                 : '未帶位';
 
+              const endedTimeStr = tm.timer_ended_at ? formatTimeHHmm(tm.timer_ended_at) : '';
+              const isPaidOrWaived = timerTarget?.billing?.status === 'paid' ||
+                                     timerTarget?.billing?.status === 'waived' ||
+                                     timerTarget?.is_paid ||
+                                     Boolean(p.paid);
+              const isToday = (() => {
+                if (!timerTarget?.start_at) return true;
+                const tDate = new Date(timerTarget.start_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+                const nowDate = getServerNow().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+                return tDate === nowDate;
+              })();
+              const canRestart = isToday && !isPaidOrWaived;
+
               return (
                 <div
                   key={p.person_no}
@@ -1553,7 +1581,7 @@ export default function SeatingPage() {
                     </div>
                     <div className="text-[12px] text-sg-muted">
                       {isEnded
-                        ? `已離場 · 合計 ${formatTimerHMM(elapsedMins)}`
+                        ? `已離場 ${endedTimeStr} · 合計 ${formatTimerHMM(elapsedMins)}`
                         : isPaused
                         ? `已暫停 · ${tm.pause_reason || '外出用餐'}`
                         : `計時中 · 已計 ${formatTimerHMM(elapsedMins)}`}
@@ -1561,7 +1589,7 @@ export default function SeatingPage() {
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {!isEnded && (
+                    {!isEnded ? (
                       <>
                         {isPaused ? (
                           <Button
@@ -1596,7 +1624,53 @@ export default function SeatingPage() {
                           <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
                           換位
                         </Button>
+                        {/* More Menu with 離場 (Spec 2.2 item 1) */}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            data-testid={`person-more-btn-${p.person_no}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPersonMenuOpen(prev => prev === p.person_no ? null : p.person_no);
+                            }}
+                            className="p-1.5 rounded-xl border border-sg-line hover:bg-sg-paper text-sg-ink/70 cursor-pointer"
+                            title="更多選項"
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                          {personMenuOpen === p.person_no && (
+                            <div
+                              className="absolute right-0 bottom-full mb-1 z-50 bg-white rounded-xl shadow-lg border border-sg-line py-1 min-w-[90px]"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                data-testid={`person-leave-btn-${p.person_no}`}
+                                onClick={() => {
+                                  setPersonMenuOpen(null);
+                                  handleTimerAction(timerTarget.booking_ref, [p.person_no], 'end');
+                                }}
+                                className="w-full text-left px-3 py-1.5 text-[12px] text-sg-danger hover:bg-sg-danger-soft font-bold flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <LogOut className="w-3.5 h-3.5" />
+                                離場
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </>
+                    ) : (
+                      canRestart && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          data-testid={`person-restart-btn-${p.person_no}`}
+                          onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'restart')}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                          取消離場
+                        </Button>
+                      )
                     )}
                   </div>
                 </div>
@@ -1609,6 +1683,23 @@ export default function SeatingPage() {
           </p>
         </div>
       </ResponsivePanel>
+
+      {/* Confirm All Leave Modal (Spec 2.2 item 1) */}
+      <ConfirmPanel
+        isOpen={showAllLeaveConfirm}
+        onClose={() => setShowAllLeaveConfirm(false)}
+        onConfirm={async () => {
+          if (timerTarget) {
+            await handleTimerAction(timerTarget.booking_ref, 'all', 'end');
+            setShowAllLeaveConfirm(false);
+            setTimerTarget(null);
+          }
+        }}
+        title="全組離場？"
+        message="計時會停止，座位釋出。"
+        confirmText="全組離場"
+        cancelText="先不要"
+      />
 
       {/* Pause Reason Sheet */}
       <ConfirmPanel
