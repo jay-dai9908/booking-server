@@ -1,6 +1,5 @@
-import React, { Suspense, lazy, useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
 import {
   X,
   CheckCircle2,
@@ -16,7 +15,9 @@ import {
 } from 'lucide-react';
 import api from '../api/axios';
 import ConfirmPanel from './admin/ConfirmPanel';
+import ErrorBoundary from './common/ErrorBoundary';
 import { formatBookingRef } from '../utils/admin/floorSelectors';
+import { safeFormatDate } from '../utils/format';
 
 const ExtendTimeModal = lazy(() => import('./ExtendTimeModal'));
 const EquipmentAddonModal = lazy(() => import('./EquipmentAddonModal'));
@@ -24,6 +25,7 @@ const CheckoutWorkbench = lazy(() => import('./admin/checkout/CheckoutWorkbench'
 const SendLineMessageModal = lazy(() => import('./SendLineMessageModal'));
 
 export const getReservationStatusUI = (r) => {
+  if (!r) return { text: '—', icon: null, colorClass: 'text-gray-400', bgClass: 'bg-gray-100' };
   if (r.status === 'cancelled') {
     return { text: '已取消', icon: <XCircle className="w-4 h-4"/>, colorClass: 'text-gray-400', bgClass: 'bg-gray-100' };
   }
@@ -36,18 +38,32 @@ export const getReservationStatusUI = (r) => {
 
   const now = new Date();
   const dStr = typeof r.session_date === 'string' ? r.session_date.slice(0, 10) : '';
-  const sessionDate = dStr ? new Date(`${dStr}T${r.start_time}:00+08:00`) : new Date(r.session_date);
-  const retainDate = new Date(sessionDate.getTime() + 15 * 60000);
+  let sessionDate = null;
+  if (dStr && r.start_time) {
+    sessionDate = new Date(`${dStr}T${r.start_time}:00+08:00`);
+  } else if (r.session_date) {
+    sessionDate = new Date(r.session_date);
+  }
 
-  if (now > retainDate) {
-    return { text: '預約未到', icon: <XCircle className="w-4 h-4"/>, colorClass: 'text-red-500', bgClass: 'bg-red-50' };
+  if (sessionDate && !isNaN(sessionDate.getTime())) {
+    const retainDate = new Date(sessionDate.getTime() + 15 * 60000);
+    if (now > retainDate) {
+      return { text: '預約未到', icon: <XCircle className="w-4 h-4"/>, colorClass: 'text-red-500', bgClass: 'bg-red-50' };
+    }
   }
 
   return { text: '預約成功', icon: <CheckCircle2 className="w-4 h-4"/>, colorClass: 'text-green-600', bgClass: 'bg-green-50' };
 };
 
-export default function ReservationDetailsModal({ reservation, onClose, onUpdate, readOnly = false }) {
+export default function ReservationDetailsModal({ bookingRef, reservation: reservationProp, onClose, onUpdate, readOnly = false }) {
   const navigate = useNavigate();
+  const ref = bookingRef || (typeof reservationProp === 'string' ? reservationProp : reservationProp?.booking_ref);
+  const [reservation, setReservation] = useState(
+    reservationProp && typeof reservationProp === 'object' && reservationProp.session_date ? reservationProp : null
+  );
+  const [loading, setLoading] = useState(!reservation && Boolean(ref));
+  const [loadError, setLoadError] = useState(null);
+
   const [showExtendModal, setShowExtendModal] = useState(false);
   const [isEditingAmount, setIsEditingAmount] = useState(false);
   const [editAmountValue, setEditAmountValue] = useState('');
@@ -65,21 +81,49 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
     setTimeout(() => setToastMsg(null), 3000);
   };
 
+  const onUpdateRef = useRef(onUpdate);
   useEffect(() => {
-    setAdminNoteInput(reservation?.admin_note || '');
-    if (reservation?.booking_ref && !reservation?.pricing_info && !readOnly) {
-      api
-        .get(`/reservations/admin/${reservation.booking_ref}/details`)
-        .then(res => {
-          if (res.data && onUpdate) {
-            onUpdate(res.data);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [reservation?.booking_ref, reservation?.admin_note]);
+    onUpdateRef.current = onUpdate;
+  });
 
-  if (!reservation) return null;
+  const fetchDetails = useCallback(() => {
+    if (!ref) return;
+    setLoading(true);
+    setLoadError(null);
+    api
+      .get(`/reservations/admin/${ref}/details`)
+      .then(res => {
+        if (res.data) {
+          setReservation(res.data);
+          setAdminNoteInput(res.data.admin_note || '');
+        }
+      })
+      .catch(err => {
+        console.error('[ReservationDetailsModal] Error loading details:', err);
+        setLoadError(err.response?.data?.error || err.response?.data?.message || '讀取預約資料失敗');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [ref]);
+
+  useEffect(() => {
+    if (!ref) {
+      setReservation(null);
+      setLoading(false);
+      return;
+    }
+    fetchDetails();
+  }, [ref, fetchDetails]);
+
+  useEffect(() => {
+    if (reservation?.admin_note !== undefined) {
+      setAdminNoteInput(reservation.admin_note || '');
+    }
+  }, [reservation?.admin_note]);
+
+  if (!ref && !reservation) return null;
+
 
   const handleSaveAdminNote = async () => {
     setIsSavingAdminNote(true);
@@ -228,116 +272,135 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
           </button>
         </div>
         
-        <div className="p-6 overflow-y-auto flex-1">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-1">訂單編號</h3>
-                <p className="text-sm text-gray-800 font-mono font-bold">{formatBookingRef(reservation.booking_ref)}</p>
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="text-sm font-medium text-gray-500">顧客姓名</h3>
-                  {!readOnly && reservation.user_id && (
-                    <button 
-                      onClick={() => {
-                        onClose();
-                        navigate(`/admin/members?userId=${reservation.user_id}`);
-                      }}
-                      className="text-xs text-sg-brown hover:text-sg-brown-hover bg-sg-brown-soft hover:bg-sg-line px-2 py-0.5 rounded-md font-bold transition-colors"
-                    >
-                      會員資料
-                    </button>
-                  )}
-                  {!readOnly && reservation.user && !reservation.user.line_user_id?.startsWith('manual_') && (
-                    <button
-                      type="button"
-                      onClick={() => setShowLineModal(true)}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-white bg-[#06C755] hover:bg-[#05b34c] px-2 py-0.5 rounded-md transition-all shadow-xs"
-                      title="發送 LINE 提醒至顧客手機"
-                    >
-                      <MessageCircle className="w-3.5 h-3.5 fill-current" />
-                      發送 LINE 提醒
-                    </button>
-                  )}
-                </div>
-                <p className="text-lg font-bold text-gray-900">{reservation.user?.name || '未設定'}</p>
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-1">聯絡電話</h3>
-                <p className="text-lg font-bold text-gray-900">{reservation.user?.phone || '未提供'}</p>
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-1">當前狀態</h3>
-                <div className="mt-1">
-                  {(() => {
-                    const rFormatted = {
-                      ...reservation,
-                      start_time: reservation.start_time || reservation.session?.start_time,
-                      session_date: reservation.session_date || reservation.session?.session_date
-                    };
-                    const statusUI = getReservationStatusUI(rFormatted);
-                    return (
-                      <div className="flex items-center flex-wrap gap-2">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                          {statusUI.icon} {statusUI.text}
-                        </span>
-                        {reservation.attendance === 'checked_in' && (
-                          <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-bold text-sg-brown bg-sg-brown-soft px-2.5 py-1 rounded-lg border border-sg-line">
-                            <Clock className="w-3.5 h-3.5" />
-                            報到時間：{reservation.checked_in_at ? format(new Date(reservation.checked_in_at), 'MM/dd HH:mm') : '已完成'}
-                          </span>
-                        )}
-                        {reservation.status === 'cancelled' && reservation.cancelled_at && (
-                          <span className="text-xs sm:text-sm text-gray-500">
-                            取消於 {format(new Date(reservation.cancelled_at), 'MM/dd HH:mm')} 
-                            ({reservation.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})
-                          </span>
-                        )}
-                        {reservation.is_force_split && (
-                          <span className="inline-flex items-center px-2 py-1 bg-amber-50 text-amber-600 border border-amber-200 rounded-md text-xs font-bold tracking-wide">
-                            顧客同意拆桌
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
+        <ErrorBoundary>
+          {loading && !reservation ? (
+            <div className="p-12 flex flex-col items-center justify-center space-y-3">
+              <div className="w-8 h-8 border-2 border-sg-brown border-t-transparent rounded-full animate-spin" />
+              <span className="text-[13px] text-sg-muted">載入訂單資料中...</span>
             </div>
-            
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-center gap-3 mb-1">
-                  <h3 className="text-sm font-medium text-gray-500">預約時間</h3>
-                  {!readOnly && reservation.status === 'confirmed' && (
-                    <button 
-                      onClick={() => setShowExtendModal(true)}
-                      className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-md hover:bg-indigo-100 transition-colors font-medium flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" />
-                      現場加時
-                    </button>
-                  )}
-                </div>
-                <div className="text-lg font-bold text-gray-900">
-                  {format(new Date(reservation.session_date || reservation.session?.session_date), 'yyyy/MM/dd')}
-                  <div className="text-gray-500 text-sm font-normal mt-1 space-y-1">
-                    {reservation.time_blocks ? (
-                      reservation.time_blocks.map((b, i) => (
-                        <div key={i}>{b.start_time} - {b.end_time}</div>
-                      ))
-                    ) : (
-                      <div>
-                        {reservation.start_time || reservation.session?.start_time} - {reservation.end_time || reservation.session?.end_time}
-                      </div>
-                    )}
-                    <div className="text-gray-400 mt-1">
-                      共 {reservation.session_count || 1} 小時
+          ) : loadError && !reservation ? (
+            <div className="p-12 flex flex-col items-center justify-center space-y-3 text-center">
+              <p className="text-[14px] text-sg-danger font-bold">{loadError}</p>
+              <button
+                type="button"
+                onClick={fetchDetails}
+                className="px-4 py-2 rounded-xl bg-sg-brown text-white text-[13px] font-bold"
+              >
+                重試
+              </button>
+            </div>
+          ) : (
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">訂單編號</h3>
+                    <p className="text-sm text-gray-800 font-mono font-bold">{formatBookingRef(reservation.booking_ref)}</p>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-sm font-medium text-gray-500">顧客姓名</h3>
+                      {!readOnly && reservation.user_id && (
+                        <button 
+                          onClick={() => {
+                            onClose();
+                            navigate(`/admin/members?userId=${reservation.user_id}`);
+                          }}
+                          className="text-xs text-sg-brown hover:text-sg-brown-hover bg-sg-brown-soft hover:bg-sg-line px-2 py-0.5 rounded-md font-bold transition-colors"
+                        >
+                          會員資料
+                        </button>
+                      )}
+                      {!readOnly && reservation.user && !reservation.user.line_user_id?.startsWith('manual_') && (
+                        <button 
+                          type="button"
+                          onClick={() => setShowLineModal(true)}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-white bg-[#06C755] hover:bg-[#05b34c] px-2 py-0.5 rounded-md transition-all shadow-xs"
+                          title="發送 LINE 提醒至顧客手機"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                          發送 LINE 提醒
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-lg font-bold text-gray-900">{reservation.user?.name || '未設定'}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">聯絡電話</h3>
+                    <p className="text-lg font-bold text-gray-900">{reservation.user?.phone || '未提供'}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">當前狀態</h3>
+                    <div className="mt-1">
+                      {(() => {
+                        const rFormatted = {
+                          ...reservation,
+                          start_time: reservation.start_time || reservation.session?.start_time,
+                          session_date: reservation.session_date || reservation.session?.session_date
+                        };
+                        const statusUI = getReservationStatusUI(rFormatted);
+                        return (
+                          <div className="flex items-center flex-wrap gap-2">
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
+                              {statusUI.icon} {statusUI.text}
+                            </span>
+                            {reservation.attendance === 'checked_in' && (
+                              <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-bold text-sg-brown bg-sg-brown-soft px-2.5 py-1 rounded-lg border border-sg-line">
+                                <Clock className="w-3.5 h-3.5" />
+                                報到時間：{reservation.checked_in_at ? safeFormatDate(reservation.checked_in_at, 'MM/dd HH:mm') : '已完成'}
+                              </span>
+                            )}
+                            {reservation.status === 'cancelled' && reservation.cancelled_at && (
+                              <span className="text-xs sm:text-sm text-gray-500">
+                                取消於 {safeFormatDate(reservation.cancelled_at, 'MM/dd HH:mm')} 
+                                ({reservation.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})
+                              </span>
+                            )}
+                            {reservation.is_force_split && (
+                              <span className="inline-flex items-center px-2 py-1 bg-amber-50 text-amber-600 border border-amber-200 rounded-md text-xs font-bold tracking-wide">
+                                顧客同意拆桌
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
-              </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center gap-3 mb-1">
+                      <h3 className="text-sm font-medium text-gray-500">預約時間</h3>
+                      {!readOnly && reservation.status === 'confirmed' && (
+                        <button 
+                          onClick={() => setShowExtendModal(true)}
+                          className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-md hover:bg-indigo-100 transition-colors font-medium flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3" />
+                          現場加時
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-lg font-bold text-gray-900">
+                      {safeFormatDate(reservation.session_date || reservation.session?.session_date, 'yyyy/MM/dd')}
+                      <div className="text-gray-500 text-sm font-normal mt-1 space-y-1">
+                        {reservation.time_blocks ? (
+                          reservation.time_blocks.map((b, i) => (
+                            <div key={i}>{b.start_time} - {b.end_time}</div>
+                          ))
+                        ) : (
+                          <div>
+                            {reservation.start_time || reservation.session?.start_time} - {reservation.end_time || reservation.session?.end_time}
+                          </div>
+                        )}
+                        <div className="text-gray-400 mt-1">
+                          共 {reservation.session_count || 1} 小時
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">人數</h3>
                 <div className="flex items-center gap-2">
@@ -618,7 +681,11 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
             </div>
           )}
         </div>
-      </div>
+      )}
+    </ErrorBoundary>
+  </div>
+
+
       
       <Suspense fallback={null}>
         {showExtendModal && (

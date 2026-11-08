@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import ErrorBoundary from '../common/ErrorBoundary';
 
 export default function ResponsivePanel({
   isOpen = false,
@@ -84,7 +85,9 @@ export default function ResponsivePanel({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </div>
 
         {/* Footer */}

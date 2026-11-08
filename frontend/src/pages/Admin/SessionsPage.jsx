@@ -47,8 +47,13 @@ export default function SessionsPage() {
   const [listDate, setListDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [monthSessionsMap, setMonthSessionsMap] = useState({});
 
-  const [startTime, setStartTime] = useState('13:00');
+  const [startTime, setStartTime] = useState('10:00');
   const [endTime, setEndTime] = useState('21:00');
+  const [businessHours, setBusinessHours] = useState({
+    weekday: { start: '10:00', end: '21:00' },
+    saturday: { start: '09:00', end: '21:00' },
+    sunday: { start: '09:00', end: '21:00' }
+  });
   const [maxCapacity, setMaxCapacity] = useState(10);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sessions, setSessions] = useState([]);
@@ -104,6 +109,28 @@ export default function SessionsPage() {
       setPriceNoticeText(res.data.price_notice_text ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品');
       setShowAnnouncement(res.data.show_announcement !== false);
       setAnnouncementText(res.data.announcement_text ?? '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠');
+      if (res.data?.business_hours_json) {
+        setBusinessHours({
+          weekday: {
+            start: res.data.business_hours_json.weekday?.start || '10:00',
+            end: res.data.business_hours_json.weekday?.end || '21:00'
+          },
+          saturday: {
+            start: res.data.business_hours_json.saturday?.start || '09:00',
+            end: res.data.business_hours_json.saturday?.end || '21:00'
+          },
+          sunday: {
+            start: res.data.business_hours_json.sunday?.start || '09:00',
+            end: res.data.business_hours_json.sunday?.end || '21:00'
+          }
+        });
+        if (res.data.business_hours_json.weekday?.start) {
+          setStartTime(res.data.business_hours_json.weekday.start);
+        }
+        if (res.data.business_hours_json.weekday?.end) {
+          setEndTime(res.data.business_hours_json.weekday.end);
+        }
+      }
       try {
         const layoutRes = await api.get('/seat-layouts/active');
         const activeCount = layoutRes.data?.layout?.seats?.filter(s => s.is_active)?.length || 16;
@@ -589,30 +616,44 @@ export default function SessionsPage() {
 
               {/* Quick Time-Range Presets + Hour Range Drum/Scroll Picker */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                   <span className="text-xs font-semibold text-gray-500">快速時段預設：</span>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => { setStartTime('13:00'); setEndTime('21:00'); }}
-                      className={`px-2 py-0.5 text-[11px] font-bold rounded-full border transition-all ${
-                        startTime === '13:00' && endTime === '21:00'
-                          ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
-                          : 'bg-[#FAF7F2] text-[#6E5D4F] border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white'
+                      data-testid="preset-weekday-btn"
+                      onClick={() => { setStartTime(businessHours.weekday.start); setEndTime(businessHours.weekday.end); }}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-xl border transition-all ${
+                        startTime === businessHours.weekday.start && endTime === businessHours.weekday.end
+                          ? 'bg-sg-brown text-white border-sg-brown'
+                          : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
                       }`}
                     >
-                      平日 13:00-21:00
+                      平日 {businessHours.weekday.start} 到 {businessHours.weekday.end}
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setStartTime('10:00'); setEndTime('21:00'); }}
-                      className={`px-2 py-0.5 text-[11px] font-bold rounded-full border transition-all ${
-                        startTime === '10:00' && endTime === '21:00'
-                          ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
-                          : 'bg-[#FAF7F2] text-[#6E5D4F] border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white'
+                      data-testid="preset-saturday-btn"
+                      onClick={() => { setStartTime(businessHours.saturday.start); setEndTime(businessHours.saturday.end); }}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-xl border transition-all ${
+                        startTime === businessHours.saturday.start && endTime === businessHours.saturday.end
+                          ? 'bg-sg-brown text-white border-sg-brown'
+                          : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
                       }`}
                     >
-                      假日 10:00-21:00
+                      週六 {businessHours.saturday.start} 到 {businessHours.saturday.end}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="preset-sunday-btn"
+                      onClick={() => { setStartTime(businessHours.sunday.start); setEndTime(businessHours.sunday.end); }}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-xl border transition-all ${
+                        startTime === businessHours.sunday.start && endTime === businessHours.sunday.end
+                          ? 'bg-sg-brown text-white border-sg-brown'
+                          : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
+                      }`}
+                    >
+                      週日 {businessHours.sunday.start} 到 {businessHours.sunday.end}
                     </button>
                   </div>
                 </div>

@@ -94,7 +94,7 @@ export default function SeatingPage() {
   const [filterMode, setFilterMode] = useState('all');
 
   // Live data polling
-  const { data: floorData, loading, error, refresh } = useLiveFloor(selectedDate, 8000);
+  const { data: floorData, loading, error, refresh, setData: setFloorData } = useLiveFloor(selectedDate, 8000);
   const { getServerNow } = useServerClock(floorData?.server_now);
   const [, setClockTick] = useState(0);
 
@@ -107,12 +107,27 @@ export default function SeatingPage() {
 
   // Modals & Panels
   const [checkoutBookingRef, setCheckoutBookingRef] = useState(null);
-  const [detailsReservation, setDetailsReservation] = useState(null);
+  const [detailsBookingRef, setDetailsBookingRef] = useState(null);
   const [showForceAdd, setShowForceAdd] = useState(false);
   const [forceAddInitialSessionId, setForceAddInitialSessionId] = useState(null);
   const [extendReservation, setExtendReservation] = useState(null);
   const [addonReservation, setAddonReservation] = useState(null);
   const [lineMsgReservation, setLineMsgReservation] = useState(null);
+  const [cardMenuBookingRef, setCardMenuBookingRef] = useState(null);
+  const [cancelReservationTarget, setCancelReservationTarget] = useState(null);
+
+  const handleCancelReservation = async () => {
+    if (!cancelReservationTarget) return;
+    try {
+      await api.delete(`/reservations/${cancelReservationTarget.booking_ref}`);
+      showToast('已取消預約');
+      setCancelReservationTarget(null);
+      refresh();
+    } catch (err) {
+      console.error('Failed to cancel reservation', err);
+      showToast(err.response?.data?.error || '取消預約失敗');
+    }
+  };
 
   // Seating-specific interactive sheets
   const [checkInTarget, setCheckInTarget] = useState(null); // booking
@@ -817,31 +832,71 @@ export default function SeatingPage() {
                           報到並帶位
                         </Button>
 
-                        <div className="flex items-center gap-1">
+                        <div className="relative">
                           <button
                             type="button"
-                            onClick={() => setDetailsReservation({ booking_ref: b.booking_ref })}
+                            onClick={() => setCardMenuBookingRef(cardMenuBookingRef === b.booking_ref ? null : b.booking_ref)}
                             className="p-1.5 rounded-xl hover:bg-sg-paper text-sg-muted hover:text-sg-ink"
-                            title="訂單詳情"
-                          >
-                            <Info className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleMarkNoShow(b.booking_ref)}
-                            className="p-1.5 rounded-xl hover:bg-sg-danger-soft text-sg-muted hover:text-sg-danger"
-                            title="標記未到"
-                          >
-                            <UserX className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setLineMsgReservation(b)}
-                            className="p-1.5 rounded-xl hover:bg-sg-paper text-sg-muted hover:text-sg-ink"
-                            title="傳 LINE 訊息"
+                            title="更多操作"
+                            aria-label="更多操作"
                           >
                             <MoreVertical className="w-4 h-4" />
                           </button>
+
+                          {cardMenuBookingRef === b.booking_ref && (
+                            <div className="absolute right-0 bottom-full mb-1 sm:bottom-auto sm:top-full sm:mt-1 w-36 bg-white border border-sg-line rounded-2xl shadow-lg z-30 py-1 text-[13px] animate-fade-in">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCardMenuBookingRef(null);
+                                  setDetailsBookingRef(b.booking_ref);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium"
+                              >
+                                訂單詳情
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCardMenuBookingRef(null);
+                                  setLineMsgReservation(b);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium"
+                              >
+                                傳 LINE 訊息
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCardMenuBookingRef(null);
+                                  setExtendReservation(b);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium"
+                              >
+                                加時
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCardMenuBookingRef(null);
+                                  handleMarkNoShow(b.booking_ref);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium"
+                              >
+                                標記未到
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCardMenuBookingRef(null);
+                                  setCancelReservationTarget(b);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-medium"
+                              >
+                                取消預約
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1308,6 +1363,7 @@ export default function SeatingPage() {
         target={checkInTarget}
         activeSeats={activeSeats}
         seatStatesMap={seatStatesMap}
+        layout={floorData?.layout}
         onSuccess={(data, deferSeating) => {
           refresh();
           showToast(deferSeating ? '已報到，稍後再帶位' : '已入座，開始計時');
@@ -1641,7 +1697,7 @@ export default function SeatingPage() {
                 variant="secondary"
                 size="sm"
                 onClick={() => {
-                  setDetailsReservation({ booking_ref: seatActionTarget.booking.booking_ref });
+                  setDetailsBookingRef(seatActionTarget.booking.booking_ref);
                   setSeatActionTarget(null);
                 }}
               >
@@ -1780,7 +1836,7 @@ export default function SeatingPage() {
                 variant="secondary"
                 size="sm"
                 onClick={() => {
-                  setDetailsReservation({ booking_ref: seatActionTarget.booking.booking_ref });
+                  setDetailsBookingRef(seatActionTarget.booking.booking_ref);
                   setSeatActionTarget(null);
                 }}
               >
@@ -2016,17 +2072,32 @@ export default function SeatingPage() {
           isOpen={Boolean(checkoutBookingRef)}
           onClose={() => setCheckoutBookingRef(null)}
           bookingRef={checkoutBookingRef}
-          onPaymentSuccess={() => {
+          onPaymentSuccess={(data) => {
+            const bRef = data?.booking_ref || checkoutBookingRef;
+            const statusCode = data?.status?.code || data?.status?.status || (typeof data?.status === 'string' ? data.status : 'paid');
+            if (bRef) {
+              setFloorData?.(prev => {
+                if (!prev?.bookings) return prev;
+                return {
+                  ...prev,
+                  bookings: prev.bookings.map(b =>
+                    b.booking_ref === bRef
+                      ? { ...b, billing: { ...(b.billing || {}), status: statusCode } }
+                      : b
+                  )
+                };
+              });
+            }
             refresh();
           }}
         />
       )}
 
       {/* Reservation Details Modal */}
-      {detailsReservation && (
+      {detailsBookingRef && (
         <ReservationDetailsModal
-          reservation={detailsReservation}
-          onClose={() => setDetailsReservation(null)}
+          bookingRef={detailsBookingRef}
+          onClose={() => setDetailsBookingRef(null)}
           onUpdate={() => refresh()}
         />
       )}
@@ -2038,13 +2109,26 @@ export default function SeatingPage() {
           onClose={() => setShowForceAdd(false)}
           selectedSessionId={forceAddInitialSessionId}
           sessions={sessions}
-          onSuccess={() => {
+          onSuccess={(createdBooking, isWait) => {
             setShowForceAdd(false);
             refresh();
-            showToast('現場加人成功');
+            if (createdBooking) {
+              setCheckInTarget(createdBooking);
+            } else {
+              showToast(isWait ? '已放入等待區' : '現場加人成功');
+            }
           }}
         />
       )}
+
+      {/* Cancel Reservation Confirmation */}
+      <ConfirmPanel
+        isOpen={Boolean(cancelReservationTarget)}
+        onClose={() => setCancelReservationTarget(null)}
+        onConfirm={handleCancelReservation}
+        title="取消預約"
+        message={`確定要取消「${cancelReservationTarget?.name || '客人'}」的預約（${cancelReservationTarget?.booking_ref}）嗎？`}
+      />
 
       {/* ExtendTime Modal */}
       {extendReservation && (

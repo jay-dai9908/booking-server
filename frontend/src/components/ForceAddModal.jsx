@@ -1,395 +1,340 @@
-import React, { useState, useEffect } from 'react';
-import { User, Phone, Users, X, Clock, Cpu, Plus, Minus } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { User, Phone, Users, Clock, Sparkles } from 'lucide-react';
 import api from '../api/axios';
-import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
+import ResponsivePanel from './admin/ResponsivePanel';
+import Button from './customer/Button';
 
-export default function ForceAddModal({ isOpen, onClose, selectedSessionId, sessions = [], onSuccess }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    pax: 1,
-    forceSplit: true
-  });
-  const [selectedSessions, setSelectedSessions] = useState([]);
-  const [equipmentConfigs, setEquipmentConfigs] = useState([]);
-  const [selectedEquipments, setSelectedEquipments] = useState({});
+export default function ForceAddModal({
+  isOpen,
+  onClose,
+  selectedSessionId,
+  sessions = [],
+  onSuccess
+}) {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [pax, setPax] = useState(1);
+  const [isUnlimited, setIsUnlimited] = useState(false);
+  const [isForceWait, setIsForceWait] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [equipmentDiscount, setEquipmentDiscount] = useState({
-    enabled: true,
-    buy_hours: 3,
-    free_hours: 1,
-    stackable: true,
-    tier2_enabled: false,
-    tier2_buy_hours: 8,
-    tier2_free_hours: 4
-  });
 
-  // Fetch equipment configs
-  useEffect(() => {
-    if (isOpen) {
-      api.get('/equipment/admin/configs')
-        .then(res => {
-          const list = res.data?.configs || (Array.isArray(res.data) ? res.data : []);
-          setEquipmentConfigs(list);
-          if (res.data) {
-            setEquipmentDiscount({
-              enabled: res.data.equipment_discount_enabled !== false,
-              buy_hours: res.data.equipment_discount_buy_hours ?? 3,
-              free_hours: res.data.equipment_discount_free_hours ?? 1,
-              stackable: res.data.equipment_discount_stackable !== false,
-              tier2_enabled: !!res.data.equipment_discount2_enabled,
-              tier2_buy_hours: res.data.equipment_discount2_buy_hours ?? 8,
-              tier2_free_hours: res.data.equipment_discount2_free_hours ?? 4
-            });
-          }
-        })
-        .catch(err => console.error('Failed to load configs:', err));
-    }
-  }, [isOpen]);
+  // Sort sessions chronologically
+  const sortedSessions = useMemo(() => {
+    return [...sessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+  }, [sessions]);
 
-  // Initialize selected sessions with the currently viewed session
+  // Default selection starting from "now"
   useEffect(() => {
-    if (isOpen) {
-      if (selectedSessionId) {
-        setSelectedSessions([selectedSessionId]);
-      } else {
-        setSelectedSessions([]);
-      }
+    if (!isOpen) return;
+    setError('');
+    setIsSubmitting(false);
+
+    if (selectedSessionId) {
+      setSelectedSessionIds([selectedSessionId]);
+      return;
     }
-  }, [isOpen, selectedSessionId]);
+
+    if (sortedSessions.length > 0) {
+      const now = new Date();
+      const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const foundIdx = sortedSessions.findIndex(s => s.start_time <= currentHHMM && s.end_time > currentHHMM);
+      const startIdx = foundIdx >= 0 ? foundIdx : 0;
+      // Default select 2 hours if available
+      const endIdx = Math.min(sortedSessions.length - 1, startIdx + 1);
+      setSelectedSessionIds(sortedSessions.slice(startIdx, endIdx + 1).map(s => s.id));
+    } else {
+      setSelectedSessionIds([]);
+    }
+  }, [isOpen, selectedSessionId, sortedSessions]);
 
   if (!isOpen) return null;
 
-  const toggleSession = (id) => {
-    setSelectedSessions(prev => 
-      prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]
-    );
+  const handleToggleSession = (sId) => {
+    const sIndex = sortedSessions.findIndex(s => s.id === sId);
+    if (sIndex < 0) return;
+
+    if (selectedSessionIds.length === 0) {
+      setSelectedSessionIds([sId]);
+      return;
+    }
+
+    const currentIndices = selectedSessionIds
+      .map(id => sortedSessions.findIndex(s => s.id === id))
+      .filter(i => i >= 0)
+      .sort((a, b) => a - b);
+
+    const minIdx = currentIndices[0];
+    const maxIdx = currentIndices[currentIndices.length - 1];
+
+    if (sIndex < minIdx) {
+      // Extend range left
+      setSelectedSessionIds(sortedSessions.slice(sIndex, maxIdx + 1).map(s => s.id));
+    } else if (sIndex > maxIdx) {
+      // Extend range right
+      setSelectedSessionIds(sortedSessions.slice(minIdx, sIndex + 1).map(s => s.id));
+    } else {
+      // Clicked inside or boundary: reset to just this slot
+      setSelectedSessionIds([sId]);
+    }
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    const paxNum = parseInt(formData.pax, 10);
-    if (!formData.name || !paxNum || paxNum < 1) {
-      setError('請填寫顧客姓名，且人數必須大於 0');
+    if (e) e.preventDefault();
+    const cleanName = name.trim();
+    const paxNum = parseInt(pax, 10);
+
+    if (!cleanName) {
+      setError('請輸入顧客姓名');
       return;
     }
-    if (selectedSessions.length === 0) {
+    if (!paxNum || paxNum < 1) {
+      setError('人數必須至少 1 位');
+      return;
+    }
+    if (selectedSessionIds.length === 0) {
       setError('請至少選擇一個時段');
       return;
     }
 
-    setIsSubmitting(true);
-    setError('');
-
-    // Sort sessions chronologically
-    const sortedSessionIds = [...selectedSessions].sort((a, b) => {
-      const sA = sessions.find(s => s.id === a);
-      const sB = sessions.find(s => s.id === b);
-      if (!sA || !sB) return 0;
-      return sA.start_time.localeCompare(sB.start_time);
-    });
-
-    const equipmentsPayload = Object.entries(selectedEquipments)
-      .filter(([_, qty]) => qty > 0)
-      .map(([equipment_id, quantity]) => ({
-        equipment_id,
-        quantity,
-        rental_hours: sortedSessionIds.length
-      }));
-
     try {
-      await api.post('/reservations/admin', {
-        session_ids: sortedSessionIds,
-        pax: paxNum,
-        name: formData.name,
-        phone: formData.phone,
-        isForceWait: true,
-        forceSplit: formData.forceSplit,
-        isWalkIn: true,
-        autoCheckIn: true,
-        attendance: 'checked_in',
-        equipments: equipmentsPayload
+      setIsSubmitting(true);
+      setError('');
+
+      // Chronologically sorted session IDs
+      const sortedIds = [...selectedSessionIds].sort((a, b) => {
+        const sA = sortedSessions.find(s => s.id === a);
+        const sB = sortedSessions.find(s => s.id === b);
+        return (sA?.start_time || '').localeCompare(sB?.start_time || '');
       });
-      
-      onSuccess(); // triggers refetch
+
+      const res = await api.post('/reservations/admin', {
+        name: cleanName,
+        phone: phone.trim() || null,
+        pax: paxNum,
+        session_ids: sortedIds,
+        isUnlimited,
+        isForceWait,
+        forceSplit: true,
+        isWalkIn: true,
+        attendance: isForceWait ? null : 'checked_in',
+        autoCheckIn: !isForceWait,
+        equipments: []
+      });
+
+      const bookingRef = res.data?.reservation?.booking_ref;
+      const assignedSeats = res.data?.reservation?.assigned_seats || [];
+
+      const bookedSessions = sortedSessions.filter(s => sortedIds.includes(s.id));
+      const startTime = bookedSessions[0]?.start_time || '';
+      const endTime = bookedSessions[bookedSessions.length - 1]?.end_time || '';
+
+      const createdBooking = {
+        booking_ref: bookingRef,
+        name: cleanName,
+        phone: phone.trim() || null,
+        pax: paxNum,
+        assigned_seats: assignedSeats,
+        reason: res.data?.reservation?.reason,
+        start_time: startTime,
+        end_time: endTime,
+        sessions: bookedSessions,
+        is_unlimited: isUnlimited,
+        isForceWait
+      };
+
       onClose();
-      setFormData({ name: '', phone: '', pax: 1, forceSplit: true });
-      setSelectedEquipments({});
+      if (onSuccess) {
+        onSuccess(isForceWait ? null : createdBooking, isForceWait);
+      }
+
+      // Reset
+      setName('');
+      setPhone('');
+      setPax(1);
+      setIsUnlimited(false);
+      setIsForceWait(false);
     } catch (err) {
+      console.error('Failed to create walk-in reservation:', err);
       setError(err.response?.data?.error || '建立失敗，請稍後再試');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const selectedSessionsList = sortedSessions.filter(s => selectedSessionIds.includes(s.id));
+  const timeSummary = selectedSessionsList.length > 0
+    ? `${selectedSessionsList[0].start_time} 到 ${selectedSessionsList[selectedSessionsList.length - 1].end_time}（${selectedSessionsList.length} 小時）`
+    : '尚未選取時段';
+
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[120] p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-fade-in-up flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="bg-sg-brown px-6 py-4 flex items-center justify-between shrink-0">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <Plus className="w-5 h-5" />
-            現場加人 (外加區)
-          </h2>
-          <button 
-            onClick={onClose}
-            className="text-sg-brown-soft hover:text-white transition-colors p-1"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 md:p-8 overflow-y-auto">
-          <p className="text-sm mb-6 bg-sg-brown-soft/40 p-3 rounded-xl border border-sg-line text-sg-ink font-medium">
-            將顧客直接加入目前的「虛擬等候 / 外加區」。
-          </p>
-
+    <ResponsivePanel
+      isOpen={isOpen}
+      onClose={onClose}
+      title="現場加人"
+      subtitle={isForceWait ? '加入等待區' : '建立後直接帶位'}
+      footer={
+        <div className="space-y-2">
           {error && (
-            <div className="mb-6 p-4 bg-red-50 text-red-700 text-sm rounded-xl border border-red-100 font-medium">
+            <div className="p-2.5 rounded-xl bg-sg-danger-soft text-sg-danger text-[12px] font-bold">
               {error}
             </div>
           )}
-
-          <div className="space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Name */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">顧客姓名</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
-                    <User className="w-5 h-5" />
-                  </div>
-                  <input
-                    type="text"
-                    required
-                    placeholder="例如：王先生"
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
-                    className="w-full pl-11 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Phone */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">聯絡電話 <span className="text-gray-400 font-normal">(選填)</span></label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
-                    <Phone className="w-5 h-5" />
-                  </div>
-                  <input
-                    type="tel"
-                    placeholder="例如：0912345678"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                    className="w-full pl-11 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Pax */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">預約人數</label>
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
-                    <Users className="w-5 h-5" />
-                  </div>
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    required
-                    value={formData.pax}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === '') {
-                        setFormData(prev => ({ ...prev, pax: '' }));
-                      } else {
-                        const parsed = parseInt(val, 10);
-                        setFormData(prev => ({ ...prev, pax: isNaN(parsed) ? '' : parsed }));
-                      }
-                    }}
-                    onBlur={() => {
-                      if (!formData.pax || parseInt(formData.pax, 10) < 1) {
-                        setFormData(prev => ({ ...prev, pax: 1 }));
-                      }
-                    }}
-                    className="w-full pl-11 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                  />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const current = parseInt(formData.pax, 10) || 1;
-                      setFormData(prev => ({ ...prev, pax: Math.max(1, current - 1) }));
-                    }}
-                    className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 flex items-center justify-center font-bold text-gray-700 transition-all"
-                    title="減少人數"
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const current = parseInt(formData.pax, 10) || 0;
-                      setFormData(prev => ({ ...prev, pax: current + 1 }));
-                    }}
-                    className="w-10 h-10 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 active:scale-95 flex items-center justify-center font-bold transition-all"
-                    title="增加人數"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Force Split */}
-            <div>
-              <label className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={formData.forceSplit}
-                  onChange={(e) => setFormData({...formData, forceSplit: e.target.checked})}
-                  className="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
-                />
-                <div className="flex flex-col">
-                  <span className="text-sm font-bold text-gray-800">同意拆桌 <span className="ml-1 text-xs text-indigo-600 bg-indigo-100 px-1.5 py-0.5 rounded">預設推薦</span></span>
-                  <span className="text-xs text-gray-500 mt-0.5">當移入實體座位但空間不足時，優先將此組客人拆散以騰出完整大桌</span>
-                </div>
-              </label>
-            </div>
-
-            {/* Multi-Session Selection */}
-            <div className="pt-2 border-t border-gray-100">
-              <div className="flex items-center justify-between mb-3">
-                <label className="block text-sm font-medium text-gray-700">選擇時段 (可複選)</label>
-                <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-md font-medium">
-                  已選 {selectedSessions.length} 小時
-                </span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {sessions.map(session => {
-                  const isSelected = selectedSessions.includes(session.id);
-                  return (
-                    <button
-                      key={session.id}
-                      type="button"
-                      onClick={() => toggleSession(session.id)}
-                      className={`py-2.5 px-3 rounded-xl border flex items-center justify-center gap-2 transition-all text-sm font-bold ${
-                        isSelected 
-                          ? 'border-indigo-600 bg-indigo-600 text-white shadow-md' 
-                          : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-gray-300 hover:bg-gray-100'
-                      }`}
-                    >
-                      <Clock className="w-4 h-4 opacity-70" />
-                      {session.start_time}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Smart Pegboard Equipment Selection */}
-            {equipmentConfigs.length > 0 && (
-              <div className="pt-3 border-t border-gray-100">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-                    <Cpu className="w-4 h-4 text-indigo-600" />
-                    現場租借智能拼豆板 <span className="text-gray-400 font-normal">(選填)</span>
-                  </label>
-                  {(() => {
-                    const totalHours = Math.max(1, selectedSessions.length);
-                    const chargeableHours = calculateEquipmentChargeableHours(totalHours, equipmentDiscount);
-                    const totalFee = equipmentConfigs.reduce((sum, c) => {
-                      const qty = selectedEquipments[c.id] || 0;
-                      const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
-                      return sum + singlePrice * qty;
-                    }, 0);
-                    const discountText = (() => {
-                      if (chargeableHours >= totalHours) return '';
-                      if (equipmentDiscount.tier2_enabled && totalHours >= equipmentDiscount.tier2_buy_hours) {
-                        return `(享二階買${equipmentDiscount.tier2_buy_hours}送${equipmentDiscount.tier2_free_hours})`;
-                      }
-                      return `(享買${equipmentDiscount.buy_hours}送${equipmentDiscount.free_hours})`;
-                    })();
-                    return totalFee > 0 ? (
-                      <span className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-bold">
-                        加購小計 +NT$ {totalFee} {discountText}
-                      </span>
-                    ) : null;
-                  })()}
-                </div>
-                <div className="space-y-2 bg-gray-50/70 p-3 rounded-2xl border border-gray-200">
-                  {equipmentConfigs.map(c => {
-                    const qty = selectedEquipments[c.id] || 0;
-                    const isBringOwn = c.id === 'bring_own';
-                    const totalHours = Math.max(1, selectedSessions.length);
-                    const chargeableHours = calculateEquipmentChargeableHours(totalHours, equipmentDiscount);
-                    const singlePrice = (c.daily_cap && c.daily_cap > 0) ? Math.min(c.hourly_rate * chargeableHours, c.daily_cap) : (c.hourly_rate * chargeableHours);
-
-                    return (
-                      <div key={c.id} className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-gray-100 shadow-2xs">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-bold text-gray-800">{c.name}</span>
-                            <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded">NT${c.hourly_rate}/時</span>
-                          </div>
-                          <div className="text-[11px] text-gray-400 mt-0.5">
-                            {isBringOwn ? '自備設備場地充電費' : (c.daily_cap && c.daily_cap > 0 ? `單台上限 NT$${c.daily_cap} ｜ 時數計 NT$${singlePrice}` : `依時數計 NT$${singlePrice} (無上限)`)}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            disabled={qty <= 0}
-                            onClick={() => setSelectedEquipments(prev => ({ ...prev, [c.id]: Math.max(0, qty - 1) }))}
-                            className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center font-bold text-gray-700 transition-colors"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <span className="w-6 text-center font-bold text-sm text-gray-800">{qty}</span>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedEquipments(prev => ({ ...prev, [c.id]: qty + 1 }))}
-                            className="w-7 h-7 rounded-lg bg-sg-brown-soft hover:bg-sg-brown hover:text-white text-sg-brown flex items-center justify-center font-bold transition-colors"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-8 flex gap-3">
-            <button
-              type="button"
+          <div className="flex items-center justify-between">
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={onClose}
-              className="flex-1 py-3 px-4 bg-sg-paper hover:bg-sg-line/50 text-sg-ink font-bold rounded-xl border border-sg-line transition-colors"
+              disabled={isSubmitting}
             >
               取消
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 py-3 px-4 bg-sg-brown hover:bg-sg-brown-hover text-white font-bold rounded-xl transition-colors shadow-xs disabled:opacity-50 flex items-center justify-center gap-2"
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={handleSubmit}
+              loading={isSubmitting}
             >
-              {isSubmitting ? (
-                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                '確認新增'
-              )}
-            </button>
+              {isForceWait ? '放入等待區' : '下一步：安排座位'}
+            </Button>
           </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4 py-2">
+        {/* Name and Phone */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[12px] font-bold text-sg-ink mb-1">
+              顧客姓名 <span className="text-sg-danger">*</span>
+            </label>
+            <div className="relative">
+              <User className="w-4 h-4 text-sg-muted absolute left-3 top-2.5" />
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="例如：王先生"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-sg-line text-[13px] text-sg-ink focus:outline-none focus:border-sg-brown"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[12px] font-bold text-sg-ink mb-1">
+              電話 <span className="text-sg-muted text-[11px] font-normal">（選填）</span>
+            </label>
+            <div className="relative">
+              <Phone className="w-4 h-4 text-sg-muted absolute left-3 top-2.5" />
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="0912345678"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-sg-line text-[13px] text-sg-ink focus:outline-none focus:border-sg-brown"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Pax */}
+        <div>
+          <label className="block text-[12px] font-bold text-sg-ink mb-1">
+            人數
+          </label>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center border border-sg-line rounded-xl overflow-hidden bg-white">
+              <button
+                type="button"
+                onClick={() => setPax(prev => Math.max(1, prev - 1))}
+                className="px-3.5 py-2 text-[14px] font-bold text-sg-ink hover:bg-sg-paper active:bg-sg-line transition"
+              >
+                −
+              </button>
+              <span className="w-12 text-center text-[14px] font-bold font-num text-sg-ink">
+                {pax}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPax(prev => prev + 1)}
+                className="px-3.5 py-2 text-[14px] font-bold text-sg-ink hover:bg-sg-paper active:bg-sg-line transition"
+              >
+                +
+              </button>
+            </div>
+            <span className="text-[12px] text-sg-muted">位顧客</span>
+          </div>
+        </div>
+
+        {/* Sessions Continuous Selection */}
+        <div className="space-y-1.5 pt-2 border-t border-sg-line">
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] font-bold text-sg-ink">時段選擇</span>
+            <span className="text-[11px] text-sg-muted font-num">{timeSummary}</span>
+          </div>
+
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-48 overflow-y-auto p-1 bg-sg-paper/40 rounded-2xl border border-sg-line">
+            {sortedSessions.map((s) => {
+              const isSelected = selectedSessionIds.includes(s.id);
+              const remaining = s.remaining_capacity ?? s.max_capacity ?? 0;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => handleToggleSession(s.id)}
+                  className={`p-2 rounded-xl border text-center transition ${
+                    isSelected
+                      ? 'bg-sg-brown text-white border-sg-brown font-bold shadow-xs'
+                      : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
+                  }`}
+                >
+                  <span className="block text-[12px] font-num">{s.start_time}</span>
+                  <span className="block text-[10px] opacity-75">餘 {remaining}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Toggles */}
+        <div className="space-y-3 pt-2 border-t border-sg-line">
+          {/* Unlimited play */}
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-[13px] font-bold text-sg-ink block">是否當日不限時</span>
+              <span className="text-[11px] text-sg-muted block">依全日不限時費率計價</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={isUnlimited}
+                onChange={(e) => setIsUnlimited(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-sg-line peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sg-line after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sg-brown"></div>
+            </label>
+          </div>
+
+          {/* Wait area toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-[13px] font-bold text-sg-ink block">先放入等待區</span>
+              <span className="text-[11px] text-sg-muted block">預設直接安排座位帶位；如現場爆滿可改放入等候區</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={isForceWait}
+                onChange={(e) => setIsForceWait(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-sg-line peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sg-line after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sg-brown"></div>
+            </label>
+          </div>
+        </div>
+      </form>
+    </ResponsivePanel>
   );
 }

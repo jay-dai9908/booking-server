@@ -7,6 +7,7 @@ import StatusPill from '../../components/admin/StatusPill';
 import CheckInPanel from '../../components/admin/floor/CheckInPanel';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
+import { safeFormatDate } from '../../utils/format';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
 
 function getReservationAttendancePillProps(r) {
@@ -430,7 +431,7 @@ export default function ReservationsPage() {
                       <div className="space-y-1 min-w-0 flex-1">
                         {/* 第一行：日期、時段 */}
                         <div className="text-xs font-semibold text-gray-500 truncate">
-                          {format(new Date(r.session_date), 'yyyy/MM/dd')} · {r.time_blocks ? r.time_blocks.map(b => `${b.start_time}-${b.end_time}`).join(', ') : `${r.start_time}-${r.end_time}`}
+                          {safeFormatDate(r.session_date, 'yyyy/MM/dd')} · {r.time_blocks ? r.time_blocks.map(b => `${b.start_time}-${b.end_time}`).join(', ') : `${r.start_time}-${r.end_time}`}
                           {r.is_unlimited && <span className="ml-1.5 font-bold text-sg-brown">(不限時)</span>}
                         </div>
                         {/* 第二行：姓名、人數 */}
@@ -518,7 +519,7 @@ export default function ReservationsPage() {
                       <td className="px-6 py-4">
                         <div className="flex flex-col">
                           <span className={`font-semibold ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
-                            {format(new Date(r.session_date), 'yyyy/MM/dd')}
+                            {safeFormatDate(r.session_date, 'yyyy/MM/dd')}
                           </span>
                           <span className="text-sm text-gray-500">
                             {r.time_blocks 
@@ -590,18 +591,18 @@ export default function ReservationsPage() {
                         </div>
                         {r.attendance === 'checked_in' && r.checked_in_at && (
                           <div className="mt-1 text-[11px] font-medium text-sg-muted flex items-center gap-0.5">
-                            <span>報到 {format(new Date(r.checked_in_at), 'HH:mm')}</span>
+                            <span>報到 {safeFormatDate(r.checked_in_at, 'HH:mm')}</span>
                           </div>
                         )}
                         {r.status === 'cancelled' && r.cancelled_at && (
                           <div className="mt-1 text-[11px] text-gray-500 flex flex-col gap-0.5">
-                            <span>{format(new Date(r.cancelled_at), 'MM/dd HH:mm')}</span>
+                            <span>{safeFormatDate(r.cancelled_at, 'MM/dd HH:mm')}</span>
                             <span>({r.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})</span>
                           </div>
                         )}
                       </td>
                       <td className="px-6 py-4 text-right text-sm text-gray-400">
-                        {format(new Date(r.created_at), 'MM/dd HH:mm')}
+                        {safeFormatDate(r.created_at, 'MM/dd HH:mm')}
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
@@ -850,18 +851,20 @@ export default function ReservationsPage() {
       )}
 
       {/* Reservation Details Modal */}
-      <ReservationDetailsModal 
-        reservation={selectedReservation} 
-        onClose={() => setSelectedReservation(null)} 
-        onUpdate={(updates) => {
-          if (updates) {
-            setSelectedReservation(prev => ({ ...prev, ...updates }));
-          } else {
-            setSelectedReservation(null);
-          }
-          fetchReservations();
-        }} 
-      />
+      {selectedReservation && (
+        <ReservationDetailsModal 
+          bookingRef={selectedReservation?.booking_ref || selectedReservation} 
+          onClose={() => setSelectedReservation(null)} 
+          onUpdate={(updates) => {
+            if (updates) {
+              setSelectedReservation(prev => (prev ? { ...prev, ...updates } : prev));
+            } else {
+              setSelectedReservation(null);
+            }
+            fetchReservations();
+          }} 
+        />
+      )}
 
       {/* Shared Check In Panel */}
       <CheckInPanel

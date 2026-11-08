@@ -12,5 +12,6 @@ export {
   formatTimeRange,
   formatPhone,
   cnNum,
-  formatYMD
+  formatYMD,
+  safeFormatDate
 } from './customer/format.js';

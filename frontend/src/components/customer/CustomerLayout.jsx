@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import '../../styles/customer.css';
+import ErrorBoundary from '../common/ErrorBoundary';
+
 export default function CustomerLayout({
   header,
   bottom,
@@ -26,10 +28,13 @@ export default function CustomerLayout({
               : 'px-[max(16px,env(safe-area-inset-left))] pr-[max(16px,env(safe-area-inset-right))] pt-[14px] pb-5'
           } ${mainClassName}`}
         >
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </main>
         {bottom && <div className="sticky bottom-0 z-40">{bottom}</div>}
       </div>
     </div>
   );
 }
+

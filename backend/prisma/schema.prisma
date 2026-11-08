@@ -144,6 +144,7 @@ model GlobalSetting {
   shop_shipping_fee           Int      @default(60)
   official_line_url           String?  @default("https://lin.ee/vsZhRW5")
   bead_colors_json            Json?
+  business_hours_json         Json?
 
   // 計時與收費
   billing_grace_minutes         Int      @default(10)

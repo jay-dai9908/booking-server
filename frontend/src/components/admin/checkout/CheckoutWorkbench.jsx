@@ -29,6 +29,7 @@ import ConfirmPanel from '../ConfirmPanel';
 import PrinterStatusLine from '../PrinterStatusLine';
 import Button from '../../customer/Button';
 import SplitCollectView from './SplitCollectView';
+import PaymentCompleteView from './PaymentCompleteView';
 import PassTenderSheet from './PassTenderSheet';
 import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
@@ -247,7 +248,9 @@ export default function CheckoutWorkbench({
   const persons = bill.persons || [];
   const unpaidPersons = persons.filter(p => !p.is_frozen);
   const paidPersons = persons.filter(p => p.is_frozen);
-  const statusInfo = billData?.status || { status: 'unpaid' };
+  const statusInfo = billData?.status || {};
+  const currentStatusCode = statusInfo.code || statusInfo.status || 'unpaid';
+  const currentStatusLabel = statusInfo.label;
   const payments = billData?.payments || [];
 
   // Handlers for person adjustments
@@ -451,9 +454,17 @@ export default function CheckoutWorkbench({
         }
       }
 
+      if (res.data?.status || res.data?.bill) {
+        setBillData(prev => ({
+          ...prev,
+          status: res.data.status || prev?.status,
+          bill: res.data.bill || prev?.bill
+        }));
+      }
+
       setSuccessPaymentData(res.data);
       setShowCollectModal(false);
-      if (onPaymentSuccess) onPaymentSuccess(res.data);
+      if (onPaymentSuccess) onPaymentSuccess({ ...res.data, booking_ref: bookingRef });
     } catch (err) {
       console.error(err);
       if (err.response?.status === 409) {
@@ -523,7 +534,7 @@ export default function CheckoutWorkbench({
             <span className="font-mono text-[11px] sm:text-[12px] bg-sg-paper px-2 py-0.5 rounded-lg border border-sg-line text-sg-muted whitespace-nowrap flex-shrink-0">
               {booking.ref_display || bookingRef}
             </span>
-            <StatusPill status={statusInfo.status || 'unpaid'} className="hidden xs:inline-flex flex-shrink-0" />
+            <StatusPill status={currentStatusCode} label={currentStatusLabel} className="hidden xs:inline-flex flex-shrink-0" />
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
@@ -538,6 +549,8 @@ export default function CheckoutWorkbench({
             <button
               type="button"
               onClick={onClose}
+              data-testid="workbench-close-btn"
+              aria-label="關閉結帳"
               className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-sg-paper text-sg-muted hover:text-sg-ink"
             >
               <X className="w-5 h-5" />
@@ -560,6 +573,31 @@ export default function CheckoutWorkbench({
           <div className="p-12 text-center space-y-4">
             <div className="text-sg-danger font-bold text-[14px]">{loadError}</div>
             <Button variant="secondary" size="sm" onClick={loadBill}>重試</Button>
+          </div>
+        ) : successPaymentData ? (
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <PaymentCompleteView
+              data={successPaymentData}
+              bookingRef={bookingRef}
+              onNextPerson={() => {
+                setSuccessPaymentData(null);
+                setShowSplitCollect(true);
+              }}
+              onDone={() => {
+                const finishedData = successPaymentData;
+                setSuccessPaymentData(null);
+                const sCode = finishedData?.status?.code || finishedData?.status?.status || 'paid';
+                const sLabel = finishedData?.status?.label || (sCode === 'paid' ? '已結清' : '部分已付');
+                if (onPaymentSuccess) {
+                  onPaymentSuccess({
+                    ...finishedData,
+                    booking_ref: bookingRef,
+                    status: { code: sCode, label: sLabel }
+                  });
+                }
+                onClose();
+              }}
+            />
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
@@ -1288,7 +1326,8 @@ export default function CheckoutWorkbench({
         )}
 
         {/* Footer Actions */}
-        <div className="p-3 sm:p-4 border-t border-sg-line bg-white">
+        {!successPaymentData && (
+          <div className="p-3 sm:p-4 border-t border-sg-line bg-white">
           {/* Mobile bottom bar (< 768px, Spec 4 & 6.11) */}
           <div className="md:hidden flex items-center justify-between gap-2">
             <div>
@@ -1408,7 +1447,8 @@ export default function CheckoutWorkbench({
             </div>
           </div>
         </div>
-      </div>
+      )}
+    </div>
 
       {/* Total Override Modal */}
       <ResponsivePanel
@@ -1574,9 +1614,22 @@ export default function CheckoutWorkbench({
           }}
           bookingRef={bookingRef}
           billData={billData}
-          onPaymentSuccess={() => {
+          onPaymentSuccess={(data) => {
+            const statusCode = data?.status?.code || data?.status?.status || (typeof data?.status === 'string' ? data.status : 'paid');
+            const statusLabel = data?.status?.label || (statusCode === 'paid' ? '已結清' : '部分已付');
+            setBillData(prev => ({
+              ...prev,
+              status: { ...(prev?.status || {}), ...(data?.status || {}), code: statusCode, label: statusLabel },
+              bill: data.bill || prev?.bill
+            }));
             loadBill();
-            if (onPaymentSuccess) onPaymentSuccess();
+            if (onPaymentSuccess) {
+              onPaymentSuccess({
+                ...data,
+                booking_ref: bookingRef,
+                status: { code: statusCode, label: statusLabel }
+              });
+            }
           }}
         />
       )}

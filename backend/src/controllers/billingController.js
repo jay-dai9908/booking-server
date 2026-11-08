@@ -78,6 +78,7 @@ export async function postCollect(req, res) {
     const result = await collectPayment(booking_ref, req.body, staffUser, deviceInfo);
     return res.json({
       success: true,
+      booking_ref,
       server_now: new Date().toISOString(),
       ...result
     });

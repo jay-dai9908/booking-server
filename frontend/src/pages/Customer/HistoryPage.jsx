@@ -761,19 +761,20 @@ export default function HistoryPage() {
                   const isNearest = idx === 0;
 
                   return (
-                    <Card key={r.booking_ref} gap={10}>
+                    <Card
+                      key={r.booking_ref}
+                      gap={10}
+                      className="cursor-pointer active:scale-[0.99] transition hover:border-sg-brown select-none"
+                      onClick={() => navigate(`/history?tab=bookings&ref=${r.booking_ref}`)}
+                    >
                       {/* Top row */}
                       <div className="flex justify-between items-center">
                         <Pill variant={pill.variant}>{pill.text}</Pill>
                         <span className="font-num sg-small">{formatShortRef(r.booking_ref)}</span>
                       </div>
 
-                      {/* Date & Time button */}
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/history?tab=bookings&ref=${r.booking_ref}`)}
-                        className="text-left group"
-                      >
+                      {/* Date & Time */}
+                      <div className="text-left group">
                         <div className="flex items-baseline">
                           <span className="font-num font-extrabold text-[26px] leading-[1.2] text-sg-ink mr-2 group-hover:text-sg-brown transition">
                             {monthDay}
@@ -785,11 +786,14 @@ export default function HistoryPage() {
                         <div className="text-[14px] text-sg-muted mt-[2px]">
                           {timeDesc}
                         </div>
-                      </button>
+                      </div>
 
                       {/* Smart board row */}
                       {canAddon && (
-                        <div className="flex items-center gap-2 rounded-[12px] bg-sg-bg p-[10px]">
+                        <div
+                          className="flex items-center gap-2 rounded-[12px] bg-sg-bg p-[10px]"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <Grid className="w-[18px] h-[18px] text-sg-muted shrink-0" />
                           <div className="text-[13px] flex-1 text-sg-ink">
                             {!hasBoards ? (
@@ -816,7 +820,10 @@ export default function HistoryPage() {
                           <Button
                             variant="text"
                             size="sm"
-                            onClick={() => setActiveAddonRes(r)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveAddonRes(r);
+                            }}
                             className="text-sg-brown font-bold"
                           >
                             {hasBoards ? '修改' : '加租'}
@@ -829,16 +836,24 @@ export default function HistoryPage() {
                         variant={isNearest ? 'primary' : 'secondary'}
                         size="sm"
                         icon={<QrCode className="w-4 h-4" />}
-                        onClick={() =>
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setActiveBarcodeData({
                             ref: r.booking_ref,
-                            summary: `${dateShort} ${weekday} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`,
-                          })
-                        }
+                            summary: `${dateShort} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`,
+                          });
+                        }}
                         className="w-full mt-1"
                       >
                         出示到店條碼
                       </Button>
+
+                      {/* Link to details and cancel */}
+                      <div className="flex justify-end pt-0.5">
+                        <span className="text-[13px] font-bold text-sg-brown hover:underline inline-flex items-center">
+                          詳情與取消 ›
+                        </span>
+                      </div>
                     </Card>
                   );
                 })}

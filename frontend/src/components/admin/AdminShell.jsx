@@ -23,6 +23,7 @@ import api from '../../api/axios';
 import AdminAppBar from './AdminAppBar';
 import AdminTabBar from './AdminTabBar';
 import ResponsivePanel from './ResponsivePanel';
+import ErrorBoundary from '../common/ErrorBoundary';
 
 const QuickPosLookupModal = lazy(() => import('../QuickPosLookupModal'));
 
@@ -235,7 +236,9 @@ export default function AdminShell({ children, title = '拾光製所', subtitle 
         />
 
         <main className="flex-1 px-4 md:px-6 py-4 overflow-x-hidden">
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </main>
       </div>
 

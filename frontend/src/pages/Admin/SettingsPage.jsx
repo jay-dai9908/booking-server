@@ -53,6 +53,13 @@ export default function SettingsPage() {
   const [weekendHourly, setWeekendHourly] = useState(150);
   const [weekendUnlimited, setWeekendUnlimited] = useState(800);
 
+  // 3.1 Business Hours Presets
+  const [businessHours, setBusinessHours] = useState({
+    weekday: { start: '10:00', end: '21:00' },
+    saturday: { start: '09:00', end: '21:00' },
+    sunday: { start: '09:00', end: '21:00' }
+  });
+
   // 4. Smart Board Global Rules
   const [allowEquipmentExceedPax, setAllowEquipmentExceedPax] = useState(false);
   const [showEquipmentLiveStock, setShowEquipmentLiveStock] = useState(true);
@@ -115,6 +122,23 @@ export default function SettingsPage() {
       setWeekdayUnlimited(d.weekday_unlimited_price ?? 550);
       setWeekendHourly(d.weekend_hourly_price ?? 150);
       setWeekendUnlimited(d.weekend_unlimited_price ?? 800);
+
+      if (d.business_hours_json) {
+        setBusinessHours({
+          weekday: {
+            start: d.business_hours_json.weekday?.start || '10:00',
+            end: d.business_hours_json.weekday?.end || '21:00'
+          },
+          saturday: {
+            start: d.business_hours_json.saturday?.start || '09:00',
+            end: d.business_hours_json.saturday?.end || '21:00'
+          },
+          sunday: {
+            start: d.business_hours_json.sunday?.start || '09:00',
+            end: d.business_hours_json.sunday?.end || '21:00'
+          }
+        });
+      }
 
       setAllowEquipmentExceedPax(!!d.allow_equipment_exceed_pax);
       setShowEquipmentLiveStock(d.show_equipment_live_stock !== false);
@@ -192,6 +216,7 @@ export default function SettingsPage() {
         auto_print_receipt: autoPrintReceipt,
         auto_print_summary: autoPrintSummary,
         receipt_footer_text: receiptFooterText,
+        business_hours_json: businessHours,
         ...overridePatch
       };
 
@@ -745,6 +770,131 @@ export default function SettingsPage() {
           >
             儲存智能板全域規則
           </button>
+        </div>
+      </div>
+
+      {/* SECTION 4.1: 營業時間預設（時段快選範本） */}
+      <div className="bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-5" data-testid="business-hours-setting-card">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+          <div>
+            <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2 mb-1">
+              <Clock className="w-5 h-5 text-[#8B5B43]" />
+              營業時間預設（時段快選範本）
+            </h2>
+            <p className="text-xs text-gray-500">
+              設定平日、週六與週日的標準營業時段。在「營業時段設定」中，快捷按鈕將直接帶入此處設定的時間。
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="save-business-hours-btn"
+            onClick={() => handleSaveAll()}
+            disabled={saving}
+            className="px-5 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm transition-all"
+          >
+            {saving ? '儲存中...' : '儲存營業時間預設'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* 平日 */}
+          <div className="bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] space-y-3">
+            <span className="block text-sm font-bold text-[#3E332B]">平日（週一至週五）</span>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">開始時間</label>
+                <input
+                  type="time"
+                  data-testid="weekday-start-input"
+                  value={businessHours.weekday.start}
+                  onChange={e => setBusinessHours(prev => ({
+                    ...prev,
+                    weekday: { ...prev.weekday, start: e.target.value }
+                  }))}
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">結束時間</label>
+                <input
+                  type="time"
+                  data-testid="weekday-end-input"
+                  value={businessHours.weekday.end}
+                  onChange={e => setBusinessHours(prev => ({
+                    ...prev,
+                    weekday: { ...prev.weekday, end: e.target.value }
+                  }))}
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 週六 */}
+          <div className="bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] space-y-3">
+            <span className="block text-sm font-bold text-[#3E332B]">週六</span>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">開始時間</label>
+                <input
+                  type="time"
+                  data-testid="saturday-start-input"
+                  value={businessHours.saturday.start}
+                  onChange={e => setBusinessHours(prev => ({
+                    ...prev,
+                    saturday: { ...prev.saturday, start: e.target.value }
+                  }))}
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">結束時間</label>
+                <input
+                  type="time"
+                  data-testid="saturday-end-input"
+                  value={businessHours.saturday.end}
+                  onChange={e => setBusinessHours(prev => ({
+                    ...prev,
+                    saturday: { ...prev.saturday, end: e.target.value }
+                  }))}
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 週日 */}
+          <div className="bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] space-y-3">
+            <span className="block text-sm font-bold text-[#3E332B]">週日</span>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">開始時間</label>
+                <input
+                  type="time"
+                  data-testid="sunday-start-input"
+                  value={businessHours.sunday.start}
+                  onChange={e => setBusinessHours(prev => ({
+                    ...prev,
+                    sunday: { ...prev.sunday, start: e.target.value }
+                  }))}
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">結束時間</label>
+                <input
+                  type="time"
+                  data-testid="sunday-end-input"
+                  value={businessHours.sunday.end}
+                  onChange={e => setBusinessHours(prev => ({
+                    ...prev,
+                    sunday: { ...prev.sunday, end: e.target.value }
+                  }))}
+                  className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43]"
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

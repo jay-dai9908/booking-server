@@ -16,7 +16,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
-import { formatBookingRef } from '../utils/customer/format';
+import { formatBookingRef, safeFormatDate } from '../utils/customer/format';
 import ConfirmPanel from './admin/ConfirmPanel';
 
 export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) {
@@ -315,7 +315,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
                             <div className="space-y-1">
                               <div className="flex items-center flex-wrap gap-2">
                                 <span className="font-bold text-sm text-[#2C241E]">
-                                  {format(new Date(r.session_date), 'yyyy/MM/dd')} ({r.start_time}~{r.end_time})
+                                  {safeFormatDate(r.session_date, 'yyyy/MM/dd')} ({r.start_time}~{r.end_time})
                                 </span>
                                 <span className="font-mono text-xs font-bold text-[#8B5B43] bg-white px-2 py-0.5 rounded border border-[#E8DEC8]">
                                   #{formatBookingRef(r.booking_ref)}
@@ -551,7 +551,7 @@ export default function QuickPosLookupModal({ isOpen, onClose, onDataChanged }) 
       {/* Nested Reservation Details / POS Checkout Modal */}
       {selectedReservationDetail && (
         <ReservationDetailsModal
-          reservation={selectedReservationDetail}
+          bookingRef={selectedReservationDetail.booking_ref || selectedReservationDetail}
           onClose={() => setSelectedReservationDetail(null)}
           onUpdate={updates => {
             if (updates) {

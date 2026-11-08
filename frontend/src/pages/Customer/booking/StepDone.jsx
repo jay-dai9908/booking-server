@@ -1,20 +1,92 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Check, Copy, QrCode } from 'lucide-react';
 import { Card, Divider } from '../../../components/customer/Card';
 import Button from '../../../components/customer/Button';
 import BarcodeSheet from '../../../components/customer/sheets/BarcodeSheet';
+import { BeadLoader } from '../../../components/customer/Bead';
 import { useToast } from '../../../components/customer/Toast';
 import { formatBookingRef, formatDateShort, weekdayChar, formatYMD } from '../../../utils/customer/format';
+import { shortBoardName } from '../../../utils/customer/pricing';
 import { getGoogleCalendarUrl, downloadIcsFile } from '../../../utils/calendarHelper';
+import api from '../../../api/axios';
 
 export default function StepDone({ result }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const toast = useToast();
   const [showBarcode, setShowBarcode] = useState(false);
 
-  const reservation = result?.reservation || result || {};
-  const bookingRef = reservation.booking_ref || '';
+  const refParam = searchParams.get('ref') || result?.reservation?.booking_ref || result?.booking_ref || '';
+  const initialRes = (result?.reservation && result.reservation.session_date) ? result.reservation : null;
+
+  const [reservation, setReservation] = useState(initialRes);
+  const [loading, setLoading] = useState(!initialRes);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!refParam) {
+      if (!initialRes) {
+        setNotFound(true);
+        setLoading(false);
+      }
+      return;
+    }
+
+    setLoading(true);
+    api.get('/reservations/my')
+      .then((res) => {
+        if (!isMounted) return;
+        const list = Array.isArray(res.data) ? res.data : (res.data?.reservations || []);
+        const found = list.find((r) => r.booking_ref === refParam);
+        if (found) {
+          setReservation(found);
+          setNotFound(false);
+        } else if (!initialRes) {
+          setNotFound(true);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load my reservations on done step', err);
+        if (!isMounted) return;
+        if (!initialRes) {
+          setNotFound(true);
+        }
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [refParam, initialRes]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col flex-1">
+        <div className="flex flex-col items-center justify-center py-12 text-center flex-1">
+          <BeadLoader />
+          <p className="text-[13px] text-sg-muted mt-3">載入預約資訊中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (notFound || !reservation) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 text-center flex-1">
+        <div className="text-[18px] font-bold text-sg-ink mb-2">找不到這筆預約</div>
+        <p className="text-[14px] text-sg-muted mb-6">請確認預約編號是否正確，或至「我的預約」查看。</p>
+        <Button variant="primary" onClick={() => navigate('/history?tab=bookings')}>
+          回到我的預約
+        </Button>
+      </div>
+    );
+  }
+
+  const bookingRef = reservation.booking_ref || refParam || '';
   const dateStr = reservation.session_date || reservation.session?.session_date || '';
   const pax = reservation.pax || 1;
   const isUnlimited = !!reservation.is_unlimited;
@@ -29,24 +101,27 @@ export default function StepDone({ result }) {
   }
 
   // Equipment summary
-  const eqSummary = (reservation.equipments || [])
-    .filter((e) => e.equipment_id !== 'bring_own')
-    .map((e) => `${e.name || '智能板'} ×${e.quantity}`)
+  const filteredEquipments = (reservation.equipments || []).filter(
+    (e) => (e.equipment_id || e.id) !== 'bring_own'
+  );
+  const eqSummary = filteredEquipments
+    .map((e) => `${shortBoardName(e.equipment_name_snapshot || e.name || '智能板')} ×${e.quantity || 1}`)
     .join('、');
 
   // Formatted date string
   const cleanDateStr = formatYMD(dateStr);
+  const dateShort = cleanDateStr ? formatDateShort(cleanDateStr) : '';
   const dateParts = cleanDateStr ? cleanDateStr.split('-') : [];
   const monthDay = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : '';
   const weekday = cleanDateStr ? `週${weekdayChar(cleanDateStr)}` : '';
 
-  // Summary line: e.g. "12:00 到 18:00 · 2 位 · 中板 ×1"
-  let summaryDetails = isUnlimited
-    ? `${startTime} 到 ${endTime} · 不限時 · ${pax} 位`
-    : `${startTime} 到 ${endTime} · ${pax} 位`;
+  // Summary line: e.g. "11/10 週二 14:00 到 17:00 · 2 位 · 中板 ×1"
+  let summaryDetails = `${startTime} 到 ${endTime} · ${isUnlimited ? '不限時 · ' : ''}${pax} 位`;
   if (eqSummary) {
     summaryDetails += ` · ${eqSummary}`;
   }
+
+  const fullSummaryLine = `${dateShort ? `${dateShort} ` : ''}${summaryDetails}`;
 
   const handleCopyRef = async () => {
     const formatted = formatBookingRef(bookingRef);
@@ -58,7 +133,16 @@ export default function StepDone({ result }) {
     }
   };
 
-  const barcodeSummaryText = `${cleanDateStr ? formatDateShort(cleanDateStr) : ''} ${startTime} 到 ${endTime} · ${pax} 位`;
+  const calendarRes = {
+    ...reservation,
+    session_date: cleanDateStr,
+    start_time: startTime,
+    end_time: endTime,
+    pax,
+    booking_ref: bookingRef,
+  };
+
+  const barcodeSummaryText = fullSummaryLine;
 
   return (
     <div className="flex flex-col flex-1">
@@ -85,9 +169,9 @@ export default function StepDone({ result }) {
             </span>
           </div>
 
-          {/* Time & pax & equipment */}
-          <div className="text-[14px] text-sg-ink leading-[1.4]">
-            {summaryDetails}
+          {/* Time & pax & equipment with test id */}
+          <div className="text-[15px] font-bold text-sg-ink leading-[1.4]" data-testid="booking-summary-text">
+            {fullSummaryLine}
           </div>
 
           <Divider className="my-[6px]" />
@@ -121,7 +205,7 @@ export default function StepDone({ result }) {
         <div className="flex items-center justify-center gap-1 sg-small text-sg-muted mt-2">
           <span>加入行事曆：</span>
           <a
-            href={getGoogleCalendarUrl(reservation)}
+            href={getGoogleCalendarUrl(calendarRes)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sg-brown font-bold hover:underline px-1 py-0.5"
@@ -131,7 +215,7 @@ export default function StepDone({ result }) {
           <span>·</span>
           <button
             type="button"
-            onClick={() => downloadIcsFile(reservation)}
+            onClick={() => downloadIcsFile(calendarRes)}
             className="text-sg-brown font-bold hover:underline px-1 py-0.5"
           >
             Apple

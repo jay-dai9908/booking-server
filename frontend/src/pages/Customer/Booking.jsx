@@ -177,7 +177,8 @@ export default function Booking() {
   // Validate step route
   useEffect(() => {
     if (step === 'done') {
-      if (!location.state?.result) {
+      const refParam = searchParams.get('ref');
+      if (!refParam && !location.state?.result) {
         navigate('/history?tab=bookings', { replace: true });
       }
       return;
@@ -206,7 +207,8 @@ export default function Booking() {
     try {
       sessionStorage.removeItem(DRAFT_KEY);
     } catch (e) {}
-    navigate('/booking?step=done', { replace: true, state: { result } });
+    const ref = result?.reservation?.booking_ref || result?.booking_ref || '';
+    navigate(`/booking?step=done${ref ? `&ref=${ref}` : ''}`, { replace: true, state: { result } });
   };
 
   // Header setup per step

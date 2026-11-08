@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
 import api from '../../../api/axios';
 import { bookingTimeRange } from '../../../utils/admin/floorSelectors';
+import { shortBoardName } from '../../../utils/customer/pricing';
 
 export default function CheckInPanel({
   isOpen,
@@ -10,6 +11,7 @@ export default function CheckInPanel({
   target,
   activeSeats: propActiveSeats,
   seatStatesMap: propSeatStatesMap,
+  layout: propLayout,
   onSuccess
 }) {
   const [selectedSeats, setSelectedSeats] = useState([]);
@@ -19,6 +21,7 @@ export default function CheckInPanel({
   const [error, setError] = useState(null);
   const [loadedSeats, setLoadedSeats] = useState([]);
   const [loadedSeatStates, setLoadedSeatStates] = useState({});
+  const [loadedLayout, setLoadedLayout] = useState(null);
 
   useEffect(() => {
     if (!target) return;
@@ -28,10 +31,10 @@ export default function CheckInPanel({
 
     // Initial board assignment
     const initialAssign = {};
-    const bds = target.boards || [];
+    const bds = target.boards || target.equipments || [];
     bds.forEach((bd, idx) => {
       const assignedSeat = target.assigned_seats?.[idx] || target.assigned_seats?.[0] || '';
-      initialAssign[bd.unit_group || idx] = assignedSeat;
+      initialAssign[bd.unit_group || bd.id || idx] = assignedSeat;
     });
     setBoardAssign(initialAssign);
 
@@ -46,6 +49,7 @@ export default function CheckInPanel({
         .then(res => {
           const lSeats = (res.data?.layout?.seats || []).filter(s => s.is_active);
           setLoadedSeats(lSeats);
+          setLoadedLayout(res.data?.layout || null);
 
           const sMap = {};
           for (const s of lSeats) {
@@ -68,6 +72,70 @@ export default function CheckInPanel({
 
   const activeSeats = (propActiveSeats && propActiveSeats.length > 0) ? propActiveSeats : loadedSeats;
   const seatStatesMap = propSeatStatesMap || loadedSeatStates;
+  const layout = propLayout || loadedLayout;
+
+  // Group activeSeats into CompactPlan (Zones -> Tables -> Left/Right sides)
+  const groupedPlan = useMemo(() => {
+    const zoneMap = new Map();
+
+    activeSeats.forEach(s => {
+      // 1. Determine zone
+      let zoneName = s.zone?.name || s.zone_name;
+      if (!zoneName && layout?.zones && s.zone_id) {
+        zoneName = layout.zones.find(z => z.id === s.zone_id)?.name;
+      }
+      if (!zoneName) {
+        const match = s.code.match(/^([A-Za-z]+)/);
+        zoneName = match ? `${match[1].toUpperCase()}區` : '全區';
+      }
+      if (!zoneMap.has(zoneName)) zoneMap.set(zoneName, new Map());
+      const tableMap = zoneMap.get(zoneName);
+
+      // 2. Determine table
+      let tableLabel = s.table?.label || s.table_label;
+      if (!tableLabel && layout?.tables && s.table_id) {
+        tableLabel = layout.tables.find(t => t.id === s.table_id)?.label;
+      }
+      if (!tableLabel) {
+        const match = s.code.match(/^([A-Za-z0-9]+)-/);
+        tableLabel = match ? `桌 ${match[1]}` : '一般桌';
+      }
+      if (!tableMap.has(tableLabel)) {
+        tableMap.set(tableLabel, { left: [], right: [] });
+      }
+      const tableObj = tableMap.get(tableLabel);
+
+      // 3. Determine side
+      const side = (s.side || '').toUpperCase();
+      if (side === 'R') {
+        tableObj.right.push(s);
+      } else if (side === 'L') {
+        tableObj.left.push(s);
+      } else {
+        tableObj.left.push(s);
+      }
+    });
+
+    const result = [];
+    for (const [zName, tableMap] of zoneMap.entries()) {
+      const tables = [];
+      for (const [tLabel, sides] of tableMap.entries()) {
+        sides.left.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+        sides.right.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+        // Auto balance if all seats fell into left side
+        if (sides.right.length === 0 && sides.left.length > 1) {
+          const half = Math.ceil(sides.left.length / 2);
+          sides.right = sides.left.slice(half);
+          sides.left = sides.left.slice(0, half);
+        }
+
+        tables.push({ label: tLabel, left: sides.left, right: sides.right });
+      }
+      result.push({ zone: zName, tables });
+    }
+    return result;
+  }, [activeSeats, layout]);
 
   const handleSubmit = async (deferSeating = false) => {
     if (!target) return;
@@ -108,8 +176,15 @@ export default function CheckInPanel({
 
   if (!isOpen || !target) return null;
 
-  const timeRangeText = target.time_range || bookingTimeRange(target);
+  const timeRangeText = bookingTimeRange(target);
   const pax = target.pax || 1;
+  const reasonText = target.allocation_reason || target.reason || '已避開冷氣出風口並優先安排同側或相鄰座位。';
+
+  const boardsList = (target.boards && target.boards.length > 0)
+    ? target.boards
+    : (target.equipments && target.equipments.length > 0)
+    ? target.equipments.filter(e => (e.equipment_id || e.id) !== 'bring_own')
+    : [];
 
   return (
     <ResponsivePanel
@@ -151,10 +226,10 @@ export default function CheckInPanel({
           <span className="font-bold block">
             系統建議座位：{target.assigned_seats?.join('、') || '自動指派'}
           </span>
-          <span className="text-[11px] opacity-90">已避開冷氣出風口並優先安排同側或相鄰座位。</span>
+          <span className="text-[11px] opacity-90">{reasonText}</span>
         </div>
 
-        {/* Seat selection */}
+        {/* Seat selection - CompactPlan (Spec 6.3) */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-[13px] font-bold text-sg-ink">
@@ -171,80 +246,155 @@ export default function CheckInPanel({
             )}
           </div>
 
-          <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-            {activeSeats.map((s) => {
-              const isSelected = selectedSeats.includes(s.code);
-              const isOccupied = seatStatesMap[s.code]?.state === 'in_use' && !target.assigned_seats?.includes(s.code);
+          <div className="space-y-3">
+            {groupedPlan.map((z) => (
+              <div key={z.zone} className="space-y-1.5">
+                <div className="text-[11px] font-bold text-sg-muted uppercase tracking-wider px-1">
+                  {z.zone}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {z.tables.map((t) => (
+                    <div key={t.label} className="border border-sg-line rounded-2xl p-2.5 bg-sg-paper/40 space-y-2">
+                      <div className="text-[12px] font-bold text-sg-ink px-1 flex items-center justify-between">
+                        <span>{t.label}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {/* Left column */}
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] text-sg-muted font-bold text-center">左側</div>
+                          {t.left.map((s) => {
+                            const isSelected = selectedSeats.includes(s.code);
+                            const isOccupied = seatStatesMap[s.code]?.state === 'in_use' && !target.assigned_seats?.includes(s.code);
 
-              return (
-                <button
-                  key={s.code}
-                  type="button"
-                  disabled={isOccupied}
-                  onClick={() => {
-                    if (isSelected) {
-                      setSelectedSeats(selectedSeats.filter(c => c !== s.code));
-                    } else {
-                      if (selectedSeats.length < pax) {
-                        setSelectedSeats([...selectedSeats, s.code]);
-                      }
-                    }
-                  }}
-                  className={`p-2.5 rounded-xl border text-center transition ${
-                    isOccupied
-                      ? 'bg-sg-paper text-sg-muted border-sg-line cursor-not-allowed opacity-50'
-                      : isSelected
-                      ? 'bg-sg-brown text-white border-sg-brown font-bold'
-                      : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
-                  }`}
-                >
-                  <span className="block text-[13px] font-num">{s.code}</span>
-                  <span className="block text-[10px] opacity-80">{isOccupied ? '有人' : isSelected ? '已選' : '空位'}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                            return (
+                              <button
+                                key={s.code}
+                                type="button"
+                                disabled={isOccupied}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setSelectedSeats(selectedSeats.filter(c => c !== s.code));
+                                  } else {
+                                    if (selectedSeats.length < pax) {
+                                      setSelectedSeats([...selectedSeats, s.code]);
+                                    }
+                                  }
+                                }}
+                                className={`w-full p-2 rounded-xl border text-center transition ${
+                                  isOccupied
+                                    ? 'bg-sg-paper text-sg-muted border-sg-line cursor-not-allowed opacity-50'
+                                    : isSelected
+                                    ? 'bg-sg-brown text-white border-sg-brown font-bold shadow-sm'
+                                    : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
+                                }`}
+                              >
+                                <span className="block text-[13px] font-num">{s.code}</span>
+                                <span className="block text-[10px] opacity-80">{isOccupied ? '有人' : isSelected ? '已選' : '空位'}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
 
-        {/* Smart Board assignment */}
-        {(target.boards || []).length > 0 && (
-          <div className="space-y-2 pt-2 border-t border-sg-line">
-            <span className="text-[13px] font-bold text-sg-ink block">智能板分配給哪一位</span>
-            {target.boards.map((bd, bIdx) => (
-              <div key={bd.unit_group || bIdx} className="flex items-center justify-between p-2.5 rounded-xl bg-sg-paper/40 border border-sg-line text-[12px]">
-                <span className="font-bold text-sg-ink">
-                  智能板 #{bIdx + 1}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {selectedSeats.map((sCode) => (
-                    <button
-                      key={sCode}
-                      type="button"
-                      onClick={() => setBoardAssign(prev => ({ ...prev, [bd.unit_group || bIdx]: sCode }))}
-                      className={`px-2.5 py-1 rounded-lg font-bold border transition ${
-                        boardAssign[bd.unit_group || bIdx] === sCode
-                          ? 'bg-sg-brown text-white border-sg-brown'
-                          : 'bg-white text-sg-ink border-sg-line'
-                      }`}
-                    >
-                      {sCode}
-                    </button>
+                        {/* Right column */}
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] text-sg-muted font-bold text-center">右側</div>
+                          {t.right.length > 0 ? (
+                            t.right.map((s) => {
+                              const isSelected = selectedSeats.includes(s.code);
+                              const isOccupied = seatStatesMap[s.code]?.state === 'in_use' && !target.assigned_seats?.includes(s.code);
+
+                              return (
+                                <button
+                                  key={s.code}
+                                  type="button"
+                                  disabled={isOccupied}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setSelectedSeats(selectedSeats.filter(c => c !== s.code));
+                                    } else {
+                                      if (selectedSeats.length < pax) {
+                                        setSelectedSeats([...selectedSeats, s.code]);
+                                      }
+                                    }
+                                  }}
+                                  className={`w-full p-2 rounded-xl border text-center transition ${
+                                    isOccupied
+                                      ? 'bg-sg-paper text-sg-muted border-sg-line cursor-not-allowed opacity-50'
+                                      : isSelected
+                                      ? 'bg-sg-brown text-white border-sg-brown font-bold shadow-sm'
+                                      : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
+                                  }`}
+                                >
+                                  <span className="block text-[13px] font-num">{s.code}</span>
+                                  <span className="block text-[10px] opacity-80">{isOccupied ? '有人' : isSelected ? '已選' : '空位'}</span>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="h-12 flex items-center justify-center text-[10px] text-sg-muted bg-white/40 rounded-xl border border-dashed border-sg-line/60">
+                              無
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Smart Board assignment (Spec 6.3 item 8) */}
+        {boardsList.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-sg-line">
+            <span className="text-[13px] font-bold text-sg-ink block">智能板分配給哪一位</span>
+            {boardsList.map((bd, bIdx) => {
+              const bKey = bd.unit_group || bd.id || bIdx;
+              const bdName = shortBoardName(bd.name || bd.equipment_name_snapshot || '智能板');
+              return (
+                <div key={bKey} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 rounded-xl bg-sg-paper/50 border border-sg-line text-[12px] gap-2">
+                  <span className="font-bold text-sg-ink">
+                    {bdName} #{bIdx + 1}
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {selectedSeats.length === 0 ? (
+                      <span className="text-[11px] text-sg-muted">請先在上方選取座位</span>
+                    ) : (
+                      selectedSeats.map((sCode, pIdx) => (
+                        <button
+                          key={sCode}
+                          type="button"
+                          onClick={() => setBoardAssign(prev => ({ ...prev, [bKey]: sCode }))}
+                          className={`px-2.5 py-1 rounded-lg font-bold border transition text-[11px] ${
+                            boardAssign[bKey] === sCode
+                              ? 'bg-sg-brown text-white border-sg-brown shadow-xs'
+                              : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
+                          }`}
+                        >
+                          第 {pIdx + 1} 位 ({sCode})
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
 
-        {/* Start timer toggle */}
+        {/* Start timer toggle with shared switch style */}
         <div className="pt-2 border-t border-sg-line flex items-center justify-between">
           <span className="text-[13px] font-bold text-sg-ink">入座後立即開始計時</span>
-          <input
-            type="checkbox"
-            checked={startTimer}
-            onChange={(e) => setStartTimer(e.target.checked)}
-            className="w-5 h-5 rounded text-sg-brown focus:ring-sg-brown cursor-pointer"
-          />
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={startTimer}
+              onChange={(e) => setStartTimer(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-sg-line peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sg-line after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sg-brown"></div>
+          </label>
         </div>
       </div>
     </ResponsivePanel>

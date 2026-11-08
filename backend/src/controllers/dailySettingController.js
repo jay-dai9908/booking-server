@@ -133,8 +133,15 @@ export const getGlobalSetting = async (req, res) => {
       line_messaging_token_masked = `••••••••${rawToken.slice(-4)}`;
     }
 
+const DEFAULT_BUSINESS_HOURS = {
+  weekday: { start: '10:00', end: '21:00' },
+  saturday: { start: '09:00', end: '21:00' },
+  sunday: { start: '09:00', end: '21:00' }
+};
+
     const safeSetting = {
       ...setting,
+      business_hours_json: setting.business_hours_json || DEFAULT_BUSINESS_HOURS,
       has_line_messaging_token,
       line_messaging_token_masked,
       line_auto_notify_booking: setting.line_auto_notify_booking ?? false,
@@ -179,11 +186,15 @@ export const updateGlobalSetting = async (req, res) => {
     line_auto_notify_booking,
     line_auto_notify_cancel,
     show_shop_button,
-    shop_enabled
+    shop_enabled,
+    business_hours_json
   } = req.body;
 
   try {
     const dataToUpdate = {};
+    if (business_hours_json !== undefined) {
+      dataToUpdate.business_hours_json = business_hours_json;
+    }
     if (weekday_hourly_price !== undefined && weekday_hourly_price !== null && weekday_hourly_price !== '') {
       dataToUpdate.weekday_hourly_price = parseInt(weekday_hourly_price, 10);
     }
@@ -244,7 +255,8 @@ export const updateGlobalSetting = async (req, res) => {
         line_button_url: dataToUpdate.line_button_url ?? "https://lin.ee/vsZhRW5",
         require_line_login_every_time: dataToUpdate.require_line_login_every_time ?? false,
         enable_preview_page: dataToUpdate.enable_preview_page ?? true,
-        preview_disabled_text: dataToUpdate.preview_disabled_text ?? "系統維護中，請點擊下方按鈕使用 LINE 進行預約"
+        preview_disabled_text: dataToUpdate.preview_disabled_text ?? "系統維護中，請點擊下方按鈕使用 LINE 進行預約",
+        business_hours_json: dataToUpdate.business_hours_json ?? DEFAULT_BUSINESS_HOURS
       }
     });
 

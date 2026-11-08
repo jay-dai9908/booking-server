@@ -1635,6 +1635,7 @@ export const adminCreateReservation = async (req, res) => {
 
       // Run Allocation algorithm or Force Wait
       let mySeats = [];
+      let allocReason = null;
       const sessionUpdates = [];
 
       if (isForceWait === true || isForceWait === 'true') {
@@ -1664,6 +1665,7 @@ export const adminCreateReservation = async (req, res) => {
         }
 
         mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
+        allocReason = allocResult.reason || null;
 
         for (const update of allocResult.updates) {
           if (update.booking_ref !== 'NEW_RES') {
@@ -1782,7 +1784,12 @@ export const adminCreateReservation = async (req, res) => {
         });
       }
 
-      return { booking_ref, count: newReservations.count };
+      return {
+        booking_ref,
+        count: newReservations.count,
+        assigned_seats: mySeats,
+        reason: allocReason || (isForceWait ? '放入等待區' : undefined)
+      };
     });
 
     res.status(201).json({ message: 'Manual reservation successful', reservation: result });

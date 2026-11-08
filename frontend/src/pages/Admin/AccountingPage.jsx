@@ -35,10 +35,16 @@ import { printJobOnThisDevice } from '../../utils/sunmiPrinter';
 import { buildClosingSlip, commandsToPreviewHtml } from '@shared/receipts.js';
 import { toTaipeiDateString } from '@shared/time.js';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
+import { formatMinus } from '../../utils/format';
 import { buildPaymentsCsv, buildEventsCsv, computeDailyRevenue } from '../../utils/admin/accountingExport';
 
 export default function AccountingPage() {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 640) {
+      return 'closing';
+    }
+    return 'overview';
+  });
 
   // Today string in Asia/Taipei
   const todayStr = useMemo(() => {
@@ -92,7 +98,7 @@ export default function AccountingPage() {
 
   // Modals
   const [checkoutBookingRef, setCheckoutBookingRef] = useState(null);
-  const [detailsReservation, setDetailsReservation] = useState(null);
+  const [detailsBookingRef, setDetailsBookingRef] = useState(null);
 
   // Toast
   const [toastMsg, setToastMsg] = useState(null);
@@ -196,7 +202,7 @@ export default function AccountingPage() {
   };
 
   useEffect(() => {
-    if (activeTab === 'payments') fetchPayments();
+    if (activeTab === 'payments' || activeTab === 'overview') fetchPayments();
     else if (activeTab === 'events') fetchEvents();
     else if (activeTab === 'print-jobs') fetchPrintJobs();
     else if (activeTab === 'closing') fetchClosing();
@@ -412,25 +418,24 @@ export default function AccountingPage() {
         <div className="flex sm:hidden items-center justify-between gap-1 w-full">
           <SegmentedTabs
             tabs={[
-              { id: 'overview', label: '總覽' },
               { id: 'closing', label: '日結' },
               { id: 'events', label: '異動' },
               { id: 'unpaid', label: `未結${summary?.unpaid?.count ? ` ${summary.unpaid.count}` : ''}` }
             ]}
-            activeTab={['overview', 'closing', 'events', 'unpaid'].includes(activeTab) ? activeTab : null}
+            activeTab={['closing', 'events', 'unpaid'].includes(activeTab) ? activeTab : null}
             onChange={(tab) => {
               setActiveTab(tab);
               setMobileMenuOpen(false);
             }}
           />
 
-          {/* More menu for 'payments' and 'print-jobs' */}
+          {/* More menu for 'overview', 'payments' and 'print-jobs' */}
           <div className="relative">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className={`p-2 rounded-2xl border transition ${
-                ['payments', 'print-jobs'].includes(activeTab)
+                ['overview', 'payments', 'print-jobs'].includes(activeTab)
                   ? 'bg-sg-brown text-white border-sg-brown'
                   : 'bg-white text-sg-ink border-sg-line hover:border-sg-muted'
               }`}
@@ -441,6 +446,19 @@ export default function AccountingPage() {
 
             {mobileMenuOpen && (
               <div className="absolute right-0 top-full mt-1.5 w-36 bg-white border border-sg-line rounded-2xl shadow-lg z-30 py-1.5 text-[13px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('overview');
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 font-bold transition flex items-center justify-between ${
+                    activeTab === 'overview' ? 'bg-sg-paper text-sg-brown' : 'text-sg-ink hover:bg-sg-paper/60'
+                  }`}
+                >
+                  <span>營收總覽</span>
+                  {activeTab === 'overview' && <Check className="w-3.5 h-3.5 text-sg-brown" />}
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -474,57 +492,59 @@ export default function AccountingPage() {
       </div>
 
       {/* Date & Search Filter Bar (Spec 5.2 Quick date chips) */}
-      {activeTab !== 'unpaid' && (
+      {['overview', 'payments', 'events', 'print-jobs'].includes(activeTab) && (
         <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-sg-line text-[12px]">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sg-muted">日期：</span>
-            <div className="flex items-center gap-1.5">
-              {[
-                { id: 'today', label: '今天' },
-                { id: 'week', label: '本週' },
-                { id: 'month', label: '本月' },
-                { id: 'custom', label: '自訂' }
-              ].map(chip => (
-                <button
-                  key={chip.id}
-                  type="button"
-                  onClick={() => handleDatePreset(chip.id)}
-                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition ${
-                    datePreset === chip.id
-                      ? 'bg-sg-brown text-white border-sg-brown'
-                      : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown/50'
-                  }`}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
+          <div className="space-y-1.5 w-full sm:w-auto">
+            <span className="text-sg-muted text-[11px] font-bold block">日期區間</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                {[
+                  { id: 'today', label: '今天' },
+                  { id: 'week', label: '本週' },
+                  { id: 'month', label: '本月' },
+                  { id: 'custom', label: '自訂' }
+                ].map(chip => (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => handleDatePreset(chip.id)}
+                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition ${
+                      datePreset === chip.id
+                        ? 'bg-sg-brown text-white border-sg-brown'
+                        : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown/50'
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
 
-            <div className="flex items-center gap-1 ml-1">
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => {
-                  setDateFrom(e.target.value);
-                  setDatePreset('custom');
-                }}
-                className="px-2 py-1 rounded-xl border border-sg-line text-[12px]"
-              />
-              <span className="text-sg-muted">至</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => {
-                  setDateTo(e.target.value);
-                  setDatePreset('custom');
-                }}
-                className="px-2 py-1 rounded-xl border border-sg-line text-[12px]"
-              />
+              <div className="flex items-center gap-1">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setDatePreset('custom');
+                  }}
+                  className="px-2 py-1 rounded-xl border border-sg-line text-[12px]"
+                />
+                <span className="text-sg-muted">至</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setDatePreset('custom');
+                  }}
+                  className="px-2 py-1 rounded-xl border border-sg-line text-[12px]"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="relative">
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <div className="relative w-full sm:w-auto">
               <Search className="w-3.5 h-3.5 text-sg-muted absolute left-2.5 top-2" />
               <input
                 type="text"
@@ -537,7 +557,7 @@ export default function AccountingPage() {
                   }
                 }}
                 placeholder="搜尋單號、姓名、收款號"
-                className="pl-8 pr-3 py-1 rounded-xl border border-sg-line text-[12px] w-48"
+                className="pl-8 pr-3 py-1 rounded-xl border border-sg-line text-[12px] w-full sm:w-48"
               />
             </div>
           </div>
@@ -720,7 +740,7 @@ export default function AccountingPage() {
               <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
                 <span className="text-sg-muted text-[11px] block">退款合計</span>
                 <span className="text-[18px] font-bold text-sg-danger font-num">
-                  -NT${summary.total_refunds || 0}
+                  {formatMinus(summary.total_refunds || 0)}
                 </span>
               </div>
               <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
@@ -779,8 +799,8 @@ export default function AccountingPage() {
             </Button>
           </div>
 
-          {/* Table */}
-          <div className="bg-white rounded-3xl border border-sg-line overflow-hidden shadow-xs">
+          {/* Desktop Table (>= 768px) */}
+          <div className="hidden md:block bg-white rounded-3xl border border-sg-line overflow-hidden shadow-xs">
             <table className="w-full text-left border-collapse text-[13px]">
               <thead>
                 <tr className="bg-sg-paper/80 border-b border-sg-line text-[12px] text-sg-muted">
@@ -869,6 +889,94 @@ export default function AccountingPage() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile Card List (< 768px, Spec 5.3) */}
+          <div className="md:hidden space-y-2.5" data-testid="mobile-payments-list">
+            {loadingPayments ? (
+              <div className="bg-white p-6 rounded-3xl border border-sg-line text-center text-sg-muted text-[13px]">
+                載入明細中...
+              </div>
+            ) : payments.length === 0 ? (
+              <div className="bg-white p-6 rounded-3xl border border-sg-line text-center text-sg-muted text-[13px]">
+                尚無符合條件的收款紀錄
+              </div>
+            ) : (
+              payments.map((p) => {
+                const isVoided = p.status === 'voided';
+                const timeStr = new Date(p.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
+                return (
+                  <div
+                    key={p.id}
+                    className={`bg-white p-3.5 rounded-2xl border border-sg-line shadow-xs space-y-2 ${
+                      isVoided ? 'opacity-60 bg-sg-paper/50' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-[13px] text-sg-ink">{p.payment_no}</span>
+                        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                          p.kind === 'refund' ? 'bg-sg-danger-soft text-sg-danger' :
+                          p.kind === 'supplement' ? 'bg-sg-honey-soft text-sg-honey' :
+                          p.kind === 'waive' ? 'bg-sg-paper text-sg-muted' :
+                          'bg-sg-sage-soft text-sg-sage-ink'
+                        }`}>
+                          {p.kind === 'refund' ? '退款' : p.kind === 'supplement' ? '補收' : p.kind === 'waive' ? '免收' : '收款'}
+                        </span>
+                        {isVoided && (
+                          <span className="px-1.5 py-0.5 rounded bg-sg-paper text-sg-danger text-[10px] font-bold">
+                            已作廢
+                          </span>
+                        )}
+                      </div>
+                      <span className={`font-num font-bold text-[15px] ${
+                        p.kind === 'refund' ? 'text-sg-danger' : 'text-sg-ink'
+                      }`}>
+                        {p.kind === 'refund' ? `-NT$${p.amount}` : `NT$${p.amount}`}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[12px] text-sg-muted">
+                      <div>
+                        <span className="font-bold text-sg-ink mr-2">{p.breakdown_json?.customer_name || '現場顧客'}</span>
+                        <span className="font-mono text-sg-brown">{formatBookingRef(p.booking_ref)}</span>
+                      </div>
+                      <span>{getMethodLabel(p.method)}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-sg-muted pt-1 border-t border-sg-line/50">
+                      <div>
+                        <span>{timeStr}</span>
+                        <span className="mx-1.5">·</span>
+                        <span>{p.staff_name || '門市人員'}</span>
+                        {p.device_label && <span> ({p.device_label})</span>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleReprintPayment(p)}
+                          className="text-sg-brown font-bold text-[12px] hover:underline"
+                        >
+                          補印
+                        </button>
+                        {!isVoided && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVoidPaymentTarget(p);
+                              setVoidReason('收錯付款方式');
+                            }}
+                            className="text-sg-danger font-bold text-[12px] hover:underline"
+                          >
+                            作廢
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}
@@ -1052,7 +1160,12 @@ export default function AccountingPage() {
       )}
 
       {/* TAB 4: CLOSING (日結) */}
-      {activeTab === 'closing' && closingPreview && (
+      {activeTab === 'closing' && (
+        !closingPreview ? (
+          <div className="bg-white p-12 rounded-3xl border border-sg-line text-center text-sg-muted text-[14px]">
+            載入日結資訊中...
+          </div>
+        ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left: Financial summary */}
@@ -1202,6 +1315,7 @@ export default function AccountingPage() {
             </div>
           )}
         </div>
+        )
       )}
 
       {/* TAB 5: UNPAID FOLLOW-UP (未結追蹤) */}
@@ -1348,6 +1462,19 @@ export default function AccountingPage() {
           }}
         />
       )}
+
+      {/* Reservation Details Modal */}
+      {detailsBookingRef && (
+        <ReservationDetailsModal
+          bookingRef={detailsBookingRef}
+          onClose={() => setDetailsBookingRef(null)}
+          onUpdate={() => {
+            if (activeTab === 'payments') fetchPayments();
+            else if (activeTab === 'unpaid') fetchUnpaid();
+          }}
+        />
+      )}
     </div>
+
   );
 }

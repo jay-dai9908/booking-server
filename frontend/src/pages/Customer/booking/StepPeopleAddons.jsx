@@ -70,6 +70,8 @@ export default function StepPeopleAddons({
   }, [equipmentConfigs]);
 
   const isBoardVisible = (eq) => {
+    const eqId = eq.equipment_id || eq.id;
+    if (eqId === 'bring_own') return false;
     return eq.visibility_status !== 'HIDDEN';
   };
 

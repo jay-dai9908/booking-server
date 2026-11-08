@@ -4,4 +4,6 @@ dist/
 dev.db
 .DS_Store
 *.csv
+test-results/
+frontend/test-results/
 

@@ -4,6 +4,12 @@
 
 export function extractTimeHHMM(isoString) {
   if (!isoString) return '';
+  if (typeof isoString === 'string') {
+    const match = isoString.trim().match(/^(\d{1,2}:\d{2})(?::\d{2})?$/);
+    if (match) {
+      return match[1].length === 4 ? `0${match[1]}` : match[1];
+    }
+  }
   const d = new Date(isoString);
   if (isNaN(d.getTime())) return '';
   const hours = String(d.getHours()).padStart(2, '0');
@@ -22,23 +28,31 @@ export function formatBookingRef(ref) {
 
 export function bookingTimeRange(bookingOrStart, maybeEnd) {
   if (!bookingOrStart) return '';
-  let startIso;
-  let endIso;
-  let fallbackRange = '';
   if (typeof bookingOrStart === 'object' && !(bookingOrStart instanceof Date)) {
-    startIso = bookingOrStart.start_at;
-    endIso = bookingOrStart.end_at;
-    fallbackRange = bookingOrStart.time_range || '';
-  } else {
-    startIso = bookingOrStart;
-    endIso = maybeEnd;
+    const st = extractTimeHHMM(bookingOrStart.start_time) || bookingOrStart.start_time;
+    const et = extractTimeHHMM(bookingOrStart.end_time) || bookingOrStart.end_time;
+    if (st && et) {
+      return `${st} 到 ${et}`;
+    }
+    if (Array.isArray(bookingOrStart.sessions) && bookingOrStart.sessions.length > 0) {
+      const sorted = [...bookingOrStart.sessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+      const s = extractTimeHHMM(sorted[0].start_time) || sorted[0].start_time;
+      const e = extractTimeHHMM(sorted[sorted.length - 1].end_time) || sorted[sorted.length - 1].end_time;
+      return `${s} 到 ${e}`;
+    }
+    const start = extractTimeHHMM(bookingOrStart.start_at);
+    const end = extractTimeHHMM(bookingOrStart.end_at);
+    if (start && end) {
+      return `${start} 到 ${end}`;
+    }
+    return bookingOrStart.time_range || '';
   }
-  const start = extractTimeHHMM(startIso);
-  const end = extractTimeHHMM(endIso);
+  const start = extractTimeHHMM(bookingOrStart) || bookingOrStart;
+  const end = extractTimeHHMM(maybeEnd) || maybeEnd;
   if (start && end) {
     return `${start} 到 ${end}`;
   }
-  return fallbackRange;
+  return '';
 }
 
 export function bookedMinutes(booking, maybeEnd) {

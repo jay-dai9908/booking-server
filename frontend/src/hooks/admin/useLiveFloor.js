@@ -61,7 +61,8 @@ export function useLiveFloor(date = null, pollInterval = 10000) {
     data,
     loading,
     error,
-    refresh
+    refresh,
+    setData
   };
 }
 

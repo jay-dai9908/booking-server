@@ -1130,19 +1130,21 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
       )}
 
       {/* Reservation Details Modal (Stacked on top) */}
-      <ReservationDetailsModal 
-        reservation={selectedReservation} 
-        onClose={() => setSelectedReservation(null)} 
-        onUpdate={(updates) => {
-          if (updates) {
-            setSelectedReservation(prev => ({ ...prev, ...updates }));
-          } else {
-            setSelectedReservation(null);
-          }
-          fetchMemberReservations();
-          refreshMemberDetails();
-        }} 
-      />
+      {selectedReservation && (
+        <ReservationDetailsModal 
+          bookingRef={selectedReservation?.booking_ref || selectedReservation} 
+          onClose={() => setSelectedReservation(null)} 
+          onUpdate={(updates) => {
+            if (updates) {
+              setSelectedReservation(prev => (prev ? { ...prev, ...updates } : prev));
+            } else {
+              setSelectedReservation(null);
+            }
+            fetchMemberReservations();
+            refreshMemberDetails();
+          }} 
+        />
+      )}
 
       {/* Send LINE Message Modal */}
       <SendLineMessageModal

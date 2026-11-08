@@ -183,7 +183,11 @@ export default function EquipmentAddonSheet({
 
   const sortedConfigs = useMemo(() => {
     return [...configs]
-      .filter((eq) => eq.visibility_status !== 'HIDDEN')
+      .filter((eq) => {
+        const eqId = eq.equipment_id || eq.id;
+        if (eqId === 'bring_own') return false;
+        return eq.visibility_status !== 'HIDDEN';
+      })
       .sort((a, b) => {
         const aId = a.equipment_id || a.id;
         const bId = b.equipment_id || b.id;

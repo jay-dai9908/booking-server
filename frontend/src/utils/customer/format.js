@@ -1,9 +1,12 @@
+import { format } from 'date-fns';
+
 // 拾光製所 格式化工具
 
 const WEEKDAY_CHARS = ['日', '一', '二', '三', '四', '五', '六'];
 const CN_NUMS = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 
 export function toDateObj(date) {
+  if (!date) return new Date(NaN);
   if (date instanceof Date) return date;
   if (typeof date === 'string') {
     if (date.includes('-')) {
@@ -12,6 +15,17 @@ export function toDateObj(date) {
     }
   }
   return new Date(date);
+}
+
+export function safeFormatDate(date, fmt = 'yyyy/MM/dd', fallback = '—') {
+  if (!date) return fallback;
+  try {
+    const d = toDateObj(date);
+    if (!d || isNaN(d.getTime())) return fallback;
+    return format(d, fmt);
+  } catch (e) {
+    return fallback;
+  }
 }
 
 export function formatMoney(n) {
@@ -23,7 +37,9 @@ export function formatMoneyBig(n) {
 }
 
 export function formatMinus(n) {
-  return `−NT$${Math.abs(Math.round(Number(n) || 0)).toLocaleString('en-US')}`;
+  const rounded = Math.round(Number(n) || 0);
+  if (rounded === 0) return 'NT$0';
+  return `-NT$${Math.abs(rounded).toLocaleString('en-US')}`;
 }
 
 export function formatPlus(n) {
@@ -31,19 +47,25 @@ export function formatPlus(n) {
 }
 
 export function weekdayChar(date) {
+  if (!date) return '';
   const d = toDateObj(date);
-  return WEEKDAY_CHARS[d.getDay()];
+  if (!d || isNaN(d.getTime())) return '';
+  return WEEKDAY_CHARS[d.getDay()] || '';
 }
 
-export function formatDateShort(date) {
+export function formatDateShort(date, fallback = '—') {
+  if (!date) return fallback;
   const d = toDateObj(date);
+  if (!d || isNaN(d.getTime())) return fallback;
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${mm}/${dd} 週${WEEKDAY_CHARS[d.getDay()]}`;
 }
 
-export function formatDateFull(date) {
+export function formatDateFull(date, fallback = '—') {
+  if (!date) return fallback;
   const d = toDateObj(date);
+  if (!d || isNaN(d.getTime())) return fallback;
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
