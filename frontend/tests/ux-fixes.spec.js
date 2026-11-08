@@ -559,8 +559,7 @@ async function run() {
     // FLOW 8: Checkout Split Collect (D1) & Payment Complete View (D2)
     // =========================================================================
     console.log('\n--- FLOW 8: Checkout Split Collect (D1) & Payment Complete View (D2) ---');
-    // Find today's active session
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
     const todayDate = new Date(`${todayStr}T00:00:00.000Z`);
     const todaySessions = await prisma.session.findMany({
       where: { session_date: todayDate },

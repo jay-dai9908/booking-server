@@ -80,7 +80,7 @@ export default function SeatLayoutPage() {
   // Publish modal state
   const [previewPublishData, setPreviewPublishData] = useState(null);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
-  const [publishDate, setPublishDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [publishDate, setPublishDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }));
   const [manualOverrides, setManualOverrides] = useState({});
   const [editingOverrideRef, setEditingOverrideRef] = useState(null);
 
@@ -282,7 +282,7 @@ export default function SeatLayoutPage() {
         layout_id: layout.id,
         draft: layout,
         pax: paxToTest,
-        date: new Date().toISOString().slice(0, 10)
+        date: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
       });
       setTestResult(res.data);
       return res.data;

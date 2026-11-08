@@ -65,7 +65,6 @@ test('Round 9 Section 5: POST /floor/:ref/boards validation and creation', async
   });
 
   // 4. Create test reservation and booking persons
-  await prisma.accountingEvent.deleteMany({ where: { booking_ref: bookingRef } });
   await prisma.bookingEquipment.deleteMany({ where: { booking_ref: bookingRef } });
   await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } });
   await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } });

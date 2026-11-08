@@ -282,9 +282,13 @@ export async function getLiveFloorData(dateStr = null) {
     const user = firstRes.user || {};
 
     const startAtStr = `${targetDateStr}T${firstRes.session.start_time}:00+08:00`;
-    const endAtStr = `${targetDateStr}T${lastRes.session.end_time}:00+08:00`;
+    let endAtStr = `${targetDateStr}T${lastRes.session.end_time}:00+08:00`;
     const startDt = new Date(startAtStr);
-    const endDt = new Date(endAtStr);
+    let endDt = new Date(endAtStr);
+    if (endDt <= startDt) {
+      endDt = new Date(endDt.getTime() + 24 * 60 * 60 * 1000);
+      endAtStr = endDt.toISOString();
+    }
 
     const bPersons = personsByRef.get(bRef) || [];
     const bPayments = paymentsByRef.get(bRef) || [];
