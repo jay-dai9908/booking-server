@@ -20,30 +20,47 @@ export function formatBookingRef(ref) {
   return `BK-${clean.toUpperCase()}`;
 }
 
-export function bookingTimeRange(booking) {
-  if (!booking) return '';
-  const start = extractTimeHHMM(booking.start_at);
-  const end = extractTimeHHMM(booking.end_at);
+export function bookingTimeRange(bookingOrStart, maybeEnd) {
+  if (!bookingOrStart) return '';
+  let startIso;
+  let endIso;
+  let fallbackRange = '';
+  if (typeof bookingOrStart === 'object' && !(bookingOrStart instanceof Date)) {
+    startIso = bookingOrStart.start_at;
+    endIso = bookingOrStart.end_at;
+    fallbackRange = bookingOrStart.time_range || '';
+  } else {
+    startIso = bookingOrStart;
+    endIso = maybeEnd;
+  }
+  const start = extractTimeHHMM(startIso);
+  const end = extractTimeHHMM(endIso);
   if (start && end) {
     return `${start} 到 ${end}`;
   }
-  return booking.time_range || '';
+  return fallbackRange;
 }
 
-export function bookedMinutes(booking) {
-  if (!booking?.start_at || !booking?.end_at) {
+export function bookedMinutes(booking, maybeEnd) {
+  let start_at = booking?.start_at;
+  let end_at = booking?.end_at;
+  if ((typeof booking === 'string' || booking instanceof Date) && (typeof maybeEnd === 'string' || maybeEnd instanceof Date)) {
+    start_at = booking;
+    end_at = maybeEnd;
+  }
+  if (!start_at || !end_at) {
     if (booking?.session_count) return booking.session_count * 60;
     return 60;
   }
-  const s = new Date(booking.start_at).getTime();
-  const e = new Date(booking.end_at).getTime();
+  const s = new Date(start_at).getTime();
+  const e = new Date(end_at).getTime();
   if (isNaN(s) || isNaN(e) || e <= s) return 60;
   return Math.round((e - s) / 60000);
 }
 
-export function bookingDurationText(booking) {
-  const range = bookingTimeRange(booking);
-  const mins = bookedMinutes(booking);
+export function bookingDurationText(booking, maybeEnd) {
+  const range = bookingTimeRange(booking, maybeEnd);
+  const mins = bookedMinutes(booking, maybeEnd);
   const hours = mins / 60;
   const hoursText = Number.isInteger(hours) ? `${hours} 小時` : `${hours.toFixed(1)} 小時`;
   if (range) {
@@ -95,20 +112,32 @@ export function personTimerState(person, booking, now = new Date()) {
   return 'running';
 }
 
-export function formatOverdueText(booking, now = new Date()) {
-  if (booking?.attendance === 'checked_in') return null;
-  if (!booking?.start_at) return null;
-
-  const start = new Date(booking.start_at).getTime();
-  const current = (now instanceof Date ? now : new Date(now)).getTime();
-  const diffMins = Math.floor((current - start) / 60000);
+export function formatOverdueText(bookingOrMins, now = new Date()) {
+  let diffMins;
+  if (typeof bookingOrMins === 'number') {
+    diffMins = bookingOrMins;
+  } else {
+    if (bookingOrMins?.attendance === 'checked_in') return null;
+    if (!bookingOrMins?.start_at) return null;
+    const start = new Date(bookingOrMins.start_at).getTime();
+    const current = (now instanceof Date ? now : new Date(now)).getTime();
+    diffMins = Math.floor((current - start) / 60000);
+  }
 
   if (diffMins <= 0) return null;
   if (diffMins <= 15) {
-    return { text: `遲到 ${diffMins} 分`, isLate: true, isOverdue: false, minutes: diffMins };
+    return { text: `遲到 ${diffMins} 分`, isLate: true, isOverdue: false, severity: 'warning', minutes: diffMins };
   }
   const overdueMins = diffMins - 15;
-  return { text: `已過保留時間 ${overdueMins} 分`, isLate: false, isOverdue: true, minutes: overdueMins };
+  let overdueStr;
+  if (overdueMins >= 60) {
+    const h = Math.floor(overdueMins / 60);
+    const m = overdueMins % 60;
+    overdueStr = m > 0 ? `${h} 小時 ${m} 分` : `${h} 小時`;
+  } else {
+    overdueStr = `${overdueMins} 分`;
+  }
+  return { text: `已過保留時間 ${overdueStr}`, isLate: false, isOverdue: true, severity: 'danger', minutes: overdueMins };
 }
 
 export function groupTimerPill(booking, now = new Date()) {
@@ -166,13 +195,13 @@ export function groupTimerPill(booking, now = new Date()) {
   for (const p of activePersons) {
     if (p.timer?.paused_at) continue;
     const elapsed = personElapsedMinutes(p, now);
-    if (elapsed >= totalBooked) {
+    if (elapsed > totalBooked) {
       hasOvertime = true;
       const over = elapsed - totalBooked;
       if (over > maxOvertime) maxOvertime = over;
     } else {
       const remaining = totalBooked - elapsed;
-      if (remaining <= 15) {
+      if (remaining <= 30) {
         hasExpiring = true;
         if (remaining < minRemaining) minRemaining = remaining;
       }
@@ -180,11 +209,11 @@ export function groupTimerPill(booking, now = new Date()) {
   }
 
   if (hasOvertime) {
-    return { label: maxOvertime > 0 ? `超時 ${maxOvertime} 分` : '已超時', variant: 'danger' };
+    return { label: maxOvertime > 0 ? `超時 ${maxOvertime} 分` : '超時 1 分', variant: 'danger' };
   }
 
   if (hasExpiring) {
-    return { label: `剩餘 ${minRemaining} 分`, variant: 'warning' };
+    return { label: `還有 ${minRemaining} 分`, variant: 'warning' };
   }
 
   return { label: '計時中', variant: 'active' };

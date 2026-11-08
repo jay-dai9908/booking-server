@@ -48,6 +48,10 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(bookingTimeRange(sampleBooking), '11:00 到 15:00');
     assert.strictEqual(bookedMinutes(sampleBooking), 240);
     assert.strictEqual(bookingDurationText(sampleBooking), '11:00 到 15:00 · 4 小時');
+    // Test dual string/date parameters
+    assert.strictEqual(bookingTimeRange(sampleBooking.start_at, sampleBooking.end_at), '11:00 到 15:00');
+    assert.strictEqual(bookedMinutes(sampleBooking.start_at, sampleBooking.end_at), 240);
+    assert.strictEqual(bookingDurationText(sampleBooking.start_at, sampleBooking.end_at), '11:00 到 15:00 · 4 小時');
   });
 
   await t.test('2. personElapsedMinutes calculates elapsed minus paused seconds', () => {
@@ -63,24 +67,161 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(elapsed2, 30);
   });
 
-  await t.test('3. personTimerState', () => {
-    const now = new Date('2026-11-08T12:00:00+08:00');
-    assert.strictEqual(personTimerState(sampleBooking.persons[0], sampleBooking, now), 'running');
-    assert.strictEqual(personTimerState(sampleBooking.persons[1], sampleBooking, now), 'paused');
+  await t.test('3. Spec test: 預約 3 小時，計時 3:08', () => {
+    const threeHourBooking = {
+      start_at: '2026-11-08T10:00:00+08:00',
+      end_at: '2026-11-08T13:00:00+08:00',
+      attendance: 'checked_in',
+      pax: 1,
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-1',
+          timer: {
+            billing_start_at: '2026-11-08T10:00:00+08:00',
+            timer_started_at: '2026-11-08T10:00:00+08:00',
+            timer_ended_at: null,
+            paused_at: null,
+            paused_seconds: 0
+          }
+        }
+      ]
+    };
+    assert.strictEqual(bookedMinutes(threeHourBooking), 180);
+    assert.strictEqual(bookingDurationText(threeHourBooking), '10:00 到 13:00 · 3 小時');
 
-    // Check overtime
-    const future = new Date('2026-11-08T15:30:00+08:00'); // 4.5 hours later
-    assert.strictEqual(personTimerState(sampleBooking.persons[0], sampleBooking, future), 'overtime');
+    // 3 hours and 8 minutes later: 13:08
+    const now1308 = new Date('2026-11-08T13:08:00+08:00');
+    const elapsed = personElapsedMinutes(threeHourBooking.persons[0], now1308);
+    assert.strictEqual(elapsed, 188);
+    assert.strictEqual(formatElapsedText(elapsed), '3:08');
+    assert.strictEqual(personTimerState(threeHourBooking.persons[0], threeHourBooking, now1308), 'overtime');
   });
 
-  await t.test('4. groupTimerPill for checked in group', () => {
-    const now = new Date('2026-11-08T12:00:00+08:00');
-    const pill = groupTimerPill(sampleBooking, now);
-    assert.strictEqual(pill.variant, 'active');
-    assert.strictEqual(pill.label, '計時中');
+  await t.test('4. Spec test: 超時 31 分', () => {
+    const overtimeBooking = {
+      start_at: '2026-11-08T10:00:00+08:00',
+      end_at: '2026-11-08T12:00:00+08:00', // 2 hours = 120 mins
+      attendance: 'checked_in',
+      pax: 1,
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-1',
+          timer: {
+            billing_start_at: '2026-11-08T10:00:00+08:00',
+            timer_started_at: '2026-11-08T10:00:00+08:00',
+            timer_ended_at: null,
+            paused_at: null,
+            paused_seconds: 0
+          }
+        }
+      ]
+    };
+    // 2 hours + 31 mins = 12:31
+    const now1231 = new Date('2026-11-08T12:31:00+08:00');
+    const pill = groupTimerPill(overtimeBooking, now1231);
+    assert.strictEqual(pill.variant, 'danger');
+    assert.strictEqual(pill.label, '超時 31 分');
   });
 
-  await t.test('5. groupTimerPill for late & overdue un-checked-in booking', () => {
+  await t.test('5. Spec test: 剩 30 分鐘內顯示「還有 x 分」', () => {
+    const expiringBooking = {
+      start_at: '2026-11-08T10:00:00+08:00',
+      end_at: '2026-11-08T12:00:00+08:00', // 120 mins
+      attendance: 'checked_in',
+      pax: 1,
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-1',
+          timer: {
+            billing_start_at: '2026-11-08T10:00:00+08:00',
+            timer_started_at: '2026-11-08T10:00:00+08:00',
+            timer_ended_at: null,
+            paused_at: null,
+            paused_seconds: 0
+          }
+        }
+      ]
+    };
+    // 11:35 -> elapsed 95 mins, remaining 25 mins <= 30 mins
+    const now1135 = new Date('2026-11-08T11:35:00+08:00');
+    const pill = groupTimerPill(expiringBooking, now1135);
+    assert.strictEqual(pill.variant, 'warning');
+    assert.strictEqual(pill.label, '還有 25 分');
+  });
+
+  await t.test('6. Spec test: 暫停中 (全部暫停才顯示「已暫停」)', () => {
+    const pausedBooking = {
+      start_at: '2026-11-08T10:00:00+08:00',
+      end_at: '2026-11-08T12:00:00+08:00',
+      attendance: 'checked_in',
+      pax: 1,
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-1',
+          timer: {
+            billing_start_at: '2026-11-08T10:00:00+08:00',
+            timer_started_at: '2026-11-08T10:00:00+08:00',
+            timer_ended_at: null,
+            paused_at: '2026-11-08T10:30:00+08:00',
+            paused_seconds: 0
+          }
+        }
+      ]
+    };
+    const now1100 = new Date('2026-11-08T11:00:00+08:00');
+    assert.strictEqual(personTimerState(pausedBooking.persons[0], pausedBooking, now1100), 'paused');
+    const pill = groupTimerPill(pausedBooking, now1100);
+    assert.strictEqual(pill.variant, 'paused');
+    assert.strictEqual(pill.label, '已暫停');
+  });
+
+  await t.test('7. Spec test: 已離場', () => {
+    const endedBooking = {
+      start_at: '2026-11-08T10:00:00+08:00',
+      end_at: '2026-11-08T12:00:00+08:00',
+      attendance: 'checked_in',
+      pax: 1,
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-1',
+          timer: {
+            billing_start_at: '2026-11-08T10:00:00+08:00',
+            timer_started_at: '2026-11-08T10:00:00+08:00',
+            timer_ended_at: '2026-11-08T11:45:00+08:00',
+            paused_at: null,
+            paused_seconds: 0
+          }
+        }
+      ]
+    };
+    const now1200 = new Date('2026-11-08T12:00:00+08:00');
+    assert.strictEqual(personTimerState(endedBooking.persons[0], endedBooking, now1200), 'ended');
+    const pill = groupTimerPill(endedBooking, now1200);
+    assert.strictEqual(pill.variant, 'muted');
+    assert.strictEqual(pill.label, '已結束');
+  });
+
+  await t.test('8. Spec test: 沒有 BookingPerson', () => {
+    const unseatedBooking = {
+      start_at: '2026-11-08T10:00:00+08:00',
+      end_at: '2026-11-08T12:00:00+08:00',
+      attendance: 'checked_in',
+      needs_seating: true,
+      pax: 2,
+      persons: []
+    };
+    const now1010 = new Date('2026-11-08T10:10:00+08:00');
+    const pill = groupTimerPill(unseatedBooking, now1010);
+    assert.strictEqual(pill.variant, 'warning');
+    assert.strictEqual(pill.label, '待帶位');
+  });
+
+  await t.test('9. groupTimerPill for late & overdue un-checked-in booking', () => {
     const lateBooking = {
       start_at: '2026-11-08T10:00:00+08:00',
       end_at: '2026-11-08T12:00:00+08:00',
@@ -93,10 +234,16 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(pillLate.label, '遲到 12 分');
     assert.strictEqual(pillLate.variant, 'warning');
 
-    // 11:13 -> 73 mins from 10:00, 58 mins past retain time
+    // 11:13 -> 73 mins from 10:00, 58 mins past retain time (<60m)
     const now1113 = new Date('2026-11-08T11:13:00+08:00');
     const pillOverdue = groupTimerPill(lateBooking, now1113);
     assert.strictEqual(pillOverdue.label, '已過保留時間 58 分');
     assert.strictEqual(pillOverdue.variant, 'danger');
+
+    // 11:53 -> 113 mins from 10:00, 98 mins past retain time (1 hr 38 mins)
+    const now1153 = new Date('2026-11-08T11:53:00+08:00');
+    const pillOverdueHour = groupTimerPill(lateBooking, now1153);
+    assert.strictEqual(pillOverdueHour.label, '已過保留時間 1 小時 38 分');
+    assert.strictEqual(pillOverdueHour.variant, 'danger');
   });
 });
