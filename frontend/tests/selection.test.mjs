@@ -1,5 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { transitionMode, buildUnlimitedOptions } from '../src/utils/customer/selection.js';
 
 describe('Customer booking selection mode switching (Section 2.2)', () => {
@@ -135,5 +137,14 @@ describe('Customer booking selection mode switching (Section 2.2)', () => {
 
     assert.equal(state.arrival, 0);
     assert.equal(state.leave, 6, 'Uses original timed end time if later than arrival + N');
+  });
+
+  test('5. Spec 2.4: HourRangeScrollPicker does not contain hardcoded business hour presets', () => {
+    const filePath = path.resolve('frontend/src/components/HourRangeScrollPicker.jsx');
+    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    assert.ok(!fileContent.includes('常用營業時段一鍵套用'), 'Must not have hardcoded preset header');
+    assert.ok(!fileContent.includes('平日 (13:00~21:00)'), 'Must not have hardcoded preset button');
+    assert.ok(!fileContent.includes('假日 (09:00~21:00)'), 'Must not have hardcoded preset button');
+    assert.ok(!fileContent.includes('全天 (10:00~22:00)'), 'Must not have hardcoded preset button');
   });
 });
