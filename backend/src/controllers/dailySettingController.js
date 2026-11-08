@@ -1,4 +1,11 @@
 import prisma from '../prismaClient.js';
+import auditService from '../services/audit/auditService.js';
+
+const DEFAULT_BUSINESS_HOURS = {
+  weekday: { start: '10:00', end: '21:00' },
+  saturday: { start: '09:00', end: '21:00' },
+  sunday: { start: '09:00', end: '21:00' }
+};
 
 export const getDailySetting = async (req, res) => {
   const { date } = req.query;
@@ -133,12 +140,6 @@ export const getGlobalSetting = async (req, res) => {
       line_messaging_token_masked = `••••••••${rawToken.slice(-4)}`;
     }
 
-const DEFAULT_BUSINESS_HOURS = {
-  weekday: { start: '10:00', end: '21:00' },
-  saturday: { start: '09:00', end: '21:00' },
-  sunday: { start: '09:00', end: '21:00' }
-};
-
     const safeSetting = {
       ...setting,
       business_hours_json: setting.business_hours_json || DEFAULT_BUSINESS_HOURS,
@@ -187,13 +188,28 @@ export const updateGlobalSetting = async (req, res) => {
     line_auto_notify_cancel,
     show_shop_button,
     shop_enabled,
-    business_hours_json
+    business_hours_json,
+    booking_note_chips,
+    guest_line_hint_text
   } = req.body;
 
   try {
     const dataToUpdate = {};
     if (business_hours_json !== undefined) {
       dataToUpdate.business_hours_json = business_hours_json;
+    }
+    if (booking_note_chips !== undefined) {
+      if (Array.isArray(booking_note_chips)) {
+        const cleaned = booking_note_chips
+          .map((s) => String(s || '').trim())
+          .filter(Boolean)
+          .map((s) => s.slice(0, 12))
+          .slice(0, 8);
+        dataToUpdate.booking_note_chips = cleaned;
+      }
+    }
+    if (guest_line_hint_text !== undefined) {
+      dataToUpdate.guest_line_hint_text = typeof guest_line_hint_text === 'string' ? guest_line_hint_text.trim() : null;
     }
     if (weekday_hourly_price !== undefined && weekday_hourly_price !== null && weekday_hourly_price !== '') {
       dataToUpdate.weekday_hourly_price = parseInt(weekday_hourly_price, 10);
@@ -238,6 +254,8 @@ export const updateGlobalSetting = async (req, res) => {
     if (show_shop_button !== undefined) dataToUpdate.show_shop_button = Boolean(show_shop_button);
     if (shop_enabled !== undefined) dataToUpdate.shop_enabled = Boolean(shop_enabled);
 
+    const oldSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
+
     const setting = await prisma.globalSetting.upsert({
       where: { id: 1 },
       update: dataToUpdate,
@@ -259,6 +277,18 @@ export const updateGlobalSetting = async (req, res) => {
         business_hours_json: dataToUpdate.business_hours_json ?? DEFAULT_BUSINESS_HOURS
       }
     });
+
+    if (dataToUpdate.booking_note_chips !== undefined) {
+      await auditService.log(prisma, {
+        event_type: '設定變更',
+        category: 'setting',
+        summary: '更新預約備註快速選項',
+        before_json: oldSetting?.booking_note_chips ? JSON.stringify(oldSetting.booking_note_chips) : null,
+        after_json: JSON.stringify(dataToUpdate.booking_note_chips),
+        staff_name: req.user?.name || '管理員',
+        device_label: '後台'
+      }).catch(err => console.error('Failed to log audit event for booking_note_chips:', err));
+    }
 
     res.json({ message: 'Global setting updated successfully', setting });
   } catch (error) {

@@ -17,7 +17,13 @@ import {
   Key,
   ShoppingBag,
   Printer,
-  Clock
+  Clock,
+  Tag,
+  Plus,
+  Trash2,
+  GripVertical,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import api from '../../api/axios';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
@@ -26,6 +32,8 @@ const DEFAULT_PREVIEW_DISABLED_TEXT = '系統維護中，請點擊下方按鈕�
 const DEFAULT_ANNOUNCEMENT_TEXT = '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
 const DEFAULT_PRICE_NOTICE_TEXT = '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品';
 const DEFAULT_LINE_URL = 'https://lin.ee/vsZhRW5';
+const DEFAULT_BOOKING_NOTE_CHIPS = ['第一次玩', '有小孩同行', '生日慶祝', '希望坐一起'];
+const DEFAULT_GUEST_LINE_HINT_TEXT = '會打開拾光製所的官方 LINE，從選單點『預約』就能登入';
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -46,6 +54,9 @@ export default function SettingsPage() {
   const [showLineButton, setShowLineButton] = useState(true);
   const [showShopButton, setShowShopButton] = useState(true);
   const [lineButtonUrl, setLineButtonUrl] = useState(DEFAULT_LINE_URL);
+  const [guestLineHintText, setGuestLineHintText] = useState(DEFAULT_GUEST_LINE_HINT_TEXT);
+  const [bookingNoteChips, setBookingNoteChips] = useState(DEFAULT_BOOKING_NOTE_CHIPS);
+  const [draggedChipIdx, setDraggedChipIdx] = useState(null);
 
   // 3. Global Store Default Prices
   const [weekdayHourly, setWeekdayHourly] = useState(100);
@@ -117,6 +128,12 @@ export default function SettingsPage() {
       setShowLineButton(d.show_line_button !== false);
       setShowShopButton(d.show_shop_button !== false && d.shop_enabled !== false);
       setLineButtonUrl(d.line_button_url || DEFAULT_LINE_URL);
+      setGuestLineHintText(d.guest_line_hint_text ?? DEFAULT_GUEST_LINE_HINT_TEXT);
+      if (Array.isArray(d.booking_note_chips) && d.booking_note_chips.length > 0) {
+        setBookingNoteChips(d.booking_note_chips);
+      } else {
+        setBookingNoteChips(DEFAULT_BOOKING_NOTE_CHIPS);
+      }
 
       setWeekdayHourly(d.weekday_hourly_price ?? 100);
       setWeekdayUnlimited(d.weekday_unlimited_price ?? 550);
@@ -192,6 +209,8 @@ export default function SettingsPage() {
         show_line_button: showLineButton,
         show_shop_button: showShopButton,
         line_button_url: lineButtonUrl,
+        guest_line_hint_text: guestLineHintText,
+        booking_note_chips: bookingNoteChips.map(s => String(s || '').trim()).filter(Boolean).map(s => s.slice(0, 12)).slice(0, 8),
         weekday_hourly_price: parseInt(weekdayHourly, 10) || 100,
         weekday_unlimited_price: parseInt(weekdayUnlimited, 10) || 550,
         weekend_hourly_price: parseInt(weekendHourly, 10) || 150,
@@ -528,15 +547,27 @@ export default function SettingsPage() {
                 <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
               </label>
             </div>
-            <div className="pt-3 border-t border-[#E8DEC8]">
-              <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">官方 LINE 連結網址</label>
-              <input
-                type="url"
-                value={lineButtonUrl}
-                onChange={e => setLineButtonUrl(e.target.value)}
-                placeholder="https://lin.ee/..."
-                className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
-              />
+            <div className="pt-3 border-t border-[#E8DEC8] space-y-2">
+              <div>
+                <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">官方 LINE 連結網址</label>
+                <input
+                  type="url"
+                  value={lineButtonUrl}
+                  onChange={e => setLineButtonUrl(e.target.value)}
+                  placeholder="https://lin.ee/..."
+                  className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">未登入按鈕下方提示小字</label>
+                <input
+                  type="text"
+                  value={guestLineHintText}
+                  onChange={e => setGuestLineHintText(e.target.value)}
+                  placeholder="會打開拾光製所的官方 LINE，從選單點『預約』就能登入"
+                  className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+                />
+              </div>
             </div>
             <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showLineButton ? '目前狀態：顧客端頂部顯示官方 LINE 按鈕' : '目前狀態：顧客端頂部隱藏官方 LINE 按鈕'}
@@ -567,6 +598,165 @@ export default function SettingsPage() {
             </div>
             <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showShopButton ? '目前狀態：顧客預約頁頂部顯示「商品預購」按鈕' : '目前狀態：顧客預約頁頂部隱藏此按鈕'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION 2.5: 預約備註快速選項 (Round 9 Section 2) */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
+              <Tag className="w-5 h-5 text-[#8B5B43]" />
+              預約備註快速選項
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              顧客在預約確認頁可點選的快速備註標籤，最多 8 個，每個最多 12 字。可新增、刪除、修改與拖曳排序。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleSaveAll()}
+            disabled={saving}
+            data-testid="save-note-chips-btn"
+            className="px-5 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white font-semibold rounded-xl text-xs sm:text-sm shadow-sm transition-all shrink-0 disabled:opacity-50"
+          >
+            {saving ? '儲存中...' : '儲存備註選項'}
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          {/* Chip Editor List */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-gray-700">
+                標籤清單（目前 {bookingNoteChips.length} / 8 個）
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (bookingNoteChips.length < 8) {
+                    setBookingNoteChips([...bookingNoteChips, '']);
+                  }
+                }}
+                disabled={bookingNoteChips.length >= 8}
+                data-testid="add-note-chip-btn"
+                className="px-3 py-1 bg-[#FAF7F2] text-[#8B5B43] hover:bg-[#E8DEC8]/60 border border-[#E8DEC8] rounded-lg text-xs font-bold flex items-center gap-1 transition disabled:opacity-40"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                新增選項
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="note-chips-editor-list">
+              {bookingNoteChips.map((chip, idx) => (
+                <div
+                  key={idx}
+                  draggable
+                  onDragStart={() => setDraggedChipIdx(idx)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => {
+                    if (draggedChipIdx === null || draggedChipIdx === idx) return;
+                    const items = [...bookingNoteChips];
+                    const [moved] = items.splice(draggedChipIdx, 1);
+                    items.splice(idx, 0, moved);
+                    setBookingNoteChips(items);
+                    setDraggedChipIdx(null);
+                  }}
+                  className="flex items-center gap-2 p-2.5 bg-[#FAF7F2] rounded-xl border border-[#E8DEC8] transition hover:border-[#8B5B43]"
+                >
+                  <span className="cursor-grab text-gray-400 hover:text-gray-600">
+                    <GripVertical className="w-4 h-4" />
+                  </span>
+                  <div className="flex-1 relative">
+                    <input
+                      type="text"
+                      value={chip}
+                      maxLength={12}
+                      onChange={(e) => {
+                        const updated = [...bookingNoteChips];
+                        updated[idx] = e.target.value.slice(0, 12);
+                        setBookingNoteChips(updated);
+                      }}
+                      data-testid={`note-chip-input-${idx}`}
+                      placeholder={`選項 ${idx + 1}`}
+                      className="w-full px-3 py-1.5 pr-12 text-xs bg-white border border-[#E8DEC8] rounded-lg focus:border-[#8B5B43] focus:outline-none"
+                    />
+                    <span className="absolute right-2 top-2 text-[10px] text-gray-400">
+                      {chip.length}/12
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => {
+                        if (idx > 0) {
+                          const items = [...bookingNoteChips];
+                          const tmp = items[idx - 1];
+                          items[idx - 1] = items[idx];
+                          items[idx] = tmp;
+                          setBookingNoteChips(items);
+                        }
+                      }}
+                      className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-20"
+                      title="上移"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === bookingNoteChips.length - 1}
+                      onClick={() => {
+                        if (idx < bookingNoteChips.length - 1) {
+                          const items = [...bookingNoteChips];
+                          const tmp = items[idx + 1];
+                          items[idx + 1] = items[idx];
+                          items[idx] = tmp;
+                          setBookingNoteChips(items);
+                        }
+                      }}
+                      className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-20"
+                      title="下移"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBookingNoteChips(bookingNoteChips.filter((_, i) => i !== idx));
+                      }}
+                      data-testid={`delete-note-chip-${idx}`}
+                      className="p-1 text-red-500 hover:text-red-700"
+                      title="刪除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Live Preview */}
+          <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-2">
+            <span className="text-xs font-bold text-gray-600 block">
+              即時預覽（顧客預約確認頁顯示效果）
+            </span>
+            <div className="flex flex-wrap gap-[6px] p-3 bg-white rounded-xl border border-gray-200" data-testid="note-chips-live-preview">
+              {bookingNoteChips.length === 0 ? (
+                <span className="text-xs text-gray-400 py-1">目前沒有任何備註選項</span>
+              ) : (
+                bookingNoteChips.map((chip, idx) => (
+                  <span
+                    key={idx}
+                    className="min-h-[32px] px-[10px] py-[3px] rounded-full text-[12px] font-bold bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8] flex items-center select-none"
+                  >
+                    {chip || '（空白）'}
+                  </span>
+                ))
+              )}
             </div>
           </div>
         </div>

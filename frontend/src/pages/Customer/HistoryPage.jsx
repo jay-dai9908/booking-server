@@ -166,6 +166,13 @@ export default function HistoryPage() {
   const { settings: globalSettings } = useGlobalSettings();
   const { user } = useCustomerProfile();
 
+  const noteChips = useMemo(() => {
+    if (Array.isArray(globalSettings?.booking_note_chips) && globalSettings.booking_note_chips.length > 0) {
+      return globalSettings.booking_note_chips;
+    }
+    return QUICK_TAGS;
+  }, [globalSettings]);
+
   // Reservations state
   const [reservations, setReservations] = useState([]);
   const [loadingReservations, setLoadingReservations] = useState(true);
@@ -535,7 +542,7 @@ export default function HistoryPage() {
             {editingNote ? (
               <div className="grid gap-2">
                 <div className="flex flex-wrap gap-[6px]">
-                  {QUICK_TAGS.map((tag) => {
+                  {noteChips.map((tag) => {
                     const isTagActive = (noteDraft || '').includes(tag);
                     return (
                       <button

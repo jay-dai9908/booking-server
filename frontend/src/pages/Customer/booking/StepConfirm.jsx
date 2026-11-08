@@ -70,6 +70,13 @@ export default function StepConfirm({
 
   const discountCfg = useMemo(() => buildDiscountConfig(globalSettings || {}), [globalSettings]);
 
+  const noteChips = useMemo(() => {
+    if (Array.isArray(globalSettings?.booking_note_chips) && globalSettings.booking_note_chips.length > 0) {
+      return globalSettings.booking_note_chips;
+    }
+    return QUICK_TAGS;
+  }, [globalSettings]);
+
   // Pricing calculations
   const priceCalculation = useMemo(() => {
     if (!dayPricing) {
@@ -318,7 +325,7 @@ export default function StepConfirm({
 
         {/* Quick tags */}
         <div className="flex flex-wrap gap-[6px]">
-          {QUICK_TAGS.map((tag) => {
+          {noteChips.map((tag) => {
             const isTagActive = (customerNote || '').includes(tag);
             return (
               <button
