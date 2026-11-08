@@ -3,8 +3,18 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { PrismaClient } = require('../../backend/node_modules/@prisma/client');
-const prisma = new PrismaClient();
+const testDbUrl = process.env.TEST_DATABASE_URL;
+if (!testDbUrl || !testDbUrl.trim()) {
+  console.error('TEST_DATABASE_URL is not set. Refusing to run tests on production/dev database.');
+  process.exit(1);
+}
+const cleanDbUrl = testDbUrl.split('?')[0];
+const dbName = cleanDbUrl.split('/').pop();
+if (!dbName || !dbName.endsWith('_test')) {
+  console.error(`TEST_DATABASE_URL database name "${dbName}" must end with "_test"! Refusing to run tests.`);
+  process.exit(1);
+}
+const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const API_BASE = process.env.API_BASE || 'http://localhost:3001/api';

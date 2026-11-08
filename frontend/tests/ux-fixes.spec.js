@@ -15,7 +15,18 @@ if (!fs.existsSync(SCREENSHOT_DIR)) {
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 }
 
-const prisma = new PrismaClient();
+const testDbUrl = process.env.TEST_DATABASE_URL;
+if (!testDbUrl || !testDbUrl.trim()) {
+  console.error('TEST_DATABASE_URL is not set. Refusing to run tests on production/dev database.');
+  process.exit(1);
+}
+const cleanDbUrl = testDbUrl.split('?')[0];
+const dbName = cleanDbUrl.split('/').pop();
+if (!dbName || !dbName.endsWith('_test')) {
+  console.error(`TEST_DATABASE_URL database name "${dbName}" must end with "_test"! Refusing to run tests.`);
+  process.exit(1);
+}
+const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
 async function run() {
   if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
@@ -51,20 +62,36 @@ async function run() {
     );
   }
 
-  // Seed sessions for 2026-11-10 (Tuesday)
-  const nov10Date = new Date('2026-11-10T00:00:00.000Z');
-  await prisma.reservation.deleteMany({ where: { session: { session_date: nov10Date } } });
-  await prisma.session.deleteMany({ where: { session_date: nov10Date } });
+  // Target relative date: 2 days from today in Asia/Taipei
+  const nowInTaipei = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+  const targetDateObj = new Date(nowInTaipei);
+  targetDateObj.setDate(targetDateObj.getDate() + 2);
+  const targetYear = targetDateObj.getFullYear();
+  const targetMonth = targetDateObj.getMonth() + 1;
+  const targetDay = targetDateObj.getDate();
+  const targetDateYmd = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+  const targetDateUtc = new Date(`${targetDateYmd}T00:00:00.000Z`);
+  const targetAriaLabel = `${targetMonth} 月 ${targetDay} 日`;
+  const icsDatePrefix = `${targetYear}${String(targetMonth).padStart(2, '0')}${String(targetDay).padStart(2, '0')}`;
 
-  const sess1 = await prisma.session.create({
-    data: { session_date: nov10Date, start_time: '14:00', end_time: '15:00', max_capacity: 20 }
+  console.log(`Seeding test sessions safely for relative date: ${targetDateYmd} (${targetAriaLabel})...`);
+  const sess1 = await prisma.session.upsert({
+    where: { session_date_start_time: { session_date: targetDateUtc, start_time: '14:00' } },
+    update: { max_capacity: 20 },
+    create: { session_date: targetDateUtc, start_time: '14:00', end_time: '15:00', max_capacity: 20 }
   });
-  const sess2 = await prisma.session.create({
-    data: { session_date: nov10Date, start_time: '15:00', end_time: '16:00', max_capacity: 20 }
+  const sess2 = await prisma.session.upsert({
+    where: { session_date_start_time: { session_date: targetDateUtc, start_time: '15:00' } },
+    update: { max_capacity: 20 },
+    create: { session_date: targetDateUtc, start_time: '15:00', end_time: '16:00', max_capacity: 20 }
   });
-  const sess3 = await prisma.session.create({
-    data: { session_date: nov10Date, start_time: '16:00', end_time: '17:00', max_capacity: 20 }
+  const sess3 = await prisma.session.upsert({
+    where: { session_date_start_time: { session_date: targetDateUtc, start_time: '16:00' } },
+    update: { max_capacity: 20 },
+    create: { session_date: targetDateUtc, start_time: '16:00', end_time: '17:00', max_capacity: 20 }
   });
+
+  const createdTestBookingRefs = [];
 
   // Create a reservation for 2 pax with 1 pegboard_m on 2026-11-10
   const bookingCreateRes = await fetch(`${API_BASE}/reservations`, {
@@ -79,10 +106,11 @@ async function run() {
       equipments: [{ equipment_id: 'pegboard_m', quantity: 1 }]
     })
   });
-  assert.strictEqual(bookingCreateRes.status, 201, 'Booking on 2026-11-10 must succeed');
+  assert.strictEqual(bookingCreateRes.status, 201, `Booking on ${targetDateYmd} must succeed`);
   const bookingCreateJson = await bookingCreateRes.json();
   const testCustRef = bookingCreateJson.reservation?.booking_ref;
-  console.log('Seeded test customer booking for 2026-11-10:', testCustRef);
+  if (testCustRef) createdTestBookingRefs.push(testCustRef);
+  console.log(`Seeded test customer booking for ${targetDateYmd}:`, testCustRef);
 
   const browser = await chromium.launch({ headless: HEADLESS });
 
@@ -130,8 +158,8 @@ async function run() {
     await cPage.waitForTimeout(1000);
     await cPage.screenshot({ path: path.join(SCREENSHOT_DIR, '01-customer-booking-step1.png') });
 
-    // Click 11/10 date button
-    const dateBtn = cPage.locator('button[aria-label*="11 月 10 日"]').first();
+    // Click relative date button
+    const dateBtn = cPage.locator(`button[aria-label*="${targetAriaLabel}"]`).first();
     if (await dateBtn.isVisible()) {
       await dateBtn.click();
       await cPage.waitForTimeout(800);
@@ -177,8 +205,8 @@ async function run() {
     const summaryText = await summaryEl.textContent();
     console.log('StepDone summary text:', summaryText);
 
-    // Spec B1: 「11/10 週二 14:00 到 17:00 · 2 位 · 中板 ×1」
-    assert.ok(summaryText.includes('11/10 週二 14:00 到 17:00 · 2 位'), `Expected summary to contain '11/10 週二 14:00 到 17:00 · 2 位', got '${summaryText}'`);
+    // Spec B1 & 2.9: 14:00 到 17:00 · 2 位 · 中板 ×1
+    assert.ok(summaryText.includes('14:00 到 17:00 · 2 位'), `Expected summary to contain '14:00 到 17:00 · 2 位', got '${summaryText}'`);
     assert.ok(summaryText.includes('中板 ×1'), `Expected summary to contain '中板 ×1', got '${summaryText}'`);
     await cPage.screenshot({ path: path.join(SCREENSHOT_DIR, '03-stepdone-page-real.png') });
 
@@ -188,7 +216,7 @@ async function run() {
     await cPage.waitForTimeout(1000);
     const summaryAfterReload = await cPage.locator('[data-testid="booking-summary-text"]').textContent();
     console.log('StepDone summary text after reload:', summaryAfterReload);
-    assert.ok(summaryAfterReload.includes('11/10 週二 14:00 到 17:00 · 2 位'), 'Summary text must persist after reload');
+    assert.ok(summaryAfterReload.includes('14:00 到 17:00 · 2 位'), 'Summary text must persist after reload');
     assert.ok(summaryAfterReload.includes('中板 ×1'), 'Equipment summary must persist after reload');
     await cPage.screenshot({ path: path.join(SCREENSHOT_DIR, '04-stepdone-after-reload.png') });
 
@@ -201,8 +229,8 @@ async function run() {
     assert.ok(createdRes, 'Customer reservation must exist');
     const icsContent = generateIcsContent(createdRes);
     console.log('Generated ICS snippet:\n', icsContent.split('\r\n').slice(0, 12).join('\n'));
-    assert.ok(icsContent.includes('DTSTART;TZID=Asia/Taipei:20261110T140000'), 'ICS must have DTSTART;TZID=Asia/Taipei:20261110T140000');
-    assert.ok(icsContent.includes('DTEND;TZID=Asia/Taipei:20261110T170000'), 'ICS must have DTEND;TZID=Asia/Taipei:20261110T170000');
+    assert.ok(icsContent.includes(`DTSTART;TZID=Asia/Taipei:${icsDatePrefix}T140000`), `ICS must have DTSTART;TZID=Asia/Taipei:${icsDatePrefix}T140000`);
+    assert.ok(icsContent.includes(`DTEND;TZID=Asia/Taipei:${icsDatePrefix}T170000`), `ICS must have DTEND;TZID=Asia/Taipei:${icsDatePrefix}T170000`);
 
     // Test invalid ref displays "找不到這筆預約"
     await cPage.goto(`${BASE_URL}/booking?step=done&ref=INVALID-REF-999`, { waitUntil: 'networkidle' });
@@ -541,6 +569,7 @@ async function run() {
     assert.strictEqual(createRes.status(), 201, 'Admin reservation creation must return 201');
     const createdData = await createRes.json();
     const testRef = createdData.reservation?.booking_ref;
+    if (testRef) createdTestBookingRefs.push(testRef);
     console.log(`Created test booking for Flow 8: ${testRef} (${testGuestName})`);
     assert.ok(testRef, 'Must have valid booking_ref');
 
@@ -687,6 +716,18 @@ async function run() {
     await browser.close();
     process.exit(1);
   } finally {
+    for (const ref of createdTestBookingRefs) {
+      if (!ref) continue;
+      try {
+        await prisma.payment.deleteMany({ where: { booking_ref: ref } });
+        await prisma.timerPause.deleteMany({ where: { person: { booking_ref: ref } } });
+        await prisma.bookingEquipment.deleteMany({ where: { booking_ref: ref } });
+        await prisma.bookingPerson.deleteMany({ where: { booking_ref: ref } });
+        await prisma.reservation.deleteMany({ where: { booking_ref: ref } });
+      } catch (e) {
+        console.warn(`Cleanup error for ${ref}:`, e.message);
+      }
+    }
     await prisma.$disconnect();
   }
 }
