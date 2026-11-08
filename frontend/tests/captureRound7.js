@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
+import { ensureFreshDbSeeded, cleanOperationalData } from './helpers/seedFreshDb.js';
 import { toTaipeiDateString } from '../../shared/time.js';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
@@ -268,9 +268,11 @@ async function runCapture() {
 
   console.log('Screenshots captured successfully in', OUTPUT_DIR);
   await browser.close();
+  await cleanOperationalData();
 }
 
-runCapture().catch(err => {
+runCapture().catch(async (err) => {
   console.error('Error during screenshot capture:', err);
+  await cleanOperationalData().catch(() => {});
   process.exit(1);
 });

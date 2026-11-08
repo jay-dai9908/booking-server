@@ -9,6 +9,27 @@ try {
   ({ PrismaClient } = require('../../../backend/node_modules/@prisma/client/index.js'));
 }
 
+export async function cleanOperationalData(customPrisma) {
+  const testDbUrl = process.env.TEST_DATABASE_URL;
+  if (!testDbUrl || !testDbUrl.trim()) return;
+  const cleanDbUrl = testDbUrl.split('?')[0];
+  const dbName = cleanDbUrl.split('/').pop();
+  if (!dbName || !dbName.endsWith('_test')) return;
+
+  const prisma = customPrisma || new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
+  await prisma.timerPause.deleteMany({}).catch(() => {});
+  await prisma.payment.deleteMany({}).catch(() => {});
+  await prisma.bookingEquipment.deleteMany({}).catch(() => {});
+  await prisma.bookingPerson.deleteMany({}).catch(() => {});
+  await prisma.reservation.deleteMany({}).catch(() => {});
+  await prisma.printJob.deleteMany({}).catch(() => {});
+  await prisma.cashClosing.deleteMany({}).catch(() => {});
+  await prisma.userLoginLog.deleteMany({}).catch(() => {});
+  if (!customPrisma) {
+    await prisma.$disconnect().catch(() => {});
+  }
+}
+
 export async function ensureFreshDbSeeded(customPrisma) {
   const testDbUrl = process.env.TEST_DATABASE_URL;
   if (!testDbUrl || !testDbUrl.trim()) {
@@ -25,14 +46,7 @@ export async function ensureFreshDbSeeded(customPrisma) {
   const prisma = customPrisma || new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
   // 0. Clean operational tables for fresh DB state
-  await prisma.timerPause.deleteMany({}).catch(() => {});
-  await prisma.payment.deleteMany({}).catch(() => {});
-  await prisma.bookingEquipment.deleteMany({}).catch(() => {});
-  await prisma.bookingPerson.deleteMany({}).catch(() => {});
-  await prisma.reservation.deleteMany({}).catch(() => {});
-  await prisma.printJob.deleteMany({}).catch(() => {});
-  await prisma.cashClosing.deleteMany({}).catch(() => {});
-  await prisma.userLoginLog.deleteMany({}).catch(() => {});
+  await cleanOperationalData(prisma);
 
   // 1. Seed GlobalSetting
   await prisma.globalSetting.upsert({
