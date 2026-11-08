@@ -26,11 +26,30 @@ async function run() {
   console.log(`Starting UX Fixes Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
 
   // Setup test customer token
-  const customerToken = jwt.sign(
-    { id: 1, role: 'customer' },
-    'super_secret_jwt_key_for_booking_system',
-    { expiresIn: '7d' }
-  );
+  let customerToken;
+  try {
+    const loginRes = await fetch(`${API_BASE}/auth/test-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 1, role: 'customer' })
+    });
+    if (loginRes.ok) {
+      const data = await loginRes.json();
+      customerToken = data.token;
+    }
+  } catch (e) {}
+
+  if (!customerToken) {
+    if (!process.env.JWT_SECRET || !process.env.JWT_SECRET.trim()) {
+      console.error('請設定 JWT_SECRET 環境變數');
+      process.exit(1);
+    }
+    customerToken = jwt.sign(
+      { id: 1, role: 'customer' },
+      process.env.JWT_SECRET.trim(),
+      { expiresIn: '7d' }
+    );
+  }
 
   // Seed sessions for 2026-11-10 (Tuesday)
   const nov10Date = new Date('2026-11-10T00:00:00.000Z');
