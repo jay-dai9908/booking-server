@@ -7,6 +7,7 @@
  * 3. No horizontal scrolling (scrollWidth <= clientWidth)
  */
 import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
@@ -129,6 +130,32 @@ export async function runAdminSmoke() {
           totalErrors++;
         } else {
           console.log(`✔ [${vp.name}] ${route} passed (no pageerror, no api >= 400, no horizontal scroll)`);
+        }
+
+        if (route === '/admin/accounting') {
+          // Spec 2.3: Verify daily closing cash input defaults empty, no diff shown, and button disabled
+          const closingTab = page.locator('button:has-text("日結")').first();
+          if (await closingTab.isVisible().catch(() => false)) {
+            await closingTab.click();
+            await page.waitForTimeout(600);
+
+            const submitBtn = page.locator('button:has-text("完成交班")').first();
+            await submitBtn.waitFor({ state: 'visible', timeout: 5000 });
+            const isDisabled = await submitBtn.isDisabled();
+            assert.ok(isDisabled, '完成交班 button must be disabled when cash count is empty');
+
+            const diffPrompt = page.locator('text=相符，沒有差額').or(page.locator('text=短少')).or(page.locator('text=多出'));
+            const hasDiff = await diffPrompt.isVisible().catch(() => false);
+            assert.ok(!hasDiff, 'Diff prompt should not be visible when cash count is empty');
+
+            const cashInput = page.locator('input[placeholder*="請輸入清點金額"], input[placeholder*="0"]').last();
+            await cashInput.fill('2000');
+            await page.waitForTimeout(300);
+
+            const isEnabledNow = !(await submitBtn.isDisabled());
+            assert.ok(isEnabledNow, '完成交班 button must be enabled after entering cash count');
+            console.log(`✔ [${vp.name}] Spec 2.3 passed: Closing cash count requires input before showing diff & enables button`);
+          }
         }
       }
 

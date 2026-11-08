@@ -80,7 +80,7 @@ export default function AccountingPage() {
   // Tab 4: Closing state
   const [closingPreview, setClosingPreview] = useState(null);
   const [closingsList, setClosingsList] = useState([]);
-  const [countedCash, setCountedCash] = useState(0);
+  const [countedCash, setCountedCash] = useState('');
   const [closingFloat, setClosingFloat] = useState(2000);
   const [closingNote, setClosingNote] = useState('');
   const [closingSubmitting, setClosingSubmitting] = useState(false);
@@ -181,7 +181,6 @@ export default function AccountingPage() {
       ]);
       setClosingPreview(prevRes.data);
       setClosingFloat(prevRes.data?.float_amount ?? 2000);
-      setCountedCash(prevRes.data?.expected_cash ?? 0);
       setClosingsList(listRes.data?.closings || []);
     } catch (err) {
       console.error(err);
@@ -1241,12 +1240,17 @@ export default function AccountingPage() {
                     label="實點現金總額"
                     value={countedCash}
                     onChange={setCountedCash}
+                    allowEmpty={true}
+                    placeholder="請輸入清點金額"
                   />
                 </div>
 
                 {/* Diff Result */}
                 {(() => {
-                  const diff = countedCash - closingPreview.expected_cash;
+                  if (countedCash === '' || countedCash === null || isNaN(Number(countedCash))) {
+                    return null;
+                  }
+                  const diff = Number(countedCash) - closingPreview.expected_cash;
                   if (diff === 0) {
                     return (
                       <div className="p-3 rounded-2xl bg-sg-sage-soft text-sg-sage-ink font-bold text-[13px] text-center">
@@ -1284,6 +1288,7 @@ export default function AccountingPage() {
                   size="md"
                   onClick={handleSubmitClosing}
                   loading={closingSubmitting}
+                  disabled={countedCash === '' || countedCash === null || isNaN(Number(countedCash))}
                   className="w-full"
                 >
                   完成交班

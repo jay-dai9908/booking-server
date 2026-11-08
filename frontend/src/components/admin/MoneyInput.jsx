@@ -4,16 +4,22 @@ export default function MoneyInput({
   value = 0,
   onChange,
   allowNegative = false,
+  allowEmpty = false,
   label = null,
   placeholder = '0',
   className = ''
 }) {
-  const numValue = parseInt(value, 10) || 0;
+  const isValueEmpty = value === '' || value === null || value === undefined;
+  const numValue = isValueEmpty ? 0 : (parseInt(value, 10) || 0);
   const isNegative = numValue < 0;
   const absValue = Math.abs(numValue);
 
   const handleInputChange = (e) => {
     const raw = e.target.value.replace(/[^0-9]/g, '');
+    if (raw === '') {
+      onChange(allowEmpty ? '' : 0);
+      return;
+    }
     const intVal = parseInt(raw, 10) || 0;
     onChange(isNegative ? -intVal : intVal);
   };
@@ -22,6 +28,8 @@ export default function MoneyInput({
     if (!allowNegative) return;
     onChange(-numValue);
   };
+
+  const displayVal = isValueEmpty ? '' : (absValue === 0 ? '' : absValue);
 
   return (
     <div className={`space-y-1.5 ${className}`}>
@@ -48,7 +56,7 @@ export default function MoneyInput({
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
-            value={absValue === 0 ? '' : absValue}
+            value={displayVal}
             placeholder={placeholder}
             onChange={handleInputChange}
             className="w-full min-h-[44px] pl-12 pr-4 rounded-xl border border-sg-line text-[16px] font-bold text-sg-ink bg-white focus:outline-none focus:border-sg-brown focus:ring-1 focus:ring-sg-brown"
