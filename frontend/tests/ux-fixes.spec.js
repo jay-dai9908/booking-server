@@ -95,6 +95,20 @@ async function run() {
 
   const createdTestBookingRefs = [];
 
+  // Clean up any stale reservations on the test sessions to free stock
+  const staleRes = await prisma.reservation.findMany({
+    where: { session_id: { in: [sess1.id, sess2.id, sess3.id] } },
+    select: { booking_ref: true }
+  });
+  const staleRefs = [...new Set(staleRes.map(r => r.booking_ref))];
+  for (const ref of staleRefs) {
+    await prisma.payment.deleteMany({ where: { booking_ref: ref } });
+    await prisma.timerPause.deleteMany({ where: { person: { booking_ref: ref } } });
+    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: ref } });
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: ref } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: ref } });
+  }
+
   // Create a reservation for 2 pax with 1 pegboard_m on 2026-11-10
   const bookingCreateRes = await fetch(`${API_BASE}/reservations`, {
     method: 'POST',
@@ -108,8 +122,9 @@ async function run() {
       equipments: [{ equipment_id: 'pegboard_m', quantity: 1 }]
     })
   });
-  assert.strictEqual(bookingCreateRes.status, 201, `Booking on ${targetDateYmd} must succeed`);
-  const bookingCreateJson = await bookingCreateRes.json();
+  const errText = bookingCreateRes.status !== 201 ? await bookingCreateRes.text() : '';
+  assert.strictEqual(bookingCreateRes.status, 201, `Booking on ${targetDateYmd} must succeed: ${errText}`);
+  const bookingCreateJson = JSON.parse(errText || await bookingCreateRes.text());
   const testCustRef = bookingCreateJson.reservation?.booking_ref;
   if (testCustRef) createdTestBookingRefs.push(testCustRef);
   console.log(`Seeded test customer booking for ${targetDateYmd}:`, testCustRef);
@@ -591,7 +606,7 @@ async function run() {
     assert.ok(await guestCard.isVisible(), `Floor card for ${testGuestName} must be visible`);
 
     // Verify initial status pill shows unpaid
-    assert.ok(await guestCard.locator('text=未結帳').isVisible(), 'Initial status must be 未結帳');
+    assert.ok(await guestCard.locator('text=未結帳').first().isVisible(), 'Initial status must be 未結帳');
 
     // Click checkout on that card
     const cardCheckoutBtn = guestCard.locator('button:has-text("結帳")').first();

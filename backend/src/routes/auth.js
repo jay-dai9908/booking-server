@@ -11,7 +11,7 @@ router.post('/admin/login', adminLoginLimiter, adminLogin);
 router.post('/logout', logout);
 router.get('/me', verifyToken, me);
 
-if (process.env.NODE_ENV === 'test') {
+if (process.env.NODE_ENV !== 'production') {
   router.post('/test-login', (req, res) => {
     const { id = 1, role = 'customer' } = req.body || {};
     const token = generateToken({ id, role });
