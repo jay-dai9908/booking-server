@@ -123,7 +123,7 @@ const DateStrip = React.forwardRef(function DateStrip({
             aria-pressed={isSelected}
             aria-label={ariaLabel}
             onClick={() => !isClosed && onSelectDate(item.dateStr)}
-            className={`flex-none w-[44px] min-h-[56px] snap-start rounded-[12px] border ${btnBg} grid content-center justify-items-center gap-[2px] pt-[6px] pb-[5px] select-none transition-colors duration-150 ${
+            className={`flex-none w-[44px] min-h-[56px] snap-start rounded-[12px] border ${btnBg} flex flex-col items-center justify-center gap-[2px] pt-[6px] pb-[5px] select-none transition-colors duration-150 ${
               isClosed ? 'cursor-not-allowed opacity-60' : 'cursor-pointer active:scale-[0.97]'
             }`}
           >

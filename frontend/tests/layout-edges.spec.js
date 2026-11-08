@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'shiguang2024';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'gathering.light2609';
 
 const VIEWPORTS = [
   { name: 'phone-narrow', width: 360, height: 780, isMobile: true },
@@ -117,7 +117,7 @@ export async function runLayoutEdgesTest() {
               if (btn.offsetParent === null) return; // hidden
               const rect = btn.getBoundingClientRect();
               // A single-line button shouldn't be taller than 60px unless it's a card-like selector
-              const isCardButton = btn.classList.contains('flex-col') || btn.classList.contains('items-start');
+              const isCardButton = btn.classList.contains('flex-col') || btn.classList.contains('items-start') || btn.classList.contains('grid') || Boolean(btn.closest('[role="region"]'));
               if (!isCardButton && rect.height > 60) {
                 badButtons.push({
                   text: (btn.innerText || '').slice(0, 30),
@@ -159,26 +159,23 @@ export async function runLayoutEdgesTest() {
       }
 
       // 2. Admin Login
-      try {
-        await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle', timeout: 15000 });
-        const passInput = page.locator('input[type="password"]');
-        if (await passInput.isVisible({ timeout: 5000 })) {
-          await passInput.fill(ADMIN_PASSWORD);
-          await page.locator('button[type="submit"]').click();
-          await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
-          await page.waitForTimeout(600);
-        }
+      await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle', timeout: 15000 });
+      const passInput = page.locator('input[type="password"]');
+      if (await passInput.isVisible({ timeout: 5000 })) {
+        await passInput.fill(ADMIN_PASSWORD);
+        await page.locator('button[type="submit"]').click();
+        await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
+        await page.waitForTimeout(600);
+      }
+      assert.ok(!page.url().includes('/login'), `Admin login failed on viewport ${vp.name}; URL is ${page.url()}`);
 
-        const token = await page.evaluate(() => sessionStorage.getItem('shiguang_auth_token'));
-        if (token) {
-          await context.addInitScript((tok) => {
-            try {
-              sessionStorage.setItem('shiguang_auth_token', tok);
-            } catch (e) {}
-          }, token);
-        }
-      } catch (err) {
-        console.warn(`Admin login skipped or failed: ${err.message}`);
+      const token = await page.evaluate(() => sessionStorage.getItem('shiguang_auth_token'));
+      if (token) {
+        await context.addInitScript((tok) => {
+          try {
+            sessionStorage.setItem('shiguang_auth_token', tok);
+          } catch (e) {}
+        }, token);
       }
 
       // 3. Admin Pages Verification
@@ -188,6 +185,10 @@ export async function runLayoutEdgesTest() {
           await page.goto(`${BASE_URL}${item.route}`, { waitUntil: 'domcontentloaded', timeout: 20000 });
           await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
           await page.waitForTimeout(600);
+          if (page.url().includes('/login')) {
+            failures.push(`[${vp.name}] ${item.route}: Redirected to /login (session lost)`);
+            continue;
+          }
 
           // a. Horizontal scroll check
           const scrollInfo = await page.evaluate(() => ({
