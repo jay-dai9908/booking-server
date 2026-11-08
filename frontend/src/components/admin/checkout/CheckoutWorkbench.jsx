@@ -1293,7 +1293,7 @@ export default function CheckoutWorkbench({
           <div className="md:hidden flex items-center justify-between gap-2">
             <div>
               <span className="text-[12px] font-bold text-sg-ink whitespace-nowrap">
-                {unpaidPersons.length} 位 · 應收 <span data-testid="workbench-net-due" className="text-[16px] text-sg-brown font-num font-bold">NT${netDue}</span>
+                {unpaidPersons.length} 位 · 應收 <span data-testid="workbench-net-due-mobile" className="text-[16px] text-sg-brown font-num font-bold">NT${netDue}</span>
               </span>
             </div>
 

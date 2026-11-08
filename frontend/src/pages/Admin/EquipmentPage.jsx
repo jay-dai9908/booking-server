@@ -625,7 +625,7 @@ export default function EquipmentPage() {
                             const isCurrentlyUnlimited = config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0;
                             handleConfigChange(config.id, 'daily_cap', isCurrentlyUnlimited ? 500 : null);
                           }}
-                          className={`text-[11px] px-2 py-0.5 rounded-full font-bold transition-all flex items-center gap-1 cursor-pointer select-none ${
+                          className={`text-[11px] px-2 py-0.5 rounded-full font-bold transition-all flex items-center gap-1 cursor-pointer select-none whitespace-nowrap shrink-0 ${
                             config.daily_cap === null || config.daily_cap === '' || parseInt(config.daily_cap, 10) <= 0
                               ? 'bg-amber-100 text-amber-800 border border-amber-300'
                               : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
@@ -916,7 +916,7 @@ export default function EquipmentPage() {
                         ...prev, 
                         daily_cap: prev.daily_cap === null ? 500 : null 
                       }))}
-                      className={`text-xs px-2 py-0.5 rounded-full font-bold cursor-pointer ${
+                      className={`text-xs px-2 py-0.5 rounded-full font-bold cursor-pointer whitespace-nowrap shrink-0 ${
                         newConfig.daily_cap === null
                           ? 'bg-amber-100 text-amber-800 border border-amber-300'
                           : 'bg-gray-200 text-gray-600'

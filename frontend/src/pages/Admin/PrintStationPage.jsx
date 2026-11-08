@@ -75,7 +75,7 @@ export default function PrintStationPage() {
         await printJobOnThisDevice(res.data.job);
       }
     } catch (err) {
-      alert(err.response?.data?.error || '測試列印失敗');
+      showToast(err.response?.data?.error || '測試列印失敗');
     }
   };
 
@@ -86,7 +86,7 @@ export default function PrintStationPage() {
       showToast('已重新將工作加入排隊');
       fetchJobs();
     } catch (err) {
-      alert(err.response?.data?.error || '重新列印失敗');
+      showToast(err.response?.data?.error || '重新列印失敗');
     }
   };
 
@@ -97,7 +97,7 @@ export default function PrintStationPage() {
       showToast('已取消此列印工作');
       fetchJobs();
     } catch (err) {
-      alert(err.response?.data?.error || '取消失敗');
+      showToast(err.response?.data?.error || '取消失敗');
     }
   };
 
@@ -119,7 +119,7 @@ export default function PrintStationPage() {
       fetchStations();
       refreshPrinterStatus();
     } catch (err) {
-      alert(err.response?.data?.error || '配對列印站失敗');
+      showToast(err.response?.data?.error || '配對列印站失敗');
     } finally {
       setIsPairing(false);
     }
@@ -287,13 +287,24 @@ export default function PrintStationPage() {
       </div>
 
       {/* Bottom Actions */}
-      <div className="flex items-center justify-between gap-3 pt-2">
-        <Button variant="secondary" size="md" onClick={handleTestPrint}>
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+        <Button
+          variant="secondary"
+          size="md"
+          onClick={handleTestPrint}
+          className="w-full sm:w-auto whitespace-nowrap"
+        >
           測試列印
         </Button>
 
         {isSunmiApp && (
-          <Button variant="primary" size="md" onClick={handlePairStation} loading={isPairing}>
+          <Button
+            variant="primary"
+            size="md"
+            onClick={handlePairStation}
+            loading={isPairing}
+            className="w-full sm:w-auto whitespace-nowrap"
+          >
             把這台設為列印站
           </Button>
         )}

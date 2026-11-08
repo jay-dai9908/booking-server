@@ -11,7 +11,7 @@ export default function SegmentedTabs({
 
   return (
     <div
-      className={`inline-flex items-center p-1 bg-sg-paper border border-sg-line rounded-full select-none ${className}`}
+      className={`inline-flex items-center p-1 bg-sg-paper border border-sg-line rounded-full select-none max-w-full overflow-x-auto no-scrollbar ${className}`}
       role="tablist"
     >
       {tabs.map((tab) => {
@@ -24,7 +24,7 @@ export default function SegmentedTabs({
             aria-selected={isActive}
             data-testid={tab['data-testid'] || `tab-${tab.id}`}
             onClick={() => onChange(tab.id)}
-            className={`relative flex items-center justify-center min-h-[36px] px-3.5 sm:px-4 rounded-full text-[13px] font-bold transition-all duration-150 ${
+            className={`relative flex items-center justify-center min-h-[36px] px-3.5 sm:px-4 rounded-full text-[13px] font-bold transition-all duration-150 whitespace-nowrap ${
               isActive
                 ? 'bg-white text-sg-ink shadow-sm'
                 : 'text-sg-muted hover:text-sg-ink'

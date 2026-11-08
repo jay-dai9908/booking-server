@@ -31,8 +31,17 @@ import {
 } from 'lucide-react';
 import api from '../../api/axios';
 import HourRangeScrollPicker from '../../components/HourRangeScrollPicker';
+import ConfirmPanel from '../../components/admin/ConfirmPanel';
 
 export default function SessionsPage() {
+  const [toastMsg, setToastMsg] = useState(null);
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3000);
+  };
+  const [deleteSessionTargetId, setDeleteSessionTargetId] = useState(null);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
   const [selectedDates, setSelectedDates] = useState([format(new Date(), 'yyyy-MM-dd')]);
   const [listDate, setListDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -122,10 +131,10 @@ export default function SessionsPage() {
       try {
         localStorage.removeItem('shiguang_booking_global_settings_cache');
       } catch (e) {}
-      alert('顧客端首頁顯示設定已成功更新！');
+      showToast('顧客端首頁顯示設定已成功更新！');
     } catch (err) {
       console.error(err);
-      alert('更新顯示設定失敗');
+      showToast('更新顯示設定失敗');
     } finally {
       setIsSavingDisplay(false);
     }
@@ -166,7 +175,7 @@ export default function SessionsPage() {
     } catch (err) {
       console.error('Error updating daily setting:', err);
       setAllowUnlimited(!newValue);
-      alert('更新設定失敗');
+      showToast('更新設定失敗');
     }
   };
 
@@ -182,9 +191,9 @@ export default function SessionsPage() {
       try {
         localStorage.removeItem('shiguang_booking_global_settings_cache');
       } catch (e) {}
-      alert('全店預設價格更新成功！');
+      showToast('全店預設價格更新成功！');
     } catch (err) {
-      alert('更新失敗');
+      showToast('更新失敗');
     }
   };
 
@@ -196,9 +205,9 @@ export default function SessionsPage() {
         hourly_price: dailyHourly || null,
         unlimited_price: dailyUnlimited || null
       });
-      alert('單日覆蓋價格更新成功！');
+      showToast('單日覆蓋價格更新成功！');
     } catch (err) {
-      alert('更新失敗');
+      showToast('更新失敗');
     }
   };
 
@@ -213,7 +222,7 @@ export default function SessionsPage() {
 
       if (batchMode === 'selected') {
         if (selectedDates.length === 0) {
-          alert('請先在上方月曆勾選日期');
+          showToast('請先在上方月曆勾選日期');
           setIsBatching(false);
           return;
         }
@@ -224,10 +233,10 @@ export default function SessionsPage() {
       }
 
       const res = await api.post('/daily-settings/batch', payload);
-      alert(`批次修改成功！${res.data?.message || ''}`);
+      showToast(`批次修改成功！${res.data?.message || ''}`);
       fetchDailySetting(listDate);
     } catch (err) {
-      alert(err.response?.data?.error || '批次修改失敗');
+      showToast(err.response?.data?.error || '批次修改失敗');
     } finally {
       setIsBatching(false);
     }
@@ -248,7 +257,7 @@ export default function SessionsPage() {
   const handleCreateSession = async (e) => {
     e.preventDefault();
     if (selectedDates.length === 0) {
-      alert('請先在月曆上勾選至少一個欲新增時段的日期');
+      showToast('請先在月曆上勾選至少一個欲新增時段的日期');
       return;
     }
     setIsSubmitting(true);
@@ -260,39 +269,49 @@ export default function SessionsPage() {
         end_time: endTime,
         max_capacity: parseInt(maxCapacity, 10)
       });
-      alert(`時段新增成功！已為 ${sortedDates.length} 天新增 ${startTime} ~ ${endTime} 時段`);
+      showToast(`時段新增成功！已為 ${sortedDates.length} 天新增 ${startTime} ~ ${endTime} 時段`);
       fetchSessions(listDate);
       fetchMonthSessions(currentMonth);
     } catch (err) {
-      alert(err.response?.data?.error || '新增失敗');
+      showToast(err.response?.data?.error || '新增失敗');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleDeleteSession = async (id) => {
-    if (window.confirm('確定要刪除此時段嗎？')) {
-      try {
-        await api.delete(`/sessions/${id}`);
-        fetchSessions(listDate);
-        fetchMonthSessions(currentMonth);
-      } catch (err) {
-        alert(err.response?.data?.error || '刪除失敗');
-      }
+  const handleDeleteSession = (id) => {
+    setDeleteSessionTargetId(id);
+  };
+
+  const handleConfirmDeleteSession = async () => {
+    if (!deleteSessionTargetId) return;
+    try {
+      await api.delete(`/sessions/${deleteSessionTargetId}`);
+      showToast('時段已刪除');
+      fetchSessions(listDate);
+      fetchMonthSessions(currentMonth);
+    } catch (err) {
+      showToast(err.response?.data?.error || '刪除失敗');
+    } finally {
+      setDeleteSessionTargetId(null);
     }
   };
 
-  const handleDeleteAllForDate = async () => {
+  const handleDeleteAllForDate = () => {
     if (sessions.length === 0) return;
-    if (window.confirm(`確定要刪除 ${listDate} 的「所有未被預約」的時段嗎？\n(已有預約的時段會自動保留)`)) {
-      try {
-        const res = await api.delete(`/sessions/date/${listDate}`);
-        alert(`成功刪除 ${res.data.deletedCount} 個時段。${res.data.keptCount > 0 ? `\n(保留了 ${res.data.keptCount} 個已被預約的時段)` : ''}`);
-        fetchSessions(listDate);
-        fetchMonthSessions(currentMonth);
-      } catch (err) {
-        alert(err.response?.data?.error || '刪除失敗');
-      }
+    setShowDeleteAllConfirm(true);
+  };
+
+  const handleConfirmDeleteAllForDate = async () => {
+    try {
+      const res = await api.delete(`/sessions/date/${listDate}`);
+      showToast(`成功刪除 ${res.data.deletedCount} 個時段。${res.data.keptCount > 0 ? ` (保留了 ${res.data.keptCount} 個已被預約的時段)` : ''}`);
+      fetchSessions(listDate);
+      fetchMonthSessions(currentMonth);
+    } catch (err) {
+      showToast(err.response?.data?.error || '刪除失敗');
+    } finally {
+      setShowDeleteAllConfirm(false);
     }
   };
 
@@ -395,6 +414,13 @@ export default function SessionsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="fixed top-4 right-4 z-50 bg-sg-ink text-white px-4 py-2.5 rounded-2xl shadow-lg text-[13px] font-bold animate-fade-in">
+          {toastMsg}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         {/* Left Column: Interactive Multi-Select Calendar & Session Creation Form */}
         <div className="xl:col-span-1">
@@ -689,31 +715,30 @@ export default function SessionsPage() {
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="overflow-x-auto">
-              {isLoading ? (
-                <div className="p-10 flex justify-center">
-                  <div className="w-8 h-8 border-4 border-gray-200 border-t-gray-800 rounded-full animate-spin" />
-                </div>
-              ) : (
-                <table className="w-full text-left whitespace-nowrap">
-                  <thead>
-                    <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
-                      <th className="px-6 py-4 font-medium">時段</th>
-                      <th className="px-6 py-4 font-medium">總座位</th>
-                      <th className="px-6 py-4 font-medium">剩餘座位</th>
-                      <th className="px-6 py-4 font-medium">狀態</th>
-                      <th className="px-6 py-4 font-medium text-right">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {sessions.length === 0 ? (
-                      <tr>
-                        <td colSpan="5" className="text-center py-16 text-gray-400">
-                          {listDate} 尚無任何時段，可透過左側月曆勾選並快速新增
-                        </td>
+            {isLoading ? (
+              <div className="p-10 flex justify-center">
+                <div className="w-8 h-8 border-4 border-gray-200 border-t-gray-800 rounded-full animate-spin" />
+              </div>
+            ) : sessions.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                {listDate} 尚無任何時段，可透過左側月曆勾選並快速新增
+              </div>
+            ) : (
+              <>
+                {/* Desktop Table (>= 768px) */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left whitespace-nowrap">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
+                        <th className="px-6 py-4 font-medium">時段</th>
+                        <th className="px-6 py-4 font-medium">總座位</th>
+                        <th className="px-6 py-4 font-medium">剩餘座位</th>
+                        <th className="px-6 py-4 font-medium">狀態</th>
+                        <th className="px-6 py-4 font-medium text-right">操作</th>
                       </tr>
-                    ) : (
-                      sessions.map(s => {
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {sessions.map(s => {
                         const isFull = s.remaining_capacity === 0;
                         return (
                           <tr key={s.id} className="hover:bg-gray-50 transition-colors group">
@@ -746,12 +771,51 @@ export default function SessionsPage() {
                             </td>
                           </tr>
                         );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </div>
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card List (< 768px) */}
+                <div className="md:hidden divide-y divide-gray-100">
+                  {sessions.map(s => {
+                    const isFull = s.remaining_capacity === 0;
+                    return (
+                      <div key={s.id} className="p-4 flex items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-gray-900 text-sm">
+                              {s.start_time} - {s.end_time}
+                            </span>
+                            {isFull ? (
+                              <span className="inline-flex items-center gap-1 text-gray-400 text-xs">
+                                <XCircle className="w-3.5 h-3.5" /> 已額滿
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-bold">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> 開放中
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            剩餘 <strong className={`font-bold ${isFull ? 'text-gray-400' : 'text-gray-900'}`}>{s.remaining_capacity}</strong> / 總座位 {s.max_capacity} 人
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSession(s.id)}
+                          className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2.5 rounded-xl transition-colors shrink-0"
+                          title="刪除時段"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -946,6 +1010,28 @@ export default function SessionsPage() {
           前往系統全域設定 →
         </a>
       </div>
+
+      {/* Delete Single Session Confirmation */}
+      <ConfirmPanel
+        isOpen={Boolean(deleteSessionTargetId)}
+        onClose={() => setDeleteSessionTargetId(null)}
+        onConfirm={handleConfirmDeleteSession}
+        title="刪除時段"
+        message="確定要刪除此時段嗎？"
+        confirmText="刪除"
+        danger
+      />
+
+      {/* Delete All Sessions Confirmation */}
+      <ConfirmPanel
+        isOpen={showDeleteAllConfirm}
+        onClose={() => setShowDeleteAllConfirm(false)}
+        onConfirm={handleConfirmDeleteAllForDate}
+        title="刪除當日所有時段"
+        message={`確定要刪除 ${listDate} 的所有未被預約時段嗎？已有預約的時段會自動保留。`}
+        confirmText="確認刪除"
+        danger
+      />
     </div>
   );
 }

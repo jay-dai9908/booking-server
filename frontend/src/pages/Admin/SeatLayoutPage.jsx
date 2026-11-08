@@ -1168,7 +1168,7 @@ export default function SeatLayoutPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Undo / Redo */}
           <div className="flex items-center bg-sg-paper rounded-xl p-0.5 border border-sg-line mr-1">
             <button
@@ -1228,16 +1228,18 @@ export default function SeatLayoutPage() {
       )}
 
       {/* Mode Tabs */}
-      <div className="flex items-center justify-between">
-        <SegmentedTabs
-          tabs={[
-            { id: 'editor', label: '平面圖畫布', icon: <Layers className="w-4 h-4" /> },
-            { id: 'rules', label: '排位規則與試算', icon: <Sliders className="w-4 h-4" /> },
-            { id: 'mobile_list', label: '清單模式', icon: <Columns className="w-4 h-4" /> }
-          ]}
-          activeTab={activeTab}
-          onChange={setActiveTab}
-        />
+      <div className="flex flex-wrap items-center justify-between gap-2 max-w-full">
+        <div className="overflow-x-auto max-w-full no-scrollbar">
+          <SegmentedTabs
+            tabs={[
+              { id: 'editor', label: '平面圖畫布', icon: <Layers className="w-4 h-4" /> },
+              { id: 'rules', label: '排位規則與試算', icon: <Sliders className="w-4 h-4" /> },
+              { id: 'mobile_list', label: '清單模式', icon: <Columns className="w-4 h-4" /> }
+            ]}
+            activeTab={activeTab}
+            onChange={setActiveTab}
+          />
+        </div>
 
         {/* Grid Snap & Zoom Controls */}
         <div className="flex items-center gap-2 text-[12px]">
@@ -1838,6 +1840,14 @@ export default function SeatLayoutPage() {
                         data-cy={cy}
                         transform={`rotate(${table?.rotation || 0} ${cx} ${cy})`}
                         cursor="grab"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedSeatCode(seat.code);
+                          setSelectedSeatCodes([seat.code]);
+                          setSelectedTableId(seat.table_id || null);
+                          setSelectedTableIds([]);
+                          setSelectedElementId(null);
+                        }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
                           const coords = getCanvasCoords(e);

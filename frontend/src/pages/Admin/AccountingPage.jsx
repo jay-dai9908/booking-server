@@ -16,7 +16,10 @@ import {
   Check,
   ChevronRight,
   ChevronDown,
-  MoreVertical
+  MoreVertical,
+  Download,
+  BarChart2,
+  TrendingUp
 } from 'lucide-react';
 import api from '../../api/axios';
 import SegmentedTabs from '../../components/admin/SegmentedTabs';
@@ -31,9 +34,11 @@ import ReservationDetailsModal from '../../components/ReservationDetailsModal';
 import { printJobOnThisDevice } from '../../utils/sunmiPrinter';
 import { buildClosingSlip, commandsToPreviewHtml } from '@shared/receipts.js';
 import { toTaipeiDateString } from '@shared/time.js';
+import { formatBookingRef } from '../../utils/admin/floorSelectors';
+import { buildPaymentsCsv, buildEventsCsv, computeDailyRevenue } from '../../utils/admin/accountingExport';
 
 export default function AccountingPage() {
-  const [activeTab, setActiveTab] = useState('payments');
+  const [activeTab, setActiveTab] = useState('overview');
 
   // Today string in Asia/Taipei
   const todayStr = useMemo(() => {
@@ -41,6 +46,7 @@ export default function AccountingPage() {
   }, []);
 
   // Shared state
+  const [datePreset, setDatePreset] = useState('today');
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState(todayStr);
   const [searchTerm, setSearchTerm] = useState('');
@@ -297,6 +303,77 @@ export default function AccountingPage() {
     }
   };
 
+  // Quick date chips handlers
+  const handleDatePreset = (preset) => {
+    setDatePreset(preset);
+    const now = new Date();
+    if (preset === 'today') {
+      setDateFrom(todayStr);
+      setDateTo(todayStr);
+    } else if (preset === 'week') {
+      const day = now.getDay() || 7;
+      const mon = new Date(now);
+      mon.setDate(now.getDate() - day + 1);
+      const sun = new Date(now);
+      sun.setDate(now.getDate() - day + 7);
+      setDateFrom(mon.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }));
+      setDateTo(sun.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }));
+    } else if (preset === 'month') {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setDateFrom(first.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }));
+      setDateTo(last.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }));
+    }
+  };
+
+  // CSV download handlers (Spec 5.2)
+  const handleDownloadPaymentsCsv = () => {
+    const csvStr = buildPaymentsCsv(payments, getMethodLabel);
+    const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `收款明細_${dateFrom}_${dateTo}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('已匯出收款明細 CSV');
+  };
+
+  const handleDownloadEventsCsv = () => {
+    const csvStr = buildEventsCsv(events);
+    const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `異動紀錄_${dateFrom}_${dateTo}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('已匯出異動紀錄 CSV');
+  };
+
+  // Overview metrics (Spec 5.2)
+  const paidOrdersCount = useMemo(() => {
+    return new Set(
+      payments
+        .filter(p => p.status === 'valid' && (p.kind === 'charge' || p.kind === 'supplement') && p.booking_ref)
+        .map(p => p.booking_ref)
+    ).size;
+  }, [payments]);
+
+  const avgTicket = useMemo(() => {
+    const rev = summary?.net_revenue || 0;
+    return paidOrdersCount > 0 ? Math.round(rev / paidOrdersCount) : 0;
+  }, [summary, paidOrdersCount]);
+
+  const dailyRevenueData = useMemo(() => {
+    return computeDailyRevenue(payments, dateFrom, dateTo);
+  }, [payments, dateFrom, dateTo]);
+
+  const maxDailyRev = useMemo(() => {
+    const maxVal = Math.max(0, ...dailyRevenueData.map(d => d.revenue));
+    return maxVal > 0 ? maxVal : 1000;
+  }, [dailyRevenueData]);
+
   return (
     <div className="space-y-4 max-w-7xl mx-auto pb-12">
       {/* Toast */}
@@ -312,6 +389,7 @@ export default function AccountingPage() {
         <div className="hidden sm:flex items-center gap-2">
           <SegmentedTabs
             tabs={[
+              { id: 'overview', label: '營收總覽' },
               { id: 'payments', label: '收款明細' },
               { id: 'events', label: '異動紀錄' },
               { id: 'print-jobs', label: '列印紀錄' },
@@ -330,15 +408,16 @@ export default function AccountingPage() {
           )}
         </div>
 
-        {/* Mobile Tabs (below sm) - Spec 6.22 */}
+        {/* Mobile Tabs (below sm) */}
         <div className="flex sm:hidden items-center justify-between gap-1 w-full">
           <SegmentedTabs
             tabs={[
+              { id: 'overview', label: '總覽' },
               { id: 'closing', label: '日結' },
               { id: 'events', label: '異動' },
               { id: 'unpaid', label: `未結${summary?.unpaid?.count ? ` ${summary.unpaid.count}` : ''}` }
             ]}
-            activeTab={['closing', 'events', 'unpaid'].includes(activeTab) ? activeTab : null}
+            activeTab={['overview', 'closing', 'events', 'unpaid'].includes(activeTab) ? activeTab : null}
             onChange={(tab) => {
               setActiveTab(tab);
               setMobileMenuOpen(false);
@@ -394,34 +473,54 @@ export default function AccountingPage() {
         </div>
       </div>
 
-      {/* Date & Search Filter Bar (for tabs 1, 2, 3) */}
+      {/* Date & Search Filter Bar (Spec 5.2 Quick date chips) */}
       {activeTab !== 'unpaid' && (
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-3 rounded-2xl border border-sg-line text-[12px]">
-          <div className="flex items-center gap-2">
-            <span className="text-sg-muted">日期區間：</span>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="px-2.5 py-1 rounded-xl border border-sg-line text-[12px]"
-            />
-            <span className="text-sg-muted">至</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="px-2.5 py-1 rounded-xl border border-sg-line text-[12px]"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setDateFrom(todayStr);
-                setDateTo(todayStr);
-              }}
-              className="text-sg-brown font-bold hover:underline px-1"
-            >
-              今天
-            </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-sg-line text-[12px]">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sg-muted">日期：</span>
+            <div className="flex items-center gap-1.5">
+              {[
+                { id: 'today', label: '今天' },
+                { id: 'week', label: '本週' },
+                { id: 'month', label: '本月' },
+                { id: 'custom', label: '自訂' }
+              ].map(chip => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => handleDatePreset(chip.id)}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition ${
+                    datePreset === chip.id
+                      ? 'bg-sg-brown text-white border-sg-brown'
+                      : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown/50'
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1 ml-1">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setDatePreset('custom');
+                }}
+                className="px-2 py-1 rounded-xl border border-sg-line text-[12px]"
+              />
+              <span className="text-sg-muted">至</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setDatePreset('custom');
+                }}
+                className="px-2 py-1 rounded-xl border border-sg-line text-[12px]"
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -440,6 +539,155 @@ export default function AccountingPage() {
                 placeholder="搜尋單號、姓名、收款號"
                 className="pl-8 pr-3 py-1 rounded-xl border border-sg-line text-[12px] w-48"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 0: REVENUE OVERVIEW (營收總覽 - Spec 5.2) */}
+      {activeTab === 'overview' && (
+        <div className="space-y-4 animate-fade-in">
+          {/* Top 3 KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
+              <span className="text-sg-muted text-[12px] font-medium block">期間實收淨額</span>
+              <div className="text-[24px] font-bold text-sg-ink font-num">
+                NT${(summary?.net_revenue ?? 0).toLocaleString()}
+              </div>
+              <span className="text-[11px] text-sg-sage-ink block font-medium">
+                已扣除退款 NT${(summary?.total_refunds || 0).toLocaleString()}
+              </span>
+            </div>
+
+            <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
+              <span className="text-sg-muted text-[12px] font-medium block">預期收益（已預約未結帳）</span>
+              <div className="text-[24px] font-bold text-sg-brown font-num">
+                NT${(summary?.unpaid?.amount ?? 0).toLocaleString()}
+              </div>
+              <span className="text-[11px] text-sg-muted block">
+                共 {summary?.unpaid?.count || 0} 組預約未結帳
+              </span>
+            </div>
+
+            <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
+              <span className="text-sg-muted text-[12px] font-medium block">平均客單價 (客組)</span>
+              <div className="text-[24px] font-bold text-sg-ink font-num">
+                NT${avgTicket.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-sg-muted block">
+                共 {paidOrdersCount} 組已結帳
+              </span>
+            </div>
+          </div>
+
+          {/* Daily Revenue Bar Chart (SVG) */}
+          <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BarChart2 className="w-4 h-4 text-sg-brown" />
+                <h3 className="text-[14px] font-bold text-sg-ink">每日營收趨勢</h3>
+              </div>
+              <span className="text-[12px] text-sg-muted font-medium">
+                {dateFrom} 至 {dateTo}
+              </span>
+            </div>
+
+            {dailyRevenueData.length === 0 ? (
+              <div className="py-12 text-center text-sg-muted text-[13px]">
+                此期間無營收數據
+              </div>
+            ) : (
+              <div className="w-full overflow-x-auto py-2 no-scrollbar">
+                <div className="min-w-[480px]">
+                  <svg viewBox="0 0 600 210" className="w-full h-52">
+                    <line x1="40" y1="20" x2="580" y2="20" stroke="#E5E7EB" strokeDasharray="3 3" />
+                    <line x1="40" y1="85" x2="580" y2="85" stroke="#E5E7EB" strokeDasharray="3 3" />
+                    <line x1="40" y1="150" x2="580" y2="150" stroke="#D1D5DB" />
+
+                    <text x="35" y="24" textAnchor="end" fontSize="10" fill="#9CA3AF">
+                      NT${maxDailyRev}
+                    </text>
+                    <text x="35" y="89" textAnchor="end" fontSize="10" fill="#9CA3AF">
+                      NT${Math.round(maxDailyRev / 2)}
+                    </text>
+                    <text x="35" y="154" textAnchor="end" fontSize="10" fill="#9CA3AF">
+                      0
+                    </text>
+
+                    {dailyRevenueData.map((d, idx) => {
+                      const totalBars = dailyRevenueData.length;
+                      const availW = 520;
+                      const barSlotW = availW / totalBars;
+                      const barW = Math.max(12, Math.min(36, barSlotW * 0.65));
+                      const x = 50 + idx * barSlotW + (barSlotW - barW) / 2;
+                      const barH = maxDailyRev > 0 ? Math.round((Math.max(0, d.revenue) / maxDailyRev) * 125) : 0;
+                      const y = 150 - barH;
+
+                      return (
+                        <g key={d.date} className="group">
+                          <rect
+                            x={x}
+                            y={y}
+                            width={barW}
+                            height={Math.max(3, barH)}
+                            rx="4"
+                            className="fill-sg-brown hover:fill-sg-brown-hover transition-colors"
+                          />
+                          {d.revenue > 0 && (
+                            <text
+                              x={x + barW / 2}
+                              y={y - 5}
+                              textAnchor="middle"
+                              fontSize="10"
+                              fontWeight="bold"
+                              fill="#4A3728"
+                            >
+                              {d.revenue >= 1000 ? `${(d.revenue / 1000).toFixed(1)}k` : d.revenue}
+                            </text>
+                          )}
+                          <text
+                            x={x + barW / 2}
+                            y="170"
+                            textAnchor="middle"
+                            fontSize="10"
+                            fill="#6B7280"
+                          >
+                            {d.date.slice(5)}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Payment Method Breakdown Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
+              <span className="text-sg-muted text-[11px] block">現金實收</span>
+              <span className="text-[18px] font-bold text-sg-ink font-num">
+                NT${(summary?.by_method?.cash?.amount || 0).toLocaleString()}
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
+              <span className="text-sg-muted text-[11px] block">LINE Pay</span>
+              <span className="text-[18px] font-bold text-sg-ink font-num">
+                NT${(summary?.by_method?.line_pay?.amount || 0).toLocaleString()}
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
+              <span className="text-sg-muted text-[11px] block">刷卡 / 轉帳</span>
+              <span className="text-[18px] font-bold text-sg-ink font-num">
+                NT${((summary?.by_method?.card?.amount || 0) + (summary?.by_method?.transfer?.amount || 0)).toLocaleString()}
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
+              <span className="text-sg-muted text-[11px] block">卡券折抵額</span>
+              <span className="text-[18px] font-bold text-sg-brown font-num">
+                NT${(summary?.pass_value || 0).toLocaleString()}
+              </span>
             </div>
           </div>
         </div>
@@ -485,38 +733,50 @@ export default function AccountingPage() {
           )}
 
           {/* Filter Bar */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[12px] text-sg-muted">種類：</span>
-            {['all', 'charge', 'supplement', 'refund', 'waive'].map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setPaymentKindFilter(k)}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border ${
-                  paymentKindFilter === k
-                    ? 'bg-sg-brown text-white border-sg-brown'
-                    : 'bg-white text-sg-ink border-sg-line'
-                }`}
-              >
-                {k === 'all' ? '全部種類' : k === 'charge' ? '收款' : k === 'supplement' ? '補收' : k === 'refund' ? '退款' : '免收'}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[12px] text-sg-muted">種類：</span>
+              {['all', 'charge', 'supplement', 'refund', 'waive'].map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setPaymentKindFilter(k)}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border ${
+                    paymentKindFilter === k
+                      ? 'bg-sg-brown text-white border-sg-brown'
+                      : 'bg-white text-sg-ink border-sg-line'
+                  }`}
+                >
+                  {k === 'all' ? '全部種類' : k === 'charge' ? '收款' : k === 'supplement' ? '補收' : k === 'refund' ? '退款' : '免收'}
+                </button>
+              ))}
 
-            <span className="text-[12px] text-sg-muted ml-3">方式：</span>
-            {['all', 'cash', 'line_pay', 'card', 'transfer', 'pass'].map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setPaymentMethodFilter(m)}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border ${
-                  paymentMethodFilter === m
-                    ? 'bg-sg-brown text-white border-sg-brown'
-                    : 'bg-white text-sg-ink border-sg-line'
-                }`}
-              >
-                {m === 'all' ? '全部方式' : getMethodLabel(m)}
-              </button>
-            ))}
+              <span className="text-[12px] text-sg-muted ml-3">方式：</span>
+              {['all', 'cash', 'line_pay', 'card', 'transfer', 'pass'].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setPaymentMethodFilter(m)}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border ${
+                    paymentMethodFilter === m
+                      ? 'bg-sg-brown text-white border-sg-brown'
+                      : 'bg-white text-sg-ink border-sg-line'
+                  }`}
+                >
+                  {m === 'all' ? '全部方式' : getMethodLabel(m)}
+                </button>
+              ))}
+            </div>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleDownloadPaymentsCsv}
+              className="whitespace-nowrap"
+            >
+              <Download className="w-3.5 h-3.5 mr-1 text-sg-muted" />
+              匯出 CSV
+            </Button>
           </div>
 
           {/* Table */}
@@ -556,7 +816,7 @@ export default function AccountingPage() {
                       >
                         <td className="py-3 px-3 font-mono text-[12px] text-sg-muted">{timeStr}</td>
                         <td className="py-3 px-3 font-mono font-bold text-sg-ink text-[12px]">{p.payment_no}</td>
-                        <td className="py-3 px-3 font-mono text-[12px] text-sg-brown font-bold">{p.booking_ref}</td>
+                        <td className="py-3 px-3 font-mono text-[12px] text-sg-brown font-bold">{formatBookingRef(p.booking_ref)}</td>
                         <td className="py-3 px-2 font-bold text-sg-ink">
                           {p.breakdown_json?.customer_name || '現場顧客'}
                         </td>
@@ -616,30 +876,42 @@ export default function AccountingPage() {
       {/* TAB 2: AUDIT EVENTS (異動紀錄) */}
       {activeTab === 'events' && (
         <div className="space-y-4">
-          {/* Category Chips */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {[
-              { key: 'all', label: '全部' },
-              { key: 'charge', label: '收款' },
-              { key: 'void', label: '作廢' },
-              { key: 'refund', label: '退款' },
-              { key: 'amount_change', label: '改金額' },
-              { key: 'print', label: '列印' },
-              { key: 'more', label: '更多 (免收/卡券/交班)' }
-            ].map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                onClick={() => setEventCategoryFilter(c.key)}
-                className={`px-3 py-1 rounded-2xl text-[12px] font-bold border transition ${
-                  eventCategoryFilter === c.key
-                    ? 'bg-sg-brown text-white border-sg-brown'
-                    : 'bg-white text-sg-ink border-sg-line'
-                }`}
-              >
-                {c.label}
-              </button>
-            ))}
+          {/* Category Chips & CSV Button */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { key: 'all', label: '全部' },
+                { key: 'charge', label: '收款' },
+                { key: 'void', label: '作廢' },
+                { key: 'refund', label: '退款' },
+                { key: 'amount_change', label: '改金額' },
+                { key: 'print', label: '列印' },
+                { key: 'more', label: '更多 (免收/卡券/交班)' }
+              ].map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => setEventCategoryFilter(c.key)}
+                  className={`px-3 py-1 rounded-2xl text-[12px] font-bold border transition ${
+                    eventCategoryFilter === c.key
+                      ? 'bg-sg-brown text-white border-sg-brown'
+                      : 'bg-white text-sg-ink border-sg-line'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleDownloadEventsCsv}
+              className="whitespace-nowrap"
+            >
+              <Download className="w-3.5 h-3.5 mr-1 text-sg-muted" />
+              匯出 CSV
+            </Button>
           </div>
 
           {/* Table */}
@@ -682,7 +954,7 @@ export default function AccountingPage() {
                           <span className="text-[10px] text-sg-muted">{ev.device_label || '裝置'}</span>
                         </td>
                         <td className="py-3 px-3 font-mono text-[12px] text-sg-brown font-bold">
-                          {ev.booking_ref || '-'}
+                          {ev.booking_ref ? formatBookingRef(ev.booking_ref) : '-'}
                         </td>
                         <td className="py-3 px-3 text-[13px] text-sg-ink font-medium">
                           {ev.summary}
@@ -971,7 +1243,7 @@ export default function AccountingPage() {
                           {r.session_date ? new Date(r.session_date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', timeZone: 'Asia/Taipei' }) : '-'}
                         </td>
                         <td className="py-3 px-3 font-mono font-bold text-sg-brown text-[12px]">
-                          {r.ref_display || r.booking_ref}
+                          {r.ref_display || formatBookingRef(r.booking_ref)}
                         </td>
                         <td className="py-3 px-3 font-bold text-sg-ink">
                           {r.name || r.user?.name || '現場貴賓'}
@@ -1050,7 +1322,7 @@ export default function AccountingPage() {
             <div className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line space-y-1">
               <div><span className="text-sg-muted">操作人員：</span><span className="font-bold">{selectedEventDetail.staff_name}</span></div>
               <div><span className="text-sg-muted">操作裝置：</span><span>{selectedEventDetail.device_label}</span></div>
-              <div><span className="text-sg-muted">關聯訂單：</span><span className="font-mono text-sg-brown font-bold">{selectedEventDetail.booking_ref || '無'}</span></div>
+              <div><span className="text-sg-muted">關聯訂單：</span><span className="font-mono text-sg-brown font-bold">{selectedEventDetail.booking_ref ? formatBookingRef(selectedEventDetail.booking_ref) : '無'}</span></div>
               <div><span className="text-sg-muted">填寫原因：</span><span className="font-bold text-sg-danger">{selectedEventDetail.reason || '無'}</span></div>
             </div>
 

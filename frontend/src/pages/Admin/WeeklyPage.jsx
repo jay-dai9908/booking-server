@@ -31,7 +31,7 @@ export default function WeeklyPage() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-full animate-fade-in">
+    <div className="flex flex-col md:flex-row h-full animate-fade-in gap-4 max-w-full overflow-hidden">
       {/* Left/Top Column for Controls */}
       <div className="w-full md:w-64 lg:w-72 shrink-0 flex flex-col gap-4 z-10">
         <div className="flex flex-col gap-2 bg-white rounded-xl border border-gray-200 p-2 shadow-sm w-full">
@@ -59,7 +59,7 @@ export default function WeeklyPage() {
       </div>
 
       {/* Right Column for Grid */}
-      <div className="flex-1 overflow-auto bg-white relative">
+      <div className="flex-1 w-full max-w-full overflow-x-auto bg-white rounded-2xl border border-gray-200 relative shadow-xs">
         {isWeeklyLoading && (
           <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-50 flex items-center justify-center">
             <div className="w-8 h-8 border-4 border-gray-200 border-t-gray-800 rounded-full animate-spin" />

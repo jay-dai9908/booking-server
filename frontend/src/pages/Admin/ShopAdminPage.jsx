@@ -765,11 +765,11 @@ export default function ShopAdminPage() {
         </div>
 
         {/* Tab Pills */}
-        <div className="flex flex-wrap bg-[#F5F0EB] p-1 rounded-xl text-xs font-bold text-[#6D5D52] self-stretch lg:self-auto gap-1">
+        <div className="flex flex-nowrap overflow-x-auto no-scrollbar max-w-full bg-[#F5F0EB] p-1 rounded-xl text-xs font-bold text-[#6D5D52] self-stretch lg:self-auto gap-1">
           <button
             type="button"
             onClick={() => setActiveTab('orders')}
-            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg transition ${
+            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap ${
               activeTab === 'orders' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
@@ -778,7 +778,7 @@ export default function ShopAdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('payments')}
-            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg transition ${
+            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap ${
               activeTab === 'payments' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
@@ -787,7 +787,7 @@ export default function ShopAdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('products')}
-            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg transition ${
+            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap ${
               activeTab === 'products' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
@@ -796,7 +796,7 @@ export default function ShopAdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('bead_colors')}
-            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg transition ${
+            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap ${
               activeTab === 'bead_colors' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >

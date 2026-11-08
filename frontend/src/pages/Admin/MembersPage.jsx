@@ -157,19 +157,180 @@ export default function MembersPage() {
             ) : users.length === 0 ? (
               <div className="p-12 text-center text-gray-400 font-medium">找不到符合的會員</div>
             ) : (
-              <table className="w-full text-left whitespace-nowrap">
-                <thead>
-                  <tr className="bg-[#FAF7F2] text-[#8C8279] text-xs uppercase tracking-wider border-b border-[#E8DEC8]">
-                    <th className="px-6 py-4 font-semibold">顧客 / LINE 檔案</th>
-                    <th className="px-6 py-4 font-semibold">不限時(封頂)累計</th>
-                    <th className="px-6 py-4 font-semibold">一般計時累計</th>
-                    <th className="px-6 py-4 font-semibold">累計消費 / 到訪</th>
-                    <th className="px-6 py-4 font-semibold">最後登入 / 註冊</th>
-                    <th className="px-6 py-4 font-semibold">狀態</th>
-                    <th className="px-6 py-4 font-semibold text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
+              <>
+                {/* Desktop Table (>= 768px) */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left whitespace-nowrap">
+                    <thead>
+                      <tr className="bg-[#FAF7F2] text-[#8C8279] text-xs uppercase tracking-wider border-b border-[#E8DEC8]">
+                        <th className="px-6 py-4 font-semibold">顧客 / LINE 檔案</th>
+                        <th className="px-6 py-4 font-semibold">不限時(封頂)累計</th>
+                        <th className="px-6 py-4 font-semibold">一般計時累計</th>
+                        <th className="px-6 py-4 font-semibold">累計消費 / 到訪</th>
+                        <th className="px-6 py-4 font-semibold">最後登入 / 註冊</th>
+                        <th className="px-6 py-4 font-semibold">狀態</th>
+                        <th className="px-6 py-4 font-semibold text-right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {users.map(u => {
+                        const stats = u.stats || {
+                          unlimited_pax_count: 0,
+                          unlimited_orders_count: 0,
+                          regular_person_hours: 0,
+                          regular_pure_hours: 0,
+                          regular_orders_count: 0,
+                          completed_visits_count: 0,
+                          total_spent: 0,
+                          no_show_count: 0
+                        };
+                        const isManualOnly = u.line_user_id?.startsWith('manual_');
+
+                        return (
+                          <tr
+                            key={u.id}
+                            onClick={() => handleSelectMember(u)}
+                            className="hover:bg-[#FAF7F2]/60 transition-colors cursor-pointer"
+                          >
+                            {/* Customer & LINE Profile */}
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3.5">
+                                {u.line_picture_url ? (
+                                  <img
+                                    src={u.line_picture_url}
+                                    alt={u.name || 'avatar'}
+                                    className="w-10 h-10 rounded-full object-cover border border-gray-200 shrink-0"
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-full bg-[#FAF7F2] text-[#8B5B43] flex items-center justify-center font-bold text-sm border border-[#E8DEC8] shrink-0">
+                                    {u.name ? u.name.slice(0, 1) : <User className="w-5 h-5" />}
+                                  </div>
+                                )}
+                                <div className="flex flex-col">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`font-bold text-sm ${u.is_blacklisted ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                      {u.name || '未設定'}
+                                    </span>
+                                    {u.line_display_name && (
+                                      <span className="text-xs px-2 py-0.5 rounded-full bg-[#06C755]/10 text-[#059941] font-semibold">
+                                        LINE: {u.line_display_name}
+                                      </span>
+                                    )}
+                                    {isManualOnly && (
+                                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
+                                        現場建檔
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-xs text-gray-500 mt-0.5 font-mono">{u.phone || '未提供電話'}</span>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Unlimited (Capped) Stats */}
+                            <td className="px-6 py-4">
+                              {stats.unlimited_pax_count > 0 ? (
+                                <div className="flex flex-col">
+                                  <span className="inline-flex items-center gap-1 font-bold text-amber-700 text-sm">
+                                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                                    {stats.unlimited_pax_count} 人次
+                                  </span>
+                                  <span className="text-xs text-gray-400">共 {stats.unlimited_orders_count} 筆訂單</span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )}
+                            </td>
+
+                            {/* Regular Hourly Stats */}
+                            <td className="px-6 py-4">
+                              {stats.regular_person_hours > 0 ? (
+                                <div className="flex flex-col">
+                                  <span className="inline-flex items-center gap-1 font-bold text-[#8B5B43] text-sm">
+                                    <Clock className="w-3.5 h-3.5 text-[#8B5B43]" />
+                                    {stats.regular_person_hours} 小時 <span className="text-xs font-normal text-gray-500">(人時)</span>
+                                  </span>
+                                  <span className="text-xs text-gray-400">
+                                    純時段 {stats.regular_pure_hours}h / {stats.regular_orders_count} 筆
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )}
+                            </td>
+
+                            {/* Total Spent & Visits */}
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col">
+                                <span className="font-bold text-gray-800 text-sm">
+                                  NT$ {(stats.total_spent || 0).toLocaleString()}
+                                </span>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-xs text-gray-500">完訪 {stats.completed_visits_count} 次</span>
+                                  {stats.no_show_count > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                                      <AlertTriangle className="w-3 h-3" /> 爽約 {stats.no_show_count}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Last Login / Created At */}
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col text-xs">
+                                {u.last_login_at ? (
+                                  <span className="text-gray-700 font-medium">
+                                    登入：{format(new Date(u.last_login_at), 'MM/dd HH:mm')}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">尚無近期登入</span>
+                                )}
+                                <span className="text-gray-400 mt-0.5">
+                                  註冊：{format(new Date(u.created_at), 'yyyy/MM/dd')}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Status */}
+                            <td className="px-6 py-4">
+                              {u.is_blacklisted ? (
+                                <span className="inline-flex items-center gap-1 text-red-600 text-xs font-bold bg-red-50 border border-red-200 px-2.5 py-1 rounded-lg">
+                                  <XCircle className="w-3.5 h-3.5" /> 黑名單
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-medium bg-emerald-50 px-2.5 py-1 rounded-lg">
+                                  正常
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Actions */}
+                            <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                              {!u.line_user_id?.startsWith('manual_') ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setLineMessageTargetUser(u)}
+                                  className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg bg-[#06C755] hover:bg-[#05b34c] text-white shadow-2xs transition active:scale-95 whitespace-nowrap"
+                                  title="發送 LINE 訊息給此會員"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                                  發訊
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-gray-400 font-medium">未綁定LINE</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card List (< 768px) */}
+                <div className="md:hidden divide-y divide-[#E8DEC8]">
                   {users.map(u => {
                     const stats = u.stats || {
                       unlimited_pax_count: 0,
@@ -184,14 +345,13 @@ export default function MembersPage() {
                     const isManualOnly = u.line_user_id?.startsWith('manual_');
 
                     return (
-                      <tr
+                      <div
                         key={u.id}
                         onClick={() => handleSelectMember(u)}
-                        className="hover:bg-[#FAF7F2]/60 transition-colors cursor-pointer"
+                        className="p-4 hover:bg-[#FAF7F2]/60 transition-colors cursor-pointer space-y-3"
                       >
-                        {/* Customer & LINE Profile */}
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-3">
                             {u.line_picture_url ? (
                               <img
                                 src={u.line_picture_url}
@@ -204,126 +364,61 @@ export default function MembersPage() {
                                 {u.name ? u.name.slice(0, 1) : <User className="w-5 h-5" />}
                               </div>
                             )}
-                            <div className="flex flex-col">
-                              <div className="flex items-center gap-2">
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className={`font-bold text-sm ${u.is_blacklisted ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
                                   {u.name || '未設定'}
                                 </span>
-                                {u.line_display_name && (
-                                  <span className="text-xs px-2 py-0.5 rounded-full bg-[#06C755]/10 text-[#059941] font-semibold">
-                                    LINE: {u.line_display_name}
-                                  </span>
-                                )}
-                                {isManualOnly && (
-                                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
-                                    現場建檔
-                                  </span>
+                                {u.is_blacklisted ? (
+                                  <span className="text-[10px] text-red-700 bg-red-50 px-1.5 py-0.5 rounded font-bold">黑名單</span>
+                                ) : (
+                                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">正常</span>
                                 )}
                               </div>
-                              <span className="text-xs text-gray-500 mt-0.5 font-mono">{u.phone || '未提供電話'}</span>
+                              <div className="text-xs text-gray-500 font-mono mt-0.5">{u.phone || '未提供電話'}</div>
                             </div>
                           </div>
-                        </td>
 
-                        {/* Unlimited (Capped) Stats */}
-                        <td className="px-6 py-4">
-                          {stats.unlimited_pax_count > 0 ? (
-                            <div className="flex flex-col">
-                              <span className="inline-flex items-center gap-1 font-bold text-amber-700 text-sm">
-                                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                                {stats.unlimited_pax_count} 人次
-                              </span>
-                              <span className="text-xs text-gray-400">共 {stats.unlimited_orders_count} 筆訂單</span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-gray-400">—</span>
-                          )}
-                        </td>
-
-                        {/* Regular Hourly Stats */}
-                        <td className="px-6 py-4">
-                          {stats.regular_person_hours > 0 ? (
-                            <div className="flex flex-col">
-                              <span className="inline-flex items-center gap-1 font-bold text-[#8B5B43] text-sm">
-                                <Clock className="w-3.5 h-3.5 text-[#8B5B43]" />
-                                {stats.regular_person_hours} 小時 <span className="text-xs font-normal text-gray-500">(人時)</span>
-                              </span>
-                              <span className="text-xs text-gray-400">
-                                純時段 {stats.regular_pure_hours}h / {stats.regular_orders_count} 筆
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-gray-400">—</span>
-                          )}
-                        </td>
-
-                        {/* Total Spent & Visits */}
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col">
-                            <span className="font-bold text-gray-800 text-sm">
-                              NT$ {(stats.total_spent || 0).toLocaleString()}
-                            </span>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-xs text-gray-500">完訪 {stats.completed_visits_count} 次</span>
-                              {stats.no_show_count > 0 && (
-                                <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
-                                  <AlertTriangle className="w-3 h-3" /> 爽約 {stats.no_show_count}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Last Login / Created At */}
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col text-xs">
-                            {u.last_login_at ? (
-                              <span className="text-gray-700 font-medium">
-                                登入：{format(new Date(u.last_login_at), 'MM/dd HH:mm')}
-                              </span>
+                          <div onClick={(e) => e.stopPropagation()}>
+                            {!isManualOnly ? (
+                              <button
+                                type="button"
+                                onClick={() => setLineMessageTargetUser(u)}
+                                className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg bg-[#06C755] text-white shadow-2xs whitespace-nowrap"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5 fill-current" />
+                                發訊
+                              </button>
                             ) : (
-                              <span className="text-gray-400">尚無近期登入</span>
+                              <span className="text-[11px] text-gray-400 font-medium">未綁LINE</span>
                             )}
-                            <span className="text-gray-400 mt-0.5">
-                              註冊：{format(new Date(u.created_at), 'yyyy/MM/dd')}
-                            </span>
                           </div>
-                        </td>
+                        </div>
 
-                        {/* Status */}
-                        <td className="px-6 py-4">
-                          {u.is_blacklisted ? (
-                            <span className="inline-flex items-center gap-1 text-red-600 text-xs font-bold bg-red-50 border border-red-200 px-2.5 py-1 rounded-lg">
-                              <XCircle className="w-3.5 h-3.5" /> 黑名單
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-medium bg-emerald-50 px-2.5 py-1 rounded-lg">
-                              正常
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Actions */}
-                        <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                          {!u.line_user_id?.startsWith('manual_') ? (
-                            <button
-                              type="button"
-                              onClick={() => setLineMessageTargetUser(u)}
-                              className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg bg-[#06C755] hover:bg-[#05b34c] text-white shadow-2xs transition active:scale-95"
-                              title="發送 LINE 訊息給此會員"
-                            >
-                              <MessageCircle className="w-3.5 h-3.5 fill-current" />
-                              發訊
-                            </button>
-                          ) : (
-                            <span className="text-[11px] text-gray-400 font-medium">未綁定LINE</span>
-                          )}
-                        </td>
-                      </tr>
+                        <div className="grid grid-cols-2 gap-2 text-xs bg-[#FAF7F2]/60 p-2.5 rounded-xl border border-[#E8DEC8]/60">
+                          <div>
+                            <span className="text-gray-400 block text-[11px]">累計消費</span>
+                            <span className="font-bold text-gray-800">NT$ {(stats.total_spent || 0).toLocaleString()}</span>
+                            <span className="text-gray-500 text-[11px] block">完訪 {stats.completed_visits_count} 次</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 block text-[11px]">時段累計</span>
+                            {stats.unlimited_pax_count > 0 && (
+                              <span className="font-bold text-amber-700 block text-[11px]">不限時 {stats.unlimited_pax_count} 人次</span>
+                            )}
+                            {stats.regular_person_hours > 0 && (
+                              <span className="font-bold text-[#8B5B43] block text-[11px]">計時 {stats.regular_person_hours} 小時</span>
+                            )}
+                            {stats.unlimited_pax_count === 0 && stats.regular_person_hours === 0 && (
+                              <span className="text-gray-400 text-[11px]">—</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
+                </div>
+              </>
             )}
           </div>
           

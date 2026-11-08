@@ -65,7 +65,7 @@ export default function Button({
       disabled={isDisabled}
       aria-busy={loading ? 'true' : undefined}
       onClick={isDisabled ? undefined : onClick}
-      className={`inline-flex items-center justify-center gap-2 rounded-full font-bold font-body select-none transition ${
+      className={`inline-flex items-center justify-center gap-2 rounded-full font-bold font-body select-none transition whitespace-nowrap ${
         isDisabled ? '' : 'active:scale-[0.98]'
       } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sg-brown ${sizeClasses} ${variantClasses} ${className}`}
       {...props}
