@@ -155,10 +155,14 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
       checked_in_by: firstRes.checked_in_by,
       seat_source: firstRes.seat_source || 'auto',
       is_seat_locked: Boolean(firstRes.is_seat_locked),
-      assigned_seats: firstRes.assigned_seats || []
+      assigned_seats: firstRes.assigned_seats || [],
+      booked_minutes: billInput.booking.booked_minutes
     },
     draft,
     pricing,
+    rules: billInput.rules,
+    discountConfig: billInput.discountConfig,
+    billInput,
     persons: billInput.effectivePersons,
     boards: billInput.boards,
     payments,
@@ -251,6 +255,7 @@ export async function saveDraft(booking_ref, base_rev, newDraft, staffName, staf
   return {
     bill: result.bill,
     draft: draftToSave,
+    billInput: result.billInput,
     rev: updatedRev
   };
 }

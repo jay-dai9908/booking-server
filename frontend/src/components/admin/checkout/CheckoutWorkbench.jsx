@@ -34,7 +34,7 @@ import PassTenderSheet from './PassTenderSheet';
 import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
-import { displayBoardName } from '@shared/billing.js';
+import { displayBoardName, computeBill, computeEntry } from '@shared/billing.js';
 import { personElapsedMinutes, formatElapsedText, extractTimeHHMM, bookingDurationText, formatBookingRef } from '../../../utils/admin/floorSelectors';
 
 export default function CheckoutWorkbench({
@@ -51,6 +51,7 @@ export default function CheckoutWorkbench({
   const [draftState, setDraftState] = useState(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [draftConflictMsg, setDraftConflictMsg] = useState(null);
+  const [syncStatus, setSyncStatus] = useState('synced'); // 'synced' | 'unsynced' | 'syncing' | 'error'
 
   // Sub-modal states
   const [adjustPersonNo, setAdjustPersonNo] = useState(null);
@@ -92,10 +93,14 @@ export default function CheckoutWorkbench({
   const [waiveLoading, setWaiveLoading] = useState(false);
   const [waiveError, setWaiveError] = useState(null);
 
-  // Debounce ref
+  // Debounce and queue refs
   const saveTimeoutRef = useRef(null);
   const isInitialLoadRef = useRef(true);
   const currentRevRef = useRef(0);
+  const pendingDraftRef = useRef(null);
+  const isSavingRef = useRef(false);
+  const hasModifiedWhileSavingRef = useRef(false);
+  const inFlightPromiseRef = useRef(null);
 
   // Load bill data
   const loadBill = async () => {
@@ -143,28 +148,59 @@ export default function CheckoutWorkbench({
     };
   }, [isOpen, bookingRef]);
 
-  // Debounced draft save
-  const triggerDraftSave = (newDraft) => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(async () => {
-      if (!bookingRef || !billData) return;
+  // Debounced draft save and queue logic (Section 4.2)
+  const flushDraft = async () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    if (isSavingRef.current) {
+      hasModifiedWhileSavingRef.current = true;
+      return inFlightPromiseRef.current;
+    }
+
+    if (!pendingDraftRef.current) {
+      return Promise.resolve();
+    }
+
+    const draftToSend = pendingDraftRef.current;
+    isSavingRef.current = true;
+    setIsSavingDraft(true);
+    setSyncStatus('syncing');
+    setDraftConflictMsg(null);
+
+    const promise = (async () => {
       try {
-        setIsSavingDraft(true);
-        setDraftConflictMsg(null);
-        const currentRev = currentRevRef.current ?? billData.draft?.rev ?? 0;
+        const currentRev = currentRevRef.current ?? billData?.draft?.rev ?? 0;
         const res = await api.put(`/billing/${bookingRef}/draft`, {
           base_rev: currentRev,
-          draft: newDraft
+          draft: draftToSend
         });
-        if (res.data?.bill) {
+        if (res.data) {
           const nextRev = res.data.rev ?? res.data.draft?.rev ?? (currentRev + 1);
           currentRevRef.current = nextRev;
           setBillData(prev => ({
             ...prev,
-            bill: res.data.bill,
-            draft: { ...newDraft, rev: nextRev }
+            bill: res.data.bill || prev?.bill,
+            billInput: res.data.billInput || prev?.billInput,
+            draft: { ...draftToSend, rev: nextRev }
           }));
           setDraftState(prev => ({ ...prev, rev: nextRev }));
+        }
+
+        if (pendingDraftRef.current === draftToSend) {
+          pendingDraftRef.current = null;
+        }
+
+        if (hasModifiedWhileSavingRef.current || pendingDraftRef.current) {
+          hasModifiedWhileSavingRef.current = false;
+          isSavingRef.current = false;
+          return await flushDraft();
+        } else {
+          isSavingRef.current = false;
+          setIsSavingDraft(false);
+          setSyncStatus('synced');
         }
       } catch (err) {
         console.error('[CheckoutWorkbench] Draft save error:', err);
@@ -178,51 +214,133 @@ export default function CheckoutWorkbench({
             currentRevRef.current = freshRev;
             const mergedDraft = {
               ...freshDraft,
-              order_addons: newDraft.order_addons !== undefined ? newDraft.order_addons : freshDraft.order_addons,
-              order_promos: newDraft.order_promos !== undefined ? newDraft.order_promos : freshDraft.order_promos,
-              manual_discount: newDraft.manual_discount !== undefined ? newDraft.manual_discount : freshDraft.manual_discount,
-              total_override: newDraft.total_override !== undefined ? newDraft.total_override : freshDraft.total_override,
-              persons: newDraft.persons !== undefined ? newDraft.persons : freshDraft.persons,
-              note: newDraft.note !== undefined ? newDraft.note : freshDraft.note,
+              order_addons: draftToSend.order_addons !== undefined ? draftToSend.order_addons : freshDraft.order_addons,
+              order_promos: draftToSend.order_promos !== undefined ? draftToSend.order_promos : freshDraft.order_promos,
+              manual_discount: draftToSend.manual_discount !== undefined ? draftToSend.manual_discount : freshDraft.manual_discount,
+              total_override: draftToSend.total_override !== undefined ? draftToSend.total_override : freshDraft.total_override,
+              persons: draftToSend.persons !== undefined ? draftToSend.persons : freshDraft.persons,
+              note: draftToSend.note !== undefined ? draftToSend.note : freshDraft.note,
               rev: freshRev
             };
-            setBillData({
-              ...freshBillData,
-              draft: mergedDraft
-            });
+            setBillData(freshBillData);
             setDraftState(mergedDraft);
             const retryRes = await api.put(`/billing/${bookingRef}/draft`, {
               base_rev: freshRev,
               draft: mergedDraft
             });
-            if (retryRes.data?.bill) {
+            if (retryRes.data) {
               const retryRev = retryRes.data.rev ?? retryRes.data.draft?.rev ?? (freshRev + 1);
               currentRevRef.current = retryRev;
               setBillData(prev => ({
                 ...prev,
-                bill: retryRes.data.bill,
+                bill: retryRes.data.bill || prev?.bill,
+                billInput: retryRes.data.billInput || prev?.billInput,
                 draft: { ...mergedDraft, rev: retryRev }
               }));
               setDraftState(prev => ({ ...prev, rev: retryRev }));
             }
+            if (pendingDraftRef.current === draftToSend) {
+              pendingDraftRef.current = null;
+            }
+            if (hasModifiedWhileSavingRef.current || pendingDraftRef.current) {
+              hasModifiedWhileSavingRef.current = false;
+              isSavingRef.current = false;
+              return await flushDraft();
+            } else {
+              isSavingRef.current = false;
+              setIsSavingDraft(false);
+              setSyncStatus('synced');
+            }
           } catch (retryErr) {
-            console.error('[CheckoutWorkbench] Re-apply after 409 failed:', retryErr);
-            loadBill();
+            console.error('[CheckoutWorkbench] 409 re-apply failed:', retryErr);
+            isSavingRef.current = false;
+            setIsSavingDraft(false);
+            setSyncStatus('error');
           }
+        } else {
+          isSavingRef.current = false;
+          setIsSavingDraft(false);
+          setSyncStatus('error');
         }
-      } finally {
-        setIsSavingDraft(false);
       }
-    }, 600);
+    })();
+
+    inFlightPromiseRef.current = promise;
+    return promise;
+  };
+
+  const scheduleDraftSave = (nextDraft) => {
+    pendingDraftRef.current = nextDraft;
+    setSyncStatus('unsynced');
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      flushDraft();
+    }, 1000);
   };
 
   const updateDraft = (updater) => {
     setDraftState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
-      triggerDraftSave(next);
+      scheduleDraftSave(next);
       return next;
     });
   };
+
+  // Immediate frontend billing calculation (Section 4.2.1)
+  const clientBill = useMemo(() => {
+    if (!billData || !draftState) return billData?.bill || null;
+    try {
+      const baseInput = billData.billInput || {};
+      const effectivePersons = billData.persons || baseInput.effectivePersons || [];
+      const draftPersons = draftState.persons || [];
+
+      const personsInput = effectivePersons.map(p => {
+        const pDraft = draftPersons.find(dp => dp.person_no === p.person_no) || {};
+        return {
+          ...p,
+          person_no: p.person_no,
+          seat_code: p.seat_code,
+          status: p.status || 'active',
+          mode: pDraft.mode || 'hourly',
+          hours_override: pDraft.hours_override ?? null,
+          int_hours: pDraft.int_hours ?? null,
+          overtime_chip: pDraft.overtime_chip ?? null,
+          addons: pDraft.addons || [],
+          promos: pDraft.promos || [],
+          adjust: pDraft.adjust || null,
+          timer: p.timer || {
+            billing_start_at: p.billing_start_at,
+            timer_started_at: p.timer_started_at,
+            timer_ended_at: p.timer_ended_at,
+            paused_at: p.paused_at,
+            paused_seconds: p.paused_seconds || 0
+          }
+        };
+      });
+
+      return computeBill({
+        ...baseInput,
+        now: baseInput.now || Date.now(),
+        pricing: baseInput.pricing || billData.pricing || { hourly: 150, unlimited: 750, allow_unlimited: true },
+        rules: baseInput.rules || billData.rules || { grace: 10, block: 30, early_leave_mode: 'booked', default_split_mode: 'proportional' },
+        discountConfig: baseInput.discountConfig || billData.discountConfig,
+        booking: baseInput.booking || billData.booking || { booked_minutes: 0 },
+        boards: baseInput.boards || billData.boards || [],
+        persons: personsInput,
+        orderAddons: draftState.order_addons || [],
+        orderPromos: draftState.order_promos || [],
+        manualDiscount: draftState.manual_discount || null,
+        totalOverride: draftState.total_override || null,
+        pendingSupplements: draftState.pending_supplements || [],
+        payments: billData.payments || []
+      });
+    } catch (e) {
+      console.error('[CheckoutWorkbench] client computeBill error:', e);
+      return billData.bill;
+    }
+  }, [billData, draftState]);
 
   if (!isOpen) return null;
 
@@ -244,7 +362,7 @@ export default function CheckoutWorkbench({
     );
   }
 
-  const bill = billData?.bill || {};
+  const bill = clientBill || billData?.bill || {};
   const persons = bill.persons || [];
   const unpaidPersons = persons.filter(p => !p.is_frozen);
   const paidPersons = persons.filter(p => p.is_frozen);
@@ -253,17 +371,121 @@ export default function CheckoutWorkbench({
   const currentStatusLabel = statusInfo.label;
   const payments = billData?.payments || [];
 
-  // Handlers for person adjustments
-  const handleHoursStep = (personNo, delta) => {
+  // Handlers for person adjustments (Section 4.3)
+  const OVERTIME_OPTIONS = [0, 0.5, 1, 1.5, 2, 2.5];
+
+  const getPersonHoursData = (p) => {
+    let bookedMins = booking.booked_minutes;
+    if (!bookedMins && booking.start_time && booking.end_time) {
+      const [sh, sm] = booking.start_time.split(':').map(Number);
+      const [eh, em] = booking.end_time.split(':').map(Number);
+      bookedMins = (eh * 60 + em) - (sh * 60 + sm);
+    }
+    const bookedHours = Math.max(1, Math.round((bookedMins || 60) / 60));
+
+    const autoEntry = computeEntry({
+      bookedMinutes: bookedMins || 0,
+      actualMinutes: p.entry?.actualMinutes ?? null,
+      pausedMinutes: p.entry?.pausedMinutes ?? 0,
+      mode: 'hourly',
+      hoursOverride: null,
+      pricing: billData?.pricing,
+      rules: billData?.rules || { grace: 10, block: 30 }
+    });
+    const autoHours = autoEntry.hours || bookedHours;
+    const defaultIntHours = Math.max(1, Math.floor(autoHours));
+    const defaultOvertimeChip = Math.max(0, Math.round((autoHours - defaultIntHours) * 10) / 10);
+
+    const pDraft = (draftState?.persons || []).find(dp => dp.person_no === p.person_no);
+    const hasOverride = pDraft && pDraft.hours_override != null;
+
+    let intHours = defaultIntHours;
+    let overtimeChip = defaultOvertimeChip;
+    if (hasOverride) {
+      intHours = pDraft.int_hours != null ? pDraft.int_hours : Math.floor(pDraft.hours_override);
+      overtimeChip = pDraft.overtime_chip != null ? pDraft.overtime_chip : Math.round((pDraft.hours_override - intHours) * 10) / 10;
+    }
+
+    const totalHours = hasOverride ? pDraft.hours_override : (intHours + overtimeChip);
+    return {
+      bookedHours,
+      defaultIntHours,
+      defaultOvertimeChip,
+      intHours,
+      overtimeChip,
+      hasOverride,
+      totalHours
+    };
+  };
+
+  const handleIntHoursChange = (personNo, delta) => {
     updateDraft(prev => {
       const pList = [...(prev.persons || [])];
       const idx = pList.findIndex(p => p.person_no === personNo);
       const curr = idx >= 0 ? pList[idx] : { person_no: personNo };
-      const currentHours = curr.hours_override != null ? curr.hours_override : (booking.session_count || 1);
-      const newHours = Math.max(0.5, currentHours + delta);
-      const updatedPerson = { ...curr, hours_override: newHours };
-      if (idx >= 0) pList[idx] = updatedPerson;
-      else pList.push(updatedPerson);
+
+      const personObj = (bill.persons || []).find(p => p.person_no === personNo) || (billData?.persons || []).find(p => p.person_no === personNo) || {};
+      const { bookedHours, defaultIntHours, defaultOvertimeChip } = getPersonHoursData(personObj);
+
+      const currentInt = curr.int_hours != null
+        ? curr.int_hours
+        : (curr.hours_override != null ? Math.floor(curr.hours_override) : defaultIntHours);
+      const currentOt = curr.overtime_chip != null
+        ? curr.overtime_chip
+        : (curr.hours_override != null ? Math.round((curr.hours_override - currentInt) * 10) / 10 : defaultOvertimeChip);
+
+      const maxHours = bookedHours + 6;
+      const newInt = Math.max(1, Math.min(maxHours, currentInt + delta));
+      const newTotal = newInt + currentOt;
+
+      const updated = {
+        ...curr,
+        int_hours: newInt,
+        overtime_chip: currentOt,
+        hours_override: newTotal
+      };
+      if (idx >= 0) pList[idx] = updated;
+      else pList.push(updated);
+      return { ...prev, persons: pList };
+    });
+  };
+
+  const handleOvertimeChipClick = (personNo, chipVal) => {
+    updateDraft(prev => {
+      const pList = [...(prev.persons || [])];
+      const idx = pList.findIndex(p => p.person_no === personNo);
+      const curr = idx >= 0 ? pList[idx] : { person_no: personNo };
+
+      const personObj = (bill.persons || []).find(p => p.person_no === personNo) || (billData?.persons || []).find(p => p.person_no === personNo) || {};
+      const { defaultIntHours } = getPersonHoursData(personObj);
+
+      const currentInt = curr.int_hours != null
+        ? curr.int_hours
+        : (curr.hours_override != null ? Math.floor(curr.hours_override) : defaultIntHours);
+
+      const newTotal = currentInt + chipVal;
+      const updated = {
+        ...curr,
+        int_hours: currentInt,
+        overtime_chip: chipVal,
+        hours_override: newTotal
+      };
+      if (idx >= 0) pList[idx] = updated;
+      else pList.push(updated);
+      return { ...prev, persons: pList };
+    });
+  };
+
+  const handleResetToAuto = (personNo) => {
+    updateDraft(prev => {
+      const pList = [...(prev.persons || [])];
+      const idx = pList.findIndex(p => p.person_no === personNo);
+      if (idx < 0) return prev;
+      const curr = { ...pList[idx] };
+      delete curr.hours_override;
+      delete curr.int_hours;
+      delete curr.overtime_chip;
+      pList[idx] = curr;
       return { ...prev, persons: pList };
     });
   };
@@ -279,6 +501,128 @@ export default function CheckoutWorkbench({
       else pList.push(updatedPerson);
       return { ...prev, persons: pList };
     });
+  };
+
+  // Pre-flush before opening collect modals
+  const handleOpenCollect = async () => {
+    if (pendingDraftRef.current || isSavingRef.current || syncStatus === 'unsynced') {
+      await flushDraft();
+    }
+    setShowCollectModal(true);
+  };
+
+  const handleOpenSplitCollect = async () => {
+    if (pendingDraftRef.current || isSavingRef.current || syncStatus === 'unsynced') {
+      await flushDraft();
+    }
+    setShowSplitCollect(true);
+  };
+
+  const renderHoursControl = (p) => {
+    const isFrozen = p.is_frozen;
+    const isUnl = p.mode === 'unlimited';
+    if (isUnl) {
+      return (
+        <div className="font-bold text-sg-ink text-[12px] sm:text-[13px]">
+          不限時 NT${pricing?.unlimited || 750}
+        </div>
+      );
+    }
+    if (isFrozen) {
+      return (
+        <span className="font-bold text-[12px] sm:text-[13px]">{formatBillingHours(p.entry?.hours || 0)}</span>
+      );
+    }
+
+    const {
+      bookedHours,
+      intHours,
+      overtimeChip,
+      hasOverride,
+      totalHours
+    } = getPersonHoursData(p);
+
+    const entryAmount = p.entry?.amount || 0;
+
+    return (
+      <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+        {/* Stepper + Mode label */}
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center gap-1 bg-sg-paper border border-sg-line rounded-lg p-0.5">
+            <button
+              type="button"
+              data-testid={`stepper-minus-${p.person_no}`}
+              onClick={() => handleIntHoursChange(p.person_no, -1)}
+              disabled={intHours <= 1}
+              className="w-6 h-6 rounded bg-white hover:bg-sg-paper disabled:opacity-40 flex items-center justify-center font-bold text-sg-ink text-[12px] shadow-xs"
+            >
+              -
+            </button>
+            <span
+              data-testid={`int-hours-${p.person_no}`}
+              className="font-num font-bold text-[12px] sm:text-[13px] px-1 min-w-[20px] text-center"
+            >
+              {intHours} 小時
+            </span>
+            <button
+              type="button"
+              data-testid={`stepper-plus-${p.person_no}`}
+              onClick={() => handleIntHoursChange(p.person_no, 1)}
+              disabled={intHours >= bookedHours + 6}
+              className="w-6 h-6 rounded bg-white hover:bg-sg-paper disabled:opacity-40 flex items-center justify-center font-bold text-sg-ink text-[12px] shadow-xs"
+            >
+              +
+            </button>
+          </div>
+
+          {hasOverride ? (
+            <div className="flex items-center text-[11px]">
+              <span className="text-sg-brown font-bold">手動</span>
+              <button
+                type="button"
+                data-testid={`reset-auto-${p.person_no}`}
+                onClick={() => handleResetToAuto(p.person_no)}
+                className="text-sg-brown underline ml-1 hover:opacity-80"
+              >
+                改回自動
+              </button>
+            </div>
+          ) : (
+            <span className="text-[11px] text-sg-muted">自動</span>
+          )}
+        </div>
+
+        {/* Overtime Chips */}
+        <div className="flex items-center flex-wrap gap-1">
+          {OVERTIME_OPTIONS.map((opt) => {
+            const isSelected = overtimeChip === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                data-testid={`ot-chip-${p.person_no}-${opt}`}
+                onClick={() => handleOvertimeChipClick(p.person_no, opt)}
+                className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition select-none ${
+                  isSelected
+                    ? 'bg-sg-brown text-white'
+                    : 'bg-sg-paper hover:bg-sg-line text-sg-ink border border-sg-line/60'
+                }`}
+              >
+                +{opt}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Total hours and subtotal */}
+        <div
+          data-testid={`hours-summary-${p.person_no}`}
+          className="text-[11px] text-sg-muted font-medium"
+        >
+          共 {totalHours} 小時 · NT${entryAmount}
+        </div>
+      </div>
+    );
   };
 
   // Addons handling
@@ -639,8 +983,25 @@ export default function CheckoutWorkbench({
                   </h3>
                   <p className="text-[11px] text-sg-muted">點選任一列可展開計時明細與手動微調</p>
                 </div>
-                <div className="text-[12px] text-sg-muted">
-                  {isSavingDraft ? <span className="text-sg-brown">自動儲存草稿中...</span> : <span>草稿已同步</span>}
+                <div data-testid="draft-sync-status" className="text-[12px] font-medium flex items-center gap-1.5">
+                  {syncStatus === 'unsynced' && (
+                    <span className="text-sg-muted">尚未同步</span>
+                  )}
+                  {syncStatus === 'syncing' && (
+                    <span className="text-sg-brown animate-pulse">同步中…</span>
+                  )}
+                  {syncStatus === 'synced' && (
+                    <span className="text-sg-sage-ink">已同步</span>
+                  )}
+                  {syncStatus === 'error' && (
+                    <button
+                      type="button"
+                      onClick={flushDraft}
+                      className="text-sg-danger hover:underline font-bold"
+                    >
+                      同步失敗，重試
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -695,31 +1056,9 @@ export default function CheckoutWorkbench({
                           <span className="text-sg-muted block text-[11px]">計時累計</span>
                           <span className="font-mono font-bold text-sg-ink">{elapsedText}</span>
                         </div>
-                        <div>
-                          <span className="text-sg-muted block text-[11px]">收費時數</span>
-                          {isFrozen ? (
-                            <span className="font-bold">{formatBillingHours(p.entry?.hours || 0)}</span>
-                          ) : (
-                            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={() => handleHoursStep(p.person_no, -0.5)}
-                                className="w-6 h-6 rounded bg-sg-paper hover:bg-sg-line flex items-center justify-center font-bold text-sg-ink text-[12px]"
-                              >
-                                -
-                              </button>
-                              <span className="font-bold min-w-[28px] text-center font-num">
-                                {p.entry?.hours || 0}h
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleHoursStep(p.person_no, 0.5)}
-                                className="w-6 h-6 rounded bg-sg-paper hover:bg-sg-line flex items-center justify-center font-bold text-sg-ink text-[12px]"
-                              >
-                                +
-                              </button>
-                            </div>
-                          )}
+                        <div className="col-span-2">
+                          <span className="text-sg-muted block text-[11px] mb-1">收費時數</span>
+                          {renderHoursControl(p)}
                         </div>
                         <div>
                           <span className="text-sg-muted block text-[11px]">入場費用</span>
@@ -838,32 +1177,7 @@ export default function CheckoutWorkbench({
                               )}
                             </td>
                             <td className="py-3 px-2">
-                              {isFrozen ? (
-                                <span className="font-bold">{formatBillingHours(p.entry?.hours || 0)}</span>
-                              ) : (
-                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleHoursStep(p.person_no, -0.5)}
-                                    className="w-6 h-6 rounded-lg bg-sg-paper hover:bg-sg-line flex items-center justify-center font-bold text-sg-ink text-[12px]"
-                                  >
-                                    -
-                                  </button>
-                                  <span className="font-bold min-w-[32px] text-center font-num">
-                                    {p.entry?.hours || 0}h
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleHoursStep(p.person_no, 0.5)}
-                                    className="w-6 h-6 rounded-lg bg-sg-paper hover:bg-sg-line flex items-center justify-center font-bold text-sg-ink text-[12px]"
-                                  >
-                                    +
-                                  </button>
-                                  <span className="text-[10px] text-sg-muted ml-1">
-                                    {hasOverride ? '手動' : '自動'}
-                                  </span>
-                                </div>
-                              )}
+                              {renderHoursControl(p)}
                             </td>
                             <td className="py-3 px-2 text-right font-num">
                               NT${p.entry?.amount || 0}
@@ -1333,7 +1647,7 @@ export default function CheckoutWorkbench({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setShowSplitCollect(true)}
+                onClick={handleOpenSplitCollect}
                 className="text-[12px] font-bold text-sg-brown hover:underline whitespace-nowrap px-1"
               >
                 分開收款
@@ -1387,10 +1701,11 @@ export default function CheckoutWorkbench({
               </div>
 
               <Button
+                data-testid="workbench-collect-btn"
                 variant="primary"
                 size="md"
                 className="whitespace-nowrap font-bold"
-                onClick={() => setShowCollectModal(true)}
+                onClick={handleOpenCollect}
                 disabled={unpaidPersons.length === 0}
               >
                 收款
@@ -1408,7 +1723,7 @@ export default function CheckoutWorkbench({
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => setShowSplitCollect(true)}
+                onClick={handleOpenSplitCollect}
                 className="whitespace-nowrap"
               >
                 分開收款
@@ -1430,10 +1745,11 @@ export default function CheckoutWorkbench({
                 <span data-testid="workbench-net-due" className="text-[16px] font-bold text-sg-ink font-num">NT${netDue}</span>
               </div>
               <Button
+                data-testid="workbench-collect-btn"
                 variant="primary"
                 size="md"
                 className="whitespace-nowrap font-bold"
-                onClick={() => setShowCollectModal(true)}
+                onClick={handleOpenCollect}
                 disabled={unpaidPersons.length === 0}
               >
                 收款
