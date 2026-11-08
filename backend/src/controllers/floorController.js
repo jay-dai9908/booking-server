@@ -578,6 +578,7 @@ export async function addPerson(req, res) {
 
       const firstRes = reservations[0];
       const sessionIds = reservations.map(r => r.session_id);
+      let displaced = null;
 
       if (seat_code) {
         if ((firstRes.assigned_seats || []).includes(seat_code)) {
@@ -592,7 +593,6 @@ export async function addPerson(req, res) {
           throw { status: 400, message: `座位 ${seat_code} 不存在或未啟用` };
         }
 
-        let displaced = null;
         const conflictReservations = await tx.reservation.findMany({
           where: {
             session_id: { in: sessionIds },
@@ -1092,6 +1092,210 @@ export async function reassignBoard(req, res) {
   }
 }
 
+export async function addBoardRental(req, res) {
+  const booking_ref = req.params.booking_ref || req.params.ref;
+  const { person_no, equipment_id, from_at, to_at } = req.body;
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+      const reservations = await tx.reservation.findMany({
+        where: { booking_ref, status: { not: 'cancelled' } },
+        include: { session: true },
+        orderBy: { session: { start_time: 'asc' } }
+      });
+      if (!reservations.length) {
+        throw { status: 404, message: '找不到此筆預約' };
+      }
+
+      const pNo = Number(person_no);
+      const targetPerson = await tx.bookingPerson.findFirst({
+        where: { booking_ref, person_no: pNo }
+      });
+      if (!targetPerson) {
+        throw { status: 404, message: `找不到第 ${person_no} 位顧客` };
+      }
+
+      const targetConfig = await tx.equipmentConfig.findUnique({
+        where: { id: equipment_id }
+      });
+      if (!targetConfig) {
+        throw { status: 404, message: '找不到此設備尺寸' };
+      }
+
+      const firstRes = reservations[0];
+      const lastRes = reservations[reservations.length - 1];
+      const sessionDate = firstRes.session.session_date;
+      const dStr = typeof sessionDate === 'string'
+        ? sessionDate.slice(0, 10)
+        : toTaipeiDateString(sessionDate);
+
+      const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
+      const bookingEndDt = new Date(`${dStr}T${lastRes.session.end_time}:00+08:00`);
+
+      let fromDt;
+      if (from_at) {
+        if (typeof from_at === 'string' && from_at.includes('T')) {
+          fromDt = new Date(from_at);
+        } else if (typeof from_at === 'string' && from_at.includes(':')) {
+          const t = from_at.length === 5 ? `${from_at}:00` : from_at;
+          fromDt = new Date(`${dStr}T${t}+08:00`);
+        } else {
+          fromDt = new Date(from_at);
+        }
+      } else {
+        const now = new Date();
+        fromDt = now < bookingStartDt ? bookingStartDt : now;
+      }
+
+      let toDt;
+      if (to_at) {
+        if (typeof to_at === 'string' && to_at.includes('T')) {
+          toDt = new Date(to_at);
+        } else if (typeof to_at === 'string' && to_at.includes(':')) {
+          const t = to_at.length === 5 ? `${to_at}:00` : to_at;
+          toDt = new Date(`${dStr}T${t}+08:00`);
+        } else {
+          toDt = new Date(to_at);
+        }
+      } else {
+        toDt = bookingEndDt;
+      }
+
+      if (fromDt.getTime() >= toDt.getTime()) {
+        throw { status: 400, message: '加租開始時間必須早於結束時間' };
+      }
+
+      // Check overlap: "檢查這一位在同一時間不會有兩台" (同一位重疊時段回 409)
+      const existingPersonBoards = await tx.bookingEquipment.findMany({
+        where: {
+          booking_ref,
+          person_id: targetPerson.id,
+          ended_reason: null
+        }
+      });
+
+      for (const ex of existingPersonBoards) {
+        const exStart = ex.start_at ? new Date(ex.start_at) : bookingStartDt;
+        const exEnd = ex.end_at ? new Date(ex.end_at) : (ex.planned_end_at ? new Date(ex.planned_end_at) : bookingEndDt);
+        if (Math.max(fromDt.getTime(), exStart.getTime()) < Math.min(toDt.getTime(), exEnd.getTime())) {
+          throw {
+            status: 409,
+            code: 'BOARD_TIME_OVERLAP',
+            message: `第 ${person_no} 位在此時段已租借智能板，不可同時租借兩台`
+          };
+        }
+      }
+
+      // Find sessions on this date covering fromDt..toDt
+      const allSessionsOnDate = await tx.session.findMany({
+        where: { session_date: sessionDate },
+        orderBy: { start_time: 'asc' }
+      });
+
+      const coveredSessions = allSessionsOnDate.filter(s => {
+        const sStart = new Date(`${dStr}T${s.start_time}:00+08:00`).getTime();
+        const sEnd = new Date(`${dStr}T${s.end_time}:00+08:00`).getTime();
+        return Math.max(fromDt.getTime(), sStart) < Math.min(toDt.getTime(), sEnd);
+      });
+
+      const coveredSessionIds = coveredSessions.map(s => s.id);
+
+      // Inventory check: "檢查庫存，庫存不足回 409"
+      const totalStock = targetConfig.total_stock;
+      if (totalStock !== null && totalStock !== undefined) {
+        const activeEquips = await tx.bookingEquipment.findMany({
+          where: {
+            equipment_id,
+            ended_reason: null
+          }
+        });
+        const activeResvs = await tx.reservation.findMany({
+          where: {
+            status: { not: 'cancelled' },
+            booking_ref: { in: activeEquips.map(e => e.booking_ref) }
+          },
+          select: { booking_ref: true }
+        });
+        const activeBookingSet = new Set(activeResvs.map(r => r.booking_ref));
+        const uncancelledEquips = activeEquips.filter(e => activeBookingSet.has(e.booking_ref));
+
+        for (const sess of coveredSessions) {
+          const sId = sess.id;
+          const occupiedCount = uncancelledEquips.filter(be => {
+            const cSessions = (be.covered_sessions || []).map(Number);
+            return cSessions.includes(sId);
+          }).reduce((sum, be) => sum + (be.quantity || 1), 0);
+
+          const available = totalStock - occupiedCount;
+          if (available < 1) {
+            throw {
+              status: 409,
+              code: 'BOARD_OUT_OF_STOCK',
+              message: `${targetConfig.name}庫存不足，剩餘 0 台`
+            };
+          }
+        }
+      }
+
+      const diffMs = toDt.getTime() - fromDt.getTime();
+      const rentalHours = Math.max(1, Math.ceil(diffMs / 3600000));
+      const unitRate = targetConfig.hourly_rate || 60;
+      const subtotalPrice = rentalHours * unitRate;
+      const newUnitGroup = crypto.randomUUID();
+
+      const newEquipment = await tx.bookingEquipment.create({
+        data: {
+          booking_ref,
+          person_id: targetPerson.id,
+          equipment_id,
+          equipment_name_snapshot: targetConfig.name,
+          quantity: 1,
+          unit_group: newUnitGroup,
+          segment_no: 1,
+          start_at: fromDt,
+          end_at: toDt,
+          planned_end_at: toDt,
+          unit_rate: unitRate,
+          rental_hours: rentalHours,
+          subtotal_price: subtotalPrice,
+          covered_sessions: coveredSessionIds.map(String)
+        }
+      });
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'amount_adjusted',
+        category: 'amount',
+        summary: `加租智能板：第 ${pNo} 位租借 ${targetConfig.name}`,
+        reason: '加租智能板',
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id,
+        device_label: deviceInfo?.device_label
+      });
+
+      await refreshBillingCache(tx, booking_ref);
+
+      return newEquipment;
+    });
+
+    return res.json({
+      success: true,
+      booking_equipment: result,
+      server_now: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[addBoardRental] Error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+    return res.status(500).json({ error: '加租智能板失敗', details: error.message });
+  }
+}
+
 export default {
   getLive,
   checkIn,
@@ -1101,5 +1305,6 @@ export default {
   removePerson,
   swapBoard,
   returnBoard,
-  reassignBoard
+  reassignBoard,
+  addBoardRental
 };

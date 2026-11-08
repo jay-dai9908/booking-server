@@ -316,7 +316,9 @@ export async function getLiveFloorData(dateStr = null) {
         name: eq.equipment?.name || eq.equipment_name_snapshot,
         start_at: eq.start_at ? eq.start_at.toISOString() : null,
         end_at: eq.end_at ? eq.end_at.toISOString() : null,
-        ended_reason: eq.ended_reason
+        planned_end_at: eq.planned_end_at ? eq.planned_end_at.toISOString() : null,
+        ended_reason: eq.ended_reason,
+        unit_group: eq.unit_group
       });
     }
 
@@ -388,6 +390,13 @@ export async function getLiveFloorData(dateStr = null) {
           person_no: p.person_no,
           seat_code: p.seat_code,
           status: p.status,
+          pauses: (p.pauses || []).map(pa => ({
+            id: pa.id,
+            reason: pa.reason,
+            started_at: pa.started_at ? pa.started_at.toISOString() : null,
+            ended_at: pa.ended_at ? pa.ended_at.toISOString() : null,
+            duration_seconds: pa.duration_seconds
+          })),
           paid: bPayments.some(pay => pay.status === 'valid' && (pay.kind === 'charge' || pay.kind === 'waive') && (pay.person_nos?.includes(p.person_no) || !pay.person_nos || pay.person_nos.length === 0)),
           timer: {
             billing_start_at: p.billing_start_at ? p.billing_start_at.toISOString() : null,

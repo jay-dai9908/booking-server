@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { XCircle, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
 import api from '../api/axios';
+import ResponsivePanel from './admin/ResponsivePanel';
+import Button from './customer/Button';
 
 const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
   const [sessions, setSessions] = useState([]);
@@ -24,12 +26,15 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
     setIsLoading(true);
     try {
       // Find the session date
-      const sessionDate = reservation.session_date || reservation.session?.session_date;
+      const sessionDate = reservation.session_date || reservation.session?.session_date || (reservation.start_at ? reservation.start_at.slice(0, 10) : null);
       // Find the end time of the current booking
       let endTime = reservation.end_time || reservation.session?.end_time;
       const blocks = reservation.time_blocks || reservation.blocks || reservation.sessions || [];
       if (blocks.length > 0) {
         endTime = blocks[blocks.length - 1].end_time || endTime;
+      }
+      if (!endTime && reservation.end_at) {
+        endTime = reservation.end_at.slice(11, 16);
       }
       
       const res = await api.get(`/sessions?date=${sessionDate}`);
@@ -109,47 +114,46 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
   if (!isOpen || !reservation) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden relative z-10 animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-        
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-sg-brown-soft text-sg-brown rounded-lg">
-              <Clock className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-gray-800">現場加時</h2>
-              <p className="text-sm text-gray-500 font-medium mt-0.5">
-                {reservation.user?.name} · {pax} 人
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors">
-            <XCircle className="w-6 h-6" />
-          </button>
+    <ResponsivePanel
+      isOpen={isOpen}
+      onClose={onClose}
+      title="現場加時"
+      subtitle={`${reservation.name || reservation.user?.name || '客人'} · ${pax} 人`}
+      footer={
+        <div className="flex justify-end gap-3">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            data-testid="confirm-extend-btn"
+            variant="primary"
+            size="sm"
+            onClick={handleSubmit}
+            disabled={isSubmitting || selectedSessions.length === 0}
+          >
+            {isSubmitting ? '處理中...' : '確認加時'}
+          </Button>
         </div>
+      }
+    >
+      <div className="p-2 sm:p-4 overflow-y-auto space-y-6">
+        {error && (
+          <div className="p-3.5 bg-red-50 text-red-600 rounded-2xl text-[13px] border border-red-100 flex items-center gap-2">
+            <XCircle className="w-5 h-5 flex-shrink-0" />
+            {error}
+          </div>
+        )}
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto">
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100 flex items-center gap-2">
-              <XCircle className="w-5 h-5 flex-shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {/* Session Selection */}
-          <div className="mb-8">
-            <div className="flex justify-between items-center mb-3">
-              <label className="block text-sm font-bold text-gray-700">選擇後續時段</label>
-              {selectedSessions.length > 0 && (
-                <span className="text-xs bg-sg-brown-soft text-sg-brown px-2.5 py-1 rounded-md font-bold">
-                  已選 {selectedSessions.length} 小時
-                </span>
-              )}
-            </div>
+        {/* Session Selection */}
+        <div>
+          <div className="flex justify-between items-center mb-3">
+            <label className="block text-[13px] font-bold text-sg-ink">選擇後續時段</label>
+            {selectedSessions.length > 0 && (
+              <span className="text-[11px] bg-sg-brown-soft text-sg-brown px-2 py-0.5 rounded-full font-bold">
+                已選 {selectedSessions.length} 小時
+              </span>
+            )}
+          </div>
             
             {isLoading ? (
               <div className="text-gray-400 py-4 text-center text-sm">載入時段中...</div>
@@ -276,32 +280,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 flex-shrink-0">
-          <button 
-            type="button" 
-            onClick={onClose}
-            className="px-5 py-2.5 text-sm font-bold text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-xl transition-colors"
-          >
-            取消
-          </button>
-          <button 
-            onClick={handleSubmit}
-            disabled={isSubmitting || selectedSessions.length === 0}
-            className={`
-              px-6 py-2.5 text-sm font-bold rounded-xl transition-all shadow-xs
-              ${isSubmitting || selectedSessions.length === 0
-                ? 'bg-sg-brown text-white opacity-50 cursor-not-allowed' 
-                : 'bg-sg-brown text-white hover:bg-sg-brown-hover active:scale-[0.98]'
-              }
-            `}
-          >
-            {isSubmitting ? '處理中...' : '確認加時'}
-          </button>
-        </div>
-      </div>
-    </div>
+      </ResponsivePanel>
   );
 };
 

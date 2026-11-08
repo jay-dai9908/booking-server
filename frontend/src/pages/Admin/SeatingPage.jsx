@@ -158,6 +158,73 @@ export default function SeatingPage() {
   const [swapSubmitting, setSwapSubmitting] = useState(false);
   const [swapError, setSwapError] = useState(null);
 
+  // Add person states (Section 5.2.2)
+  const [showAddPersonModalTarget, setShowAddPersonModalTarget] = useState(null);
+  const [selectedAddPersonSeat, setSelectedAddPersonSeat] = useState(null);
+  const [addPersonSubmitting, setAddPersonSubmitting] = useState(false);
+  const [overCapacityTarget, setOverCapacityTarget] = useState(null);
+
+  // Add board states (Section 5.2.4)
+  const [addBoardModalTarget, setAddBoardModalTarget] = useState(null);
+  const [selectedAddBoardEqId, setSelectedAddBoardEqId] = useState('medium');
+  const [addBoardFromTime, setAddBoardFromTime] = useState('');
+  const [addBoardToTime, setAddBoardToTime] = useState('');
+  const [addBoardSubmitting, setAddBoardSubmitting] = useState(false);
+  const [addBoardError, setAddBoardError] = useState(null);
+
+  const handleAddPersonSubmit = async (force = false) => {
+    const target = showAddPersonModalTarget || (overCapacityTarget ? timerTarget : null);
+    const seatCode = selectedAddPersonSeat || overCapacityTarget?.seatCode;
+    if (!target) return;
+    setAddPersonSubmitting(true);
+    try {
+      await api.post(`/floor/${target.booking_ref}/persons`, {
+        seat_code: seatCode,
+        force
+      });
+      setShowAddPersonModalTarget(null);
+      setSelectedAddPersonSeat(null);
+      setOverCapacityTarget(null);
+      await refresh();
+      showToast('現場加人成功，已開始計時');
+    } catch (err) {
+      if (err.response?.status === 409 && err.response?.data?.code === 'OVER_CAPACITY') {
+        setOverCapacityTarget({
+          bookingRef: target.booking_ref,
+          seatCode
+        });
+      } else {
+        showToast(err.response?.data?.error || '加人失敗');
+      }
+    } finally {
+      setAddPersonSubmitting(false);
+    }
+  };
+
+  const handleAddBoardSubmit = async () => {
+    if (!selectedAddBoardEqId || !addBoardModalTarget) {
+      setAddBoardError('請選擇智能板尺寸');
+      return;
+    }
+    setAddBoardSubmitting(true);
+    setAddBoardError(null);
+    try {
+      await api.post(`/floor/${addBoardModalTarget.booking.booking_ref}/boards`, {
+        person_no: addBoardModalTarget.personNo,
+        equipment_id: selectedAddBoardEqId,
+        from_at: addBoardFromTime,
+        to_at: addBoardToTime
+      });
+      setAddBoardModalTarget(null);
+      await refresh();
+      showToast('加租智能板成功');
+    } catch (err) {
+      setAddBoardError(err.response?.data?.error || '加租智能板失敗');
+    } finally {
+      setAddBoardSubmitting(false);
+    }
+  };
+
   const [selectedTableDetails, setSelectedTableDetails] = useState(null); // table object
   const [activeMobileTableId, setActiveMobileTableId] = useState(null);
   const [flashingTableId, setFlashingTableId] = useState(null);
@@ -1470,6 +1537,7 @@ export default function SeatingPage() {
                   </Button>
                 </div>
                 <Button
+                  data-testid="timer-checkout-btn"
                   variant="primary"
                   size="md"
                   onClick={() => {
@@ -1507,22 +1575,33 @@ export default function SeatingPage() {
             </div>
           )}
 
-          {/* Info KV */}
-          <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-sg-paper/40 border border-sg-line text-[12px]">
-            <div>
-              <span className="text-sg-muted block">預約時段</span>
-              <span className="font-bold text-sg-ink">
-                {bookingDurationText(timerTarget)}
-              </span>
+          {/* Info KV with ExtendTime button */}
+          <div className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line text-[12px] flex items-center justify-between">
+            <div className="grid grid-cols-2 gap-2 flex-1">
+              <div>
+                <span className="text-sg-muted block">預約時段</span>
+                <span className="font-bold text-sg-ink">
+                  {bookingDurationText(timerTarget)}
+                </span>
+              </div>
+              <div>
+                <span className="text-sg-muted block">入座座位</span>
+                <span className="font-bold text-sg-ink">
+                  {timerTarget?.assigned_seats?.length > 0
+                    ? (timerTarget.assigned_seats.every(s => s && s.startsWith('WAIT-')) ? '等待區' : timerTarget.assigned_seats.join('、'))
+                    : '未分配'}
+                </span>
+              </div>
             </div>
-            <div>
-              <span className="text-sg-muted block">入座座位</span>
-              <span className="font-bold text-sg-ink">
-                {timerTarget?.assigned_seats?.length > 0
-                  ? (timerTarget.assigned_seats.every(s => s && s.startsWith('WAIT-')) ? '等待區' : timerTarget.assigned_seats.join('、'))
-                  : '未分配'}
-              </span>
-            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="extend-time-btn"
+              onClick={() => setExtendReservation(timerTarget)}
+              className="ml-2 whitespace-nowrap font-bold"
+            >
+              加時
+            </Button>
           </div>
 
           {/* Notes preview in timer sheet */}
@@ -1545,9 +1624,23 @@ export default function SeatingPage() {
             </div>
           )}
 
-          {/* Per-person timer list (Spec 3.1, 3.5) */}
-          <div className="space-y-2">
-            <span className="text-[13px] font-bold text-sg-ink block">每位計時</span>
+          {/* Per-person timer list with Timeline (Section 5.2.3) */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-bold text-sg-ink">每位計時</span>
+              <button
+                type="button"
+                data-testid="add-person-btn"
+                onClick={() => {
+                  setShowAddPersonModalTarget(timerTarget);
+                  setSelectedAddPersonSeat(null);
+                }}
+                className="text-[13px] font-bold text-sg-brown hover:underline cursor-pointer"
+              >
+                ＋ 加人
+              </button>
+            </div>
+
             {(timerTarget?.persons || []).map((p) => {
               const tm = p.timer || p;
               const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
@@ -1557,7 +1650,6 @@ export default function SeatingPage() {
                 ? (p.seat_code.startsWith('WAIT-') ? '等待區' : p.seat_code)
                 : '未帶位';
 
-              const endedTimeStr = tm.timer_ended_at ? formatTimeHHmm(tm.timer_ended_at) : '';
               const isPaidOrWaived = timerTarget?.billing?.status === 'paid' ||
                                      timerTarget?.billing?.status === 'waived' ||
                                      timerTarget?.is_paid ||
@@ -1570,108 +1662,340 @@ export default function SeatingPage() {
               })();
               const canRestart = isToday && !isPaidOrWaived;
 
+              // Timeline calculations
+              const startMs = timerTarget?.start_at ? new Date(timerTarget.start_at).getTime() : Date.now();
+              const bookedEndMs = timerTarget?.end_at ? new Date(timerTarget.end_at).getTime() : (startMs + 7200000);
+              const nowMs = getServerNow().getTime();
+              const isOvertime = nowMs > bookedEndMs;
+              const timelineStartMs = startMs;
+              const timelineEndMs = Math.max(bookedEndMs, nowMs);
+              const totalDurationMs = Math.max(1, timelineEndMs - timelineStartMs);
+
+              const timerStartedMs = tm.timer_started_at
+                ? new Date(tm.timer_started_at).getTime()
+                : (tm.billing_start_at ? new Date(tm.billing_start_at).getTime() : startMs);
+              const timerEndedMs = tm.timer_ended_at ? new Date(tm.timer_ended_at).getTime() : nowMs;
+
+              // Green played bar
+              const playedLeftPercent = Math.max(0, Math.min(100, ((timerStartedMs - timelineStartMs) / totalDurationMs) * 100));
+              const normalPlayEndMs = Math.min(bookedEndMs, timerEndedMs);
+              const playedWidthPercent = Math.max(0, Math.min(100 - playedLeftPercent, ((normalPlayEndMs - Math.max(timerStartedMs, timelineStartMs)) / totalDurationMs) * 100));
+
+              // Red overtime bar
+              let overtimeLeftPercent = 0;
+              let overtimeWidthPercent = 0;
+              if (timerEndedMs > bookedEndMs) {
+                overtimeLeftPercent = Math.max(0, Math.min(100, ((bookedEndMs - timelineStartMs) / totalDurationMs) * 100));
+                overtimeWidthPercent = Math.max(0, Math.min(100 - overtimeLeftPercent, ((timerEndedMs - bookedEndMs) / totalDurationMs) * 100));
+              }
+
+              // "Now" red line indicator
+              const nowLeftPercent = Math.max(0, Math.min(100, ((nowMs - timelineStartMs) / totalDurationMs) * 100));
+
+              // Pauses
+              const pauseSegments = [];
+              if (Array.isArray(p.pauses) && p.pauses.length > 0) {
+                for (const pa of p.pauses) {
+                  const pStart = new Date(pa.started_at).getTime();
+                  const pEnd = pa.ended_at ? new Date(pa.ended_at).getTime() : nowMs;
+                  if (pEnd > timelineStartMs && pStart < timelineEndMs) {
+                    const left = Math.max(0, Math.min(100, ((pStart - timelineStartMs) / totalDurationMs) * 100));
+                    const width = Math.max(1, Math.min(100 - left, ((pEnd - pStart) / totalDurationMs) * 100));
+                    pauseSegments.push({ left, width, reason: pa.reason });
+                  }
+                }
+              } else if (tm.paused_at) {
+                const pStart = new Date(tm.paused_at).getTime();
+                const pEnd = nowMs;
+                const left = Math.max(0, Math.min(100, ((pStart - timelineStartMs) / totalDurationMs) * 100));
+                const width = Math.max(1, Math.min(100 - left, ((pEnd - pStart) / totalDurationMs) * 100));
+                pauseSegments.push({ left, width, reason: tm.pause_reason });
+              }
+
+              // Paused minutes
+              let pausedSecs = tm.paused_seconds || 0;
+              if (tm.paused_at && !tm.timer_ended_at) {
+                pausedSecs += Math.floor((nowMs - new Date(tm.paused_at).getTime()) / 1000);
+              }
+              const pausedMins = Math.round(pausedSecs / 60);
+
+              // Smart boards for this person
+              const personBoards = (timerTarget?.boards || []).filter(b => b.person_no === p.person_no);
+              const hasBoard = personBoards.length > 0;
+              const primaryBoard = personBoards[0] || null;
+
+              const boardSubBars = [];
+              for (const b of personBoards) {
+                for (const seg of (b.segments || [])) {
+                  const segStart = seg.start_at ? new Date(seg.start_at).getTime() : startMs;
+                  const segEnd = seg.end_at ? new Date(seg.end_at).getTime() : (seg.planned_end_at ? new Date(seg.planned_end_at).getTime() : bookedEndMs);
+                  const left = Math.max(0, Math.min(100, ((segStart - timelineStartMs) / totalDurationMs) * 100));
+                  const width = Math.max(2, Math.min(100 - left, ((segEnd - segStart) / totalDurationMs) * 100));
+                  const sName = (seg.name || '').includes('大板') ? '大板' : ((seg.name || '').includes('中板') ? '中板' : '小板');
+                  const timeRangeStr = `${formatTimeHHmm(segStart)}–${formatTimeHHmm(segEnd)}`;
+                  boardSubBars.push({
+                    left,
+                    width,
+                    label: `${sName} ${timeRangeStr}`,
+                    fullText: `${seg.name} ${timeRangeStr}`
+                  });
+                }
+              }
+
+              // Billed hours
+              const bookedMins = Math.round((bookedEndMs - startMs) / 60000);
+              let billedHours = Math.max(1, Math.round(bookedMins / 60));
+              if (elapsedMins > bookedMins + 10) {
+                const overBlocks = Math.ceil((elapsedMins - bookedMins - 10) / 30);
+                const totalH = (bookedMins / 60) + (overBlocks * 0.5);
+                billedHours = totalH % 1 === 0 ? totalH.toFixed(0) : totalH.toFixed(1);
+              }
+
+              // Status pill
+              const statusPill = isPaidOrWaived
+                ? { label: '已付', cls: 'bg-sg-sage-soft text-sg-sage-ink' }
+                : isEnded
+                ? { label: '已離場', cls: 'bg-gray-100 text-gray-500' }
+                : isPaused
+                ? { label: '已暫停', cls: 'bg-amber-100 text-amber-800' }
+                : { label: '計時中', cls: 'bg-sg-sage-soft text-sg-sage-ink font-bold' };
+
               return (
                 <div
                   key={p.person_no}
-                  className="p-3 rounded-2xl border border-sg-line bg-white flex items-center justify-between"
+                  className="p-3 sm:p-3.5 rounded-2xl border border-sg-line bg-white space-y-2.5"
                 >
-                  <div>
-                    <div className="font-bold text-[14px] text-sg-ink">
-                      第 {p.person_no} 位 ({seatLabel})
+                  {/* First row: Person label & Status pill */}
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[14px] text-sg-ink">
+                      第 {p.person_no} 位 · {seatLabel}
+                    </span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${statusPill.cls}`}>
+                      {statusPill.label}
+                    </span>
+                  </div>
+
+                  {/* Second row: Horizontal Timeline Bar */}
+                  <div className="space-y-1">
+                    <div
+                      data-testid={`person-timeline-bar-${p.person_no}`}
+                      className="relative h-6 w-full rounded-xl bg-sg-paper border border-sg-line overflow-hidden"
+                    >
+                      {/* Played Green Bar */}
+                      {playedWidthPercent > 0 && (
+                        <div
+                          className="absolute top-0 bottom-0 bg-sg-sage transition-all"
+                          style={{ left: `${playedLeftPercent}%`, width: `${playedWidthPercent}%` }}
+                        />
+                      )}
+
+                      {/* Pause diagonal stripes */}
+                      {pauseSegments.map((pa, idx) => (
+                        <div
+                          key={idx}
+                          data-testid={`pause-segment-${p.person_no}-${idx}`}
+                          className="absolute top-0 bottom-0 z-[2]"
+                          style={{
+                            left: `${pa.left}%`,
+                            width: `${pa.width}%`,
+                            backgroundImage: 'repeating-linear-gradient(45deg, #9ca3af, #9ca3af 4px, #d1d5db 4px, #d1d5db 8px)'
+                          }}
+                          title={`暫停: ${pa.reason || '暫停'}`}
+                        />
+                      ))}
+
+                      {/* Overtime Red Bar */}
+                      {overtimeWidthPercent > 0 && (
+                        <div
+                          className="absolute top-0 bottom-0 bg-sg-danger z-[3] transition-all"
+                          style={{ left: `${overtimeLeftPercent}%`, width: `${overtimeWidthPercent}%` }}
+                        />
+                      )}
+
+                      {/* Now vertical line */}
+                      {nowLeftPercent >= 0 && nowLeftPercent <= 100 && (
+                        <div
+                          className="absolute top-0 bottom-0 w-[2px] bg-sg-danger z-[10]"
+                          style={{ left: `${nowLeftPercent}%` }}
+                          title={`現在 ${formatTimeHHmm(nowMs)}`}
+                        />
+                      )}
                     </div>
-                    <div className="text-[12px] text-sg-muted">
-                      {isEnded
-                        ? `已離場 ${endedTimeStr} · 合計 ${formatTimerHMM(elapsedMins)}`
-                        : isPaused
-                        ? `已暫停 · ${tm.pause_reason || '外出用餐'}`
-                        : `計時中 · 已計 ${formatTimerHMM(elapsedMins)}`}
+
+                    {/* Smart board sub-bar */}
+                    {boardSubBars.length > 0 && (
+                      <div
+                        data-testid={`board-subbars-${p.person_no}`}
+                        className="relative h-5 w-full rounded-lg bg-sg-paper/40 border border-sg-line/60 overflow-hidden"
+                      >
+                        {boardSubBars.map((seg, idx) => (
+                          <div
+                            key={idx}
+                            data-testid={`board-segment-${p.person_no}`}
+                            className="absolute top-0 bottom-0 bg-sg-brown-soft text-sg-brown border border-sg-brown/30 rounded flex items-center px-1 text-[11px] font-bold truncate z-[4]"
+                            style={{ left: `${seg.left}%`, width: `${seg.width}%` }}
+                            title={seg.fullText}
+                          >
+                            <span className="truncate">{seg.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Time ticks: start, end, now if overtime */}
+                    <div className="flex items-center justify-between text-[12px] text-sg-muted font-num px-0.5">
+                      <span>{formatTimeHHmm(startMs)}</span>
+                      {isOvertime && (
+                        <span className="text-sg-danger font-bold">現在 {formatTimeHHmm(nowMs)}</span>
+                      )}
+                      <span>{formatTimeHHmm(bookedEndMs)}</span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    {!isEnded ? (
-                      <>
-                        {isPaused ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'resume')}
-                          >
-                            <Play className="w-3.5 h-3.5 mr-1" />
-                            繼續
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setPausePersonTarget(p)}
-                          >
-                            <Pause className="w-3.5 h-3.5 mr-1" />
-                            暫停
-                          </Button>
-                        )}
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => {
-                            setMoveSeatModalTarget({
-                              booking: timerTarget,
-                              fromSeat: p.seat_code,
-                              personNo: p.person_no
-                            });
-                          }}
-                        >
-                          <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
-                          換位
-                        </Button>
-                        {/* More Menu with 離場 (Spec 2.2 item 1) */}
-                        <div className="relative">
-                          <button
-                            type="button"
-                            data-testid={`person-more-btn-${p.person_no}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPersonMenuOpen(prev => prev === p.person_no ? null : p.person_no);
-                            }}
-                            className="p-1.5 rounded-xl border border-sg-line hover:bg-sg-paper text-sg-ink/70 cursor-pointer"
-                            title="更多選項"
-                          >
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
-                          {personMenuOpen === p.person_no && (
-                            <div
-                              className="absolute right-0 bottom-full mb-1 z-50 bg-white rounded-xl shadow-lg border border-sg-line py-1 min-w-[90px]"
-                              onClick={(e) => e.stopPropagation()}
+                  {/* Third row: Info & Action Buttons */}
+                  <div className="flex items-center justify-between pt-1 border-t border-sg-line/40">
+                    <div className="text-[12px] text-sg-muted">
+                      <span className="font-bold text-sg-ink">已計 {formatTimerHMM(elapsedMins)}</span>
+                      <span className="mx-1">·</span>
+                      <span>收費 {billedHours} 小時</span>
+                      {pausedMins > 0 && (
+                        <span className="text-sg-muted ml-1">（已扣暫停 {pausedMins} 分）</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {!isEnded ? (
+                        <>
+                          {isPaused ? (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'resume')}
                             >
-                              <button
-                                type="button"
-                                data-testid={`person-leave-btn-${p.person_no}`}
-                                onClick={() => {
-                                  setPersonMenuOpen(null);
-                                  handleTimerAction(timerTarget.booking_ref, [p.person_no], 'end');
-                                }}
-                                className="w-full text-left px-3 py-1.5 text-[12px] text-sg-danger hover:bg-sg-danger-soft font-bold flex items-center gap-1.5 cursor-pointer"
-                              >
-                                <LogOut className="w-3.5 h-3.5" />
-                                離場
-                              </button>
-                            </div>
+                              <Play className="w-3.5 h-3.5 mr-1" />
+                              繼續
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setPausePersonTarget(p)}
+                            >
+                              <Pause className="w-3.5 h-3.5 mr-1" />
+                              暫停
+                            </Button>
                           )}
-                        </div>
-                      </>
-                    ) : (
-                      canRestart && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          data-testid={`person-restart-btn-${p.person_no}`}
-                          onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'restart')}
-                        >
-                          <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                          取消離場
-                        </Button>
-                      )
-                    )}
+
+                          {/* ⋯ Menu */}
+                          <div className="relative">
+                            <button
+                              type="button"
+                              data-testid={`person-more-btn-${p.person_no}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPersonMenuOpen(prev => prev === p.person_no ? null : p.person_no);
+                              }}
+                              className="p-1.5 rounded-xl border border-sg-line hover:bg-sg-paper text-sg-ink/70 cursor-pointer"
+                              title="更多選項"
+                            >
+                              <MoreHorizontal className="w-4 h-4" />
+                            </button>
+                            {personMenuOpen === p.person_no && (
+                              <div
+                                className="absolute right-0 bottom-full mb-1 z-50 bg-white rounded-2xl shadow-xl border border-sg-line py-1 min-w-[130px] space-y-0.5"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  data-testid={`person-move-seat-btn-${p.person_no}`}
+                                  onClick={() => {
+                                    setPersonMenuOpen(null);
+                                    setMoveSeatModalTarget({
+                                      booking: timerTarget,
+                                      fromSeat: p.seat_code,
+                                      personNo: p.person_no
+                                    });
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
+                                >
+                                  <ArrowRightLeft className="w-3.5 h-3.5 text-sg-muted" />
+                                  換位
+                                </button>
+
+                                {hasBoard ? (
+                                  <button
+                                    type="button"
+                                    data-testid={`person-swap-board-btn-${p.person_no}`}
+                                    onClick={() => {
+                                      setPersonMenuOpen(null);
+                                      setBoardSwapTarget({
+                                        booking: timerTarget,
+                                        board: primaryBoard,
+                                        personNo: p.person_no,
+                                        seatCode: p.seat_code
+                                      });
+                                      setSelectedSwapSize(null);
+                                      setSelectedBoundary(null);
+                                      setSwapError(null);
+                                    }}
+                                    className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5 text-sg-muted" />
+                                    換板
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    data-testid={`person-add-board-btn-${p.person_no}`}
+                                    onClick={() => {
+                                      setPersonMenuOpen(null);
+                                      setAddBoardModalTarget({
+                                        booking: timerTarget,
+                                        person: p,
+                                        personNo: p.person_no
+                                      });
+                                      setSelectedAddBoardEqId('medium');
+                                      setAddBoardFromTime(formatTimeHHmm(startMs));
+                                      setAddBoardToTime(formatTimeHHmm(bookedEndMs));
+                                      setAddBoardError(null);
+                                    }}
+                                    className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
+                                  >
+                                    <Plus className="w-3.5 h-3.5 text-sg-muted" />
+                                    加租智能板
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  data-testid={`person-leave-btn-${p.person_no}`}
+                                  onClick={() => {
+                                    setPersonMenuOpen(null);
+                                    handleTimerAction(timerTarget.booking_ref, [p.person_no], 'end');
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft flex items-center gap-2 cursor-pointer"
+                                >
+                                  <LogOut className="w-3.5 h-3.5" />
+                                  離場
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        canRestart && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            data-testid={`person-restart-btn-${p.person_no}`}
+                            onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'restart')}
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                            取消離場
+                          </Button>
+                        )
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -2280,6 +2604,196 @@ export default function SeatingPage() {
           }}
         />
       )}
+
+      {/* Add Person Modal (Section 5.2.2) */}
+      <ResponsivePanel
+        isOpen={Boolean(showAddPersonModalTarget)}
+        onClose={() => {
+          setShowAddPersonModalTarget(null);
+          setSelectedAddPersonSeat(null);
+        }}
+        title="現場加人"
+        subtitle={`${showAddPersonModalTarget?.name} · 目前 ${showAddPersonModalTarget?.pax} 位`}
+        footer={
+          <div className="flex items-center justify-between">
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => {
+                setShowAddPersonModalTarget(null);
+                setSelectedAddPersonSeat(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              data-testid="confirm-add-person-btn"
+              disabled={!selectedAddPersonSeat || addPersonSubmitting}
+              onClick={() => handleAddPersonSubmit(false)}
+            >
+              {addPersonSubmitting ? '處理中...' : '確認入座並計時'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4 py-2">
+          <p className="text-[12px] text-sg-muted">
+            請為新加入的顧客選擇入座空位（只能選空位）：
+          </p>
+
+          <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+            {activeSeats.map(s => {
+              const isOccupied = seatStatesMap[s.code]?.state === 'in_use';
+              const isAssigned = (showAddPersonModalTarget?.assigned_seats || []).includes(s.code);
+              const isUnavailable = isOccupied || isAssigned;
+              const isSelected = selectedAddPersonSeat === s.code;
+
+              return (
+                <button
+                  key={s.code}
+                  type="button"
+                  data-testid={`seat-select-${s.code}`}
+                  disabled={isUnavailable}
+                  onClick={() => setSelectedAddPersonSeat(s.code)}
+                  className={`p-2.5 rounded-xl border text-center transition ${
+                    isUnavailable
+                      ? 'bg-gray-100 text-gray-400 border-sg-line cursor-not-allowed opacity-50'
+                      : isSelected
+                      ? 'bg-sg-selected border-sg-brown text-sg-brown ring-2 ring-sg-brown'
+                      : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown cursor-pointer'
+                  }`}
+                >
+                  <span className="block text-[13px] font-bold font-num">{s.code}</span>
+                  <span className="block text-[10px] opacity-80">
+                    {isUnavailable ? '已佔用' : isSelected ? '已選取' : '空位'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </ResponsivePanel>
+
+      {/* Over Capacity Confirm Modal */}
+      <ConfirmPanel
+        isOpen={Boolean(overCapacityTarget)}
+        onClose={() => setOverCapacityTarget(null)}
+        onConfirm={() => handleAddPersonSubmit(true)}
+        title="人數已達上限"
+        message="該時段預約人數已達上限，是否仍然加入？"
+        confirmText="仍然加入"
+      />
+
+      {/* Add Board Modal (Section 5.2.4) */}
+      <ResponsivePanel
+        isOpen={Boolean(addBoardModalTarget)}
+        onClose={() => setAddBoardModalTarget(null)}
+        title="加租智能板"
+        subtitle={`${addBoardModalTarget?.booking?.name} · 第 ${addBoardModalTarget?.personNo} 位`}
+        footer={
+          <div className="flex items-center justify-between">
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => setAddBoardModalTarget(null)}
+              disabled={addBoardSubmitting}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              data-testid="confirm-add-board-btn"
+              disabled={!selectedAddBoardEqId || addBoardSubmitting}
+              onClick={handleAddBoardSubmit}
+            >
+              {addBoardSubmitting ? '處理中...' : '確認加租'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4 py-2">
+          {addBoardError && (
+            <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl flex items-center gap-2 border border-red-200">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{addBoardError}</span>
+            </div>
+          )}
+
+          <div>
+            <span className="text-[13px] font-bold text-sg-ink block mb-2">選擇尺寸</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {(boardUsage.length > 0 ? boardUsage : [
+                { equipment_id: 'small', name: '智能拼豆板（小板）', total: 5, in_use: 0 },
+                { equipment_id: 'medium', name: '智能拼豆板（中板）', total: 5, in_use: 0 },
+                { equipment_id: 'large', name: '智能拼豆板（大板）', total: 5, in_use: 0 }
+              ]).map(item => {
+                const stockLeft = Math.max(0, item.total - item.in_use);
+                const isOutOfStock = stockLeft <= 0;
+                const isSelected = selectedAddBoardEqId === item.equipment_id;
+
+                return (
+                  <button
+                    key={item.equipment_id}
+                    type="button"
+                    data-testid={`board-choice-${item.equipment_id}`}
+                    disabled={isOutOfStock}
+                    onClick={() => setSelectedAddBoardEqId(item.equipment_id)}
+                    className={`p-3 rounded-2xl border text-left transition flex flex-col justify-between ${
+                      isOutOfStock
+                        ? 'bg-gray-100 border-sg-line opacity-50 cursor-not-allowed'
+                        : isSelected
+                        ? 'bg-sg-selected border-sg-brown shadow-xs'
+                        : 'bg-white border-sg-line hover:border-sg-brown cursor-pointer'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-[13px] text-sg-ink">{item.name}</div>
+                      <div className="text-[11px] text-sg-muted mt-0.5">
+                        {item.equipment_id === 'large' ? 'NT$150 / 時' : item.equipment_id === 'medium' ? 'NT$120 / 時' : 'NT$90 / 時'}
+                      </div>
+                    </div>
+                    <div className="mt-2 text-[11px] font-bold">
+                      {isOutOfStock ? (
+                        <span className="text-sg-danger">已無庫存</span>
+                      ) : (
+                        <span className="text-sg-sage font-num">剩餘 {stockLeft} 台</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[12px] font-bold text-sg-ink block mb-1">開始時間</label>
+              <input
+                type="text"
+                data-testid="add-board-from-time"
+                value={addBoardFromTime}
+                onChange={(e) => setAddBoardFromTime(e.target.value)}
+                placeholder="19:00"
+                className="w-full px-3 py-2 rounded-xl border border-sg-line font-num text-[13px] focus:outline-none focus:border-sg-brown"
+              />
+            </div>
+            <div>
+              <label className="text-[12px] font-bold text-sg-ink block mb-1">結束時間</label>
+              <input
+                type="text"
+                data-testid="add-board-to-time"
+                value={addBoardToTime}
+                onChange={(e) => setAddBoardToTime(e.target.value)}
+                placeholder="21:00"
+                className="w-full px-3 py-2 rounded-xl border border-sg-line font-num text-[13px] focus:outline-none focus:border-sg-brown"
+              />
+            </div>
+          </div>
+        </div>
+      </ResponsivePanel>
 
       {/* LINE message modal */}
       {lineMsgReservation && (

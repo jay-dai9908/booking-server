@@ -9,7 +9,8 @@ import {
   removePerson,
   swapBoard,
   returnBoard,
-  reassignBoard
+  reassignBoard,
+  addBoardRental
 } from '../controllers/floorController.js';
 
 const router = express.Router();
@@ -21,6 +22,7 @@ router.post('/:booking_ref/move-seat', ...floorAuth, moveSeat);
 router.post('/:booking_ref/timer', ...floorAuth, handleTimer);
 router.post('/:booking_ref/persons', ...floorAuth, addPerson);
 router.delete('/:booking_ref/persons/:person_no', ...floorAuth, removePerson);
+router.post('/:booking_ref/boards', ...floorAuth, addBoardRental);
 router.post('/:booking_ref/boards/:unit_group/swap', ...floorAuth, swapBoard);
 router.post('/:booking_ref/boards/:unit_group/return', ...floorAuth, returnBoard);
 router.patch('/:booking_ref/boards/:unit_group', ...floorAuth, reassignBoard);
