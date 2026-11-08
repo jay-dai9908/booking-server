@@ -171,6 +171,7 @@ export const updateGlobalSetting = async (req, res) => {
     announcement_text,
     show_line_button,
     line_button_url,
+    official_line_url,
     require_line_login_every_time,
     enable_preview_page,
     preview_disabled_text,
@@ -211,6 +212,18 @@ export const updateGlobalSetting = async (req, res) => {
     if (guest_line_hint_text !== undefined) {
       dataToUpdate.guest_line_hint_text = typeof guest_line_hint_text === 'string' ? guest_line_hint_text.trim() : null;
     }
+    if (official_line_url !== undefined) {
+      dataToUpdate.official_line_url = official_line_url;
+      if (line_button_url === undefined) {
+        dataToUpdate.line_button_url = official_line_url;
+      }
+    }
+    if (line_button_url !== undefined) {
+      dataToUpdate.line_button_url = line_button_url;
+      if (dataToUpdate.official_line_url === undefined) {
+        dataToUpdate.official_line_url = line_button_url;
+      }
+    }
     if (weekday_hourly_price !== undefined && weekday_hourly_price !== null && weekday_hourly_price !== '') {
       dataToUpdate.weekday_hourly_price = parseInt(weekday_hourly_price, 10);
     }
@@ -228,7 +241,6 @@ export const updateGlobalSetting = async (req, res) => {
     if (show_announcement !== undefined) dataToUpdate.show_announcement = Boolean(show_announcement);
     if (announcement_text !== undefined) dataToUpdate.announcement_text = announcement_text;
     if (show_line_button !== undefined) dataToUpdate.show_line_button = Boolean(show_line_button);
-    if (line_button_url !== undefined) dataToUpdate.line_button_url = line_button_url;
     if (require_line_login_every_time !== undefined) dataToUpdate.require_line_login_every_time = Boolean(require_line_login_every_time);
     if (enable_preview_page !== undefined) dataToUpdate.enable_preview_page = Boolean(enable_preview_page);
     if (preview_disabled_text !== undefined) dataToUpdate.preview_disabled_text = preview_disabled_text;

@@ -127,7 +127,7 @@ export default function SettingsPage() {
       setPriceNoticeText(d.price_notice_text ?? DEFAULT_PRICE_NOTICE_TEXT);
       setShowLineButton(d.show_line_button !== false);
       setShowShopButton(d.show_shop_button !== false && d.shop_enabled !== false);
-      setLineButtonUrl(d.line_button_url || DEFAULT_LINE_URL);
+      setLineButtonUrl(d.official_line_url || d.line_button_url || DEFAULT_LINE_URL);
       setGuestLineHintText(d.guest_line_hint_text ?? DEFAULT_GUEST_LINE_HINT_TEXT);
       if (Array.isArray(d.booking_note_chips) && d.booking_note_chips.length > 0) {
         setBookingNoteChips(d.booking_note_chips);
@@ -209,6 +209,7 @@ export default function SettingsPage() {
         show_line_button: showLineButton,
         show_shop_button: showShopButton,
         line_button_url: lineButtonUrl,
+        official_line_url: lineButtonUrl,
         guest_line_hint_text: guestLineHintText,
         booking_note_chips: bookingNoteChips.map(s => String(s || '').trim()).filter(Boolean).map(s => s.slice(0, 12)).slice(0, 8),
         weekday_hourly_price: parseInt(weekdayHourly, 10) || 100,

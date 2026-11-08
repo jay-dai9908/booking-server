@@ -77,4 +77,22 @@ test('Round 9 Section 2: Configurable booking note chips in backend', async (t) 
     assert.ok(event, 'Audit log event must be recorded');
     assert.equal(event.category, 'setting');
   });
+
+  await t.test('3. updateGlobalSetting syncs official_line_url and line_button_url', async () => {
+    const customLineUrl = 'https://lin.ee/testSyncUrl123';
+    const req = mockReq({ line_button_url: customLineUrl });
+    const res = mockRes();
+    await updateGlobalSetting(req, res);
+    assert.equal(res.statusCode, 200);
+
+    const updated = await prisma.globalSetting.findUnique({ where: { id: 1 } });
+    assert.equal(updated.line_button_url, customLineUrl);
+    assert.equal(updated.official_line_url, customLineUrl, 'official_line_url must sync with line_button_url');
+
+    const getRes = mockRes();
+    await getGlobalSetting(mockReq(), getRes);
+    const data = getRes.getResponseData();
+    assert.equal(data.official_line_url, customLineUrl);
+    assert.equal(data.line_button_url, customLineUrl);
+  });
 });
