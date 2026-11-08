@@ -141,4 +141,6 @@ test('Item 3: Fresh DB without GlobalSetting enables seat layout upon publishing
     createdRes.assigned_seats.includes('NEW-1-1'),
     `Assigned seats should use new layout code NEW-1-1, but got ${JSON.stringify(createdRes.assigned_seats)}`
   );
+
+  await prisma.reservation.deleteMany({ where: { booking_ref: createdRes.booking_ref } });
 });

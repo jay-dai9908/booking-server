@@ -49,12 +49,12 @@ export default function SeatTile({
         </div>
       </div>
 
-      {/* Middle/Bottom: timerText or paxName */}
+      {/* Middle/Bottom: timerText and paxName formatted cleanly on separate lines */}
       {(paxName || timerText) && size !== 'mini' && size !== 'map' && (
-        <div className="mt-1 flex items-center justify-between text-[11px] font-medium leading-none">
-          {paxName && <span className="truncate max-w-[42px]">{paxName}</span>}
+        <div className="mt-1 flex flex-col gap-0.5 text-[11px] font-medium leading-tight">
+          {paxName && <span className="truncate max-w-full font-bold">{paxName}</span>}
           {timerText && (
-            <span className="font-bold ml-auto flex items-center gap-0.5 text-[10px]">
+            <span className="font-bold flex items-center gap-0.5 text-[10px] opacity-90">
               {state === 'pause' && <Pause className="w-2 h-2 flex-shrink-0" />}
               {timerText}
             </span>

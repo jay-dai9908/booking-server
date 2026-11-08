@@ -45,7 +45,7 @@ export default function ResponsivePanel({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-end md:items-stretch md:justify-end bg-black/40 backdrop-blur-[2px] transition-opacity"
+      className="fixed inset-0 z-[60] flex items-end md:items-stretch md:justify-end bg-black/40 transition-opacity"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"

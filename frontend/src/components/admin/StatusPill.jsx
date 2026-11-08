@@ -6,7 +6,11 @@ const STATUS_CONFIGS = {
   paid: { label: '已結清', bg: 'bg-sg-sage-soft text-sg-sage-ink border-sg-sage/30' },
   waived: { label: '免收', bg: 'bg-sg-full-soft text-sg-muted border-sg-line' },
   refund: { label: '有退款', bg: 'bg-sg-danger-soft text-sg-danger border-sg-danger/20' },
-  pending: { label: '待補收', bg: 'bg-sg-honey-soft text-sg-honey-ink border-sg-honey/30' }
+  pending: { label: '待補收', bg: 'bg-sg-honey-soft text-sg-honey-ink border-sg-honey/30' },
+  confirmed: { label: '預約成功', bg: 'bg-sg-sage-soft text-sg-sage-ink border-sg-sage/30' },
+  checked_in: { label: '已報到', bg: 'bg-sg-brown-soft text-sg-brown border-sg-brown/20' },
+  no_show: { label: '未到', bg: 'bg-sg-danger-soft text-sg-danger border-sg-danger/20' },
+  cancelled: { label: '已取消', bg: 'bg-sg-full-soft text-sg-muted border-sg-line' }
 };
 
 export default function StatusPill({ status = 'unpaid', label = null, className = '', children }) {

@@ -23,7 +23,6 @@ export default function TableCard({
       <div className="flex items-center justify-between pb-2 border-b border-sg-line">
         <div className="flex items-baseline gap-2">
           <h3 className="text-[16px] font-bold text-sg-ink">{table.label}</h3>
-          {zoneName && <span className="text-[12px] text-sg-muted">{zoneName}</span>}
         </div>
         <span className="text-[12px] font-medium text-sg-muted">
           {seats.filter(s => s.is_active).length} 個座位
@@ -31,7 +30,7 @@ export default function TableCard({
       </div>
 
       {isOneSide ? (
-        <div className="grid grid-cols-1 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {seats.map((seat) => {
             const seatInfo = seatStates[seat.code] || {};
             let state = seatInfo.state || (seat.is_active ? 'empty' : 'off');

@@ -237,13 +237,16 @@ export async function moveSeat(req, res) {
 
       const sessionIds = reservations.map(r => r.session_id);
 
-      // Validate to_seat exists and is active on layout
-      const sessionDate = reservations[0].session.session_date;
-      const activeLayout = await getActiveLayoutForDate(tx, sessionDate);
-      const layoutSeats = activeLayout?.seats || [];
-      const targetSeatObj = layoutSeats.find(ls => ls.code === to_seat);
-      if (!targetSeatObj || !targetSeatObj.is_active) {
-        throw { status: 400, message: `目標座位 ${to_seat} 不存在或未啟用` };
+      // Validate to_seat exists and is active on layout (WAIT- seats bypass layout check)
+      const isWaitSeat = to_seat.startsWith('WAIT-');
+      if (!isWaitSeat) {
+        const sessionDate = reservations[0].session.session_date;
+        const activeLayout = await getActiveLayoutForDate(tx, sessionDate);
+        const layoutSeats = activeLayout?.seats || [];
+        const targetSeatObj = layoutSeats.find(ls => ls.code === to_seat);
+        if (!targetSeatObj || !targetSeatObj.is_active) {
+          throw { status: 400, message: `目標座位 ${to_seat} 不存在或未啟用` };
+        }
       }
 
       // Check internal moves within the same booking
@@ -276,9 +279,9 @@ export async function moveSeat(req, res) {
         }
       }
 
-      // Check target occupancy across all sessions of this reservation
+      // Check target occupancy across all sessions of this reservation (skip if wait seat)
       let displaced = null;
-      const conflictReservations = await tx.reservation.findMany({
+      const conflictReservations = isWaitSeat ? [] : await tx.reservation.findMany({
         where: {
           session_id: { in: sessionIds },
           booking_ref: { not: booking_ref },

@@ -17,7 +17,11 @@ import {
   Calendar,
   Layers,
   ArrowRightLeft,
-  Ticket
+  Ticket,
+  Search,
+  MessageSquare,
+  Lock,
+  UserX
 } from 'lucide-react';
 import api from '../../api/axios';
 import { useLiveFloor } from '../../hooks/admin/useLiveFloor';
@@ -26,15 +30,16 @@ import SegmentedTabs from '../../components/admin/SegmentedTabs';
 import StatusPill from '../../components/admin/StatusPill';
 import ResponsivePanel from '../../components/admin/ResponsivePanel';
 import ReasonChips from '../../components/admin/ReasonChips';
-import MoneyInput from '../../components/admin/MoneyInput';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import Button from '../../components/customer/Button';
+import DateStrip from '../../components/customer/DateStrip';
 
 // Floor components
 import FloorPlan from '../../components/admin/floor/FloorPlan';
 import MiniMap from '../../components/admin/floor/MiniMap';
 import TableCard from '../../components/admin/floor/TableCard';
 import TimelineGrid from '../../components/admin/floor/TimelineGrid';
+import CheckInPanel from '../../components/admin/floor/CheckInPanel';
 
 // Modals
 import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
@@ -44,9 +49,19 @@ import EquipmentAddonModal from '../../components/EquipmentAddonModal';
 import ExtendTimeModal from '../../components/ExtendTimeModal';
 import SendLineMessageModal from '../../components/SendLineMessageModal';
 
-import { swapBoundaryOptions, formatTimerHMM, blocksBy1030, formatTimeHHmm } from '@shared/time.js';
+import { swapBoundaryOptions, formatTimerHMM, formatTimeHHmm } from '@shared/time.js';
 import { calculateBoardTotal } from '@shared/boardPricing.js';
 import { displayBoardName } from '@shared/billing.js';
+import {
+  bookingTimeRange,
+  bookingDurationText,
+  personElapsedMinutes,
+  formatElapsedText,
+  personTimerState,
+  formatOverdueText,
+  groupTimerPill,
+  formatBookingRef
+} from '../../utils/admin/floorSelectors';
 
 export default function SeatingPage() {
   // Navigation & Tabs
@@ -61,11 +76,25 @@ export default function SeatingPage() {
     localStorage.setItem('shiguang_seating_tab', tab);
   };
 
+  // Date selection state
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Time slot filter for floor plan: 'now' | '10:00' | '11:00' ...
+  const [selectedSlot, setSelectedSlot] = useState('now');
+
+  // Search input state
+  const [searchQuery, setSearchQuery] = useState('');
+
   // Filter chips: 'all' | 'alert' | 'pending' | 'empty'
   const [filterMode, setFilterMode] = useState('all');
 
   // Live data polling
-  const { data: floorData, loading, error, refresh } = useLiveFloor(null, 8000);
+  const { data: floorData, loading, error, refresh } = useLiveFloor(selectedDate, 8000);
   const { getServerNow } = useServerClock(floorData?.server_now);
   const [, setClockTick] = useState(0);
 
@@ -89,11 +118,16 @@ export default function SeatingPage() {
   const [checkInTarget, setCheckInTarget] = useState(null); // booking
   const [timerTarget, setTimerTarget] = useState(null); // booking
   const [seatActionTarget, setSeatActionTarget] = useState(null); // seat object + booking
+  const [moveSeatModalTarget, setMoveSeatModalTarget] = useState(null); // { booking, fromSeat, personNo }
+  const [swapConfirmTarget, setSwapConfirmTarget] = useState(null); // { bookingRef, fromSeat, toSeat, occupantName }
+
+  // Board swap states
   const [boardSwapTarget, setBoardSwapTarget] = useState(null); // { booking, unit_group, board }
   const [selectedSwapSize, setSelectedSwapSize] = useState(null);
   const [selectedBoundary, setSelectedBoundary] = useState(null);
   const [swapSubmitting, setSwapSubmitting] = useState(false);
   const [swapError, setSwapError] = useState(null);
+
   const [selectedTableDetails, setSelectedTableDetails] = useState(null); // table object
   const [activeMobileTableId, setActiveMobileTableId] = useState(null);
   const [flashingTableId, setFlashingTableId] = useState(null);
@@ -113,13 +147,6 @@ export default function SeatingPage() {
       }, 1200);
     }
   };
-
-  // Toast message
-  const [checkInSelectedSeats, setCheckInSelectedSeats] = useState([]);
-  const [checkInStartTimer, setCheckInStartTimer] = useState(true);
-  const [checkInBoardAssign, setCheckInBoardAssign] = useState({}); // { [unitGroup]: seatCode }
-  const [checkInSubmitting, setCheckInSubmitting] = useState(false);
-  const [checkInError, setCheckInError] = useState(null);
 
   // Timer sheet pause menu states
   const [pausePersonTarget, setPausePersonTarget] = useState(null);
@@ -152,6 +179,60 @@ export default function SeatingPage() {
   const activeSeats = (layout.seats || []).filter(s => s.is_active);
   const emptySeatCount = Math.max(0, activeSeats.length - inUsePax);
 
+  // Compute next available WAIT-n code
+  const nextEmptyWaitSeat = useMemo(() => {
+    const allAssigned = bookings.flatMap(b => b.assigned_seats || []);
+    let i = 1;
+    while (allAssigned.includes(`WAIT-${i}`)) {
+      i++;
+    }
+    return `WAIT-${i}`;
+  }, [bookings]);
+
+  // Compute occupied wait seats & wait slots
+  const { waitSlots, waitPax } = useMemo(() => {
+    const waitSeatMap = {};
+    let totalWaitPax = 0;
+    for (const b of bookings) {
+      const seats = b.assigned_seats || [];
+      const hasWait = seats.some(s => s && s.startsWith('WAIT-'));
+      if (hasWait) totalWaitPax += (b.pax || 0);
+
+      seats.forEach((seatCode, idx) => {
+        if (seatCode && seatCode.startsWith('WAIT-')) {
+          const person = (b.persons || [])[idx];
+          waitSeatMap[seatCode] = {
+            booking: b,
+            person,
+            personNo: idx + 1
+          };
+        }
+      });
+    }
+
+    const occupiedNums = Object.keys(waitSeatMap)
+      .map(k => parseInt(k.replace('WAIT-', ''), 10))
+      .filter(n => !isNaN(n));
+    const maxWaitNum = occupiedNums.length > 0 ? Math.max(...occupiedNums) : 0;
+    const totalWaitSlots = Math.max(2, maxWaitNum + 2);
+
+    const slots = [];
+    for (let i = 1; i <= totalWaitSlots; i++) {
+      const code = `WAIT-${i}`;
+      const occ = waitSeatMap[code];
+      slots.push({
+        code,
+        label: `等待 ${i}`,
+        occupied: Boolean(occ),
+        booking: occ?.booking,
+        person: occ?.person,
+        personNo: occ?.personNo
+      });
+    }
+
+    return { waitSlots: slots, waitPax: totalWaitPax };
+  }, [bookings]);
+
   // Seat state map for FloorPlan and SeatTiles
   const seatStatesMap = useMemo(() => {
     const map = {};
@@ -164,6 +245,7 @@ export default function SeatingPage() {
       const isPaid = b.billing?.status === 'paid';
       const bSeats = b.assigned_seats || [];
       bSeats.forEach((seatCode, idx) => {
+        if (!seatCode || seatCode.startsWith('WAIT-')) return;
         const person = (b.persons || [])[idx];
         let timerText = '計時中';
         let state = 'in_use';
@@ -174,7 +256,7 @@ export default function SeatingPage() {
             state = 'paused';
             timerText = '已暫停';
           } else {
-            const rawElapsed = person.actual_minutes || 0;
+            const rawElapsed = personElapsedMinutes(person, getServerNow());
             timerText = formatTimerHMM(rawElapsed);
           }
         }
@@ -218,9 +300,9 @@ export default function SeatingPage() {
     }
 
     return map;
-  }, [activeSeats, checkedInBookings, pendingBookings]);
+  }, [activeSeats, checkedInBookings, pendingBookings, getServerNow]);
 
-  // Group tables by zone (Spec 3.2)
+  // Group tables by zone
   const zoneGroupedTables = useMemo(() => {
     const zones = [...(layout.zones || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     const allTables = layout.tables || [];
@@ -228,7 +310,6 @@ export default function SeatingPage() {
 
     const groups = [];
 
-    // Map zones
     for (const zone of zones) {
       const zoneTables = allTables
         .filter(t => t.zone_id === zone.id)
@@ -257,7 +338,6 @@ export default function SeatingPage() {
       });
     }
 
-    // Any tables without a zone
     const unzonedTables = allTables
       .filter(t => !t.zone_id || !zones.some(z => z.id === t.zone_id))
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -279,7 +359,7 @@ export default function SeatingPage() {
     return groups;
   }, [layout.zones, layout.tables, layout.seats, seatStatesMap]);
 
-  // Mobile scroll-spy for MiniMap (Spec 6.5)
+  // Scroll spy for MiniMap
   useEffect(() => {
     if (activeTab !== 'floor') return;
     const handleScroll = () => {
@@ -302,92 +382,83 @@ export default function SeatingPage() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [activeTab, layout.tables]);
 
-  // Open Check In Sheet
-  const handleOpenCheckIn = (booking) => {
-    setCheckInTarget(booking);
-    setCheckInSelectedSeats(booking.assigned_seats || []);
-    setCheckInStartTimer(true);
-    setCheckInError(null);
-
-    // Initial board assignment
-    const initialAssign = {};
-    const bds = booking.boards || [];
-    bds.forEach((bd, idx) => {
-      const assignedSeat = booking.assigned_seats?.[idx] || booking.assigned_seats?.[0] || '';
-      initialAssign[bd.unit_group] = assignedSeat;
-    });
-    setCheckInBoardAssign(initialAssign);
-  };
-
-  // Submit Check In
-  const handleSubmitCheckIn = async (deferSeating = false) => {
-    if (!checkInTarget) return;
-    try {
-      setCheckInSubmitting(true);
-      setCheckInError(null);
-
-      const boardAssignments = Object.entries(checkInBoardAssign).map(([uGroup, sCode]) => {
-        const pIdx = checkInSelectedSeats.indexOf(sCode);
-        return {
-          unit_group: uGroup,
-          person_no: pIdx >= 0 ? pIdx + 1 : 1
-        };
-      });
-
-      const res = await api.post(`/floor/${checkInTarget.booking_ref}/check-in`, {
-        seats: deferSeating ? [] : checkInSelectedSeats,
-        board_assignments: boardAssignments,
-        start_timer: deferSeating ? false : checkInStartTimer,
-        defer_seating: deferSeating
-      });
-
-      setCheckInTarget(null);
-      refresh();
-      showToast(deferSeating ? '已報到，稍後再帶位' : '已入座，開始計時');
-
-      if (res.data?.displaced_reservations?.length) {
-        const displacedNames = res.data.displaced_reservations.map(d => `${d.name} (${d.new_seats?.join('、')})`).join('、');
-        showToast(`已自動改排其他預約：${displacedNames}`);
-      }
-    } catch (err) {
-      console.error(err);
-      if (err.response?.status === 409) {
-        setCheckInError(err.response?.data?.error || '座位已被鎖定，請選其他座位');
-      } else {
-        setCheckInError(err.response?.data?.error || '報到帶位失敗');
-      }
-    } finally {
-      setCheckInSubmitting(false);
+  // Available slots for Slot Selector chips
+  const slotChips = useMemo(() => {
+    const chips = ['現在'];
+    const times = new Set();
+    for (const s of sessions) {
+      if (s.start_time) times.add(s.start_time.slice(0, 5));
     }
+    if (times.size === 0) {
+      for (let h = 10; h <= 20; h++) {
+        times.add(`${String(h).padStart(2, '0')}:00`);
+      }
+    }
+    const sorted = [...times].sort();
+    return [...chips, ...sorted];
+  }, [sessions]);
+
+  // Filtered bookings based on search query
+  const filterBySearch = (list) => {
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.trim().toLowerCase();
+    return list.filter(b => {
+      const matchName = b.name && b.name.toLowerCase().includes(q);
+      const matchPhone = b.phone && b.phone.includes(q);
+      const matchRef = b.booking_ref && b.booking_ref.toLowerCase().includes(q);
+      const matchNotes = (b.customer_note && b.customer_note.toLowerCase().includes(q)) ||
+                         (b.admin_note && b.admin_note.toLowerCase().includes(q)) ||
+                         (b.notes && b.notes.toLowerCase().includes(q));
+      return matchName || matchPhone || matchRef || matchNotes;
+    });
   };
 
-  // Timer controls (pause, resume, pause all, resume all)
-  const handleTimerAction = async (bookingRef, personNo, action, reason = null) => {
+  const searchedPending = useMemo(() => filterBySearch(pendingBookings), [pendingBookings, searchQuery]);
+  const searchedCheckedIn = useMemo(() => filterBySearch(checkedInBookings), [checkedInBookings, searchQuery]);
+  const searchedCompleted = useMemo(() => filterBySearch(completedBookings), [completedBookings, searchQuery]);
+
+  // Timer controls
+  const handleTimerAction = async (bookingRef, personNos, action, reason = null) => {
     try {
       await api.post(`/floor/${bookingRef}/timer`, {
-        person_no: personNo,
         action,
+        person_nos: personNos === 'all' ? 'all' : (Array.isArray(personNos) ? personNos : [Number(personNos)]),
         reason
       });
       refresh();
       setPausePersonTarget(null);
+      showToast('計時更新成功');
     } catch (err) {
-      alert(err.response?.data?.error || '計時操作失敗');
+      showToast(err.response?.data?.error || '計時操作失敗');
     }
   };
 
   // Move seat action
-  const handleMoveSeat = async (bookingRef, personNo, targetSeat) => {
+  const handleMoveSeat = async (bookingRef, fromSeat, toSeat, mode = 'move') => {
     try {
       await api.post(`/floor/${bookingRef}/move-seat`, {
-        person_no: personNo,
-        target_seat_code: targetSeat
+        from_seat: fromSeat,
+        to_seat: toSeat,
+        mode
       });
       refresh();
       setSeatActionTarget(null);
-      showToast(`已換至座位 ${targetSeat}`);
+      setMoveSeatModalTarget(null);
+      setSwapConfirmTarget(null);
+      showToast(`已換至座位 ${toSeat}`);
     } catch (err) {
-      alert(err.response?.data?.error || '換座位失敗');
+      showToast(err.response?.data?.error || '換座位失敗');
+    }
+  };
+
+  // Mark no-show
+  const handleMarkNoShow = async (bookingRef) => {
+    try {
+      await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'no_show' });
+      showToast('已標記為未到');
+      refresh();
+    } catch (err) {
+      showToast(err.response?.data?.error || '標記未到失敗');
     }
   };
 
@@ -403,7 +474,6 @@ export default function SeatingPage() {
         booking: seatInfo.booking
       });
     } else {
-      // Empty seat -> Option to add walk-in
       setSeatActionTarget({
         seat,
         seatInfo,
@@ -412,7 +482,7 @@ export default function SeatingPage() {
     }
   };
 
-  // Arrival status helper
+  // Arrival status helper using formatOverdueText
   const getArrivalStatus = (startAt) => {
     if (!startAt) return null;
     const nowMs = getServerNow().getTime();
@@ -426,58 +496,19 @@ export default function SeatingPage() {
       };
     } else {
       const lateMins = Math.abs(diffMins);
-      if (lateMins <= 15) {
-        return {
-          label: `遲到 ${lateMins} 分`,
-          pillClass: 'bg-sg-honey-soft text-sg-honey font-bold'
-        };
-      } else {
-        const retainTime = new Date(startMs + 15 * 60000).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
-        return {
-          label: `保留到 ${retainTime}`,
-          pillClass: 'bg-sg-danger-soft text-sg-danger font-bold'
-        };
-      }
+      const overdue = formatOverdueText(lateMins);
+      return {
+        label: overdue.text,
+        pillClass: overdue.severity === 'danger'
+          ? 'bg-sg-danger-soft text-sg-danger font-bold'
+          : 'bg-sg-honey-soft text-sg-honey font-bold'
+      };
     }
-  };
-
-  // Group timer status helper
-  const getGroupTimerPill = (b) => {
-    const persons = b.persons || [];
-    let isAnyOvertime = false;
-    let maxOvertime = 0;
-    let isAllPaused = persons.length > 0;
-    let isAnyLowTime = false;
-
-    for (const p of persons) {
-      if (p.timer_started_at && !p.timer_ended_at) {
-        if (!p.paused_at) isAllPaused = false;
-        const booked = (b.session_count || 1) * 60;
-        const act = p.actual_minutes || 0;
-        if (act > booked) {
-          isAnyOvertime = true;
-          maxOvertime = Math.max(maxOvertime, act - booked);
-        } else if (booked - act <= 20) {
-          isAnyLowTime = true;
-        }
-      }
-    }
-
-    if (isAnyOvertime) {
-      return { label: `超時 ${maxOvertime} 分`, pillClass: 'bg-sg-danger-soft text-sg-danger font-bold' };
-    }
-    if (isAllPaused) {
-      return { label: '已暫停', pillClass: 'bg-sg-paper text-sg-muted font-bold' };
-    }
-    if (isAnyLowTime) {
-      return { label: '還有 20 分', pillClass: 'bg-sg-honey-soft text-sg-honey font-bold' };
-    }
-    return { label: '計時中', pillClass: 'bg-sg-sage-soft text-sg-sage-ink font-bold' };
   };
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto pb-12">
-      {/* Toast */}
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-4 right-4 z-50 bg-sg-ink text-white px-4 py-2.5 rounded-2xl shadow-lg text-[13px] font-bold flex items-center gap-2 animate-fade-in">
           <Sparkles className="w-4 h-4 text-sg-peach" />
@@ -485,11 +516,71 @@ export default function SeatingPage() {
         </div>
       )}
 
+      {/* Date Switcher Bar */}
+      <div className="flex items-center justify-between bg-white px-4 py-2.5 rounded-3xl border border-sg-line shadow-xs">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowDatePicker(!showDatePicker)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-sg-paper/60 border border-sg-line hover:border-sg-brown text-[12px] font-bold text-sg-ink transition"
+          >
+            <Calendar className="w-3.5 h-3.5 text-sg-brown" />
+            <span>{selectedDate}</span>
+            <ChevronDown className={`w-3.5 h-3.5 text-sg-muted transition-transform ${showDatePicker ? 'rotate-180' : ''}`} />
+          </button>
+          {selectedDate !== todayStr && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedDate(todayStr);
+                setShowDatePicker(false);
+              }}
+              className="text-[11px] px-2.5 py-1 rounded-xl bg-sg-honey-soft text-sg-honey font-bold hover:underline"
+            >
+              回到今天
+            </button>
+          )}
+        </div>
+
+        <div className="text-[12px] text-sg-muted font-medium hidden sm:block">
+          使用中 <span className="font-bold text-sg-ink font-num">{inUsePax}</span> 位 · 待入座 <span className="font-bold text-sg-ink font-num">{pendingPax}</span> 位 · 空位 <span className="font-bold text-sg-ink font-num">{emptySeatCount}</span> 個
+        </div>
+      </div>
+
+      {/* DatePicker Dropdown / Strip */}
+      {showDatePicker && (
+        <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-sm space-y-3 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-bold text-sg-ink">選擇帶位日期</span>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setSelectedDate(e.target.value);
+                  setShowDatePicker(false);
+                }
+              }}
+              className="px-3 py-1 text-[12px] border border-sg-line rounded-xl focus:border-sg-brown focus:outline-none"
+            />
+          </div>
+          <DateStrip
+            selectedDate={selectedDate}
+            onSelectDate={(d) => {
+              setSelectedDate(d);
+              setShowDatePicker(false);
+            }}
+            sessionsByDate={{ [selectedDate]: sessions }}
+          />
+        </div>
+      )}
+
       {/* Desktop Top Header & Summary */}
       <div className="hidden lg:flex items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
         <div>
           <div className="text-[13px] text-sg-muted">
-            使用中 <span className="font-bold text-sg-ink font-num">{inUsePax}</span> 位 · 待入座 <span className="font-bold text-sg-ink font-num">{pendingPax}</span> 位 · 空位 <span className="font-bold text-sg-ink font-num">{emptySeatCount}</span> 個
+            全店使用中 <span className="font-bold text-sg-ink font-num">{inUsePax}</span> 位 · 待入座 <span className="font-bold text-sg-ink font-num">{pendingPax}</span> 位 · 空位 <span className="font-bold text-sg-ink font-num">{emptySeatCount}</span> 個
+            {waitPax > 0 && <span className="ml-2 font-bold text-sg-brown font-num">· 等待區 {waitPax} 位</span>}
           </div>
         </div>
 
@@ -591,6 +682,7 @@ export default function SeatingPage() {
               seatStates={seatStatesMap}
               activeTableId={activeMobileTableId}
               onTableClick={handleMiniMapTableClick}
+              waitPax={waitPax}
             />
           </div>
         )}
@@ -598,22 +690,63 @@ export default function SeatingPage() {
 
       {/* TAB 1: LIST VIEW (名單) */}
       {activeTab === 'list' && (
-        <div className="space-y-6">
+        <div className="space-y-4">
+          {/* Mobile Board Usage Summary (Spec 3.4) */}
+          {boardUsage.length > 0 && (
+            <div className="lg:hidden bg-sg-paper/80 border border-sg-line px-3.5 py-2 rounded-2xl flex items-center justify-between text-[12px]">
+              <span className="text-sg-muted font-bold">智能板租借</span>
+              <span className="font-bold text-sg-ink">
+                {boardUsage.map(bu => `${displayBoardName(bu.name)} ${bu.in_use}/${bu.total}`).join(' · ')}
+              </span>
+            </div>
+          )}
+
+          {/* Search Box (Spec 3.4) */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-sg-muted" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜尋姓名、電話、單號或備註..."
+              className="w-full pl-9 pr-4 py-2 rounded-2xl border border-sg-line text-[13px] bg-white focus:outline-none focus:border-sg-brown shadow-2xs"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-2.5 text-sg-muted hover:text-sg-ink"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
           {/* Section: 待入座 */}
           <div className="space-y-3">
             <h2 className="text-[14px] font-bold text-sg-ink flex items-center justify-between">
-              <span>待入座 ({pendingBookings.length})</span>
+              <span>待入座 ({searchedPending.length})</span>
             </h2>
 
-            {pendingBookings.length === 0 ? (
+            {searchedPending.length === 0 ? (
               <div className="p-8 text-center bg-white rounded-3xl border border-sg-line text-[13px] text-sg-muted">
-                目前沒有待入座的顧客
+                {searchQuery ? '沒有符合搜尋條件的待入座顧客' : '目前沒有待入座的顧客'}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {pendingBookings.map((b, idx) => {
+                {searchedPending.map((b, idx) => {
                   const arrival = getArrivalStatus(b.start_at);
                   const isFirst = idx === 0;
+                  const timeRangeStr = bookingTimeRange(b.start_at, b.end_at);
+                  const seatsList = b.assigned_seats || [];
+                  const isWaitOnly = seatsList.length > 0 && seatsList.every(s => s && s.startsWith('WAIT-'));
+                  const seatText = seatsList.length > 0
+                    ? (isWaitOnly ? '等待區' : seatsList.join('、'))
+                    : '未排座';
+                  const boardCount = (b.boards || []).length;
+                  const boardText = boardCount > 0
+                    ? ` · ${(b.boards || []).map(bd => (bd.segments?.[0]?.name ? displayBoardName(bd.segments[0].name) : '智能板')).join('、')} ×${boardCount}`
+                    : '';
 
                   return (
                     <div
@@ -625,6 +758,11 @@ export default function SeatingPage() {
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-[15px] text-sg-ink">{b.name}</span>
                             <span className="text-[13px] text-sg-muted">· {b.pax} 位</span>
+                            {isWaitOnly && (
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-sg-brown-soft text-sg-brown font-bold">
+                                等待區
+                              </span>
+                            )}
                           </div>
                           {arrival && (
                             <span className={`text-[11px] px-2 py-0.5 rounded-lg ${arrival.pillClass}`}>
@@ -633,17 +771,30 @@ export default function SeatingPage() {
                           )}
                         </div>
 
-                        <div className="text-[12px] text-sg-muted mt-1">
-                          {b.time_range} · 預定 {b.assigned_seats?.join('、') || '未排座'}
-                          {b.boards?.length > 0 && ` · 智能板 ×${b.boards.length}`}
+                        <div className="text-[12px] text-sg-muted mt-1 leading-relaxed">
+                          {timeRangeStr} · 預定 {seatText}{boardText}
                         </div>
+
+                        {/* Notes preview (Spec 3.4) */}
+                        {b.customer_note && (
+                          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-sg-brown bg-sg-paper/80 px-2 py-1 rounded-xl truncate">
+                            <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate">{b.customer_note}</span>
+                          </div>
+                        )}
+                        {b.admin_note && (
+                          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-900 bg-amber-50 px-2 py-1 rounded-xl truncate">
+                            <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate">{b.admin_note}</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between pt-2 border-t border-sg-line">
                         <Button
                           variant={isFirst ? 'primary' : 'secondary'}
                           size="sm"
-                          onClick={() => handleOpenCheckIn(b)}
+                          onClick={() => setCheckInTarget(b)}
                         >
                           報到並帶位
                         </Button>
@@ -656,6 +807,14 @@ export default function SeatingPage() {
                             title="訂單詳情"
                           >
                             <Info className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMarkNoShow(b.booking_ref)}
+                            className="p-1.5 rounded-xl hover:bg-sg-danger-soft text-sg-muted hover:text-sg-danger"
+                            title="標記未到"
+                          >
+                            <UserX className="w-4 h-4" />
                           </button>
                           <button
                             type="button"
@@ -677,18 +836,23 @@ export default function SeatingPage() {
           {/* Section: 使用中 */}
           <div className="space-y-3">
             <h2 className="text-[14px] font-bold text-sg-ink flex items-center justify-between">
-              <span>使用中 ({checkedInBookings.length})</span>
+              <span>使用中 ({searchedCheckedIn.length})</span>
             </h2>
 
-            {checkedInBookings.length === 0 ? (
+            {searchedCheckedIn.length === 0 ? (
               <div className="p-8 text-center bg-white rounded-3xl border border-sg-line text-[13px] text-sg-muted">
-                目前沒有正在使用中的顧客
+                {searchQuery ? '沒有符合搜尋條件的使用中顧客' : '目前沒有正在使用中的顧客'}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {checkedInBookings.map((b) => {
-                  const timerPill = getGroupTimerPill(b);
-                  const isPaid = b.billing?.status === 'paid';
+                {searchedCheckedIn.map((b) => {
+                  const timerPill = groupTimerPill(b, getServerNow());
+                  const seatsList = b.assigned_seats || [];
+                  const isWaitOnly = seatsList.length > 0 && seatsList.every(s => s && s.startsWith('WAIT-'));
+                  const seatText = seatsList.length > 0
+                    ? (isWaitOnly ? '等待區' : seatsList.join('、'))
+                    : '未帶位';
+                  const timeRangeStr = bookingTimeRange(b.start_at, b.end_at);
 
                   return (
                     <div
@@ -701,6 +865,11 @@ export default function SeatingPage() {
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-[15px] text-sg-ink">{b.name}</span>
                             <span className="text-[13px] text-sg-muted">· {b.pax} 位</span>
+                            {isWaitOnly && (
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-sg-brown-soft text-sg-brown font-bold">
+                                等待區
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5">
                             <span className={`text-[11px] px-2 py-0.5 rounded-lg ${timerPill.pillClass}`}>
@@ -710,9 +879,40 @@ export default function SeatingPage() {
                           </div>
                         </div>
 
-                        <div className="text-[12px] text-sg-muted mt-1">
-                          座位 {b.assigned_seats?.join('、') || '未帶位'} · 預約到 {b.end_at ? new Date(b.end_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : ''}
+                        {/* Unseated Warning Banner (Spec 3.2) */}
+                        {b.needs_seating && (
+                          <div className="mt-2 p-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-[12px] flex items-center justify-between">
+                            <span className="font-bold">這組還沒帶位，沒有計時紀錄</span>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCheckInTarget(b);
+                              }}
+                            >
+                              帶位並開始計時
+                            </Button>
+                          </div>
+                        )}
+
+                        <div className="text-[12px] text-sg-muted mt-1 leading-relaxed">
+                          座位 {seatText} · {timeRangeStr}
                         </div>
+
+                        {/* Notes preview (Spec 3.4) */}
+                        {b.customer_note && (
+                          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-sg-brown bg-sg-paper/80 px-2 py-1 rounded-xl truncate">
+                            <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate">{b.customer_note}</span>
+                          </div>
+                        )}
+                        {b.admin_note && (
+                          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-900 bg-amber-50 px-2 py-1 rounded-xl truncate">
+                            <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate">{b.admin_note}</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between pt-2 border-t border-sg-line" onClick={(e) => e.stopPropagation()}>
@@ -745,21 +945,21 @@ export default function SeatingPage() {
               className="w-full px-5 py-3.5 flex items-center justify-between bg-sg-paper/40 hover:bg-sg-paper/60 text-left transition"
             >
               <span className="font-bold text-[14px] text-sg-ink">
-                已離場 {completedBookings.length} 組
+                已離場 {searchedCompleted.length} 組
               </span>
               <ChevronDown className={`w-4 h-4 text-sg-muted transition-transform ${isCompletedExpanded ? 'rotate-180' : ''}`} />
             </button>
 
             {isCompletedExpanded && (
               <div className="p-4 divide-y divide-sg-line">
-                {completedBookings.length === 0 ? (
+                {searchedCompleted.length === 0 ? (
                   <div className="py-4 text-center text-sg-muted text-[13px]">尚無已離場紀錄</div>
                 ) : (
-                  completedBookings.map((b) => (
+                  searchedCompleted.map((b) => (
                     <div key={b.booking_ref} className="py-2.5 flex items-center justify-between text-[13px]">
                       <div>
                         <span className="font-bold text-sg-ink mr-2">{b.name}</span>
-                        <span className="text-sg-muted">{b.time_range} · {b.pax} 位</span>
+                        <span className="text-sg-muted">{bookingTimeRange(b.start_at, b.end_at)} · {b.pax} 位</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <StatusPill status={b.billing?.status || 'unpaid'} />
@@ -785,10 +985,28 @@ export default function SeatingPage() {
       {/* TAB 2: FLOOR PLAN VIEW (平面圖) */}
       {activeTab === 'floor' && (
         <div className="space-y-4">
-          {/* Desktop/Tablet: Side by side */}
+          {/* Slot Selector Chips (Spec 3.4) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar -mx-1 px-1">
+            <span className="text-[12px] font-bold text-sg-muted shrink-0 mr-1">時段：</span>
+            {slotChips.map(slot => (
+              <button
+                key={slot}
+                type="button"
+                onClick={() => setSelectedSlot(slot)}
+                className={`px-3 py-1 rounded-2xl text-[12px] font-bold whitespace-nowrap transition border ${
+                  selectedSlot === slot
+                    ? 'bg-sg-brown text-white border-sg-brown'
+                    : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown/50'
+                }`}
+              >
+                {slot}
+              </button>
+            ))}
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
             {/* Left: Floor canvas (Desktop / Tablet) */}
-            <div className="hidden lg:block lg:col-span-8 bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-3">
+            <div className="hidden lg:block lg:col-span-8 bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-sg-line">
                 <div className="text-[13px] font-bold text-sg-ink">全店座位平面圖</div>
                 <div className="flex items-center gap-3 text-[11px] text-sg-muted">
@@ -808,13 +1026,57 @@ export default function SeatingPage() {
                   fitContainer={true}
                 />
               </div>
+
+              {/* Waiting Area Section (Desktop) */}
+              <div id="waiting-area-section" className="bg-sg-paper/40 rounded-2xl border border-sg-line p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-[13px] text-sg-ink">
+                    等待區 · {waitPax} 位 · 不佔座位
+                  </div>
+                  <span className="text-[11px] text-sg-muted">點選入座等待中的客人</span>
+                </div>
+                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                  {waitSlots.map((ws) => {
+                    if (ws.occupied && ws.booking) {
+                      const isPaused = ws.person ? Boolean(ws.person.paused_at && !ws.person.timer_ended_at) : false;
+                      const elapsedText = ws.person ? formatElapsedText(ws.person, getServerNow()) : '';
+                      return (
+                        <div
+                          key={ws.code}
+                          onClick={() => setCheckInTarget(ws.booking)}
+                          className="p-2.5 rounded-xl border border-sg-brown bg-white cursor-pointer hover:border-sg-brown shadow-2xs transition text-left flex flex-col justify-between min-h-[64px]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-sg-ink">{ws.label}</span>
+                            <span className="text-[9px] px-1 py-0.5 rounded bg-sg-brown text-white font-bold">帶位</span>
+                          </div>
+                          <div>
+                            <div className="text-[12px] font-bold text-sg-ink truncate">{ws.booking.name}</div>
+                            <div className="text-[10px] text-sg-muted truncate">
+                              {isPaused ? '已暫停' : elapsedText || '等待中'}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        key={ws.code}
+                        className="p-2.5 rounded-xl border border-dashed border-sg-line bg-gray-50/50 text-left flex flex-col justify-between min-h-[64px]"
+                      >
+                        <span className="text-[11px] font-medium text-sg-muted">{ws.label}</span>
+                        <span className="text-[10px] text-sg-muted">空置</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
-            {/* Mobile Table Cards List below canvas for small screens */}
+            {/* Mobile Table Cards List */}
             <div className="lg:hidden space-y-5">
               {zoneGroupedTables.map((group) => (
                 <div key={group.zone?.id || 'unzoned'} className="space-y-3">
-                  {/* Zone Header: e.g. 1 前區 靠門口 使用中 8 / 12 位 */}
                   <div className="bg-sg-paper/90 border border-sg-line px-3.5 py-2 rounded-2xl flex items-center justify-between text-[13px] font-bold text-sg-ink">
                     <div className="flex items-center gap-2">
                       <span>{group.zoneTitle}</span>
@@ -845,11 +1107,56 @@ export default function SeatingPage() {
                   </div>
                 </div>
               ))}
-              {/* Spacer so last card can scroll under MiniMap (Spec 6.5) */}
+
+              {/* Waiting Area Section (Mobile) */}
+              <div id="waiting-area-section" className="bg-white rounded-3xl border border-sg-line p-4 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-[14px] text-sg-ink">
+                    等待區 · {waitPax} 位 · 不佔座位
+                  </div>
+                  <span className="text-[12px] text-sg-muted">點選入座等待中的客人</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {waitSlots.map((ws) => {
+                    if (ws.occupied && ws.booking) {
+                      const isPaused = ws.person ? Boolean(ws.person.paused_at && !ws.person.timer_ended_at) : false;
+                      const elapsedText = ws.person ? formatElapsedText(ws.person, getServerNow()) : '';
+                      return (
+                        <div
+                          key={ws.code}
+                          onClick={() => setCheckInTarget(ws.booking)}
+                          className="p-3 rounded-2xl border border-sg-brown bg-sg-paper/40 cursor-pointer hover:border-sg-brown transition text-left flex flex-col justify-between min-h-[72px]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[12px] font-bold text-sg-ink">{ws.label}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-sg-brown text-white font-bold">帶位</span>
+                          </div>
+                          <div>
+                            <div className="text-[13px] font-bold text-sg-ink truncate">{ws.booking.name}</div>
+                            <div className="text-[11px] text-sg-muted truncate">
+                              {isPaused ? '已暫停' : elapsedText || '等待中'}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        key={ws.code}
+                        className="p-3 rounded-2xl border border-dashed border-sg-line bg-gray-50/50 text-left flex flex-col justify-between min-h-[72px]"
+                      >
+                        <span className="text-[12px] font-medium text-sg-muted">{ws.label}</span>
+                        <span className="text-[11px] text-sg-muted">空置</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div style={{ minHeight: 'calc(100vh - 280px)' }} />
             </div>
 
-            {/* Right: Sidebar Overview or Table Details */}
+            {/* Right: Sidebar Overview or Table Details (Desktop) */}
             <div className="hidden lg:block lg:col-span-4 space-y-4">
               {selectedTableDetails ? (
                 <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-4">
@@ -931,12 +1238,12 @@ export default function SeatingPage() {
                         <div key={b.booking_ref} className="p-2.5 rounded-2xl bg-sg-paper/40 border border-sg-line flex items-center justify-between text-[12px]">
                           <div>
                             <div className="font-bold text-sg-ink">{b.name} · {b.pax} 位</div>
-                            <div className="text-sg-muted text-[11px]">{b.time_range}</div>
+                            <div className="text-sg-muted text-[11px]">{bookingTimeRange(b.start_at, b.end_at)}</div>
                           </div>
                           <Button
                             variant="secondary"
                             size="sm"
-                            onClick={() => handleOpenCheckIn(b)}
+                            onClick={() => setCheckInTarget(b)}
                           >
                             帶位
                           </Button>
@@ -963,7 +1270,7 @@ export default function SeatingPage() {
             sessions={sessions}
             onBookingClick={(b) => {
               if (b.attendance === 'checked_in') setTimerTarget(b);
-              else handleOpenCheckIn(b);
+              else setCheckInTarget(b);
             }}
             onEmptySlotClick={(seatCode, session) => {
               setForceAddInitialSessionId(session?.id);
@@ -973,192 +1280,140 @@ export default function SeatingPage() {
         </div>
       )}
 
-      {/* Check In Sheet (Section 6.3) */}
-      <ResponsivePanel
+      {/* Shared CheckInPanel (Spec 3.2) */}
+      <CheckInPanel
         isOpen={Boolean(checkInTarget)}
         onClose={() => setCheckInTarget(null)}
-        title="報到並帶位"
-        subtitle={`${checkInTarget?.name} · ${checkInTarget?.pax} 位 · ${checkInTarget?.time_range}`}
-        footer={
-          <div className="space-y-2">
-            {checkInError && (
-              <div className="p-2.5 rounded-xl bg-sg-danger-soft text-sg-danger text-[12px] font-bold">
-                {checkInError}
-              </div>
-            )}
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => handleSubmitCheckIn(true)}
-                className="text-[13px] text-sg-brown font-bold hover:underline"
-              >
-                只報到，稍後再帶位
-              </button>
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => handleSubmitCheckIn(false)}
-                loading={checkInSubmitting}
-                disabled={checkInSelectedSeats.length === 0}
-              >
-                {checkInStartTimer ? '入座並開始計時' : '入座'}
-              </Button>
-            </div>
-          </div>
-        }
-      >
-        <div className="space-y-4 py-2">
-          {/* Allocator suggestion box */}
-          <div className="p-3 rounded-2xl bg-sg-brown-soft text-[12px] text-sg-brown border border-sg-brown/20 space-y-1">
-            <span className="font-bold block">系統建議座位：{checkInTarget?.assigned_seats?.join('、') || '自動指派'}</span>
-            <span className="text-[11px] opacity-90">已避開冷氣出風口並優先安排同側或相鄰座位。</span>
-          </div>
+        target={checkInTarget}
+        activeSeats={activeSeats}
+        seatStatesMap={seatStatesMap}
+        onSuccess={(data, deferSeating) => {
+          refresh();
+          showToast(deferSeating ? '已報到，稍後再帶位' : '已入座，開始計時');
+          if (data?.displaced_reservations?.length) {
+            const displacedNames = data.displaced_reservations
+              .map(d => `${d.name} (${d.new_seats?.join('、')})`)
+              .join('、');
+            showToast(`已自動改排其他預約：${displacedNames}`);
+          }
+        }}
+      />
 
-          {/* Seat selection */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[13px] font-bold text-sg-ink">
-                選擇入座座位（已選 {checkInSelectedSeats.length} / {checkInTarget?.pax || 1} 位）
-              </span>
-              {checkInSelectedSeats.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setCheckInSelectedSeats([])}
-                  className="text-[11px] text-sg-brown hover:underline"
-                >
-                  清除重選
-                </button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-              {activeSeats.map((s) => {
-                const isSelected = checkInSelectedSeats.includes(s.code);
-                const isOccupied = seatStatesMap[s.code]?.state === 'in_use';
-
-                return (
-                  <button
-                    key={s.code}
-                    type="button"
-                    disabled={isOccupied}
-                    onClick={() => {
-                      if (isSelected) {
-                        setCheckInSelectedSeats(checkInSelectedSeats.filter(c => c !== s.code));
-                      } else {
-                        if (checkInSelectedSeats.length < (checkInTarget?.pax || 1)) {
-                          setCheckInSelectedSeats([...checkInSelectedSeats, s.code]);
-                        }
-                      }
-                    }}
-                    className={`p-2.5 rounded-xl border text-center transition ${
-                      isOccupied
-                        ? 'bg-sg-paper text-sg-muted border-sg-line cursor-not-allowed opacity-50'
-                        : isSelected
-                        ? 'bg-sg-brown text-white border-sg-brown font-bold'
-                        : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
-                    }`}
-                  >
-                    <span className="block text-[13px] font-num">{s.code}</span>
-                    <span className="block text-[10px] opacity-80">{isOccupied ? '有人' : isSelected ? '已選' : '空位'}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Smart Board assignment */}
-          {(checkInTarget?.boards || []).length > 0 && (
-            <div className="space-y-2 pt-2 border-t border-sg-line">
-              <span className="text-[13px] font-bold text-sg-ink block">智能板分配給哪一位</span>
-              {checkInTarget.boards.map((bd, bIdx) => (
-                <div key={bd.unit_group || bIdx} className="flex items-center justify-between p-2.5 rounded-xl bg-sg-paper/40 border border-sg-line text-[12px]">
-                  <span className="font-bold text-sg-ink">
-                    智能板 #{bIdx + 1}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {checkInSelectedSeats.map((sCode) => (
-                      <button
-                        key={sCode}
-                        type="button"
-                        onClick={() => setCheckInBoardAssign(prev => ({ ...prev, [bd.unit_group]: sCode }))}
-                        className={`px-2.5 py-1 rounded-lg font-bold border transition ${
-                          checkInBoardAssign[bd.unit_group] === sCode
-                            ? 'bg-sg-brown text-white border-sg-brown'
-                            : 'bg-white text-sg-ink border-sg-line'
-                        }`}
-                      >
-                        {sCode}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Start timer toggle */}
-          <div className="pt-2 border-t border-sg-line flex items-center justify-between">
-            <span className="text-[13px] font-bold text-sg-ink">入座後立即開始計時</span>
-            <input
-              type="checkbox"
-              checked={checkInStartTimer}
-              onChange={(e) => setCheckInStartTimer(e.target.checked)}
-              className="w-5 h-5 rounded text-sg-brown focus:ring-sg-brown cursor-pointer"
-            />
-          </div>
-        </div>
-      </ResponsivePanel>
-
-      {/* Timer Sheet (Section 6.8) */}
+      {/* Timer Sheet (Spec 3.1, 3.2, 3.5) */}
       <ResponsivePanel
         isOpen={Boolean(timerTarget)}
         onClose={() => setTimerTarget(null)}
-        title={`${timerTarget?.name} · ${timerTarget?.pax} 位計時面板`}
+        title={`${timerTarget?.name} · ${timerTarget?.pax} 位`}
         footer={
-          <div className="flex items-center justify-between">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                // Pause / resume all
-                const isAllPaused = (timerTarget?.persons || []).every(p => p.paused_at && !p.timer_ended_at);
-                handleTimerAction(timerTarget.booking_ref, 1, isAllPaused ? 'resume_all' : 'pause_all');
-              }}
-            >
-              {(timerTarget?.persons || []).every(p => p.paused_at && !p.timer_ended_at) ? '全組繼續' : '全組暫停'}
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => {
-                const bRef = timerTarget.booking_ref;
-                setTimerTarget(null);
-                setCheckoutBookingRef(bRef);
-              }}
-            >
-              進入結帳
-            </Button>
-          </div>
+          (() => {
+            const activePersons = (timerTarget?.persons || []).filter(p => p.timer_started_at && !p.timer_ended_at);
+            const isAnyRunning = activePersons.some(p => !p.paused_at);
+            const isAllPaused = activePersons.length > 0 && activePersons.every(p => p.paused_at);
+            const hasActive = activePersons.length > 0;
+
+            return (
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!hasActive}
+                  onClick={() => {
+                    handleTimerAction(
+                      timerTarget.booking_ref,
+                      'all',
+                      isAllPaused ? 'resume' : 'pause',
+                      isAllPaused ? null : '全組暫停'
+                    );
+                  }}
+                >
+                  {isAllPaused ? '全組繼續' : '全組暫停'}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => {
+                    const bRef = timerTarget.booking_ref;
+                    setTimerTarget(null);
+                    setCheckoutBookingRef(bRef);
+                  }}
+                >
+                  結帳
+                </Button>
+              </div>
+            );
+          })()
         }
       >
         <div className="space-y-4 py-2">
+          {/* Unseated Warning Banner (Spec 3.2) */}
+          {timerTarget?.needs_seating && (
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-[12px] flex items-center justify-between">
+              <div>
+                <div className="font-bold">這組還沒帶位，沒有計時紀錄</div>
+                <div className="text-[11px] text-amber-700">請先為顧客安排座位以開始計時</div>
+              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const b = timerTarget;
+                  setTimerTarget(null);
+                  setCheckInTarget(b);
+                }}
+              >
+                帶位並開始計時
+              </Button>
+            </div>
+          )}
+
           {/* Info KV */}
           <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-sg-paper/40 border border-sg-line text-[12px]">
             <div>
-              <span className="text-sg-muted block">預約時數</span>
-              <span className="font-bold text-sg-ink">{timerTarget?.session_count || 1} 小時</span>
+              <span className="text-sg-muted block">預約時段</span>
+              <span className="font-bold text-sg-ink">
+                {bookingDurationText(timerTarget?.start_at, timerTarget?.end_at)}
+              </span>
             </div>
             <div>
               <span className="text-sg-muted block">入座座位</span>
-              <span className="font-bold text-sg-ink">{timerTarget?.assigned_seats?.join('、') || '未分配'}</span>
+              <span className="font-bold text-sg-ink">
+                {timerTarget?.assigned_seats?.length > 0
+                  ? (timerTarget.assigned_seats.every(s => s && s.startsWith('WAIT-')) ? '等待區' : timerTarget.assigned_seats.join('、'))
+                  : '未分配'}
+              </span>
             </div>
           </div>
 
-          {/* Per-person timer list */}
+          {/* Notes preview in timer sheet */}
+          {timerTarget?.customer_note && (
+            <div className="p-2.5 rounded-xl bg-sg-paper text-sg-brown text-[12px] flex items-start gap-2">
+              <MessageSquare className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block text-[11px]">顧客備註</span>
+                <span>{timerTarget.customer_note}</span>
+              </div>
+            </div>
+          )}
+          {timerTarget?.admin_note && (
+            <div className="p-2.5 rounded-xl bg-amber-50 text-amber-900 text-[12px] flex items-start gap-2">
+              <Lock className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block text-[11px]">內部備註</span>
+                <span>{timerTarget.admin_note}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Per-person timer list (Spec 3.1, 3.5) */}
           <div className="space-y-2">
             <span className="text-[13px] font-bold text-sg-ink block">每位計時</span>
             {(timerTarget?.persons || []).map((p) => {
               const isPaused = Boolean(p.paused_at && !p.timer_ended_at);
+              const isEnded = Boolean(p.timer_ended_at);
+              const elapsedMins = personElapsedMinutes(p, getServerNow());
+              const seatLabel = p.seat_code
+                ? (p.seat_code.startsWith('WAIT-') ? '等待區' : p.seat_code)
+                : '未帶位';
 
               return (
                 <div
@@ -1167,32 +1422,54 @@ export default function SeatingPage() {
                 >
                   <div>
                     <div className="font-bold text-[14px] text-sg-ink">
-                      第 {p.person_no} 位 ({p.seat_code || '未帶位'})
+                      第 {p.person_no} 位 ({seatLabel})
                     </div>
                     <div className="text-[12px] text-sg-muted">
-                      {isPaused ? `已暫停 · ${p.pause_reason || '暫停'}` : `計時中 · 已計 ${formatTimerHMM(p.actual_minutes || 0)}`}
+                      {isEnded
+                        ? `已離場 · 合計 ${formatTimerHMM(elapsedMins)}`
+                        : isPaused
+                        ? `已暫停 · ${p.pause_reason || '外出用餐'}`
+                        : `計時中 · 已計 ${formatTimerHMM(elapsedMins)}`}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {isPaused ? (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => handleTimerAction(timerTarget.booking_ref, p.person_no, 'resume')}
-                      >
-                        <Play className="w-3.5 h-3.5 mr-1" />
-                        繼續
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setPausePersonTarget(p)}
-                      >
-                        <Pause className="w-3.5 h-3.5 mr-1" />
-                        暫停
-                      </Button>
+                  <div className="flex items-center gap-1.5">
+                    {!isEnded && (
+                      <>
+                        {isPaused ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'resume')}
+                          >
+                            <Play className="w-3.5 h-3.5 mr-1" />
+                            繼續
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setPausePersonTarget(p)}
+                          >
+                            <Pause className="w-3.5 h-3.5 mr-1" />
+                            暫停
+                          </Button>
+                        )}
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setMoveSeatModalTarget({
+                              booking: timerTarget,
+                              fromSeat: p.seat_code,
+                              personNo: p.person_no
+                            });
+                          }}
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
+                          換位
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1200,7 +1477,7 @@ export default function SeatingPage() {
             })}
           </div>
 
-          <p className="text-[11px] text-sg-muted">
+          <p className="text-[12px] text-sg-muted">
             暫停的時間不計費。結帳時每位的時數會自動帶入，店員可以再修改。
           </p>
         </div>
@@ -1212,7 +1489,7 @@ export default function SeatingPage() {
         onClose={() => setPausePersonTarget(null)}
         onConfirm={() => {
           if (timerTarget && pausePersonTarget) {
-            handleTimerAction(timerTarget.booking_ref, pausePersonTarget.person_no, 'pause', pauseReason);
+            handleTimerAction(timerTarget.booking_ref, [pausePersonTarget.person_no], 'pause', pauseReason);
           }
         }}
         title={`暫停第 ${pausePersonTarget?.person_no} 位計時`}
@@ -1225,7 +1502,108 @@ export default function SeatingPage() {
         />
       </ConfirmPanel>
 
-      {/* Seat Action Panel (Section 6.6) */}
+      {/* Move Seat Modal (Spec 3.1 f, 3.3.4) */}
+      <ResponsivePanel
+        isOpen={Boolean(moveSeatModalTarget)}
+        onClose={() => setMoveSeatModalTarget(null)}
+        title="更換座位"
+        subtitle={`${moveSeatModalTarget?.booking?.name} · 第 ${moveSeatModalTarget?.personNo} 位 (原座位 ${moveSeatModalTarget?.fromSeat || '無'})`}
+      >
+        <div className="space-y-4 py-2">
+          {/* Waiting area shortcut */}
+          <div className="p-3 rounded-2xl bg-sg-paper/60 border border-sg-line flex items-center justify-between">
+            <div>
+              <span className="font-bold text-[13px] text-sg-ink block">移至等待區</span>
+              <span className="text-[11px] text-sg-muted">不佔座位，暫放候位（指派至 {nextEmptyWaitSeat}）</span>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                if (moveSeatModalTarget) {
+                  handleMoveSeat(
+                    moveSeatModalTarget.booking.booking_ref,
+                    moveSeatModalTarget.fromSeat,
+                    nextEmptyWaitSeat,
+                    'move'
+                  );
+                }
+              }}
+            >
+              移到等待區
+            </Button>
+          </div>
+
+          <div>
+            <span className="text-[13px] font-bold text-sg-ink block mb-2">選擇目標實體座位</span>
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+              {activeSeats.map(s => {
+                const isCurrent = s.code === moveSeatModalTarget?.fromSeat;
+                const occupant = seatStatesMap[s.code]?.booking;
+                const isOccupied = seatStatesMap[s.code]?.state === 'in_use';
+
+                return (
+                  <button
+                    key={s.code}
+                    type="button"
+                    disabled={isCurrent}
+                    onClick={() => {
+                      if (!moveSeatModalTarget) return;
+                      if (isOccupied && occupant) {
+                        setSwapConfirmTarget({
+                          bookingRef: moveSeatModalTarget.booking.booking_ref,
+                          fromSeat: moveSeatModalTarget.fromSeat,
+                          toSeat: s.code,
+                          occupantName: occupant.name
+                        });
+                      } else {
+                        handleMoveSeat(
+                          moveSeatModalTarget.booking.booking_ref,
+                          moveSeatModalTarget.fromSeat,
+                          s.code,
+                          'move'
+                        );
+                      }
+                    }}
+                    className={`p-2.5 rounded-xl border text-center transition ${
+                      isCurrent
+                        ? 'bg-gray-100 text-gray-400 border-sg-line cursor-not-allowed'
+                        : isOccupied
+                        ? 'bg-amber-50/60 border-amber-300 text-amber-900 hover:bg-amber-100'
+                        : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
+                    }`}
+                  >
+                    <span className="block text-[13px] font-bold font-num">{s.code}</span>
+                    <span className="block text-[10px] opacity-80">
+                      {isCurrent ? '原位' : isOccupied ? '對調' : '空位'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </ResponsivePanel>
+
+      {/* Swap Confirmation Modal */}
+      <ConfirmPanel
+        isOpen={Boolean(swapConfirmTarget)}
+        onClose={() => setSwapConfirmTarget(null)}
+        onConfirm={() => {
+          if (swapConfirmTarget) {
+            handleMoveSeat(
+              swapConfirmTarget.bookingRef,
+              swapConfirmTarget.fromSeat,
+              swapConfirmTarget.toSeat,
+              'swap'
+            );
+          }
+        }}
+        title="確認對調座位"
+        message={`目標座位 ${swapConfirmTarget?.toSeat} 目前由「${swapConfirmTarget?.occupantName}」使用中。確定要進行互換對調嗎？`}
+      />
+
+      {/* Seat Action Panel (Spec 3.1, 3.3.4) */}
       <ResponsivePanel
         isOpen={Boolean(seatActionTarget)}
         onClose={() => setSeatActionTarget(null)}
@@ -1282,11 +1660,41 @@ export default function SeatingPage() {
                   const b = seatActionTarget.booking;
                   const pNo = seatActionTarget.seatInfo?.personNo || 1;
                   const isPaused = seatActionTarget.seatInfo?.state === 'paused';
-                  handleTimerAction(b.booking_ref, pNo, isPaused ? 'resume' : 'pause');
+                  handleTimerAction(b.booking_ref, [pNo], isPaused ? 'resume' : 'pause');
                   setSeatActionTarget(null);
                 }}
               >
                 {seatActionTarget.seatInfo?.state === 'paused' ? '繼續計時' : '暫停計時'}
+              </Button>
+
+              {/* Move Seat button */}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setMoveSeatModalTarget({
+                    booking: seatActionTarget.booking,
+                    fromSeat: seatActionTarget.seat?.code,
+                    personNo: seatActionTarget.seatInfo?.personNo || 1
+                  });
+                  setSeatActionTarget(null);
+                }}
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
+                換座位
+              </Button>
+
+              {/* Move to waiting area */}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const b = seatActionTarget.booking;
+                  const fromSeat = seatActionTarget.seat?.code;
+                  handleMoveSeat(b.booking_ref, fromSeat, nextEmptyWaitSeat, 'move');
+                }}
+              >
+                移到等待區
               </Button>
 
               {/* Board swap button */}
@@ -1354,10 +1762,6 @@ export default function SeatingPage() {
                 訂單詳情
               </Button>
             </div>
-
-            <div className="pt-2 border-t border-sg-line text-[12px] text-sg-muted">
-              長按座位可直接拖曳換位。
-            </div>
           </div>
         ) : (
           <div className="py-4 text-center text-sg-muted text-[13px]">
@@ -1366,7 +1770,7 @@ export default function SeatingPage() {
         )}
       </ResponsivePanel>
 
-      {/* Board Swap Sheet (Section 6.9) */}
+      {/* Board Swap Sheet */}
       {boardSwapTarget && (() => {
         const b = boardSwapTarget.booking;
         const currentBoard = (b.boards || []).find(bd => bd.person_no === boardSwapTarget.personNo) || (b.boards || [])[0];
@@ -1390,7 +1794,6 @@ export default function SeatingPage() {
 
         const targetOption = boardUsage.find(item => item.equipment_id === selectedSwapSize);
 
-        // Price preview calculation
         let segsCalc = [];
         if (selectedSwapSize === 'return') {
           segsCalc = [
@@ -1469,7 +1872,6 @@ export default function SeatingPage() {
                 </div>
               )}
 
-              {/* 換成選項 */}
               <div>
                 <span className="text-[13px] font-bold text-sg-ink block mb-2">換成</span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1504,7 +1906,6 @@ export default function SeatingPage() {
                     );
                   })}
 
-                  {/* 不用了，歸還 */}
                   <button
                     type="button"
                     onClick={() => setSelectedSwapSize('return')}
@@ -1524,7 +1925,6 @@ export default function SeatingPage() {
                 </div>
               </div>
 
-              {/* 換板時間 */}
               <div>
                 <span className="text-[13px] font-bold text-sg-ink block mb-1">換板時間</span>
                 <div className="flex items-center gap-2 mb-1.5">
@@ -1553,7 +1953,6 @@ export default function SeatingPage() {
                 </p>
               </div>
 
-              {/* 金額試算框 */}
               {calcRes && (
                 <div className="p-3.5 rounded-2xl bg-sg-paper/40 border border-sg-line text-[12px] space-y-1.5">
                   <div className="flex justify-between">

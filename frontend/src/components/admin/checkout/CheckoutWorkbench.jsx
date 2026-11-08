@@ -34,6 +34,7 @@ import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
 import { displayBoardName } from '@shared/billing.js';
+import { personElapsedMinutes, formatElapsedText, extractTimeHHMM } from '../../../utils/admin/floorSelectors';
 
 export default function CheckoutWorkbench({
   isOpen = false,
@@ -59,6 +60,7 @@ export default function CheckoutWorkbench({
   const [showCollectModal, setShowCollectModal] = useState(false);
   const [showSplitCollect, setShowSplitCollect] = useState(false);
   const [showWaiveModal, setShowWaiveModal] = useState(false);
+  const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
   const [successPaymentData, setSuccessPaymentData] = useState(null);
 
   // Addon inputs
@@ -513,22 +515,22 @@ export default function CheckoutWorkbench({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-sg-ink/50 backdrop-blur-sm animate-fade-in">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[96vh] flex flex-col overflow-hidden border border-sg-line">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-sg-line flex items-center justify-between bg-sg-paper/40">
-          <div className="flex items-center gap-3">
-            <h2 className="text-[17px] font-bold text-sg-ink">
-              結帳 · {booking.customer_name || '現場顧客'} {booking.pax || persons.length} 位
+        <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-sg-line flex items-center justify-between bg-sg-paper/40">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <h2 className="text-[15px] sm:text-[17px] font-bold text-sg-ink truncate">
+              結帳 · {booking.customer_name || (booking.is_walk_in && !booking.customer_name ? '現場客人' : (booking.name || '現場客人'))} {booking.pax || persons.length} 位
             </h2>
-            <span className="font-mono text-[12px] bg-sg-paper px-2 py-0.5 rounded-lg border border-sg-line text-sg-muted">
+            <span className="font-mono text-[11px] sm:text-[12px] bg-sg-paper px-2 py-0.5 rounded-lg border border-sg-line text-sg-muted whitespace-nowrap flex-shrink-0">
               {booking.ref_display || bookingRef}
             </span>
-            <StatusPill status={statusInfo.status || 'unpaid'} />
+            <StatusPill status={statusInfo.status || 'unpaid'} className="hidden xs:inline-flex flex-shrink-0" />
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             <button
               type="button"
               onClick={() => setShowPassCenter(true)}
-              className="text-[13px] font-bold text-sg-brown hover:text-sg-brown-hover hover:underline flex items-center gap-1"
+              className="hidden md:flex text-[13px] font-bold text-sg-brown hover:text-sg-brown-hover hover:underline items-center gap-1 whitespace-nowrap"
             >
               <Ticket className="w-4 h-4" />
               卡券中心
@@ -566,7 +568,13 @@ export default function CheckoutWorkbench({
               <div>
                 <span className="text-sg-muted block">預約時段</span>
                 <span className="font-bold text-sg-ink">
-                  {booking.session_time_range || '未定'} · {booking.session_count || 1} 小時
+                  {(() => {
+                    const startT = booking.start_time || (booking.start_at ? extractTimeHHMM(booking.start_at) : '');
+                    const endT = booking.end_time || (booking.end_at ? extractTimeHHMM(booking.end_at) : '');
+                    const hours = booking.booked_minutes ? Math.round(booking.booked_minutes / 60) : (booking.session_count || 1);
+                    if (startT && endT) return `${startT} 到 ${endT} · ${hours} 小時`;
+                    return `${booking.session_time_range || '未定'} · ${hours} 小時`;
+                  })()}
                 </span>
               </div>
               <div>
@@ -585,7 +593,7 @@ export default function CheckoutWorkbench({
               <div>
                 <span className="text-sg-muted block">計費牌告</span>
                 <span className="font-bold text-sg-ink">
-                  {pricing.is_weekend ? '假日' : '平日'} NT${pricing.hourly} ／時 · 封頂 NT${pricing.unlimited}
+                  {(pricing.day_type === 'weekend' || pricing.is_weekend) ? '假日' : '平日'} NT${pricing.hourly} ／時 · 封頂 NT${pricing.unlimited}
                 </span>
               </div>
             </div>
@@ -604,7 +612,132 @@ export default function CheckoutWorkbench({
                 </div>
               </div>
 
-              <div className="border border-sg-line rounded-2xl overflow-hidden bg-white shadow-sm">
+              {/* Mobile Person Cards View (< 768px, Spec 6.11) */}
+              <div className="md:hidden space-y-3">
+                {persons.map((p) => {
+                  const isFrozen = p.is_frozen;
+                  const isUnl = p.mode === 'unlimited';
+                  const rawP = (billData?.persons || []).find(rp => rp.person_no === p.person_no) || p;
+                  const elapsedMins = personElapsedMinutes(rawP, new Date(billData?.server_now || Date.now()));
+                  const elapsedText = formatElapsedText(elapsedMins);
+
+                  return (
+                    <div
+                      key={p.person_no}
+                      onClick={() => !isFrozen && setAdjustPersonNo(adjustPersonNo === p.person_no ? null : p.person_no)}
+                      className={`p-3.5 rounded-2xl border transition shadow-xs ${
+                        isFrozen
+                          ? 'bg-sg-paper/40 border-sg-line'
+                          : adjustPersonNo === p.person_no
+                          ? 'bg-white border-sg-brown shadow-sm'
+                          : 'bg-white border-sg-line hover:border-sg-brown/50'
+                      }`}
+                    >
+                      {/* Top line: Person & Seat, mode, paid pill */}
+                      <div className="flex items-center justify-between pb-2 border-b border-sg-line/60">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-[14px] text-sg-ink">第 {p.person_no} 位</span>
+                          {p.seat_code && (
+                            <span className="font-mono text-[11px] bg-sg-paper px-1.5 py-0.5 rounded border border-sg-line font-bold">
+                              {p.seat_code}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded-lg text-[11px] font-bold ${
+                            isUnl ? 'bg-sg-peach-soft text-sg-peach' : 'bg-sg-paper text-sg-ink'
+                          }`}>
+                            {isUnl ? '不限時' : '計時'}
+                          </span>
+                          {isFrozen && (
+                            <span className="text-[10px] text-sg-sage-ink font-bold bg-sg-sage-soft px-1.5 py-0.5 rounded">
+                              已付清
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Middle breakdown */}
+                      <div className="grid grid-cols-2 gap-2 py-2 text-[12px]">
+                        <div>
+                          <span className="text-sg-muted block text-[11px]">計時累計</span>
+                          <span className="font-mono font-bold text-sg-ink">{elapsedText}</span>
+                        </div>
+                        <div>
+                          <span className="text-sg-muted block text-[11px]">收費時數</span>
+                          {isFrozen ? (
+                            <span className="font-bold">{formatBillingHours(p.entry?.hours || 0)}</span>
+                          ) : (
+                            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => handleHoursStep(p.person_no, -0.5)}
+                                className="w-6 h-6 rounded bg-sg-paper hover:bg-sg-line flex items-center justify-center font-bold text-sg-ink text-[12px]"
+                              >
+                                -
+                              </button>
+                              <span className="font-bold min-w-[28px] text-center font-num">
+                                {p.entry?.hours || 0}h
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleHoursStep(p.person_no, 0.5)}
+                                className="w-6 h-6 rounded bg-sg-paper hover:bg-sg-line flex items-center justify-center font-bold text-sg-ink text-[12px]"
+                              >
+                                +
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-sg-muted block text-[11px]">入場費用</span>
+                          <span className="font-num font-bold">NT${p.entry?.amount || 0}</span>
+                        </div>
+                        <div>
+                          <span className="text-sg-muted block text-[11px]">智能板</span>
+                          <span className="font-num font-bold">NT${p.board?.amount || 0}</span>
+                        </div>
+                      </div>
+
+                      {/* Total line */}
+                      <div className="flex items-center justify-between pt-2 border-t border-sg-line/60">
+                        <span className="text-[11px] text-sg-muted">
+                          {adjustPersonNo === p.person_no ? '點擊收合' : '點擊展開細項調整'}
+                        </span>
+                        <div className="text-right">
+                          <span className="text-[11px] text-sg-muted mr-1.5">應收</span>
+                          <span className="text-[16px] font-bold text-sg-brown font-num">
+                            NT${p.total || 0}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Expanded adjustment details on mobile */}
+                      {adjustPersonNo === p.person_no && !isFrozen && (
+                        <div className="mt-3 pt-3 border-t border-sg-line space-y-2.5 text-[12px]" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-sg-brown">計費方案切換</span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleMode(p.person_no)}
+                              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] border ${
+                                p.mode === 'unlimited'
+                                  ? 'bg-sg-peach-soft text-sg-peach border-sg-peach'
+                                  : 'bg-sg-paper text-sg-ink border-sg-line'
+                              }`}
+                            >
+                              {p.mode === 'unlimited' ? '切換為計時' : '切換為不限時'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table View (>= 768px) */}
+              <div className="hidden md:block border border-sg-line rounded-2xl overflow-hidden bg-white shadow-sm">
                 <table className="w-full text-left border-collapse text-[13px]">
                   <thead>
                     <tr className="bg-sg-paper/80 border-b border-sg-line text-[12px] text-sg-muted">
@@ -624,6 +757,9 @@ export default function CheckoutWorkbench({
                       const isFrozen = p.is_frozen;
                       const hasOverride = p.hours_override != null;
                       const isUnl = p.mode === 'unlimited';
+                      const rawP = (billData?.persons || []).find(rp => rp.person_no === p.person_no) || p;
+                      const elapsedMins = personElapsedMinutes(rawP, new Date(billData?.server_now || Date.now()));
+                      const elapsedText = formatElapsedText(elapsedMins);
 
                       return (
                         <React.Fragment key={p.person_no}>
@@ -661,7 +797,7 @@ export default function CheckoutWorkbench({
                             </td>
                             <td className="py-3 px-2">
                               <div className="font-mono font-medium">
-                                {formatTimerHMM(p.entry?.actual_minutes ?? p.actual_minutes ?? 0)}
+                                {elapsedText}
                               </div>
                               {p.entry?.explainDetail && (
                                 <div className="text-[10px] text-sg-muted truncate max-w-[120px]">
@@ -1152,42 +1288,124 @@ export default function CheckoutWorkbench({
         )}
 
         {/* Footer Actions */}
-        <div className="p-4 border-t border-sg-line bg-white flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={handleOpenPreview}>
-              <Printer className="w-4 h-4 mr-1 text-sg-muted" />
-              預覽總單
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowSplitCollect(true)}
-            >
-              分開收款
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowWaiveModal(true)}
-              disabled={unpaidPersons.length === 0}
-            >
-              免收（招待）
-            </Button>
+        <div className="p-3 sm:p-4 border-t border-sg-line bg-white">
+          {/* Mobile bottom bar (< 768px, Spec 4 & 6.11) */}
+          <div className="md:hidden flex items-center justify-between gap-2">
+            <div>
+              <span className="text-[12px] font-bold text-sg-ink whitespace-nowrap">
+                {unpaidPersons.length} 位 · 應收 <span data-testid="workbench-net-due" className="text-[16px] text-sg-brown font-num font-bold">NT${netDue}</span>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setShowSplitCollect(true)}
+                className="text-[12px] font-bold text-sg-brown hover:underline whitespace-nowrap px-1"
+              >
+                分開收款
+              </button>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileMoreMenu(prev => !prev)}
+                  className="p-1.5 rounded-xl border border-sg-line hover:bg-sg-paper text-sg-muted hover:text-sg-ink"
+                  aria-label="更多動作"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+                {showMobileMoreMenu && (
+                  <div
+                    className="absolute bottom-full right-0 mb-2 w-44 bg-white rounded-2xl shadow-xl border border-sg-line p-1.5 text-left z-30 space-y-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setShowMobileMoreMenu(false); handleOpenPreview(); }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper rounded-xl"
+                    >
+                      預覽總單
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowMobileMoreMenu(false); setShowWaiveModal(true); }}
+                      disabled={unpaidPersons.length === 0}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl disabled:opacity-40"
+                    >
+                      免收（招待）
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowMobileMoreMenu(false); setShowOverrideModal(true); }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-brown hover:bg-sg-brown-soft rounded-xl"
+                    >
+                      直接改應收金額
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowMobileMoreMenu(false); setShowPassCenter(true); }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper rounded-xl"
+                    >
+                      卡券中心
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <Button
+                variant="primary"
+                size="md"
+                className="whitespace-nowrap font-bold"
+                onClick={() => setShowCollectModal(true)}
+                disabled={unpaidPersons.length === 0}
+              >
+                收款
+              </Button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="text-right">
-              <span className="text-[11px] text-sg-muted block">未收 {unpaidPersons.length} 位</span>
-              <span data-testid="workbench-net-due" className="text-[16px] font-bold text-sg-ink font-num">NT${netDue}</span>
+          {/* Desktop bottom bar (>= 768px) */}
+          <div className="hidden md:flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={handleOpenPreview} className="whitespace-nowrap">
+                <Printer className="w-4 h-4 mr-1 text-sg-muted" />
+                預覽總單
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowSplitCollect(true)}
+                className="whitespace-nowrap"
+              >
+                分開收款
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowWaiveModal(true)}
+                disabled={unpaidPersons.length === 0}
+                className="whitespace-nowrap"
+              >
+                免收（招待）
+              </Button>
             </div>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => setShowCollectModal(true)}
-              disabled={unpaidPersons.length === 0}
-            >
-              一併收款
-            </Button>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <span className="text-[11px] text-sg-muted block">未收 {unpaidPersons.length} 位</span>
+                <span data-testid="workbench-net-due" className="text-[16px] font-bold text-sg-ink font-num">NT${netDue}</span>
+              </div>
+              <Button
+                variant="primary"
+                size="md"
+                className="whitespace-nowrap font-bold"
+                onClick={() => setShowCollectModal(true)}
+                disabled={unpaidPersons.length === 0}
+              >
+                收款
+              </Button>
+            </div>
           </div>
         </div>
       </div>

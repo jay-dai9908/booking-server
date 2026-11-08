@@ -4,7 +4,29 @@ import { Search, Plus, XCircle, CheckCircle2, Cpu, Minus, CreditCard } from 'luc
 import api from '../../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from '../../components/ReservationDetailsModal';
 import StatusPill from '../../components/admin/StatusPill';
+import CheckInPanel from '../../components/admin/floor/CheckInPanel';
+import { formatBookingRef } from '../../utils/admin/floorSelectors';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
+
+function getReservationAttendancePillProps(r) {
+  if (r.status === 'cancelled') {
+    return { status: 'cancelled', label: '已取消' };
+  }
+  if (r.attendance === 'checked_in') {
+    return { status: 'checked_in', label: '已報到' };
+  }
+  if (r.attendance === 'no_show') {
+    return { status: 'no_show', label: '未到' };
+  }
+  const now = new Date();
+  const dStr = typeof r.session_date === 'string' ? r.session_date.slice(0, 10) : '';
+  const sessionDate = dStr ? new Date(`${dStr}T${r.start_time}:00+08:00`) : new Date(r.session_date);
+  const retainDate = new Date(sessionDate.getTime() + 15 * 60000);
+  if (now > retainDate) {
+    return { status: 'no_show', label: '未到' };
+  }
+  return { status: 'confirmed', label: '預約成功' };
+}
 
 function getBillingStatusPillProps(r) {
   const billing = r.billing || {
@@ -47,6 +69,7 @@ export default function ReservationsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending_checkin' | 'checked_in' | 'unpaid' | 'cancelled'
   const [checkingInRef, setCheckingInRef] = useState(null);
+  const [checkInBooking, setCheckInBooking] = useState(null);
   
   // Pagination & Month filter
   const [page, setPage] = useState(1);
@@ -404,9 +427,10 @@ export default function ReservationsPage() {
 
                       {/* 右邊：StatusPill */}
                       <div className="flex flex-col items-end gap-1 shrink-0">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                          {statusUI.icon} {statusUI.text}
-                        </span>
+                        {(() => {
+                          const attPill = getReservationAttendancePillProps(r);
+                          return <StatusPill status={attPill.status} label={attPill.label} />;
+                        })()}
                         {r.status !== 'cancelled' && (
                           <StatusPill status={pill.status} label={pill.label} />
                         )}
@@ -415,16 +439,15 @@ export default function ReservationsPage() {
 
                     {/* 下方：操作按鈕 */}
                     <div className="flex items-center justify-between pt-1 border-t border-gray-100/80">
-                      <span className="text-[11px] text-gray-400 font-mono truncate max-w-[120px]">
-                        {r.booking_ref.slice(0, 8)}...
+                      <span className="text-[11px] text-gray-400 font-mono truncate max-w-[130px]">
+                        {formatBookingRef(r.booking_ref)}
                       </span>
                       <div className="flex items-center gap-2">
                         {!isCancelled && r.attendance !== 'checked_in' && (
                           <button
                             type="button"
-                            disabled={checkingInRef === r.booking_ref}
-                            onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
-                            className="px-3 py-1 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+                            onClick={(e) => { e.stopPropagation(); setCheckInBooking(r); }}
+                            className="px-3 py-1 bg-sg-brown hover:bg-sg-brown-hover text-white rounded-lg text-xs font-bold transition shadow-2xs whitespace-nowrap"
                           >
                             報到
                           </button>
@@ -433,7 +456,7 @@ export default function ReservationsPage() {
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setSelectedReservation(r); }}
-                            className="px-3 py-1 bg-sg-honey hover:bg-sg-honey-ink text-white rounded-lg text-xs font-bold transition shadow-2xs"
+                            className="px-3 py-1 bg-sg-brown hover:bg-sg-brown-hover text-white rounded-lg text-xs font-bold transition shadow-2xs whitespace-nowrap"
                           >
                             結帳
                           </button>
@@ -441,7 +464,7 @@ export default function ReservationsPage() {
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setSelectedReservation(r); }}
-                          className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium transition"
+                          className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium transition whitespace-nowrap"
                         >
                           詳情
                         </button>
@@ -533,9 +556,10 @@ export default function ReservationsPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center flex-wrap gap-1.5">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
-                            {statusUI.icon} {statusUI.text}
-                          </span>
+                          {(() => {
+                            const attPill = getReservationAttendancePillProps(r);
+                            return <StatusPill status={attPill.status} label={attPill.label} />;
+                          })()}
                           {r.status !== 'cancelled' && (() => {
                             const pill = getBillingStatusPillProps(r);
                             return <StatusPill status={pill.status} label={pill.label} />;
@@ -561,9 +585,8 @@ export default function ReservationsPage() {
                           {!isCancelled && r.attendance !== 'checked_in' && (
                             <button
                               type="button"
-                              disabled={checkingInRef === r.booking_ref}
-                              onClick={(e) => handleDirectCheckIn(e, r.booking_ref)}
-                              className="px-2.5 py-1.5 bg-sg-brown hover:bg-sg-brown-hover disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                              onClick={(e) => { e.stopPropagation(); setCheckInBooking(r); }}
+                              className="px-2.5 py-1.5 bg-sg-brown hover:bg-sg-brown-hover text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition whitespace-nowrap"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               <span>報到</span>
@@ -576,7 +599,7 @@ export default function ReservationsPage() {
                                 e.stopPropagation();
                                 setSelectedReservation(r);
                               }}
-                              className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+                              className="px-2.5 py-1.5 bg-sg-brown hover:bg-sg-brown-hover text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition whitespace-nowrap"
                             >
                               <CreditCard className="w-3.5 h-3.5" />
                               <span>結帳</span>
@@ -815,6 +838,17 @@ export default function ReservationsPage() {
           }
           fetchReservations();
         }} 
+      />
+
+      {/* Shared Check In Panel */}
+      <CheckInPanel
+        isOpen={Boolean(checkInBooking)}
+        onClose={() => setCheckInBooking(null)}
+        target={checkInBooking}
+        onSuccess={() => {
+          fetchReservations();
+          window.dispatchEvent(new CustomEvent('admin-data-updated'));
+        }}
       />
 
       <style dangerouslySetInnerHTML={{__html: `

@@ -1742,7 +1742,7 @@ export const adminCreateReservation = async (req, res) => {
       const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
       const totalAmount = baseSeatingPrice + totalEquipmentFee;
 
-      const shouldAutoCheckIn = attendance === 'checked_in' || autoCheckIn === true || autoCheckIn === 'true' || isWalkIn === true || isWalkIn === 'true' || isForceWait === true || isForceWait === 'true';
+      const shouldAutoCheckIn = attendance === 'checked_in' || autoCheckIn === true || autoCheckIn === 'true' || isWalkIn === true || isWalkIn === 'true';
       const checkInStatus = shouldAutoCheckIn ? 'checked_in' : (attendance || null);
       const checkInTime = shouldAutoCheckIn ? new Date() : null;
       const cleanCustomerNote = req.body.customer_note ? String(req.body.customer_note).trim() : null;

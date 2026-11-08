@@ -5,6 +5,7 @@ export default function MiniMap({
   seatStates = {},
   activeTableId = null,
   onTableClick = null,
+  waitingPaxCount = 0,
   className = ''
 }) {
   const containerRef = useRef(null);
@@ -160,23 +161,36 @@ export default function MiniMap({
             const cy = (table?.cy || 0) + rotLy;
 
             const seatInfo = seatStates[seat.code] || {};
-            let dotColor = 'bg-sg-line';
+            let dotColor = 'bg-sg-line border border-sg-muted/30';
             if (seatInfo.state === 'run' || seatInfo.state === 'in_use') dotColor = 'bg-sg-sage';
             else if (seatInfo.state === 'over') dotColor = 'bg-sg-danger';
             else if (seatInfo.state === 'warn') dotColor = 'bg-sg-honey';
             else if (seatInfo.state === 'pause' || seatInfo.state === 'paused') dotColor = 'bg-sg-vent';
-            else if (seatInfo.state === 'wait' || seatInfo.state === 'pending') dotColor = 'bg-white border border-sg-brown';
+            else if (seatInfo.state === 'wait' || seatInfo.state === 'pending' || seatInfo.state === 'reserved') dotColor = 'bg-white border-2 border-sg-brown';
 
             return (
               <div
                 key={seat.code}
-                className={`absolute w-3 h-3 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none ${dotColor}`}
+                className={`absolute w-5 h-5 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none shadow-xs ${dotColor}`}
                 style={{ left: cx, top: cy }}
               />
             );
           })}
         </div>
       </div>
+
+      {/* Waiting area badge in bottom-right (Spec 3.3 item 3) */}
+      <button
+        type="button"
+        onClick={() => {
+          const el = document.getElementById('waiting-area-section');
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }}
+        className="absolute bottom-1.5 right-1.5 z-20 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sg-paper border border-sg-line text-sg-brown shadow-xs hover:bg-sg-brown-soft transition flex items-center gap-1"
+      >
+        <span className="w-2 h-2 rounded-full bg-sg-honey" />
+        <span>等待區 {waitingPaxCount}</span>
+      </button>
     </div>
   );
 }
