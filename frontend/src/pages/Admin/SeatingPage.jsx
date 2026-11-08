@@ -117,6 +117,16 @@ export default function SeatingPage() {
   // Seating-specific interactive sheets
   const [checkInTarget, setCheckInTarget] = useState(null); // booking
   const [timerTarget, setTimerTarget] = useState(null); // booking
+
+  // Keep timerTarget in sync with live floor data
+  useEffect(() => {
+    if (timerTarget && floorData?.bookings) {
+      const updated = floorData.bookings.find(b => b.booking_ref === timerTarget.booking_ref);
+      if (updated) {
+        setTimerTarget(updated);
+      }
+    }
+  }, [floorData]);
   const [seatActionTarget, setSeatActionTarget] = useState(null); // seat object + booking
   const [moveSeatModalTarget, setMoveSeatModalTarget] = useState(null); // { booking, fromSeat, personNo }
   const [swapConfirmTarget, setSwapConfirmTarget] = useState(null); // { bookingRef, fromSeat, toSeat, occupantName }
@@ -251,7 +261,8 @@ export default function SeatingPage() {
         let state = 'in_use';
 
         if (person) {
-          const isPaused = Boolean(person.paused_at && !person.timer_ended_at);
+          const tm = person.timer || person;
+          const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
           if (isPaused) {
             state = 'paused';
             timerText = '已暫停';
@@ -425,7 +436,7 @@ export default function SeatingPage() {
         person_nos: personNos === 'all' ? 'all' : (Array.isArray(personNos) ? personNos : [Number(personNos)]),
         reason
       });
-      refresh();
+      await refresh();
       setPausePersonTarget(null);
       showToast('計時更新成功');
     } catch (err) {
@@ -497,6 +508,12 @@ export default function SeatingPage() {
     } else {
       const lateMins = Math.abs(diffMins);
       const overdue = formatOverdueText(lateMins);
+      if (!overdue) {
+        return {
+          label: '準時到',
+          pillClass: 'bg-sg-paper text-sg-ink border border-sg-line'
+        };
+      }
       return {
         label: overdue.text,
         pillClass: overdue.severity === 'danger'
@@ -751,6 +768,7 @@ export default function SeatingPage() {
                   return (
                     <div
                       key={b.booking_ref}
+                      data-booking-ref={b.booking_ref}
                       className="bg-white rounded-3xl border border-sg-line p-4 shadow-xs flex flex-col justify-between space-y-3"
                     >
                       <div>
@@ -857,6 +875,7 @@ export default function SeatingPage() {
                   return (
                     <div
                       key={b.booking_ref}
+                      data-booking-ref={b.booking_ref}
                       onClick={() => setTimerTarget(b)}
                       className="bg-white rounded-3xl border border-sg-line p-4 shadow-xs flex flex-col justify-between space-y-3 cursor-pointer hover:border-sg-brown transition"
                     >
@@ -1038,7 +1057,8 @@ export default function SeatingPage() {
                 <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                   {waitSlots.map((ws) => {
                     if (ws.occupied && ws.booking) {
-                      const isPaused = ws.person ? Boolean(ws.person.paused_at && !ws.person.timer_ended_at) : false;
+                      const tm = ws.person?.timer || ws.person;
+                      const isPaused = tm ? Boolean(tm.paused_at && !tm.timer_ended_at) : false;
                       const elapsedText = ws.person ? formatElapsedText(ws.person, getServerNow()) : '';
                       return (
                         <div
@@ -1119,7 +1139,8 @@ export default function SeatingPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {waitSlots.map((ws) => {
                     if (ws.occupied && ws.booking) {
-                      const isPaused = ws.person ? Boolean(ws.person.paused_at && !ws.person.timer_ended_at) : false;
+                      const tm = ws.person?.timer || ws.person;
+                      const isPaused = tm ? Boolean(tm.paused_at && !tm.timer_ended_at) : false;
                       const elapsedText = ws.person ? formatElapsedText(ws.person, getServerNow()) : '';
                       return (
                         <div
@@ -1306,9 +1327,12 @@ export default function SeatingPage() {
         title={`${timerTarget?.name} · ${timerTarget?.pax} 位`}
         footer={
           (() => {
-            const activePersons = (timerTarget?.persons || []).filter(p => p.timer_started_at && !p.timer_ended_at);
-            const isAnyRunning = activePersons.some(p => !p.paused_at);
-            const isAllPaused = activePersons.length > 0 && activePersons.every(p => p.paused_at);
+            const activePersons = (timerTarget?.persons || []).filter(p => {
+              const tm = p.timer || p;
+              return Boolean((tm.timer_started_at || tm.billing_start_at) && !tm.timer_ended_at);
+            });
+            const isAnyRunning = activePersons.some(p => !(p.timer?.paused_at || p.paused_at));
+            const isAllPaused = activePersons.length > 0 && activePersons.every(p => Boolean(p.timer?.paused_at || p.paused_at));
             const hasActive = activePersons.length > 0;
 
             return (
@@ -1371,7 +1395,7 @@ export default function SeatingPage() {
             <div>
               <span className="text-sg-muted block">預約時段</span>
               <span className="font-bold text-sg-ink">
-                {bookingDurationText(timerTarget?.start_at, timerTarget?.end_at)}
+                {bookingDurationText(timerTarget)}
               </span>
             </div>
             <div>
@@ -1408,8 +1432,9 @@ export default function SeatingPage() {
           <div className="space-y-2">
             <span className="text-[13px] font-bold text-sg-ink block">每位計時</span>
             {(timerTarget?.persons || []).map((p) => {
-              const isPaused = Boolean(p.paused_at && !p.timer_ended_at);
-              const isEnded = Boolean(p.timer_ended_at);
+              const tm = p.timer || p;
+              const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
+              const isEnded = Boolean(tm.timer_ended_at);
               const elapsedMins = personElapsedMinutes(p, getServerNow());
               const seatLabel = p.seat_code
                 ? (p.seat_code.startsWith('WAIT-') ? '等待區' : p.seat_code)
@@ -1428,7 +1453,7 @@ export default function SeatingPage() {
                       {isEnded
                         ? `已離場 · 合計 ${formatTimerHMM(elapsedMins)}`
                         : isPaused
-                        ? `已暫停 · ${p.pause_reason || '外出用餐'}`
+                        ? `已暫停 · ${tm.pause_reason || '外出用餐'}`
                         : `計時中 · 已計 ${formatTimerHMM(elapsedMins)}`}
                     </div>
                   </div>

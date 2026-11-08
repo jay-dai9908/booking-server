@@ -10,7 +10,8 @@
     "lint": "eslint . --ext .js,.jsx",
     "preview": "vite preview",
     "test:e2e": "node tests/acceptance.spec.js",
-    "test:layout": "node tests/layout-edges.spec.js"
+    "test:layout": "node tests/layout-edges.spec.js",
+    "test:seating": "node tests/seating.spec.js"
   },
   "dependencies": {
     "axios": "^1.4.0",
