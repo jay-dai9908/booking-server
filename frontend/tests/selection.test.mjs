@@ -161,4 +161,11 @@ describe('Customer booking selection mode switching (Section 2.2)', () => {
     assert.ok(!fileContent.includes('位顧客 · 單號'), 'Must use "位一起 · BK-..." subtitle instead of "位顧客 · 單號"');
     assert.ok(fileContent.includes('Number(netDue).toLocaleString()'), 'Must format netDue with toLocaleString()');
   });
+
+  test('8. Spec 2.9: StepDone renders summaryDetails without duplicating date in second line', () => {
+    const filePath = path.resolve('frontend/src/pages/Customer/booking/StepDone.jsx');
+    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    assert.ok(fileContent.includes('{summaryDetails}'), 'Must use summaryDetails instead of fullSummaryLine');
+    assert.ok(!fileContent.includes('{fullSummaryLine}'), 'Second line must not render fullSummaryLine');
+  });
 });

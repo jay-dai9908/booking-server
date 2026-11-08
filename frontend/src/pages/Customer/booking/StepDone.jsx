@@ -121,7 +121,7 @@ export default function StepDone({ result }) {
     summaryDetails += ` · ${eqSummary}`;
   }
 
-  const fullSummaryLine = `${dateShort ? `${dateShort} ` : ''}${summaryDetails}`;
+  const barcodeSummaryText = `${dateShort ? `${dateShort} ` : ''}${summaryDetails}`;
 
   const handleCopyRef = async () => {
     const formatted = formatBookingRef(bookingRef);
@@ -142,8 +142,6 @@ export default function StepDone({ result }) {
     booking_ref: bookingRef,
   };
 
-  const barcodeSummaryText = fullSummaryLine;
-
   return (
     <div className="flex flex-col flex-1">
       {/* 1. Hero checkmark */}
@@ -157,7 +155,7 @@ export default function StepDone({ result }) {
       </div>
 
       {/* 2. Content */}
-      <div className="grid gap-3 px-4 pt-4 pb-5 flex-1">
+      <div className="grid gap-2.5 px-4 pt-2 pb-4 flex-1">
         <Card gap={6}>
           {/* Date line */}
           <div className="flex items-baseline">
@@ -171,7 +169,7 @@ export default function StepDone({ result }) {
 
           {/* Time & pax & equipment with test id */}
           <div className="text-[15px] font-bold text-sg-ink leading-[1.4]" data-testid="booking-summary-text">
-            {fullSummaryLine}
+            {summaryDetails}
           </div>
 
           <Divider className="my-[6px]" />
@@ -197,12 +195,12 @@ export default function StepDone({ result }) {
         </Card>
 
         {/* Small Notice */}
-        <div className="sg-small px-1">
+        <div className="sg-small px-1 text-sg-muted">
           到店時出示條碼就能報到。要改時間的話，先取消再重新預約。
         </div>
 
         {/* Add to Calendar */}
-        <div className="flex items-center justify-center gap-1 sg-small text-sg-muted mt-2">
+        <div className="flex items-center justify-center gap-1 sg-small text-sg-muted mt-1">
           <span>加入行事曆：</span>
           <a
             href={getGoogleCalendarUrl(calendarRes)}
