@@ -166,11 +166,42 @@ async function runCapture() {
     }
   }
 
-  // --- ITEM 2.5 & 2.10: 今日帶位平面圖與智能板租借標題 ---
-  console.log('Capturing Item 2.5 & 2.10: Seating Page...');
+  // --- ITEM 2.5: 今日帶位平面圖縮圖與等待區人數同步 ---
+  console.log('Capturing Item 2.5: Seating Page MiniMap and waiting area...');
+  // Create a waiting reservation so waitingPax > 0 is visibly displayed
+  try {
+    const waitResCreate = await page.request.post(apiBaseUrl('/reservations/admin'), {
+      headers: { Authorization: `Bearer ${token}` },
+      data: {
+        name: '等待客',
+        phone: '0988000222',
+        pax: 2,
+        session_ids: [sessions[0].id]
+      }
+    });
+    const waitJson = await waitResCreate.json();
+    if (waitJson.booking_ref) {
+      await page.request.post(apiBaseUrl(`/floor/${waitJson.booking_ref}/check-in`), {
+        headers: { Authorization: `Bearer ${token}` },
+        data: {
+          seats: ['WAIT-1', 'WAIT-2'],
+          start_timer: true
+        }
+      });
+    }
+  } catch (e) {}
+
   await page.goto(`${BASE_URL}/admin/seating`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(800);
   await page.screenshot({ path: path.join(OUTPUT_DIR, 'item-2.5-after.png'), fullPage: false });
+
+  // --- ITEM 2.10: 智能板租借摘要標題防止換行 (名單分頁) ---
+  console.log('Capturing Item 2.10: Seating Page List tab board usage banner...');
+  const listTab = page.locator('button:has-text("名單"):visible').first();
+  if (await listTab.isVisible()) {
+    await listTab.click();
+    await page.waitForTimeout(600);
+  }
   await page.screenshot({ path: path.join(OUTPUT_DIR, 'item-2.10-after.png'), fullPage: false });
 
   // --- ITEM 2.8: 現場加人時段選擇 ---
@@ -205,29 +236,21 @@ async function runCapture() {
 
   // --- ITEM 2.2: 已結束已結清移至已離場 ---
   console.log('Capturing Item 2.2: Seating Completed Section...');
-  // Stop timers for bookingRef
+  // End timer for bookingRef so it moves to completed
   try {
-    const liveRes = await page.request.get(apiBaseUrl(`/floor/live?date=${todayStr}`), {
-      headers: { Authorization: `Bearer ${token}` }
+    await page.request.post(apiBaseUrl(`/floor/${bookingRef}/timer`), {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { action: 'end', person_nos: 'all' }
     });
-    const liveData = await liveRes.json();
-    const liveBooking = liveData.active_bookings?.find(b => b.booking_ref === bookingRef);
-    if (liveBooking?.persons) {
-      for (const p of liveBooking.persons) {
-        await page.request.post(apiBaseUrl(`/floor/${bookingRef}/timer`), {
-          headers: { Authorization: `Bearer ${token}` },
-          data: { action: 'stop', person_id: p.id }
-        });
-      }
-    }
   } catch (e) {}
 
   await page.goto(`${BASE_URL}/admin/seating`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(800);
-  const completedHeading = page.locator('text=已離場').first();
-  if (await completedHeading.isVisible()) {
-    await completedHeading.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(400);
+  const completedBtn = page.locator('button:has-text("已離場"):visible').first();
+  if (await completedBtn.isVisible()) {
+    await completedBtn.click();
+    await page.waitForTimeout(500);
+    await completedBtn.scrollIntoViewIfNeeded();
   }
   await page.screenshot({ path: path.join(OUTPUT_DIR, 'item-2.2-after.png'), fullPage: false });
 
