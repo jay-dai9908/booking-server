@@ -27,6 +27,12 @@ function apiBaseUrl(route) {
 }
 
 async function runCapture() {
+  if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+    console.error('請設定 ADMIN_PASSWORD 環境變數');
+    process.exit(1);
+  }
+  const adminPassword = process.env.ADMIN_PASSWORD.trim();
+
   await ensureFreshDbSeeded();
 
   const browser = await chromium.launch({ headless: true });
@@ -41,7 +47,7 @@ async function runCapture() {
   // 1. Admin login
   console.log('Logging in as admin on mobile...');
   await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
-  await page.locator('input[type="password"]').fill(process.env.ADMIN_PASSWORD || 'gathering.light2609');
+  await page.locator('input[type="password"]').fill(adminPassword);
   await page.locator('button[type="submit"]').click();
   await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
   await page.waitForTimeout(1000);

@@ -10,9 +10,9 @@ try {
 }
 
 export async function ensureFreshDbSeeded(customPrisma) {
-  const testDbUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+  const testDbUrl = process.env.TEST_DATABASE_URL;
   if (!testDbUrl || !testDbUrl.trim()) {
-    console.error('TEST_DATABASE_URL is not set.');
+    console.error('TEST_DATABASE_URL is not set. Refusing to run tests on production/dev database.');
     process.exit(1);
   }
   const cleanDbUrl = testDbUrl.split('?')[0];

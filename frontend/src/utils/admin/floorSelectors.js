@@ -292,9 +292,9 @@ export function isSessionPast(session, now = new Date()) {
   const currentHHMM = new Date(now).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
 
   if (session.session_date) {
-    const sDateStr = typeof session.session_date === 'string'
-      ? session.session_date.slice(0, 10)
-      : new Date(session.session_date).toISOString().slice(0, 10);
+    const sDateStr = typeof session.session_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(session.session_date.trim())
+      ? session.session_date.trim()
+      : new Date(session.session_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
     if (sDateStr < nowTaipeiStr) return true;
     if (sDateStr > nowTaipeiStr) return false;
   }

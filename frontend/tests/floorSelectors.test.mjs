@@ -308,5 +308,10 @@ test('floorSelectors pure function tests', async (t) => {
     
     // Tomorrow 14:00~15:00 -> false
     assert.strictEqual(isSessionPast({ start_time: '14:00', end_time: '15:00', session_date: '2026-11-09' }, now2000), false);
+
+    // Date object created with local midnight / UTC
+    const dateObjUtc = new Date('2026-11-08T00:00:00.000Z');
+    assert.strictEqual(isSessionPast({ start_time: '14:00', end_time: '15:00', session_date: dateObjUtc }, now2000), true);
+    assert.strictEqual(isSessionPast({ start_time: '20:00', end_time: '21:00', session_date: dateObjUtc }, now2000), false);
   });
 });

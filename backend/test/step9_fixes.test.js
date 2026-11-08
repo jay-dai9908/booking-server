@@ -429,6 +429,16 @@ test('Step 9 Fixes Verification Suite', async (t) => {
     assert.ok(layout.seats && layout.seats.length > 0, 'Layout must have seats');
   });
 
+  await t.test('Bug 10: test-login route strictly enabled only when NODE_ENV === test', async () => {
+    const authRouter = (await import('../src/routes/auth.js')).default;
+    const testLoginRoute = authRouter.stack.find(s => s.route && s.route.path === '/test-login');
+    if (process.env.NODE_ENV === 'test') {
+      assert.ok(testLoginRoute, 'test-login route must be registered when NODE_ENV is test');
+    } else {
+      assert.equal(testLoginRoute, undefined, 'test-login route must NOT be registered when NODE_ENV is not test');
+    }
+  });
+
   // Teardown cleanup
   await prisma.bookingEquipment.deleteMany({ where: { booking_ref: { startsWith: 'BK-TEST-' } } });
   await prisma.bookingPerson.deleteMany({ where: { booking_ref: { startsWith: 'BK-TEST-' } } });
