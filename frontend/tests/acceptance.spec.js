@@ -1,8 +1,17 @@
-// 注意：執行前請先跑 npx playwright install chromium
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
 import { toTaipeiDateString } from '../../shared/time.js';
+
+const require = createRequire(import.meta.url);
+let PrismaClient;
+try {
+  ({ PrismaClient } = require('@prisma/client'));
+} catch (e) {
+  ({ PrismaClient } = require('../../backend/node_modules/@prisma/client/index.js'));
+}
+let prisma = null;
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
@@ -20,6 +29,7 @@ async function run() {
       console.error(`TEST_DATABASE_URL database name "${dbName}" must end with "_test"! Refusing to run tests.`);
       process.exit(1);
     }
+    prisma = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL.trim() } } });
   }
 
   await ensureFreshDbSeeded();
@@ -44,14 +54,15 @@ async function run() {
     pageErrors.push(err.message || String(err));
   });
 
-  page.on('response', (res) => {
+  page.on('response', async (res) => {
     if (res.url().includes('/api/') && res.status() >= 400) {
       if (res.url().includes('/api/auth/me') && res.status() === 401) {
         // Expected before login
         return;
       }
-      console.error(`API Error ${res.status()} on ${res.url()}`);
-      apiErrors.push({ url: res.url(), status: res.status() });
+      const body = await res.text().catch(() => '');
+      console.error(`API Error ${res.status()} on ${res.url()}: ${body}`);
+      apiErrors.push({ url: res.url(), status: res.status(), body });
     }
   });
 
@@ -180,6 +191,11 @@ async function run() {
       console.log(`Updated due amount: NT$${updatedAmount}`);
       assert.ok(updatedAmount > initialAmount, `Amount due should increase after adding addon item (was ${initialAmount}, now ${updatedAmount})`);
       console.log('✔ Section 1.1 Acceptance Flow PASSED!');
+      if (prisma && testRef) {
+        await prisma.timerPause.deleteMany({ where: { person: { booking_ref: testRef } } }).catch(() => {});
+        await prisma.bookingPerson.deleteMany({ where: { booking_ref: testRef } }).catch(() => {});
+        await prisma.reservation.deleteMany({ where: { booking_ref: testRef } }).catch(() => {});
+      }
     } catch (wbErr) {
       console.error('Section 1.1 Acceptance Flow Warning:', wbErr.message);
       throw wbErr;
@@ -215,18 +231,7 @@ async function run() {
 
     // Step 2: 把 3-3 從桌邊拉開
     console.log('Step 2: Pulling Seat 3-3 away from table...');
-    let seat33 = page.locator('[data-testid="seat-node-3-3"]').first();
-    if (!await seat33.isVisible()) {
-      // If 3-3 not labeled, find first seat of table 3 and set code to 3-3
-      const anySeat = page.locator('[data-testid^="seat-node-"]').first();
-      await anySeat.click();
-      const codeInput = page.locator('[data-testid="seat-code-input"]');
-      if (await codeInput.isVisible()) {
-        await codeInput.fill('3-3');
-        await codeInput.blur();
-      }
-      seat33 = page.locator('[data-testid="seat-node-3-3"]').first();
-    }
+    const seat33 = page.locator('[data-testid="seat-node-3-3"]').first();
     await seat33.waitFor({ state: 'visible', timeout: 5000 });
     const seatBox = await seat33.boundingBox();
     if (seatBox) {
@@ -343,6 +348,18 @@ async function run() {
     }
     await t1.waitFor({ state: 'visible', timeout: 5000 });
     await t2.waitFor({ state: 'visible', timeout: 5000 });
+
+    // If Table 1 and Table 2 already share the same cy, stagger Table 2 so align-top has a delta to align and undo
+    if (await t1.getAttribute('data-cy') === await t2.getAttribute('data-cy')) {
+      const b2 = await t2.boundingBox();
+      if (b2) {
+        await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2 + 60, { steps: 5 });
+        await page.mouse.up();
+        await page.waitForTimeout(400);
+      }
+    }
 
     // Item 7.1 Test 1: Marquee-select Table 1 and Table 2, click "靠上", cy must be identical
     console.log('Item 7.1 Test 1: Marquee box-select Table 1 & Table 2, align-top...');
@@ -600,6 +617,9 @@ async function run() {
 
     console.log('\n🎉 ALL ACCEPTANCE AND SMOKE TESTS PASSED WITH 0 ERRORS!');
   } finally {
+    if (prisma) {
+      await prisma.$disconnect().catch(() => {});
+    }
     await browser.close();
   }
 }

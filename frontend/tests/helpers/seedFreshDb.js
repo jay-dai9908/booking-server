@@ -24,6 +24,16 @@ export async function ensureFreshDbSeeded(customPrisma) {
 
   const prisma = customPrisma || new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
+  // 0. Clean operational tables for fresh DB state
+  await prisma.timerPause.deleteMany({}).catch(() => {});
+  await prisma.payment.deleteMany({}).catch(() => {});
+  await prisma.bookingEquipment.deleteMany({}).catch(() => {});
+  await prisma.bookingPerson.deleteMany({}).catch(() => {});
+  await prisma.reservation.deleteMany({}).catch(() => {});
+  await prisma.printJob.deleteMany({}).catch(() => {});
+  await prisma.cashClosing.deleteMany({}).catch(() => {});
+  await prisma.userLoginLog.deleteMany({}).catch(() => {});
+
   // 1. Seed GlobalSetting
   await prisma.globalSetting.upsert({
     where: { id: 1 },
@@ -82,13 +92,10 @@ export async function ensureFreshDbSeeded(customPrisma) {
     });
   }
 
-  // 3. Seed SeatLayout
-  const existingLayout = await prisma.seatLayout.findFirst({
-    where: { status: 'published' }
-  });
-  if (!existingLayout) {
-    console.log('[Seed] Seeding published seat layout...');
-    const defaultRules = {
+  // 3. Seed SeatLayout (Always re-seed fresh layout and clean up stale drafts)
+  await prisma.seatLayout.deleteMany({});
+  console.log('[Seed] Seeding fresh published seat layout...');
+  const defaultRules = {
       spread_tables: true,
       avoid_opposite: true,
       avoid_beside: true,
@@ -189,7 +196,6 @@ export async function ensureFreshDbSeeded(customPrisma) {
         }
       });
     }
-  }
 
   // 4. Seed User (Customer id: 1)
   const existingUser = await prisma.user.findFirst({ where: { id: 1 } });

@@ -138,9 +138,16 @@ export function personElapsedMinutes(person, now = new Date()) {
   return Math.floor(totalSeconds / 60);
 }
 
-export function formatElapsedText(elapsedMinutes) {
-  const h = Math.floor(elapsedMinutes / 60);
-  const m = elapsedMinutes % 60;
+export function formatElapsedText(personOrMinutes, maybeNow = new Date()) {
+  let mins;
+  if (typeof personOrMinutes === 'object' && personOrMinutes !== null) {
+    mins = personElapsedMinutes(personOrMinutes, maybeNow);
+  } else {
+    mins = Number(personOrMinutes);
+  }
+  if (isNaN(mins) || mins < 0) return '';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
   return `${h}:${String(m).padStart(2, '0')}`;
 }
 

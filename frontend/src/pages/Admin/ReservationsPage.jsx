@@ -423,6 +423,7 @@ export default function ReservationsPage() {
                 return (
                   <div
                     key={r.booking_ref}
+                    data-testid={`reservation-card-${r.booking_ref}`}
                     onClick={() => setSelectedReservation(r)}
                     className="p-4 hover:bg-gray-50/80 transition-colors cursor-pointer space-y-3"
                   >
@@ -514,6 +515,7 @@ export default function ReservationsPage() {
                   const statusUI = getReservationStatusUI(r);
                   return (
                     <tr key={r.booking_ref} 
+                        data-testid={`reservation-card-${r.booking_ref}`}
                         onClick={() => setSelectedReservation(r)}
                         className={`hover:bg-gray-50 transition-colors cursor-pointer ${isCancelled ? 'bg-gray-50/50' : ''}`}>
                       <td className="px-6 py-4">

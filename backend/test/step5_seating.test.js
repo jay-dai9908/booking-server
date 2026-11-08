@@ -367,6 +367,9 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
 
     // Set future session max_capacity to 20 to test capacity_before = 20
     const futureDate = dateOnly('2026-11-25');
+    await prisma.session.deleteMany({
+      where: { session_date: { in: [futureDate, dateOnly('2026-11-26')] } }
+    });
     const futureSession = await prisma.session.upsert({
       where: { session_date_start_time: { session_date: futureDate, start_time: '14:00' } },
       update: { end_time: '15:00', max_capacity: 20 },
@@ -481,5 +484,8 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
         startsWith: 'BK-TEST-5-'
       }
     }
+  });
+  await prisma.session.deleteMany({
+    where: { session_date: { in: [dateOnly('2026-11-25'), dateOnly('2026-11-26')] } }
   });
 });

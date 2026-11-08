@@ -15,7 +15,12 @@ if (!dbName || !dbName.endsWith('_test')) {
   console.error(`TEST_DATABASE_URL database name "${dbName}" must end with "_test"! Refusing to run tests.`);
   process.exit(1);
 }
-const { PrismaClient } = require('@prisma/client');
+let PrismaClient;
+try {
+  ({ PrismaClient } = require('@prisma/client'));
+} catch (e) {
+  ({ PrismaClient } = require('../../backend/node_modules/@prisma/client/index.js'));
+}
 const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
@@ -171,7 +176,7 @@ export async function runSeatingTests() {
       await page.waitForTimeout(1000);
 
       // Make sure we are on the list tab if tabs exist
-      const listTab = page.locator('button:has-text("名單")').first();
+      const listTab = page.locator('button:visible:has-text("名單")').first();
       if (await listTab.isVisible().catch(() => false)) {
         await listTab.click();
         await page.waitForTimeout(400);
@@ -196,7 +201,9 @@ export async function runSeatingTests() {
       await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(800);
 
-      const checkInBtn = page.getByRole('button', { name: '報到', exact: true }).first();
+      const targetCard = page.locator(`[data-testid="reservation-card-${testRef1}"]:visible`).first();
+      await targetCard.waitFor({ state: 'visible', timeout: 8000 });
+      const checkInBtn = targetCard.locator('button:has-text("報到")').first();
       await checkInBtn.waitFor({ state: 'visible', timeout: 8000 });
       await checkInBtn.click();
       await page.waitForTimeout(600);
@@ -216,7 +223,7 @@ export async function runSeatingTests() {
       await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(1000);
 
-      const listTab2 = page.locator('button:has-text("名單")').first();
+      const listTab2 = page.locator('button:visible:has-text("名單")').first();
       if (await listTab2.isVisible().catch(() => false)) {
         await listTab2.click();
         await page.waitForTimeout(400);
@@ -291,7 +298,7 @@ export async function runSeatingTests() {
       await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(1000);
 
-      const listTab3 = page.locator('button:has-text("名單")').first();
+      const listTab3 = page.locator('button:visible:has-text("名單")').first();
       if (await listTab3.isVisible().catch(() => false)) {
         await listTab3.click();
         await page.waitForTimeout(400);
@@ -327,13 +334,19 @@ export async function runSeatingTests() {
       await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(600);
 
-      const floorTabMini = page.locator('button:has-text("平面圖")').first();
-      if (await floorTabMini.isVisible().catch(() => false)) {
-        await floorTabMini.click();
-        await page.waitForTimeout(600);
-        const miniMapWaitBadge = page.locator('button:has-text("等待區 2")').first();
-        await miniMapWaitBadge.waitFor({ state: 'visible', timeout: 5000 });
-        console.log('  ✔ Step 6b PASSED: MiniMap waiting pax matches waitPax (2)');
+      if (vp.name === 'mobile') {
+        const floorTabMini = page.locator('button:visible:has-text("平面圖")').first();
+        if (await floorTabMini.isVisible().catch(() => false)) {
+          await floorTabMini.click();
+          await page.waitForTimeout(600);
+          const miniMapWaitBadge = page.locator('button:visible:has-text("等待區 2")').first();
+          await miniMapWaitBadge.waitFor({ state: 'visible', timeout: 5000 });
+          console.log('  ✔ Step 6b PASSED: MiniMap waiting pax matches waitPax (2)');
+        }
+      } else {
+        const waitHeader = page.locator(':has-text("等待區 2 位")').first();
+        await waitHeader.waitFor({ state: 'visible', timeout: 5000 });
+        console.log('  ✔ Step 6b PASSED: Desktop header displays waitPax (2)');
       }
 
       // Step 7: 已報到但沒有帶位的訂單：顯示「這組還沒帶位」橫幅，按「帶位並開始計時」可以完成帶位
@@ -354,7 +367,7 @@ export async function runSeatingTests() {
       await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(1000);
 
-      const listTab4 = page.locator('button:has-text("名單")').first();
+      const listTab4 = page.locator('button:visible:has-text("名單")').first();
       if (await listTab4.isVisible().catch(() => false)) {
         await listTab4.click();
         await page.waitForTimeout(400);
@@ -399,7 +412,7 @@ export async function runSeatingTests() {
       await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(1000);
 
-      const listTab5 = page.locator('button:has-text("名單")').first();
+      const listTab5 = page.locator('button:visible:has-text("名單")').first();
       if (await listTab5.isVisible().catch(() => false)) {
         await listTab5.click();
         await page.waitForTimeout(400);
