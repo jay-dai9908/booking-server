@@ -882,6 +882,26 @@ export default function CheckoutWorkbench({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <div data-testid="workbench-header-sync-status" className="text-[12px] font-medium flex items-center gap-1.5">
+              {syncStatus === 'unsynced' && (
+                <span className="text-sg-muted">尚未同步</span>
+              )}
+              {syncStatus === 'syncing' && (
+                <span className="text-sg-brown animate-pulse">同步中…</span>
+              )}
+              {syncStatus === 'synced' && (
+                <span className="text-sg-sage-ink font-bold">已同步</span>
+              )}
+              {syncStatus === 'error' && (
+                <button
+                  type="button"
+                  onClick={flushDraft}
+                  className="text-sg-danger hover:underline font-bold"
+                >
+                  同步失敗，重試
+                </button>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setShowPassCenter(true)}
