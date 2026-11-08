@@ -308,13 +308,6 @@ export default function AccountingPage() {
 
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
-        <div>
-          <h1 className="text-[18px] font-bold text-sg-ink">帳務管理</h1>
-          <p className="text-[12px] text-sg-muted">
-            收支結算、日結交班、異動審計與列印佇列監控
-          </p>
-        </div>
-
         {/* Desktop Tabs (sm and above) */}
         <div className="hidden sm:flex items-center gap-2">
           <SegmentedTabs

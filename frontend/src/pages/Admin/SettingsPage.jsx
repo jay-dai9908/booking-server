@@ -233,7 +233,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-4 sm:p-8 max-w-6xl mx-auto space-y-8 animate-fade-in">
+    <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
       {/* Toast Notification */}
       {toastMsg && (
         <div className="fixed top-6 right-6 z-50 bg-emerald-700 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-sm font-bold">
@@ -242,22 +242,8 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 pb-5">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <span className="p-2.5 rounded-2xl bg-[#F4EFE6] text-[#8B5B43]">
-              <Settings className="w-6 h-6" />
-            </span>
-            <h1 className="text-2xl font-bold text-[#2C241E]">
-              系統全域設定中心
-            </h1>
-          </div>
-          <p className="text-sm text-gray-500">
-            集中管理 LINE 每次登入驗證開關、空位預覽網頁開關與維護公告、顧客端首頁顯示區塊、全店預設收費與智能板優惠規則。
-          </p>
-        </div>
-
+      {/* Page Header Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4 pb-2">
         <button
           type="button"
           onClick={() => handleSaveAll()}

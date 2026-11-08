@@ -503,7 +503,7 @@ export default function CouponsPage() {
   };
 
   return (
-    <div className="p-4 md:p-8 space-y-6 animate-fade-in bg-[#FAF7F2] min-h-screen">
+    <div className="space-y-6 animate-fade-in">
       {/* Toast Notification */}
       {toastMsg && (
         <div
@@ -519,20 +519,7 @@ export default function CouponsPage() {
       )}
 
       {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-white border border-[#E8DEC8] flex items-center justify-center text-[#8B5B43] shadow-xs">
-              <Ticket className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-[#3E332B] tracking-tight">卡券與優惠管理</h1>
-              <p className="text-[#8C8279] text-xs sm:text-sm mt-0.5">
-                管理線上預約折扣碼、現場 POS 櫃檯快捷通用券及結帳加購品項。
-              </p>
-            </div>
-          </div>
-        </div>
+      <div className="flex flex-col md:flex-row md:items-center justify-end gap-4">
 
         {/* Tab Switcher & Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">

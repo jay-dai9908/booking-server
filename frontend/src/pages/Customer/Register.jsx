@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Check } from 'lucide-react';
 import CustomerLayout from '../../components/customer/CustomerLayout';
+import AppBar from '../../components/customer/AppBar';
 import BrandLogo from '../../components/customer/BrandLogo';
 import Field from '../../components/customer/Field';
 import Button from '../../components/customer/Button';
@@ -97,21 +98,27 @@ export default function Register({ setUserRole }) {
   };
 
   return (
-    <CustomerLayout bare>
-      <div className="flex flex-col min-h-[100dvh]">
-        {/* 1. Brand Area */}
-        <div className="sg-peg border-b border-sg-line grid justify-items-center gap-2 text-center px-5 pt-[max(26px,calc(env(safe-area-inset-top)+18px))] pb-[18px]">
-          <BrandLogo size="nav" className="w-16 h-16" />
-          <h1 className="font-display text-[24px] leading-[1.35] font-bold text-sg-ink">
+    <CustomerLayout
+      header={
+        <AppBar
+          variant="brandTwoLine"
+          subtitle="綁定會員"
+        />
+      }
+    >
+      <div className="flex flex-col flex-1">
+        {/* Welcome Area */}
+        <div className="py-2 text-center">
+          <h2 className="font-display text-[20px] leading-[1.35] font-bold text-sg-ink">
             歡迎第一次來
-          </h1>
-          <p className="text-[13px] text-sg-muted">
+          </h2>
+          <p className="text-[13px] text-sg-muted mt-1">
             留下稱呼和手機，就能開始預約
           </p>
         </div>
 
         {/* 2. Form Area */}
-        <form onSubmit={handleSubmit} className="grid gap-4 px-4 pt-[18px] pb-5 flex-1">
+        <form onSubmit={handleSubmit} className="grid gap-4 pt-2 pb-5 flex-1">
           {/* Connection status bar */}
           <div className="flex items-center gap-[10px] rounded-[14px] border border-sg-line bg-sg-paper px-3 py-[10px]">
             <span className="flex-1 text-[14px] font-bold text-sg-ink">

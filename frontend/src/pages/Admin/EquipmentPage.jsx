@@ -257,7 +257,7 @@ export default function EquipmentPage() {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-6xl mx-auto space-y-8">
+    <div className="max-w-6xl mx-auto space-y-6">
       {/* Toast Notification */}
       {successToast && (
         <div className="fixed top-6 right-6 z-50 bg-emerald-700 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-sm font-bold animate-in fade-in slide-in-from-top-4 duration-200">
@@ -266,22 +266,8 @@ export default function EquipmentPage() {
         </div>
       )}
 
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 pb-5">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <span className="p-2.5 rounded-2xl bg-[#F4EFE6] text-[#8B5B43]">
-              <Cpu className="w-6 h-6" />
-            </span>
-            <h1 className="text-2xl font-bold text-[#2C241E]">
-              智能拼豆板與設備庫存管理
-            </h1>
-          </div>
-          <p className="text-sm text-gray-500">
-            動態調整小板、中板、大板與自帶設備之實體庫存、時租費率、單日上限與前台顯示/維護狀態。
-          </p>
-        </div>
-
+      {/* Page Header Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4 pb-2">
         <button
           onClick={() => setShowAddModal(true)}
           className="inline-flex items-center gap-2 bg-[#8B5B43] hover:bg-[#724a35] text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-sm transition-colors self-start sm:self-auto"

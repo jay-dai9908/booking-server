@@ -214,25 +214,32 @@ export default function Booking() {
   if (step === '1') {
     headerSlot = (
       <AppBar
-        variant="brand"
-        title="預約時段"
+        variant="brandTwoLine"
+        subtitle="預約時段"
         right={<span className="sg-small whitespace-nowrap">{updateText}</span>}
       />
     );
   } else if (step === '2') {
     headerSlot = (
       <AppBar
-        variant="back"
-        title="預約時段"
+        variant="backTwoLine"
+        subtitle="人數與加購"
         onBack={() => navigate('/booking?step=1')}
       />
     );
   } else if (step === '3') {
     headerSlot = (
       <AppBar
-        variant="back"
-        title="確認預約"
+        variant="backTwoLine"
+        subtitle="確認預約"
         onBack={() => navigate('/booking?step=2')}
+      />
+    );
+  } else if (step === 'done') {
+    headerSlot = (
+      <AppBar
+        variant="brandTwoLine"
+        subtitle="預約完成"
       />
     );
   }
@@ -240,7 +247,6 @@ export default function Booking() {
   return (
     <CustomerLayout
       header={headerSlot}
-      bare={step === 'done'}
     >
       {step === '1' && (
         <StepSelectTime

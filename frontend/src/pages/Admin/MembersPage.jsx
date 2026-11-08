@@ -117,14 +117,8 @@ export default function MembersPage() {
 
   return (
     <>
-      <div className="p-4 md:p-8 space-y-6 animate-fade-in">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">會員管理與消費統計</h1>
-            <p className="text-gray-500 mt-1 text-sm">
-              檢視顧客 LINE 檔案、編輯會員姓名、雙軌時數累計（不限時人次 vs 一般計時）及近 2 個月登入紀錄。
-            </p>
-          </div>
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex flex-col md:flex-row md:items-center justify-end gap-4">
           <div className="flex items-center gap-3">
             <button
               type="button"

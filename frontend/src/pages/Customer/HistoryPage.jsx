@@ -449,8 +449,8 @@ export default function HistoryPage() {
       <CustomerLayout
         header={
           <AppBar
-            variant="back"
-            title="預約詳情"
+            variant="backTwoLine"
+            subtitle="預約詳情"
             onBack={() => navigate('/history?tab=bookings')}
           />
         }
@@ -663,8 +663,8 @@ export default function HistoryPage() {
     <CustomerLayout
       header={
         <AppBar
-          variant="brand"
-          title="我的會員"
+          variant="brandTwoLine"
+          subtitle="我的會員"
           right={customerName && <span className="sg-small truncate max-w-[8em]">{customerName}</span>}
         />
       }

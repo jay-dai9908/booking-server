@@ -587,8 +587,8 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
       <CustomerLayout
         header={
           <AppBar
-            variant="back"
-            title="確認訂單"
+            variant="backTwoLine"
+            subtitle="確認訂單"
             onBack={() => navigate('/shop')}
           />
         }
@@ -838,8 +838,8 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
     <CustomerLayout
       header={
         <AppBar
-          variant="brand"
-          title="商品預購"
+          variant="brandTwoLine"
+          subtitle="商品預購"
           right={hasPreorderItems && <Pill variant="peach">限量預購</Pill>}
         />
       }

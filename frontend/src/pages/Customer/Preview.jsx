@@ -10,7 +10,7 @@ import PriceCard from '../../components/customer/PriceCard';
 import SlotGrid, { SlotCell } from '../../components/customer/SlotGrid';
 import Skeleton from '../../components/customer/Skeleton';
 import EmptyState from '../../components/customer/EmptyState';
-import { InfoBanner } from '../../components/customer/Banners';
+import { InfoBanner, AnnouncementBar } from '../../components/customer/Banners';
 import PriceInfoSheet from '../../components/customer/sheets/PriceInfoSheet';
 import { initiateLineOAuth } from '../../utils/lineAuth';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
@@ -89,7 +89,7 @@ export default function Preview() {
       header={
         <AppBar
           variant="brandTwoLine"
-          title="拾光製所"
+          subtitle="拼豆時段預覽"
           right={<Pill variant="full">未登入</Pill>}
         />
       }
@@ -115,8 +115,13 @@ export default function Preview() {
             />
           ) : (
             <>
+              {/* Store Announcement */}
+              {globalSettings?.show_announcement && globalSettings?.announcement_text && (
+                <AnnouncementBar text={globalSettings.announcement_text} />
+              )}
+
               {/* 1. Info Banner */}
-              <InfoBanner message="先看看空位，登入後就能直接選時段" />
+              <InfoBanner>先看看空位，登入後就能直接選時段</InfoBanner>
 
               {/* 2. MonthBar + DateStrip / MonthCalendar */}
               <MonthBar

@@ -33,8 +33,7 @@ export default function WeeklyPage() {
   return (
     <div className="flex flex-col md:flex-row h-full animate-fade-in">
       {/* Left/Top Column for Controls */}
-      <div className="w-full md:w-64 lg:w-72 p-4 md:p-8 lg:p-10 shrink-0 flex flex-col gap-4 bg-gray-50 border-r border-gray-200 z-10">
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">周營業狀況</h1>
+      <div className="w-full md:w-64 lg:w-72 shrink-0 flex flex-col gap-4 z-10">
         <div className="flex flex-col gap-2 bg-white rounded-xl border border-gray-200 p-2 shadow-sm w-full">
           <div className="text-center text-xs font-bold text-gray-400 tracking-wider">選擇日期區間</div>
           <div className="flex items-center justify-between">

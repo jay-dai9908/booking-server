@@ -298,12 +298,8 @@ export default function ReservationsPage() {
 
   return (
     <>
-      <div className="p-4 md:p-8 space-y-6 md:space-y-8 animate-fade-in max-w-full overflow-x-hidden">
+      <div className="space-y-6 animate-fade-in max-w-full">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">預約訂單總覽</h1>
-          <p className="text-gray-500 mt-1 text-sm">查看所有顧客的預約明細與狀態。</p>
-        </div>
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full md:w-auto">
           <div className="relative flex-1 min-w-[160px] sm:min-w-[200px]">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">

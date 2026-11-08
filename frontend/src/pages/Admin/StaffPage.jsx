@@ -229,18 +229,9 @@ export default function StaffPage() {
   };
 
   return (
-    <div className="p-4 md:p-8 space-y-8 animate-fade-in max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight flex items-center gap-2.5">
-            <ShieldCheck className="w-7 h-7 text-[#8B5B43]" />
-            人員權限管理
-          </h1>
-          <p className="text-gray-500 mt-1 text-sm">
-            為每位員工設定專屬密碼，並個別指派能訪問與操作的後台頁面。
-          </p>
-        </div>
+    <div className="space-y-6 animate-fade-in max-w-7xl mx-auto">
+      {/* Header Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
         <button
           onClick={handleOpenCreateModal}
           className="inline-flex items-center justify-center gap-2 bg-[#8B5B43] hover:bg-[#724833] text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-all hover:shadow hover:scale-[1.01] active:scale-[0.99]"

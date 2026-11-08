@@ -146,8 +146,7 @@ export default function PrintStationPage() {
             <Printer className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-[18px] font-bold text-sg-ink">列印站</h1>
-            <p className="text-[12px] text-sg-muted">商米 POS 櫃檯收據與票券印表機</p>
+            <p className="text-[13px] font-bold text-sg-ink">商米 POS 櫃檯收據與票券印表機</p>
           </div>
         </div>
 

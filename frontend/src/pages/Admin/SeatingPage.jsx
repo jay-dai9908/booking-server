@@ -486,15 +486,9 @@ export default function SeatingPage() {
       )}
 
       {/* Desktop Top Header & Summary */}
-      <div className="hidden lg:flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
+      <div className="hidden lg:flex items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-[18px] font-bold text-sg-ink">今日帶位</h1>
-            <span className="text-[13px] text-sg-muted">
-              {getServerNow().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short', timeZone: 'Asia/Taipei' })}
-            </span>
-          </div>
-          <div className="text-[13px] text-sg-muted mt-0.5">
+          <div className="text-[13px] text-sg-muted">
             使用中 <span className="font-bold text-sg-ink font-num">{inUsePax}</span> 位 · 待入座 <span className="font-bold text-sg-ink font-num">{pendingPax}</span> 位 · 空位 <span className="font-bold text-sg-ink font-num">{emptySeatCount}</span> 個
           </div>
         </div>

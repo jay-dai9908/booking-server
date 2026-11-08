@@ -394,14 +394,7 @@ export default function SessionsPage() {
   };
 
   return (
-    <div className="p-4 md:p-8 space-y-8 animate-fade-in">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">營業時段設定</h1>
-          <p className="text-gray-500 mt-1 text-sm">支援月曆多選批次排班、整點磁吸滾輪快速設定與價格覆蓋。</p>
-        </div>
-      </div>
-
+    <div className="space-y-6 animate-fade-in">
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         {/* Left Column: Interactive Multi-Select Calendar & Session Creation Form */}
         <div className="xl:col-span-1">

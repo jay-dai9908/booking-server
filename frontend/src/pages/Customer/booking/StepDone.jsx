@@ -61,15 +61,15 @@ export default function StepDone({ result }) {
   const barcodeSummaryText = `${cleanDateStr ? formatDateShort(cleanDateStr) : ''} ${startTime} 到 ${endTime} · ${pax} 位`;
 
   return (
-    <div className="flex flex-col min-h-[100dvh]">
-      {/* 1. Grid Brand Area */}
-      <div className="sg-peg border-b border-sg-line grid justify-items-center gap-[10px] text-center px-5 pt-[max(34px,calc(env(safe-area-inset-top)+24px))] pb-[22px]">
-        <div className="h-14 w-14 rounded-full bg-sg-sage text-white grid place-items-center shadow-sg-pop">
+    <div className="flex flex-col flex-1">
+      {/* 1. Hero checkmark */}
+      <div className="flex flex-col items-center justify-center py-4 text-center">
+        <div className="h-14 w-14 rounded-full bg-sg-sage text-white grid place-items-center shadow-sg-pop mb-1">
           <Check className="w-[30px] h-[30px]" strokeWidth={2.4} />
         </div>
-        <h1 className="font-display text-[26px] leading-[1.3] font-bold text-sg-ink">
-          預約完成！
-        </h1>
+        <p className="text-[13px] text-sg-muted">
+          感謝預約，我們期待您的到來！
+        </p>
       </div>
 
       {/* 2. Content */}

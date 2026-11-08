@@ -227,13 +227,14 @@ export default function AdminShell({ children, title = '拾光製所', subtitle 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 pb-[70px] md:pb-0">
         <AdminAppBar
-          title={title !== '拾光製所' ? title : (allNavLinks.find(l => location.pathname.startsWith(l.to))?.label || '拾光製所')}
+          pageTitle={title !== '拾光製所' ? title : (allNavLinks.find(l => location.pathname.startsWith(l.to))?.label || '拾光製所')}
           subtitle={subtitle}
+          onLogoClick={() => setShowMoreSheet(true)}
           onSearchClick={() => setShowQuickLookup(true)}
           actions={actions}
         />
 
-        <main className="flex-1">
+        <main className="flex-1 px-4 md:px-6 py-4 overflow-x-hidden">
           {children}
         </main>
       </div>

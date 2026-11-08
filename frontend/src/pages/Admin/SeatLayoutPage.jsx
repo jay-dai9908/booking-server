@@ -1159,13 +1159,12 @@ export default function SeatLayoutPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-sg-line shadow-xs">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-[18px] font-bold text-sg-ink">座位設定與平面圖編輯</h1>
             <span className={`text-[12px] px-2.5 py-0.5 rounded-full font-bold ${layout?.status === 'published' ? 'bg-sg-sage-soft text-sg-sage-ink' : 'bg-sg-honey-soft text-sg-honey'}`}>
               {layout?.status === 'published' ? '已發布生效中' : '編輯草稿中'}
             </span>
-          </div>
-          <div className="text-[12px] text-sg-muted mt-0.5">
-            1 單位 = 1 公分 · 總座位數 <span className="font-bold text-sg-ink font-num">{layout?.seats?.filter(s => s.is_active !== false)?.length || 0}</span> 席
+            <span className="text-[12px] text-sg-muted">
+              1 單位 = 1 公分 · 總座位數 <strong className="font-bold text-sg-ink font-num">{layout?.seats?.filter(s => s.is_active !== false)?.length || 0}</strong> 席
+            </span>
           </div>
         </div>
 
