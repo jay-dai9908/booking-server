@@ -16,8 +16,8 @@ export default function CustomerLayout({
   }, []);
 
   return (
-    <div className="sg-app min-h-[100dvh] bg-sg-bg font-body text-sg-ink antialiased">
-      <div className="mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col">
+    <div className="sg-app min-h-[100dvh] bg-sg-bg font-body text-sg-ink antialiased overflow-x-hidden">
+      <div className="mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col overflow-x-hidden">
         {header}
         <main
           className={`flex flex-1 flex-col gap-3 [&>*]:shrink-0 ${

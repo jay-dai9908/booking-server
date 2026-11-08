@@ -27,7 +27,7 @@ import {
   meterBeads,
   dayState,
 } from '../../../utils/customer/availability';
-import { tapSlot, buildUnlimitedOptions } from '../../../utils/customer/selection';
+import { tapSlot, buildUnlimitedOptions, transitionMode } from '../../../utils/customer/selection';
 import { formatDateShort, formatMoney, formatTimeRange } from '../../../utils/customer/format';
 
 export default function StepSelectTime({
@@ -125,6 +125,21 @@ export default function StepSelectTime({
     return buildUnlimitedOptions(sortedSessions, { N, usable, linked, isPast });
   }, [sortedSessions, N, hasSessions, allowUnlimited]);
 
+  const lastTimedSelRef = useRef(sel);
+  const lastUnlimitedRef = useRef(arrival != null && leave != null ? { arrival, leave } : null);
+
+  useEffect(() => {
+    if (mode === 'timed' && sel) {
+      lastTimedSelRef.current = sel;
+    }
+  }, [mode, sel]);
+
+  useEffect(() => {
+    if (mode === 'unlimited' && arrival != null && leave != null) {
+      lastUnlimitedRef.current = { arrival, leave };
+    }
+  }, [mode, arrival, leave]);
+
   // Default selection for unlimited if not set or invalid
   useEffect(() => {
     if (mode !== 'unlimited' || !allowUnlimited || !unlimitedOptions.arrivals.length) return;
@@ -144,12 +159,14 @@ export default function StepSelectTime({
     const validLeaves = leaves.filter((l) => l.enabled);
     if (validLeaves.length > 0) {
       if (leave == null || !validLeaves.some((l) => l.endIndex === leave)) {
-        // default to latest valid leave
-        const defaultLeave = validLeaves[validLeaves.length - 1].endIndex;
+        // default to arrival + N if available, or first valid leave (do not greedy-select full day)
+        const defaultLeaveIndex = curArrival + N;
+        const matched = validLeaves.find((l) => l.endIndex === defaultLeaveIndex);
+        const defaultLeave = matched ? matched.endIndex : validLeaves[0].endIndex;
         onChangeLeave(defaultLeave);
       }
     }
-  }, [mode, allowUnlimited, unlimitedOptions, arrival, leave, onChangeArrival, onChangeLeave]);
+  }, [mode, allowUnlimited, unlimitedOptions, arrival, leave, N, onChangeArrival, onChangeLeave]);
 
   // Slot click handler for timed mode
   const handleSlotClick = (idx) => {
@@ -176,22 +193,29 @@ export default function StepSelectTime({
     }
     if (newMode === mode) return;
 
+    const res = transitionMode({
+      currentMode: mode,
+      targetMode: newMode,
+      sel,
+      arrival,
+      leave,
+      lastTimedSel: lastTimedSelRef.current,
+      lastUnlimited: lastUnlimitedRef.current,
+      N,
+      unlimitedOptions,
+    });
+
+    if (res.lastTimedSel !== undefined) lastTimedSelRef.current = res.lastTimedSel;
+    if (res.lastUnlimited !== undefined) lastUnlimitedRef.current = res.lastUnlimited;
+
     if (newMode === 'unlimited') {
-      // Transition from timed -> unlimited: arrival from sel.start
-      if (sel) {
-        const candidateArrival = sel.start;
-        const validArrivals = unlimitedOptions.arrivals.filter((a) => a.enabled);
-        if (validArrivals.some((a) => a.index === candidateArrival)) {
-          onChangeArrival(candidateArrival);
-          const leaves = unlimitedOptions.leavesFor(candidateArrival).filter((l) => l.enabled);
-          if (leaves.length) onChangeLeave(leaves[leaves.length - 1].endIndex);
-        }
-      }
+      if (res.arrival != null) onChangeArrival(res.arrival);
+      if (res.leave != null) onChangeLeave(res.leave);
+      onChangeSel(null);
     } else {
-      // Transition from unlimited -> timed: sel from arrival to leave - 1
-      if (arrival != null && leave != null && leave > arrival) {
-        onChangeSel({ start: arrival, end: leave - 1 });
-      }
+      onChangeSel(res.sel);
+      onChangeArrival(null);
+      onChangeLeave(null);
     }
     onChangeMode(newMode);
   };

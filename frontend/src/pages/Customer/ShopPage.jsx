@@ -864,7 +864,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
         )
       }
     >
-      <div className="grid gap-3 pb-8">
+      <div className="grid gap-3 pb-8 overflow-x-hidden">
         {loading ? (
           <div className="py-20 flex justify-center">
             <BeadLoader />
@@ -873,9 +873,9 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
           <>
             {/* 1. Bundle Hero Card */}
             {bundleProduct && (
-              <Card p={0} gap={0} className="overflow-hidden">
+              <Card p={0} gap={0} className="overflow-hidden overflow-x-hidden">
                 {/* Image */}
-                <div className="h-[96px] relative bg-sg-peach-soft grid place-items-center">
+                <div className="h-[96px] relative bg-sg-peach-soft grid place-items-center overflow-hidden">
                   {bundleProduct.image_url ? (
                     <img
                       src={bundleProduct.image_url}
@@ -883,8 +883,8 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <div className="sg-peg w-full h-full grid place-items-center">
-                      <BeadRow count={24} size={14} gap={4} />
+                    <div className="sg-peg w-full h-full grid place-items-center overflow-hidden">
+                      <BeadRow count={12} size={14} gap={4} />
                     </div>
                   )}
                 </div>
@@ -969,7 +969,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                 return (
                   <div
                     key={p.id}
-                    className="grid overflow-hidden rounded-[16px] border border-sg-line bg-sg-paper"
+                    className="grid overflow-hidden rounded-[16px] border border-sg-line bg-sg-paper overflow-x-hidden"
                   >
                     {/* Image */}
                     <div className="aspect-square relative overflow-hidden">
@@ -980,9 +980,9 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <div className={`sg-peg w-full h-full grid place-items-center ${bgClass}`}>
+                        <div className={`sg-peg w-full h-full grid place-items-center overflow-hidden ${bgClass}`}>
                           {isBeads ? (
-                            <BeadRow count={12} size={12} gap={3} />
+                            <BeadRow count={6} size={11} gap={3} />
                           ) : (
                             <IconComponent className="w-[34px] h-[34px] text-sg-brown/60" />
                           )}

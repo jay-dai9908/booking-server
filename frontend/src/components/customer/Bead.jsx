@@ -89,14 +89,18 @@ export function BeadLoader({ size = 'md', className = '' }) {
   );
 }
 
-export function BeadRow({ className = '', count = 5 }) {
+export function BeadRow({ className = '', count = 5, size = 12, gap = 4 }) {
   const colors = ['#8B5B43', '#E7B4A2', '#7E9A72', '#D9A441', '#E6DDD2'];
   return (
-    <div className={`inline-flex items-center gap-1 ${className}`} aria-hidden="true">
+    <div
+      className={`inline-flex items-center max-w-full overflow-hidden ${className}`}
+      style={{ gap: `${gap}px` }}
+      aria-hidden="true"
+    >
       {Array.from({ length: count }).map((_, i) => (
         <Bead
           key={i}
-          size={12}
+          size={size}
           color={colors[i % colors.length]}
           empty={i % colors.length === 4}
         />
