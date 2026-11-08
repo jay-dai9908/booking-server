@@ -178,6 +178,26 @@ export default function SeatingPage() {
   const [pausePersonTarget, setPausePersonTarget] = useState(null);
   const [pauseReason, setPauseReason] = useState('外出用餐');
 
+  // Reseated hints for Category C guests (Spec 1.3)
+  const [reseatedHints, setReseatedHints] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('sg_reseated_c_hints') || '{}');
+    } catch {
+      return {};
+    }
+  });
+
+  const handleDismissReseatHint = (bRef) => {
+    setReseatedHints(prev => {
+      const next = { ...prev };
+      delete next[bRef];
+      try {
+        sessionStorage.setItem('sg_reseated_c_hints', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
   // Toast message
   const [toastMessage, setToastMessage] = useState(null);
   const showToast = (msg) => {
@@ -954,6 +974,30 @@ export default function SeatingPage() {
                             <StatusPill status={b.billing?.status || 'unpaid'} />
                           </div>
                         </div>
+
+                        {/* Reseat Hint Banner (Spec 1.3) */}
+                        {reseatedHints[b.booking_ref] && (
+                          <div
+                            data-testid={`reseat-hint-banner-${b.booking_ref}`}
+                            className="mt-2 p-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-[12px] flex items-center justify-between"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span className="font-bold">
+                              座位已更新：{reseatedHints[b.booking_ref].from} → {reseatedHints[b.booking_ref].to}
+                            </span>
+                            <button
+                              type="button"
+                              data-testid={`dismiss-reseat-hint-${b.booking_ref}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDismissReseatHint(b.booking_ref);
+                              }}
+                              className="px-2.5 py-1 rounded-xl bg-white border border-amber-300 text-amber-900 text-[11px] font-bold hover:bg-amber-100 shadow-xs cursor-pointer"
+                            >
+                              知道了
+                            </button>
+                          </div>
+                        )}
 
                         {/* Unseated Warning Banner (Spec 3.2) */}
                         {b.needs_seating && (

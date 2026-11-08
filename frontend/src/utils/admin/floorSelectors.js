@@ -1,6 +1,7 @@
 /**
  * Floor selectors and pure calculation functions for SeatingPage & Checkout
  */
+import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
 
 export function extractTimeHHMM(isoString) {
   if (!isoString) return '';
@@ -193,8 +194,37 @@ export function formatOverdueText(bookingOrMins, now = new Date()) {
 }
 
 export function groupTimerPill(booking, now = new Date()) {
+  const pillClasses = {
+    danger: 'bg-sg-danger-soft text-sg-danger font-bold',
+    warning: 'bg-sg-honey-soft text-sg-honey font-bold',
+    paused: 'bg-sg-paper text-sg-ink border border-sg-line',
+    muted: 'bg-sg-paper text-sg-ink/60 border border-sg-line',
+    active: 'bg-sg-sage-soft text-sg-sage-ink font-bold',
+    default: 'bg-sg-paper text-sg-ink border border-sg-line'
+  };
+
+  const makeResult = (label, variant) => ({
+    label,
+    variant,
+    pillClass: pillClasses[variant] || pillClasses.default
+  });
+
   if (!booking) {
-    return { label: '待入座', variant: 'default' };
+    return makeResult('待入座', 'default');
+  }
+
+  // Spec 2.2 item 4: 已結清的訂單不顯示「超時 x 分」
+  const isPaid =
+    booking.billing?.status === 'paid' ||
+    booking.billing?.status === 'waived' ||
+    booking.billing_status === 'paid' ||
+    booking.billing_status === 'waived' ||
+    booking.status === 'paid' ||
+    booking.status === 'waived' ||
+    booking.is_paid === true;
+
+  if (isPaid) {
+    return makeResult('已結清', 'muted');
   }
 
   // If not checked in
@@ -202,39 +232,39 @@ export function groupTimerPill(booking, now = new Date()) {
     const overdue = formatOverdueText(booking, now);
     if (overdue) {
       if (overdue.isOverdue) {
-        return { label: overdue.text, variant: 'danger' };
+        return makeResult(overdue.text, 'danger');
       }
-      return { label: overdue.text, variant: 'warning' };
+      return makeResult(overdue.text, 'warning');
     }
-    return { label: '待入座', variant: 'default' };
+    return makeResult('待入座', 'default');
   }
 
   // If checked in but needs seating
   if (booking.needs_seating) {
-    return { label: '待帶位', variant: 'warning' };
+    return makeResult('待帶位', 'warning');
   }
 
   const persons = booking.persons || [];
   if (persons.length === 0) {
-    return { label: '待入座', variant: 'default' };
+    return makeResult('待入座', 'default');
   }
 
   // Check if all ended
   const allEnded = persons.every(p => p.timer?.timer_ended_at);
   if (allEnded) {
-    return { label: '已結束', variant: 'muted' };
+    return makeResult('已結束', 'muted');
   }
 
   // Active persons (not ended)
   const activePersons = persons.filter(p => !p.timer?.timer_ended_at && p.timer?.timer_started_at);
   if (activePersons.length === 0) {
-    return { label: '待帶位', variant: 'warning' };
+    return makeResult('待帶位', 'warning');
   }
 
   // If all active are paused
   const allPaused = activePersons.every(p => p.timer?.paused_at);
   if (allPaused) {
-    return { label: '已暫停', variant: 'paused' };
+    return makeResult('已暫停', 'paused');
   }
 
   // Check overtime / expiring
@@ -261,30 +291,17 @@ export function groupTimerPill(booking, now = new Date()) {
   }
 
   if (hasOvertime) {
-    return { label: maxOvertime > 0 ? `超時 ${maxOvertime} 分` : '超時 1 分', variant: 'danger' };
+    return makeResult(maxOvertime > 0 ? `超時 ${maxOvertime} 分` : '超時 1 分', 'danger');
   }
 
   if (hasExpiring) {
-    return { label: `還有 ${minRemaining} 分`, variant: 'warning' };
+    return makeResult(`還有 ${minRemaining} 分`, 'warning');
   }
 
-  return { label: '計時中', variant: 'active' };
+  return makeResult('計時中', 'active');
 }
 
-export function isBookingCompleted(booking) {
-  if (!booking) return false;
-  if (booking.attendance === 'completed') return true;
-  if (booking.attendance === 'checked_in') {
-    const persons = booking.persons || [];
-    if (persons.length > 0 && persons.every(p => {
-      const tm = p.timer || p;
-      return Boolean(tm.timer_ended_at);
-    })) {
-      return true;
-    }
-  }
-  return false;
-}
+export { isBookingCompleted };
 
 export function isSessionPast(session, now = new Date()) {
   if (!session) return false;

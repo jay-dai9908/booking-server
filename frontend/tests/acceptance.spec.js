@@ -551,7 +551,7 @@ async function run() {
     console.log('  Publishing layout with standalone seats...');
     await page.locator('button:has-text("發布生效")').click();
     await page.waitForTimeout(500);
-    const confirmPublishBtn = page.locator('button:has-text("確認發布並排位")').first();
+    const confirmPublishBtn = page.locator('button:has-text("發布並套用新座位"), button:has-text("確認發布並排位")').first();
     await confirmPublishBtn.waitFor({ state: 'visible', timeout: 5000 });
     await confirmPublishBtn.click();
     await page.waitForTimeout(1500);

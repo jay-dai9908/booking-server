@@ -4,7 +4,9 @@ import { getActiveLayoutForDate, getLegacyFallbackLayout, loadAllocatorContext }
 import { resolveLayoutGeometry } from '../../../shared/allocator/geometry.js';
 import { allocate } from '../../../shared/allocator/score.js';
 import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
-import { allocateWithLayout, reseatBookings } from '../services/seating/allocator.js';
+import { allocateWithLayout, reseatBookings, assertNoSeatCollisions } from '../services/seating/allocator.js';
+import { isBookingCompleted } from '../../../shared/floorSelectors.js';
+import { log as auditLog } from '../services/audit/auditService.js';
 
 export async function getActiveLayout(req, res) {
   try {
@@ -433,86 +435,388 @@ export async function previewPublish(req, res) {
 
     const draft = await prisma.seatLayout.findUnique({
       where: { id },
-      include: { seats: true }
+      include: { zones: true, tables: true, seats: true }
     });
     if (!draft) {
       return res.status(404).json({ error: '找不到該版面', code: 'LAYOUT_NOT_FOUND' });
     }
 
-    const currentLayout = await getActiveLayoutForDate(prisma, effDate);
-    const futureSessions = await prisma.session.findMany({
-      where: { session_date: { gte: effDate } },
-      select: { max_capacity: true }
-    });
-    const capacityBefore = futureSessions.length > 0
-      ? Math.max(...futureSessions.map(s => s.max_capacity))
-      : (currentLayout?.capacity || 20);
-    const capacityAfter = draft.seats.filter(s => s.is_active && s.priority !== 'manual_only').length;
-
-    // Check sessions over capacity on or after effective_from
-    const sessions = await prisma.session.findMany({
-      where: {
-        session_date: { gte: effDate }
-      },
-      include: {
-        reservations: {
-          where: { status: 'confirmed' },
-          select: { pax: true, booking_ref: true, attendance: true, assigned_seats: true }
-        }
-      }
-    });
-
-    const sessionsOverCapacity = [];
-    for (const sess of sessions) {
-      const bookedPax = sess.reservations.reduce((s, r) => s + r.pax, 0);
-      if (bookedPax > capacityAfter) {
-        sessionsOverCapacity.push({
-          session_id: sess.id,
-          session_date: sess.session_date,
-          start_time: sess.start_time,
-          end_time: sess.end_time,
-          booked_pax: bookedPax,
-          capacity_after: capacityAfter
-        });
-      }
-    }
-
-    // Check affected bookings on deleted or disabled seats
-    const newSeatCodes = new Set(draft.seats.filter(s => s.is_active).map(s => s.code));
-    const affectedBookings = [];
-
-    for (const sess of sessions) {
-      for (const r of sess.reservations) {
-        const missingSeats = (r.assigned_seats || []).filter(code => !newSeatCodes.has(code));
-        if (missingSeats.length > 0) {
-          affectedBookings.push({
-            booking_ref: r.booking_ref,
-            session_date: sess.session_date,
-            time: `${sess.start_time}-${sess.end_time}`,
-            missing_seats: missingSeats,
-            pinned: r.attendance === 'checked_in'
-          });
-        }
-      }
-    }
+    const evaluation = await evaluateLayoutImpact(prisma, draft, effDate);
 
     return res.json({
       server_now: new Date().toISOString(),
-      capacity_before: capacityBefore,
-      capacity_after: capacityAfter,
-      sessions_over_capacity: sessionsOverCapacity,
-      affected_bookings: affectedBookings
+      capacity_before: evaluation.capacityBefore,
+      capacity_after: evaluation.capacityAfter,
+      capacity: evaluation.capacityAfter,
+      sessions_over_capacity: evaluation.sessionsOverCapacity,
+      affected_bookings: evaluation.affectedBookings,
+      category_c: evaluation.category_c,
+      category_b: evaluation.category_b,
+      in_store_reseat: evaluation.in_store_reseat,
+      auto_reseat: evaluation.auto_reseat,
+      needs_manual: evaluation.needs_manual
     });
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
     console.error('previewPublish error:', err);
     return res.status(500).json({ error: '發布預覽評估失敗', code: 'PREVIEW_PUBLISH_FAILED' });
   }
 }
 
+/**
+ * Evaluates the impact of publishing a layout draft on or after effDate.
+ * Categorizes affected bookings into:
+ *   Category A (已結束): completed / departed / past / cancelled (completely ignored)
+ *   Category B (還沒到): unseated bookings to be reseated
+ *   Category C (正在座位上): in-store seated guests with running/paused timers to be reseated
+ * Computes suggested seats or falls back to WAIT-n.
+ * Throws 409 if total seated pax > active bookable seats + waiting capacity.
+ */
+async function evaluateLayoutImpact(client, draft, effDate) {
+  const currentLayout = await getActiveLayoutForDate(client, effDate);
+  const futureSessions = await client.session.findMany({
+    where: { session_date: { gte: effDate } },
+    select: { max_capacity: true }
+  });
+  const capacityBefore = futureSessions.length > 0
+    ? Math.max(...futureSessions.map(s => s.max_capacity))
+    : (currentLayout?.capacity || 20);
+  const capacityAfter = draft.seats.filter(s => s.is_active && s.priority !== 'manual_only').length;
+
+  const sessions = await client.session.findMany({
+    where: { session_date: { gte: effDate } },
+    include: {
+      reservations: {
+        where: { status: { not: 'cancelled' } },
+        include: { session: true, user: true }
+      }
+    },
+    orderBy: [
+      { session_date: 'asc' },
+      { start_time: 'asc' }
+    ]
+  });
+
+  const sessionsOverCapacity = [];
+  for (const sess of sessions) {
+    const bookedPax = sess.reservations.reduce((s, r) => s + r.pax, 0);
+    if (bookedPax > capacityAfter) {
+      sessionsOverCapacity.push({
+        session_id: sess.id,
+        session_date: sess.session_date,
+        start_time: sess.start_time,
+        end_time: sess.end_time,
+        booked_pax: bookedPax,
+        capacity_after: capacityAfter
+      });
+    }
+  }
+
+  const allBookingRefs = [...new Set(sessions.flatMap(s => s.reservations.map(r => r.booking_ref)))];
+  const allPersons = allBookingRefs.length > 0 ? await client.bookingPerson.findMany({
+    where: { booking_ref: { in: allBookingRefs }, status: 'active' },
+    include: { pauses: true },
+    orderBy: { person_no: 'asc' }
+  }) : [];
+  const allPayments = allBookingRefs.length > 0 ? await client.payment.findMany({
+    where: { booking_ref: { in: allBookingRefs }, status: 'valid' }
+  }) : [];
+
+  const personsMap = new Map();
+  for (const p of allPersons) {
+    if (!personsMap.has(p.booking_ref)) personsMap.set(p.booking_ref, []);
+    personsMap.get(p.booking_ref).push(p);
+  }
+
+  const paymentsMap = new Map();
+  for (const pay of allPayments) {
+    if (!paymentsMap.has(pay.booking_ref)) paymentsMap.set(pay.booking_ref, []);
+    paymentsMap.get(pay.booking_ref).push(pay);
+  }
+
+  const bookingsMap = new Map();
+  for (const sess of sessions) {
+    for (const r of sess.reservations) {
+      if (!bookingsMap.has(r.booking_ref)) bookingsMap.set(r.booking_ref, []);
+      bookingsMap.get(r.booking_ref).push(r);
+    }
+  }
+
+  const activeNewSeats = new Set(draft.seats.filter(s => s.is_active).map(s => s.code));
+  const maxWaitCapacity = draft.rules_json?.max_wait_capacity ?? 8;
+  const serverNow = new Date();
+
+  const categoryA = [];
+  const categoryB = [];
+  const pinnedCategoryB = [];
+  const categoryC = [];
+
+  for (const [bRef, bResvs] of bookingsMap.entries()) {
+    const firstRes = bResvs[0];
+    const lastRes = bResvs[bResvs.length - 1];
+    const bPersons = personsMap.get(bRef) || [];
+    const bPayments = paymentsMap.get(bRef) || [];
+
+    const assignedSeats = firstRes.assigned_seats || [];
+    const missingSeats = assignedSeats.filter(code => !code.startsWith('WAIT-') && !activeNewSeats.has(code));
+
+    const sessionDateStr = toTaipeiDateString(lastRes.session.session_date);
+    const endDt = new Date(`${sessionDateStr}T${lastRes.session.end_time}:00+08:00`);
+    const isPastOrEnded = endDt.getTime() <= serverNow.getTime();
+
+    const bookingObj = {
+      booking_ref: bRef,
+      attendance: firstRes.attendance,
+      status: firstRes.status,
+      is_paid: Boolean(firstRes.is_paid),
+      billing_status: firstRes.billing_status,
+      billing: { status: firstRes.billing_status },
+      end_at: endDt.toISOString(),
+      persons: bPersons.map(p => ({
+        person_no: p.person_no,
+        paid: bPayments.some(pay => pay.person_nos?.includes(p.person_no) || !pay.person_nos || pay.person_nos.length === 0),
+        timer: {
+          timer_started_at: p.timer_started_at,
+          billing_start_at: p.billing_start_at,
+          timer_ended_at: p.timer_ended_at,
+          paused_at: p.paused_at
+        }
+      }))
+    };
+
+    const isCompleted = firstRes.status === 'cancelled' ||
+      firstRes.attendance === 'completed' ||
+      isBookingCompleted(bookingObj, serverNow);
+
+    const isSeatedWithRunningTimer =
+      (firstRes.attendance === 'checked_in' || firstRes.checked_in_at != null) &&
+      bPersons.length > 0 &&
+      bPersons.some(p => (p.timer_started_at || p.billing_start_at) && !p.timer_ended_at);
+
+    if (isCompleted) {
+      // Category A: 已結束
+      categoryA.push({ booking_ref: bRef, bResvs, firstRes, missingSeats });
+    } else if (isSeatedWithRunningTimer) {
+      // Category C: 正在座位上 (even if scheduled session has passed, they are still on seats!)
+      categoryC.push({ booking_ref: bRef, bResvs, firstRes, lastRes, bPersons, missingSeats });
+    } else if (isPastOrEnded) {
+      // Category A: Past slot that ended without active in-store presence
+      categoryA.push({ booking_ref: bRef, bResvs, firstRes, missingSeats });
+    } else {
+      // Category B: 還沒到
+      const isPinned = Boolean(firstRes.is_seat_locked) || firstRes.seat_source === 'staff';
+      if (isPinned) {
+        pinnedCategoryB.push({ booking_ref: bRef, bResvs, firstRes, lastRes, bPersons, missingSeats });
+      } else {
+        categoryB.push({ booking_ref: bRef, bResvs, firstRes, lastRes, bPersons, missingSeats });
+      }
+    }
+  }
+
+  // 1.2 Check blocking condition:
+  // 新版面的座位數少於「現在正在座位上的人數」，而且等待區也放不下。這時回 409
+  const totalSeatedPax = categoryC.reduce((sum, c) => sum + c.firstRes.pax, 0);
+  if (totalSeatedPax > capacityAfter + maxWaitCapacity) {
+    const err = new Error(`新版面的座位不夠目前在場的 ${totalSeatedPax} 位客人，請先調整版面或等客人離場`);
+    err.status = 409;
+    err.code = 'INSUFFICIENT_SEATS_FOR_SEATED';
+    throw err;
+  }
+
+  // Reseat affected bookings in Category C and Category B
+  const reseatC = categoryC.filter(c => c.missingSeats.length > 0);
+  const reseatB = categoryB.filter(b => b.missingSeats.length > 0);
+
+  // Initialize occupancy map per session with non-moving, uncompleted bookings
+  const movingRefs = new Set([...reseatC.map(c => c.booking_ref), ...reseatB.map(b => b.booking_ref)]);
+  const completedRefs = new Set(categoryA.map(a => a.booking_ref));
+
+  const occMap = new Map();
+  for (const sess of sessions) {
+    if (!occMap.has(sess.id)) occMap.set(sess.id, new Set());
+    for (const r of sess.reservations) {
+      if (movingRefs.has(r.booking_ref) || completedRefs.has(r.booking_ref)) {
+        continue;
+      }
+      for (const sc of (r.assigned_seats || [])) {
+        if (!sc.startsWith('WAIT-') && activeNewSeats.has(sc)) {
+          occMap.get(sess.id).add(sc);
+        }
+      }
+    }
+  }
+
+  let waitCounter = 1;
+  const processedCategoryC = [];
+  const processedCategoryB = [];
+  const needsManual = [];
+
+  const tryReseatBooking = (b) => {
+    const bSessionIds = b.bResvs.map(r => r.session_id);
+    const unionOccupied = new Set();
+    for (const sid of bSessionIds) {
+      for (const sc of (occMap.get(sid) || [])) {
+        unionOccupied.add(sc);
+      }
+    }
+
+    const dummyResvs = [];
+    for (const sid of bSessionIds) {
+      for (const seatCode of unionOccupied) {
+        dummyResvs.push({
+          booking_ref: `__OCC_${sid}_${seatCode}__`,
+          session_id: sid,
+          pax: 1,
+          assigned_seats: [seatCode],
+          is_pinned: true,
+          attendance: 'checked_in'
+        });
+      }
+    }
+
+    const block = {
+      booking_ref: b.booking_ref,
+      pax: b.firstRes.pax,
+      session_ids: bSessionIds,
+      original_sessions: b.bResvs,
+      original_seats: b.firstRes.assigned_seats || []
+    };
+
+    let alloc = allocateWithLayout(dummyResvs, block, false, { layout: draft, rules: draft.rules_json });
+    if (!alloc.success || !alloc.updates?.[0]?.assigned_seats?.length || alloc.updates[0].assigned_seats.some(s => s.startsWith('WAIT-'))) {
+      alloc = allocateWithLayout(dummyResvs, block, true, { layout: draft, rules: draft.rules_json });
+    }
+
+    if (alloc.success && alloc.updates?.[0]?.assigned_seats?.length && !alloc.updates[0].assigned_seats.some(s => s.startsWith('WAIT-'))) {
+      const newSeats = alloc.updates[0].assigned_seats;
+      for (const sid of bSessionIds) {
+        for (const sc of newSeats) {
+          occMap.get(sid)?.add(sc);
+        }
+      }
+      return { success: true, to: newSeats, is_wait: false };
+    }
+
+    // Fallback to waiting area
+    const waitSeats = Array.from({ length: b.firstRes.pax }, () => `WAIT-${waitCounter++}`);
+    return { success: false, to: waitSeats, is_wait: true };
+  };
+
+  // 1. Reseat Category C (In-store guests)
+  for (const c of reseatC) {
+    const res = tryReseatBooking(c);
+    const sessionDateStr = toTaipeiDateString(c.firstRes.session.session_date);
+    const timeStr = `${c.bResvs[0].session.start_time}-${c.bResvs[c.bResvs.length - 1].session.end_time}`;
+    const item = {
+      booking_ref: c.booking_ref,
+      name: c.firstRes.user?.name || '客人',
+      pax: c.firstRes.pax,
+      time: timeStr,
+      date: sessionDateStr,
+      from: c.firstRes.assigned_seats || [],
+      to: res.to,
+      is_wait: res.is_wait,
+      persons: c.bPersons
+    };
+
+    if (res.is_wait) {
+      needsManual.push({ ...item, reason: '座位不足，放進等待區' });
+    } else {
+      processedCategoryC.push(item);
+    }
+  }
+
+  // 2. Reseat Category B (Upcoming bookings)
+  for (const b of reseatB) {
+    const res = tryReseatBooking(b);
+    const sessionDateStr = toTaipeiDateString(b.firstRes.session.session_date);
+    const timeStr = `${b.bResvs[0].session.start_time}-${b.bResvs[b.bResvs.length - 1].session.end_time}`;
+    const item = {
+      booking_ref: b.booking_ref,
+      name: b.firstRes.user?.name || '客人',
+      pax: b.firstRes.pax,
+      time: timeStr,
+      date: sessionDateStr,
+      from: b.firstRes.assigned_seats || [],
+      to: res.to,
+      is_wait: res.is_wait
+    };
+
+    if (res.is_wait) {
+      needsManual.push({ ...item, reason: '座位不足，放進等待區' });
+    } else {
+      processedCategoryB.push(item);
+    }
+  }
+
+  // 3. Process pinned Category B (staff-locked seats preserved, manual intervention needed)
+  for (const p of pinnedCategoryB) {
+    const sessionDateStr = toTaipeiDateString(p.firstRes.session.session_date);
+    const timeStr = `${p.bResvs[0].session.start_time}-${p.bResvs[p.bResvs.length - 1].session.end_time}`;
+    needsManual.push({
+      booking_ref: p.booking_ref,
+      name: p.firstRes.user?.name || '客人',
+      pax: p.firstRes.pax,
+      time: timeStr,
+      date: sessionDateStr,
+      missing_seats: p.missingSeats,
+      pinned: true,
+      reason: '手動鎖定座位，需人工確認',
+      from: p.firstRes.assigned_seats || [],
+      to: p.firstRes.assigned_seats || [],
+      persons: p.bPersons
+    });
+  }
+
+  // Construct affected_bookings for legacy/backward compatibility
+  const affectedBookings = [
+    ...processedCategoryC.map(c => ({
+      booking_ref: c.booking_ref,
+      name: c.name,
+      time: c.time,
+      missing_seats: c.from.filter(sc => !activeNewSeats.has(sc)),
+      pinned: true,
+      category: 'C'
+    })),
+    ...processedCategoryB.map(b => ({
+      booking_ref: b.booking_ref,
+      name: b.name,
+      time: b.time,
+      missing_seats: b.from.filter(sc => !activeNewSeats.has(sc)),
+      pinned: false,
+      category: 'B'
+    })),
+    ...needsManual.map(m => ({
+      booking_ref: m.booking_ref,
+      name: m.name,
+      time: m.time,
+      missing_seats: m.from.filter(sc => !activeNewSeats.has(sc)),
+      pinned: false,
+      category: 'wait'
+    }))
+  ];
+
+  return {
+    capacityBefore,
+    capacityAfter,
+    sessionsOverCapacity,
+    affectedBookings,
+    category_c: processedCategoryC,
+    category_b: processedCategoryB,
+    in_store_reseat: processedCategoryC,
+    auto_reseat: processedCategoryB,
+    needs_manual: needsManual,
+    sessions,
+    totalSeatedPax
+  };
+}
+
 export async function publishLayout(req, res) {
   try {
     const id = parseInt(req.params.id, 10);
-    const { effective_from, confirm } = req.body;
+    const { effective_from, confirm, manual_overrides = {} } = req.body;
     if (!confirm) {
       return res.status(400).json({ error: '請確認發布', code: 'CONFIRM_REQUIRED' });
     }
@@ -535,41 +839,10 @@ export async function publishLayout(req, res) {
 
     const staffName = req.user?.name || '店長';
 
+    // 1. Evaluate impact (throws 409 if seats + waiting cannot fit in-store seated guests)
+    const evaluation = await evaluateLayoutImpact(prisma, draft, effDate);
+
     const publishResult = await prisma.$transaction(async (tx) => {
-      const currentLayout = await getActiveLayoutForDate(tx, effDate);
-      const futureSessions = await tx.session.findMany({
-        where: { session_date: { gte: effDate } },
-        select: { max_capacity: true }
-      });
-      const capacityBefore = futureSessions.length > 0
-        ? Math.max(...futureSessions.map(s => s.max_capacity))
-        : (currentLayout?.capacity || 20);
-
-      // 1. If effective today, check if any deleted/disabled seats are currently occupied right now
-      if (effStr === todayStr) {
-        const activeSeatsInDraft = new Set(draft.seats.filter(s => s.is_active).map(s => s.code));
-        const todaySessions = await tx.session.findMany({
-          where: { session_date: effDate },
-          include: { reservations: { where: { status: 'confirmed', attendance: 'checked_in' } } }
-        });
-
-        const occupiedDeleted = new Set();
-        for (const sess of todaySessions) {
-          for (const r of sess.reservations) {
-            for (const s of (r.assigned_seats || [])) {
-              if (!activeSeatsInDraft.has(s)) {
-                occupiedDeleted.add(s);
-              }
-            }
-          }
-        }
-
-        if (occupiedDeleted.size > 0) {
-          const listStr = Array.from(occupiedDeleted).join('、');
-          throw new Error(`SEATS_OCCUPIED_TODAY:${listStr}`);
-        }
-      }
-
       // 2. Mark this layout as published and archive old layouts
       await tx.seatLayout.updateMany({
         where: {
@@ -580,7 +853,7 @@ export async function publishLayout(req, res) {
         data: { status: 'archived' }
       });
 
-      const capacity = draft.seats.filter(s => s.is_active && s.priority !== 'manual_only').length;
+      const capacity = evaluation.capacityAfter;
 
       await tx.seatLayout.update({
         where: { id },
@@ -637,95 +910,85 @@ export async function publishLayout(req, res) {
         }
       }
 
-      // 6. Reallocate reservations on deleted or disabled seats
-      const activeNewSeats = new Set(draft.seats.filter(s => s.is_active).map(s => s.code));
-      
-      const futureResvs = await tx.reservation.findMany({
-        where: {
-          session: { session_date: { gte: effDate } },
-          status: 'confirmed'
-        },
-        include: { session: true, user: true }
+      // 6. Apply reseat for Category C (in-store guests)
+      for (const c of evaluation.category_c) {
+        const targetSeats = manual_overrides[c.booking_ref] || c.to;
+        await tx.reservation.updateMany({
+          where: { booking_ref: c.booking_ref, status: { not: 'cancelled' } },
+          data: { assigned_seats: targetSeats }
+        });
+
+        for (let i = 0; i < c.persons.length; i++) {
+          await tx.bookingPerson.update({
+            where: { id: c.persons[i].id },
+            data: { seat_code: targetSeats[i] || null }
+          });
+        }
+      }
+
+      // 7. Apply reseat for Category B (upcoming bookings)
+      for (const b of evaluation.category_b) {
+        const targetSeats = manual_overrides[b.booking_ref] || b.to;
+        await tx.reservation.updateMany({
+          where: { booking_ref: b.booking_ref, status: { not: 'cancelled' } },
+          data: { assigned_seats: targetSeats }
+        });
+        if (b.bPersons && b.bPersons.length > 0) {
+          for (let i = 0; i < b.bPersons.length; i++) {
+            await tx.bookingPerson.update({
+              where: { id: b.bPersons[i].id },
+              data: { seat_code: targetSeats[i] || null }
+            });
+          }
+        }
+      }
+
+      // 8. Apply reseat for needs_manual (wait area or staff overrides)
+      for (const m of evaluation.needs_manual) {
+        const targetSeats = manual_overrides[m.booking_ref] || (m.pinned ? null : m.to);
+        if (targetSeats) {
+          await tx.reservation.updateMany({
+            where: { booking_ref: m.booking_ref, status: { not: 'cancelled' } },
+            data: { assigned_seats: targetSeats }
+          });
+
+          const mPersons = await tx.bookingPerson.findMany({ where: { booking_ref: m.booking_ref } });
+          for (let i = 0; i < mPersons.length; i++) {
+            await tx.bookingPerson.update({
+              where: { id: mPersons[i].id },
+              data: { seat_code: targetSeats[i] || null }
+            });
+          }
+        }
+      }
+
+      // 9. Write audit log
+      const countB = evaluation.category_b.length;
+      const countC = evaluation.category_c.length;
+      const countWait = evaluation.needs_manual.length;
+      await auditLog(tx, {
+        event_type: 'layout_published',
+        category: 'status',
+        summary: `發布座位版面：改排 ${countB} 筆、在場換座 ${countC} 筆、等待區 ${countWait} 筆`,
+        staff_name: staffName,
+        device_label: '管理後台'
       });
 
-      const bookingsMap = new Map();
-      for (const r of futureResvs) {
-        if (!bookingsMap.has(r.booking_ref)) {
-          bookingsMap.set(r.booking_ref, []);
-        }
-        bookingsMap.get(r.booking_ref).push(r);
-      }
-
-      const reallocated = [];
-      const needsManual = [];
-
-      const ctx = await loadAllocatorContext(tx, effDate);
-
-      for (const [bRef, bResvs] of bookingsMap.entries()) {
-        const firstRes = bResvs[0];
-        const assignedSeats = firstRes.assigned_seats || [];
-        const missingSeats = assignedSeats.filter(code => !activeNewSeats.has(code));
-        
-        if (missingSeats.length === 0) {
-          continue;
-        }
-
-        const isPinned = firstRes.attendance === 'checked_in' ||
-                         Boolean(firstRes.is_seat_locked) ||
-                         firstRes.seat_source === 'staff';
-
-        const sessionDateStr = toTaipeiDateString(firstRes.session.session_date);
-        const timeStr = `${bResvs[0].session.start_time}-${bResvs[bResvs.length - 1].session.end_time}`;
-
-        if (isPinned) {
-          needsManual.push({
-            booking_ref: bRef,
-            name: firstRes.user?.name || '客人',
-            date: sessionDateStr,
-            time: timeStr,
-            missing_seats: missingSeats,
-            pinned: true
-          });
-          continue;
-        }
-
-        // Try to reallocate movable reservation using reseatBookings
-        try {
-          const bSessionIds = bResvs.map(r => r.session_id);
-          const disp = await reseatBookings(tx, {
-            bookingRefs: [bRef],
-            reservedSeats: [],
-            sessionIds: bSessionIds
-          });
-          if (disp && disp.length) {
-            for (const d of disp) {
-              if (!reallocated.some(r => r.booking_ref === d.booking_ref)) {
-                reallocated.push(d);
-              }
-            }
-            continue;
-          }
-        } catch (reseatErr) {
-          // If reseat failed, fall through to needsManual
-        }
-
-        needsManual.push({
-          booking_ref: bRef,
-          name: firstRes.user?.name || '客人',
-          date: sessionDateStr,
-          time: timeStr,
-          missing_seats: missingSeats,
-          pinned: false
-        });
-      }
+      // 10. Assert no collisions in all touched sessions
+      const allTouchedSessionIds = [...new Set(evaluation.sessions.map(s => s.id))];
+      await assertNoSeatCollisions(tx, allTouchedSessionIds);
 
       return {
-        capacity_before: capacityBefore,
+        capacity_before: evaluation.capacityBefore,
         capacity_after: capacity,
         capacity,
         renamed: renamedBookings,
-        reallocated,
-        needs_manual: needsManual
+        category_c: evaluation.category_c,
+        category_b: evaluation.category_b,
+        in_store_reseat: evaluation.category_c,
+        auto_reseat: evaluation.category_b,
+        reallocated: [...evaluation.category_c, ...evaluation.category_b],
+        needs_manual: evaluation.needs_manual
       };
     });
 
@@ -735,12 +998,8 @@ export async function publishLayout(req, res) {
       ...publishResult
     });
   } catch (err) {
-    if (err.message?.startsWith('SEATS_OCCUPIED_TODAY:')) {
-      const seatsStr = err.message.replace('SEATS_OCCUPIED_TODAY:', '');
-      return res.status(409).json({
-        error: `這些座位現在有人坐，不能今天刪除：${seatsStr}`,
-        code: 'SEATS_OCCUPIED_TODAY'
-      });
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
     }
     console.error('publishLayout error:', err);
     return res.status(500).json({ error: '發布版面失敗', code: 'PUBLISH_LAYOUT_FAILED' });

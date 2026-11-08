@@ -81,6 +81,8 @@ export default function SeatLayoutPage() {
   const [previewPublishData, setPreviewPublishData] = useState(null);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [publishDate, setPublishDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [manualOverrides, setManualOverrides] = useState({});
+  const [editingOverrideRef, setEditingOverrideRef] = useState(null);
 
   // Allocation test state
   const [testPax, setTestPax] = useState(2);
@@ -314,9 +316,20 @@ export default function SeatLayoutPage() {
       setSaving(true);
       const res = await api.post(`/seat-layouts/${layout.id}/publish`, {
         effective_from: publishDate,
-        confirm: true
+        confirm: true,
+        manual_overrides: manualOverrides
       });
       setShowPublishConfirm(false);
+      if (res.data?.category_c?.length > 0 || res.data?.in_store_reseat?.length > 0) {
+        const catC = res.data.category_c || res.data.in_store_reseat;
+        const existingHints = JSON.parse(sessionStorage.getItem('sg_reseated_c_hints') || '{}');
+        for (const c of catC) {
+          const fromStr = (c.from || []).join('、');
+          const toStr = (manualOverrides[c.booking_ref] || c.to || []).join('、');
+          existingHints[c.booking_ref] = { from: fromStr, to: toStr };
+        }
+        sessionStorage.setItem('sg_reseated_c_hints', JSON.stringify(existingHints));
+      }
       if (res.data?.layout) {
         setLayout(res.data.layout);
       } else {
@@ -2663,17 +2676,140 @@ export default function SeatLayoutPage() {
         onClose={() => setShowPublishConfirm(false)}
         onConfirm={handleConfirmPublish}
         title="發布座位版面生效確認"
-        confirmText="確認發布並排位"
+        confirmText="發布並套用新座位"
+        cancelText="先不要"
         variant="primary"
+        loading={saving}
       >
-        <div className="space-y-3 text-[13px]">
-          <p className="text-sg-ink">
-            即將自 <span className="font-bold text-sg-brown">{publishDate}</span> 起發布新生效版面。
-          </p>
+        <div className="space-y-3.5 text-[13px] max-h-[70vh] overflow-y-auto pr-1">
           {previewPublishData && (
-            <div className="bg-sg-paper p-3 rounded-2xl border border-sg-line space-y-1">
-              <div>總容量：<span className="font-bold text-sg-ink font-num">{previewPublishData.capacity}</span> 席</div>
-              <div>受影響時段預約：<span className="font-bold text-sg-ink font-num">{previewPublishData.impacted_bookings_count || 0}</span> 筆</div>
+            <div className="bg-sg-paper p-3 rounded-2xl border border-sg-line text-[12px] space-y-1">
+              <div className="font-bold text-sg-ink">
+                每個時段的預約上限：{previewPublishData.capacity_before ?? 20} 人 → {previewPublishData.capacity_after ?? previewPublishData.capacity} 人
+              </div>
+              <div className="text-sg-muted">
+                生效日期：<span className="font-bold text-sg-brown">{publishDate}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Category C: 需要換座位的在場客人 */}
+          {previewPublishData?.category_c?.length > 0 && (
+            <div className="space-y-2">
+              <div>
+                <div className="font-bold text-sg-ink text-[13px]">需要換座位的在場客人</div>
+                <div className="text-[11px] text-sg-muted">發布後請帶客人移到新座位，計時不會中斷</div>
+              </div>
+              <div className="space-y-1.5">
+                {previewPublishData.category_c.map((c) => {
+                  const currentTo = (manualOverrides[c.booking_ref] || c.to || []).join('、');
+                  const fromStr = (c.from || []).join('、');
+                  const isEditing = editingOverrideRef === c.booking_ref;
+
+                  return (
+                    <div key={c.booking_ref} className="p-2.5 rounded-xl border border-sg-line bg-white space-y-2">
+                      <div className="flex items-center justify-between text-[12px]">
+                        <div>
+                          <span className="font-bold text-sg-ink">{c.name}</span>
+                          <span className="text-sg-muted"> · {c.pax} 位：</span>
+                          <span className="text-sg-muted">{fromStr}</span>
+                          <span className="mx-1 text-sg-brown font-bold">→</span>
+                          <span className="font-bold text-sg-brown font-num">{currentTo}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditingOverrideRef(isEditing ? null : c.booking_ref)}
+                          className="px-2.5 py-0.5 rounded-lg border border-sg-line text-[11px] font-bold text-sg-ink hover:bg-sg-paper transition shadow-2xs"
+                        >
+                          {isEditing ? '完成' : '改'}
+                        </button>
+                      </div>
+
+                      {/* Seat picker if editing */}
+                      {isEditing && (
+                        <div className="pt-2 border-t border-sg-line space-y-1.5">
+                          <label className="text-[11px] text-sg-muted block">挑選新座位（需選 {c.pax} 個）：</label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(layout?.seats || []).filter(s => s.is_active).map(s => {
+                              const selected = (manualOverrides[c.booking_ref] || c.to || []).includes(s.code);
+                              return (
+                                <button
+                                  key={s.code}
+                                  type="button"
+                                  onClick={() => {
+                                    const currentList = manualOverrides[c.booking_ref] || [...c.to];
+                                    let nextList;
+                                    if (currentList.includes(s.code)) {
+                                      nextList = currentList.filter(x => x !== s.code);
+                                    } else {
+                                      if (currentList.length >= c.pax) {
+                                        nextList = [...currentList.slice(1), s.code];
+                                      } else {
+                                        nextList = [...currentList, s.code];
+                                      }
+                                    }
+                                    setManualOverrides(prev => ({ ...prev, [c.booking_ref]: nextList }));
+                                  }}
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition ${
+                                    selected ? 'bg-sg-brown text-white border-sg-brown' : 'bg-sg-paper text-sg-ink border-sg-line hover:border-sg-brown'
+                                  }`}
+                                >
+                                  {s.code}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Category B: 會自動改排的預約 */}
+          {previewPublishData?.category_b?.length > 0 && (
+            <div className="space-y-2">
+              <div className="font-bold text-sg-ink text-[13px]">會自動改排的預約</div>
+              <div className="space-y-1.5">
+                {previewPublishData.category_b.map((b) => {
+                  const fromStr = (b.from || []).join('、');
+                  const toStr = (b.to || []).join('、');
+                  const timeStr = b.time ? ` ${b.time}：` : '：';
+                  return (
+                    <div key={b.booking_ref} className="p-2.5 rounded-xl border border-sg-line bg-white text-[12px]">
+                      <span className="font-bold text-sg-ink">{b.name}</span>
+                      <span className="text-sg-muted">{timeStr}</span>
+                      <span className="text-sg-muted">{fromStr}</span>
+                      <span className="mx-1 text-sg-brown font-bold">→</span>
+                      <span className="font-bold text-sg-brown font-num">{toStr}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Needs Manual: 放進等待區、需要手動帶位 */}
+          {previewPublishData?.needs_manual?.length > 0 && (
+            <div className="space-y-2">
+              <div className="font-bold text-amber-900 text-[13px]">放進等待區、需要手動帶位</div>
+              <div className="space-y-1.5">
+                {previewPublishData.needs_manual.map((m) => {
+                  const fromStr = (m.from || []).join('、');
+                  const toStr = (m.to || []).join('、');
+                  return (
+                    <div key={m.booking_ref} className="p-2.5 rounded-xl border border-amber-200 bg-amber-50 text-[12px] text-amber-950">
+                      <span className="font-bold">{m.name}</span>
+                      <span className="text-amber-800"> · {m.pax} 位：</span>
+                      <span>{fromStr}</span>
+                      <span className="mx-1 font-bold">→</span>
+                      <span className="font-bold font-num">{toStr}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

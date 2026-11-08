@@ -342,7 +342,7 @@ export async function assertNoSeatCollisions(tx, sessionIds) {
   const collisions = await tx.$queryRawUnsafe(`
     SELECT session_id, seat, count(distinct booking_ref)::int as count
     FROM "Reservation", unnest(assigned_seats) seat
-    WHERE status <> 'cancelled' AND seat NOT LIKE 'WAIT-%'
+    WHERE status <> 'cancelled' AND (attendance IS NULL OR attendance <> 'completed') AND seat NOT LIKE 'WAIT-%'
       AND session_id IN (${numSessionIds.join(',')})
     GROUP BY 1, 2 HAVING count(distinct booking_ref) > 1
   `);
