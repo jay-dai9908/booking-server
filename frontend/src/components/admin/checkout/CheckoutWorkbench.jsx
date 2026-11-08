@@ -35,7 +35,7 @@ import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
 import { displayBoardName } from '@shared/billing.js';
-import { personElapsedMinutes, formatElapsedText, extractTimeHHMM, bookingDurationText } from '../../../utils/admin/floorSelectors';
+import { personElapsedMinutes, formatElapsedText, extractTimeHHMM, bookingDurationText, formatBookingRef } from '../../../utils/admin/floorSelectors';
 
 export default function CheckoutWorkbench({
   isOpen = false,
@@ -1512,8 +1512,8 @@ export default function CheckoutWorkbench({
       <ResponsivePanel
         isOpen={showCollectModal}
         onClose={() => setShowCollectModal(false)}
-        title={`一併收款 NT$${netDue}`}
-        subtitle={`${unpaidPersons.length} 位顧客 · 單號 ${booking.ref_display || bookingRef}`}
+        title={`收款 NT$${Number(netDue).toLocaleString()}`}
+        subtitle={`${unpaidPersons.length} 位一起 · ${booking.ref_display || formatBookingRef(bookingRef)}`}
         footer={
           <div className="space-y-3">
             {collectError && (
@@ -1538,7 +1538,7 @@ export default function CheckoutWorkbench({
                 onClick={handleCollectFullOrder}
                 loading={collectLoading}
               >
-                確認收款 NT${netDue}
+                確認收款 NT${Number(netDue).toLocaleString()}
               </Button>
             </div>
           </div>

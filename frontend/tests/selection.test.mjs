@@ -153,4 +153,12 @@ describe('Customer booking selection mode switching (Section 2.2)', () => {
     const fileContent = fs.readFileSync(filePath, 'utf-8');
     assert.ok(!fileContent.includes('已避開冷氣出風口並優先安排同側或相鄰座位。'), 'Must not have hardcoded fallback reason');
   });
+
+  test('7. Spec 2.7: CheckoutWorkbench collect modal title has thousand separator and subtitle has 位一起', () => {
+    const filePath = path.resolve('frontend/src/components/admin/checkout/CheckoutWorkbench.jsx');
+    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    assert.ok(!fileContent.includes('一併收款 NT${netDue}'), 'Must not use unformatted 一併收款 title');
+    assert.ok(!fileContent.includes('位顧客 · 單號'), 'Must use "位一起 · BK-..." subtitle instead of "位顧客 · 單號"');
+    assert.ok(fileContent.includes('Number(netDue).toLocaleString()'), 'Must format netDue with toLocaleString()');
+  });
 });
