@@ -168,4 +168,11 @@ describe('Customer booking selection mode switching (Section 2.2)', () => {
     assert.ok(fileContent.includes('{summaryDetails}'), 'Must use summaryDetails instead of fullSummaryLine');
     assert.ok(!fileContent.includes('{fullSummaryLine}'), 'Second line must not render fullSummaryLine');
   });
+
+  test('9. Spec 2.10: SeatingPage board usage summary has whitespace-nowrap and shrink-0 on label', () => {
+    const filePath = path.resolve('frontend/src/pages/Admin/SeatingPage.jsx');
+    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    assert.ok(fileContent.includes('className="text-sg-muted font-bold whitespace-nowrap shrink-0">智能板租借</span>'), 'Label must have whitespace-nowrap and shrink-0');
+    assert.ok(fileContent.includes('break-words min-w-0'), 'Content must have break-words and min-w-0');
+  });
 });

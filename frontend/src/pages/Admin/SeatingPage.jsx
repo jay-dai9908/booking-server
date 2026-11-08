@@ -727,9 +727,9 @@ export default function SeatingPage() {
         <div className="space-y-4">
           {/* Mobile Board Usage Summary (Spec 3.4) */}
           {boardUsage.length > 0 && (
-            <div className="lg:hidden bg-sg-paper/80 border border-sg-line px-3.5 py-2 rounded-2xl flex items-center justify-between text-[12px]">
-              <span className="text-sg-muted font-bold">智能板租借</span>
-              <span className="font-bold text-sg-ink">
+            <div className="lg:hidden bg-sg-paper/80 border border-sg-line px-3.5 py-2 rounded-2xl flex items-center justify-between text-[12px] gap-2">
+              <span className="text-sg-muted font-bold whitespace-nowrap shrink-0">智能板租借</span>
+              <span className="font-bold text-sg-ink text-right break-words min-w-0">
                 {boardUsage.map(bu => `${displayBoardName(bu.name)} ${bu.in_use}/${bu.total}`).join(' · ')}
               </span>
             </div>
