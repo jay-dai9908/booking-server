@@ -12,6 +12,7 @@
  */
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
 
 if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
   console.error('請設定 ADMIN_PASSWORD 環境變數');
@@ -61,6 +62,17 @@ const FORBIDDEN_TEXT_PATTERNS = [
 ];
 
 export async function runLayoutEdgesTest() {
+  if (process.env.TEST_DATABASE_URL) {
+    const cleanDbUrl = process.env.TEST_DATABASE_URL.split('?')[0];
+    const dbName = cleanDbUrl.split('/').pop();
+    if (!dbName || !dbName.endsWith('_test')) {
+      console.error(`TEST_DATABASE_URL database name "${dbName}" must end with "_test"! Refusing to run tests.`);
+      process.exit(1);
+    }
+  }
+
+  await ensureFreshDbSeeded();
+
   console.log(`Starting Layout Edges Verification on ${BASE_URL}...`);
   const launchOptions = { headless: HEADLESS };
   if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {

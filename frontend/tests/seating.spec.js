@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
 
 const require = createRequire(import.meta.url);
 const testDbUrl = process.env.TEST_DATABASE_URL;
@@ -52,6 +53,7 @@ async function cleanupTestData(bookingRefs = []) {
 }
 
 export async function runSeatingTests() {
+  await ensureFreshDbSeeded(prisma);
   console.log(`Starting Seating Verification on ${BASE_URL} (Headless: ${HEADLESS})...`);
 
   const launchOptions = { headless: HEADLESS };

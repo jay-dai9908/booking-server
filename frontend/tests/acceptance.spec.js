@@ -1,6 +1,8 @@
 // 注意：執行前請先跑 npx playwright install chromium
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
+import { toTaipeiDateString } from '../../shared/time.js';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
@@ -10,6 +12,17 @@ async function run() {
     console.error('請設定 ADMIN_PASSWORD 環境變數');
     process.exit(1);
   }
+
+  if (process.env.TEST_DATABASE_URL) {
+    const cleanDbUrl = process.env.TEST_DATABASE_URL.split('?')[0];
+    const dbName = cleanDbUrl.split('/').pop();
+    if (!dbName || !dbName.endsWith('_test')) {
+      console.error(`TEST_DATABASE_URL database name "${dbName}" must end with "_test"! Refusing to run tests.`);
+      process.exit(1);
+    }
+  }
+
+  await ensureFreshDbSeeded();
 
   console.log(`Starting Acceptance Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
   const launchOptions = { headless: HEADLESS };
@@ -68,6 +81,36 @@ async function run() {
     console.log('\n--- Section 1.1 Acceptance Flow: Checkout Workbench Addon ---');
     try {
       const apiBase = process.env.API_BASE || 'http://localhost:3001/api';
+
+      // Dynamically get or create session for today
+      const todayStr = toTaipeiDateString(new Date());
+      let sessionRes = await page.request.get(`${apiBase}/sessions?date=${todayStr}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      let sessions = [];
+      if (sessionRes.ok()) {
+        sessions = await sessionRes.json();
+      }
+      if (!sessions || sessions.length === 0) {
+        console.log('No sessions found for today, creating bulk sessions...');
+        await page.request.post(`${apiBase}/sessions`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          data: {
+            session_dates: [todayStr],
+            start_time: '10:00',
+            end_time: '21:00'
+          }
+        });
+        sessionRes = await page.request.get(`${apiBase}/sessions?date=${todayStr}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        sessions = await sessionRes.json();
+      }
+
+      assert.ok(sessions && sessions.length > 0, 'Must have at least one session for today');
+      const testSession = sessions[0];
+
+      // Create reservation via admin reservation API
       const bookRes = await page.request.post(`${apiBase}/reservations/admin`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -76,14 +119,28 @@ async function run() {
           name: '工作台加購客',
           phone: '0988111222',
           pax: 1,
-          session_ids: [474],
-          attendance: 'checked_in',
-          autoCheckIn: true
+          session_ids: [testSession.id]
         }
       });
       const bookJson = await bookRes.json();
       const testRef = bookJson.booking_ref || bookJson.reservation?.booking_ref;
+      assert.ok(testRef, `Failed to create reservation: ${JSON.stringify(bookJson)}`);
       console.log('Test booking for checkout workbench:', testRef);
+
+      // Check-in and seat the reservation
+      const allocatedSeats = (Array.isArray(bookJson.assigned_seats) && bookJson.assigned_seats.length > 0)
+        ? bookJson.assigned_seats
+        : ['A1-1'];
+      const checkInRes = await page.request.post(`${apiBase}/floor/${testRef}/check-in`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        data: {
+          seats: allocatedSeats,
+          start_timer: true
+        }
+      });
+      console.log('Check-in status:', checkInRes.status());
 
       await page.goto(`${BASE_URL}/admin/accounting`, { waitUntil: 'networkidle', timeout: 15000 });
       // Switch to unpaid tab

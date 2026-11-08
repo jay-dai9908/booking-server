@@ -8,6 +8,7 @@
  */
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
@@ -38,6 +39,17 @@ export async function runAdminSmoke() {
     console.error('請設定 ADMIN_PASSWORD 環境變數');
     process.exit(1);
   }
+
+  if (process.env.TEST_DATABASE_URL) {
+    const cleanDbUrl = process.env.TEST_DATABASE_URL.split('?')[0];
+    const dbName = cleanDbUrl.split('/').pop();
+    if (!dbName || !dbName.endsWith('_test')) {
+      console.error(`TEST_DATABASE_URL database name "${dbName}" must end with "_test"! Refusing to run tests.`);
+      process.exit(1);
+    }
+  }
+
+  await ensureFreshDbSeeded();
 
   console.log(`Starting Admin Smoke Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
 

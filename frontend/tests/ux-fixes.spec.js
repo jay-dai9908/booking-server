@@ -5,6 +5,7 @@ import path from 'node:path';
 import { PrismaClient } from '../../backend/node_modules/@prisma/client/index.js';
 import jwt from '../../backend/node_modules/jsonwebtoken/index.js';
 import { generateIcsContent } from '../src/utils/calendarHelper.js';
+import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const API_BASE = process.env.API_BASE || 'http://localhost:3001/api';
@@ -34,6 +35,7 @@ async function run() {
     process.exit(1);
   }
   const adminPassword = process.env.ADMIN_PASSWORD.trim();
+  await ensureFreshDbSeeded(prisma);
   console.log(`Starting UX Fixes Tests on ${BASE_URL} (Headless: ${HEADLESS})...`);
 
   // Setup test customer token
