@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import api from '../api/axios';
 import ConfirmPanel from './admin/ConfirmPanel';
+import { formatBookingRef } from '../utils/admin/floorSelectors';
 
 const ExtendTimeModal = lazy(() => import('./ExtendTimeModal'));
 const EquipmentAddonModal = lazy(() => import('./EquipmentAddonModal'));
@@ -232,7 +233,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-medium text-gray-500 mb-1">訂單編號</h3>
-                <p className="text-sm text-gray-800 font-mono">{reservation.booking_ref}</p>
+                <p className="text-sm text-gray-800 font-mono font-bold">{formatBookingRef(reservation.booking_ref)}</p>
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -578,7 +579,7 @@ export default function ReservationDetailsModal({ reservation, onClose, onUpdate
                         className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 shadow-sm ${
                           reservation.is_paid 
                             ? 'bg-emerald-50 border border-emerald-300 text-emerald-800 hover:bg-emerald-100' 
-                            : 'bg-gradient-to-r from-indigo-600 to-emerald-600 text-white hover:from-indigo-700 hover:to-emerald-700'
+                            : 'bg-sg-brown hover:bg-sg-brown-hover text-white'
                         }`}
                       >
                         <CreditCard className="w-4 h-4" />

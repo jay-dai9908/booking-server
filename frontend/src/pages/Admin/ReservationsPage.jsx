@@ -5,6 +5,7 @@ import api from '../../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from '../../components/ReservationDetailsModal';
 import StatusPill from '../../components/admin/StatusPill';
 import CheckInPanel from '../../components/admin/floor/CheckInPanel';
+import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
 
@@ -70,6 +71,14 @@ export default function ReservationsPage() {
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending_checkin' | 'checked_in' | 'unpaid' | 'cancelled'
   const [checkingInRef, setCheckingInRef] = useState(null);
   const [checkInBooking, setCheckInBooking] = useState(null);
+  const [toastMsg, setToastMsg] = useState(null);
+  const [deleteRecordTarget, setDeleteRecordTarget] = useState(null);
+  const [isDeletingRecord, setIsDeletingRecord] = useState(false);
+
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3000);
+  };
   
   // Pagination & Month filter
   const [page, setPage] = useState(1);
@@ -182,30 +191,40 @@ export default function ReservationsPage() {
       if (selectedReservation && selectedReservation.booking_ref === booking_ref) {
         setSelectedReservation(prev => ({ ...prev, attendance }));
       }
+      showToast('狀態已成功更新');
     } catch (err) {
       console.error(err);
-      alert('更新狀態失敗');
+      showToast('更新狀態失敗');
     }
   };
 
   const handleCancelReservation = async (id) => {
     try {
       await api.delete(`/reservations/${id}`);
+      showToast('預約已成功取消');
       fetchReservations();
     } catch (err) {
-      alert(err.response?.data?.error || '取消失敗');
+      showToast(err.response?.data?.error || '取消失敗');
     }
   };
 
-  const handleDeleteReservationRecord = async (id) => {
-    if (window.confirm('確定要永久刪除此筆訂單紀錄嗎？此操作無法復原。')) {
-      try {
-        await api.delete(`/reservations/${id}/record`);
-        fetchReservations();
-        setSelectedReservation(null);
-      } catch (err) {
-        alert(err.response?.data?.error || '刪除失敗');
-      }
+  const handleDeleteReservationRecord = (id) => {
+    setDeleteRecordTarget(id);
+  };
+
+  const executeDeleteReservationRecord = async () => {
+    if (!deleteRecordTarget) return;
+    try {
+      setIsDeletingRecord(true);
+      await api.delete(`/reservations/${deleteRecordTarget}/record`);
+      showToast('訂單紀錄已永久刪除');
+      fetchReservations();
+      setSelectedReservation(null);
+      setDeleteRecordTarget(null);
+    } catch (err) {
+      showToast(err.response?.data?.error || '刪除失敗');
+    } finally {
+      setIsDeletingRecord(false);
     }
   };
 
@@ -234,7 +253,7 @@ export default function ReservationsPage() {
   const handleManualSubmit = async (e) => {
     e.preventDefault();
     if (manualSelectedSessions.length === 0) {
-      alert('請至少選擇一個時段');
+      showToast('請至少選擇一個時段');
       return;
     }
     const sortedSessions = [...manualSelectedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
@@ -257,7 +276,7 @@ export default function ReservationsPage() {
         isWalkIn: true,
         equipments: equipmentsPayload
       });
-      alert('手動預約建立成功！');
+      showToast('手動預約建立成功！');
       setShowManualBooking(false);
       setManualName('');
       setManualPhone('');
@@ -267,7 +286,7 @@ export default function ReservationsPage() {
       fetchReservations();
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
-      alert(err.response?.data?.error || '手動預約失敗');
+      showToast(err.response?.data?.error || '手動預約失敗');
     }
   };
 
@@ -278,10 +297,11 @@ export default function ReservationsPage() {
     setCheckingInRef(bookingRef);
     try {
       await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'checked_in' });
+      showToast('已完成報到');
       fetchReservations();
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
-      alert('報到更新失敗');
+      showToast('報到更新失敗');
     } finally {
       setCheckingInRef(null);
     }
@@ -505,6 +525,9 @@ export default function ReservationsPage() {
                               ? r.time_blocks.map(b => `${b.start_time} - ${b.end_time}`).join(', ')
                               : `${r.start_time} - ${r.end_time}`} 
                             ({r.session_count}小時)
+                          </span>
+                          <span className="font-mono text-[11px] font-bold text-sg-brown mt-0.5">
+                            {formatBookingRef(r.booking_ref)}
                           </span>
                         </div>
                       </td>
@@ -850,6 +873,25 @@ export default function ReservationsPage() {
           window.dispatchEvent(new CustomEvent('admin-data-updated'));
         }}
       />
+
+      {/* Delete Record Confirmation Panel */}
+      <ConfirmPanel
+        isOpen={Boolean(deleteRecordTarget)}
+        onClose={() => setDeleteRecordTarget(null)}
+        onConfirm={executeDeleteReservationRecord}
+        loading={isDeletingRecord}
+        title="確定永久刪除此訂單紀錄？"
+        message="此操作將永久清除此預約及其歷史資料，且無法復原。"
+        confirmText="確認刪除"
+        confirmVariant="danger"
+      />
+
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="fixed bottom-6 right-6 z-50 bg-sg-ink text-white px-4 py-2.5 rounded-2xl shadow-xl text-[13px] font-bold flex items-center gap-2 animate-fade-in">
+          <span>{toastMsg}</span>
+        </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         .animate-in { animation: animateIn 0.4s ease-out forwards; }
