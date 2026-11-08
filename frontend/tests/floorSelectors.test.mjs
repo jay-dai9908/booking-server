@@ -246,4 +246,27 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(pillOverdueHour.label, '已過保留時間 1 小時 38 分');
     assert.strictEqual(pillOverdueHour.variant, 'danger');
   });
+
+  await t.test('10. Spec 2.1: Lin Hsiao-mei 15:00-19:00 booked duration and raw person timer calculation', () => {
+    const linBooking = {
+      start_time: '15:00',
+      end_time: '19:00'
+    };
+    assert.strictEqual(bookedMinutes(linBooking), 240);
+    assert.strictEqual(bookingDurationText(linBooking), '15:00 到 19:00 · 4 小時');
+
+    // Raw person directly from GET /billing/:ref without nested .timer object
+    const rawPerson = {
+      person_no: 1,
+      billing_start_at: '2026-11-08T15:00:00+08:00',
+      timer_started_at: '2026-11-08T15:00:00+08:00',
+      timer_ended_at: null,
+      paused_at: null,
+      paused_seconds: 0
+    };
+    const now = new Date('2026-11-08T15:39:00+08:00');
+    const elapsed = personElapsedMinutes(rawPerson, now);
+    assert.strictEqual(elapsed, 39);
+    assert.strictEqual(formatElapsedText(elapsed), '0:39');
+  });
 });

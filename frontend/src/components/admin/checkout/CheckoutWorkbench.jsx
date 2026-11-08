@@ -35,7 +35,7 @@ import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
 import { displayBoardName } from '@shared/billing.js';
-import { personElapsedMinutes, formatElapsedText, extractTimeHHMM } from '../../../utils/admin/floorSelectors';
+import { personElapsedMinutes, formatElapsedText, extractTimeHHMM, bookingDurationText } from '../../../utils/admin/floorSelectors';
 
 export default function CheckoutWorkbench({
   isOpen = false,
@@ -606,13 +606,7 @@ export default function CheckoutWorkbench({
               <div>
                 <span className="text-sg-muted block">預約時段</span>
                 <span className="font-bold text-sg-ink">
-                  {(() => {
-                    const startT = booking.start_time || (booking.start_at ? extractTimeHHMM(booking.start_at) : '');
-                    const endT = booking.end_time || (booking.end_at ? extractTimeHHMM(booking.end_at) : '');
-                    const hours = booking.booked_minutes ? Math.round(booking.booked_minutes / 60) : (booking.session_count || 1);
-                    if (startT && endT) return `${startT} 到 ${endT} · ${hours} 小時`;
-                    return `${booking.session_time_range || '未定'} · ${hours} 小時`;
-                  })()}
+                  {bookingDurationText(booking)}
                 </span>
               </div>
               <div>

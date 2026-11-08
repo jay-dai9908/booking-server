@@ -55,6 +55,13 @@ export function bookingTimeRange(bookingOrStart, maybeEnd) {
   return '';
 }
 
+function parseTimeToMinutes(t) {
+  if (!t || typeof t !== 'string') return null;
+  const match = t.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return null;
+  return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+}
+
 export function bookedMinutes(booking, maybeEnd) {
   let start_at = booking?.start_at;
   let end_at = booking?.end_at;
@@ -62,13 +69,37 @@ export function bookedMinutes(booking, maybeEnd) {
     start_at = booking;
     end_at = maybeEnd;
   }
+
+  const startTimeStr = booking?.start_time || (typeof start_at === 'string' && start_at.includes(':') && !start_at.includes('T') ? start_at : null);
+  const endTimeStr = booking?.end_time || (typeof end_at === 'string' && end_at.includes(':') && !end_at.includes('T') ? end_at : null);
+
+  if (startTimeStr && endTimeStr) {
+    const sMin = parseTimeToMinutes(startTimeStr);
+    const eMin = parseTimeToMinutes(endTimeStr);
+    if (sMin !== null && eMin !== null && eMin > sMin) {
+      return eMin - sMin;
+    }
+  }
+
+  if (Array.isArray(booking?.sessions) && booking.sessions.length > 0) {
+    const sorted = [...booking.sessions].sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+    const sMin = parseTimeToMinutes(sorted[0].start_time);
+    const eMin = parseTimeToMinutes(sorted[sorted.length - 1].end_time);
+    if (sMin !== null && eMin !== null && eMin > sMin) {
+      return eMin - sMin;
+    }
+  }
+
   if (!start_at || !end_at) {
     if (booking?.session_count) return booking.session_count * 60;
     return 60;
   }
   const s = new Date(start_at).getTime();
   const e = new Date(end_at).getTime();
-  if (isNaN(s) || isNaN(e) || e <= s) return 60;
+  if (isNaN(s) || isNaN(e) || e <= s) {
+    if (booking?.session_count) return booking.session_count * 60;
+    return 60;
+  }
   return Math.round((e - s) / 60000);
 }
 
@@ -84,7 +115,7 @@ export function bookingDurationText(booking, maybeEnd) {
 }
 
 export function personElapsedMinutes(person, now = new Date()) {
-  const timer = person?.timer;
+  const timer = person?.timer || person;
   if (!timer) return 0;
 
   const startIso = timer.billing_start_at || timer.timer_started_at;
@@ -114,7 +145,7 @@ export function formatElapsedText(elapsedMinutes) {
 }
 
 export function personTimerState(person, booking, now = new Date()) {
-  const timer = person?.timer;
+  const timer = person?.timer || person;
   if (!timer || !timer.timer_started_at) return 'not_started';
   if (timer.timer_ended_at) return 'ended';
   if (timer.paused_at) return 'paused';
