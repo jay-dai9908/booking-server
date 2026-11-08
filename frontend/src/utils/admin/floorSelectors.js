@@ -263,3 +263,19 @@ export function groupTimerPill(booking, now = new Date()) {
 
   return { label: '計時中', variant: 'active' };
 }
+
+export function isBookingCompleted(booking) {
+  if (!booking) return false;
+  if (booking.attendance === 'completed') return true;
+  if (booking.attendance === 'checked_in') {
+    const persons = booking.persons || [];
+    if (persons.length > 0 && persons.every(p => {
+      const tm = p.timer || p;
+      return Boolean(tm.timer_ended_at);
+    })) {
+      return true;
+    }
+  }
+  return false;
+}
+

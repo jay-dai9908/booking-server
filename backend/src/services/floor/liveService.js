@@ -328,6 +328,12 @@ export async function getLiveFloorData(dateStr = null) {
     const activePersons = bPersons.filter(p => p.status === 'active');
     const personsTotal = activePersons.length || firstRes.pax;
 
+    const allPersonsEnded = bPersons.length > 0 && bPersons.every(p => p.timer_ended_at);
+    let resolvedAttendance = firstRes.attendance || null;
+    if (resolvedAttendance === 'checked_in' && allPersonsEnded) {
+      resolvedAttendance = 'completed';
+    }
+
     const bookingItem = {
       booking_ref: bRef,
       ref_display: refDisplay,
@@ -337,13 +343,13 @@ export async function getLiveFloorData(dateStr = null) {
       start_at: startAtStr,
       end_at: endAtStr,
       is_walk_in: Boolean(firstRes.is_walk_in),
-      attendance: firstRes.attendance || null,
+      attendance: resolvedAttendance,
       checked_in_at: firstRes.checked_in_at ? firstRes.checked_in_at.toISOString() : null,
       checked_in_by: firstRes.checked_in_by || null,
       seat_source: firstRes.seat_source || 'auto',
       is_seat_locked: Boolean(firstRes.is_seat_locked),
       assigned_seats: firstRes.assigned_seats || [],
-      needs_seating: Boolean((firstRes.attendance === 'checked_in' || firstRes.checked_in_at) && bPersons.length === 0),
+      needs_seating: Boolean((resolvedAttendance === 'checked_in' || firstRes.checked_in_at) && bPersons.length === 0),
       billing: {
         status: statusObj.code,
         paid_persons: firstRes.paid_persons ?? 0,
@@ -379,7 +385,7 @@ export async function getLiveFloorData(dateStr = null) {
     bookings.push(bookingItem);
 
     // Alerts check for checked-in and active bookings
-    if (firstRes.attendance === 'checked_in') {
+    if (resolvedAttendance === 'checked_in') {
       const nowMs = serverNow.getTime();
       const bookedMinutes = Math.max(0, Math.floor((endDt.getTime() - startDt.getTime()) / 60000));
       const tableDisplay = getTableDisplay(firstRes.assigned_seats);

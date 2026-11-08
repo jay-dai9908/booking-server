@@ -14,6 +14,7 @@ if (!dbName || !dbName.endsWith('_test')) {
   console.error(`TEST_DATABASE_URL database name "${dbName}" must end with "_test"! Refusing to run tests.`);
   process.exit(1);
 }
+const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
@@ -354,8 +355,61 @@ export async function runSeatingTests() {
 
       console.log('  ✔ Step 7 PASSED: Needs seating banner and completion verified');
 
-      // Step 8: Assert no errors and no forbidden patterns
-      console.log('Step 8: Verifying zero page errors and no forbidden tokens...');
+      // Step 8 (Spec 2.2): 付款且結束計時後，「使用中」減少 1 組、「已離場」增加 1 組，該桌號回到可用狀態
+      console.log('Step 8 (Spec 2.2): Ending timers and verifying move to "已離場" and seat release...');
+      const endTimerRes = await page.request.post(`${API_BASE}/floor/${testRef2}/timer`, {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { target_person_nos: [1], action: 'end' }
+      });
+      assert.strictEqual(endTimerRes.status(), 200, 'End timer API should return 200');
+
+      await page.request.post(`${API_BASE}/billing/${testRef2}/payments`, {
+        headers: { Authorization: `Bearer ${token}` },
+        data: {
+          kind: 'charge',
+          method: 'cash',
+          amount: 200,
+          person_nos: [1],
+          note: 'test payment'
+        }
+      }).catch(() => {});
+
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+
+      const listTab5 = page.locator('button:has-text("名單")').first();
+      if (await listTab5.isVisible().catch(() => false)) {
+        await listTab5.click();
+        await page.waitForTimeout(400);
+      }
+
+      // 1. Completed bookings count increases
+      const completedSection = page.locator('button:has-text("已離場")').first();
+      await completedSection.waitFor({ state: 'visible', timeout: 8000 });
+      const completedText = await completedSection.innerText();
+      assert.ok(completedText.includes('已離場 1 組'), `Expected "已離場 1 組", got "${completedText}"`);
+
+      // 2. In-use bookings count decreases to 1
+      const inUseHeading = page.locator('h2:has-text("使用中")').first();
+      const inUseText = await inUseHeading.innerText();
+      assert.ok(inUseText.includes('使用中 (1)'), `Expected "使用中 (1)", got "${inUseText}"`);
+
+      // 3. Table/seat A2-1 returns to available
+      const floorTab = page.locator('button:has-text("平面圖")').first();
+      if (await floorTab.isVisible().catch(() => false)) {
+        await floorTab.click();
+        await page.waitForTimeout(600);
+        const seatTile = page.locator('[data-seat-code="A2-1"]').first();
+        if (await seatTile.isVisible().catch(() => false)) {
+          const seatClasses = await seatTile.getAttribute('class') || '';
+          assert.ok(!seatClasses.includes('bg-sg-sage'), 'Seat A2-1 should not be in_use after completion');
+        }
+      }
+      console.log('  ✔ Step 8 PASSED: Completed booking moved to "已離場" and seat released');
+
+      // Step 9: Assert no errors and no forbidden patterns
+      console.log('Step 9: Verifying zero page errors and no forbidden tokens...');
       const bodyFinal = await page.evaluate(() => document.body.innerText || '');
       for (const pat of FORBIDDEN_TEXT_PATTERNS) {
         assert.ok(!pat.test(bodyFinal), `Found forbidden text pattern ${pat} on ${vp.name}`);

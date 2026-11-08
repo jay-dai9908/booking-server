@@ -60,7 +60,8 @@ import {
   personTimerState,
   formatOverdueText,
   groupTimerPill,
-  formatBookingRef
+  formatBookingRef,
+  isBookingCompleted
 } from '../../utils/admin/floorSelectors';
 
 export default function SeatingPage() {
@@ -194,9 +195,9 @@ export default function SeatingPage() {
   const sessions = floorData?.sessions || [];
 
   // Group bookings by attendance
-  const checkedInBookings = bookings.filter(b => b.attendance === 'checked_in');
-  const pendingBookings = bookings.filter(b => b.attendance === 'pending' || !b.attendance);
-  const completedBookings = bookings.filter(b => b.attendance === 'completed');
+  const completedBookings = bookings.filter(b => isBookingCompleted(b));
+  const checkedInBookings = bookings.filter(b => b.attendance === 'checked_in' && !isBookingCompleted(b));
+  const pendingBookings = bookings.filter(b => (b.attendance === 'pending' || !b.attendance) && !isBookingCompleted(b));
 
   // In-use pax & empty count
   const inUsePax = checkedInBookings.reduce((sum, b) => sum + (b.pax || 0), 0);

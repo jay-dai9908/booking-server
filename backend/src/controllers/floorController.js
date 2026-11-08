@@ -469,6 +469,27 @@ export async function handleTimer(req, res) {
           }
         }
       }
+
+      if (action === 'end') {
+        const remainingActive = await tx.bookingPerson.count({
+          where: {
+            booking_ref,
+            timer_ended_at: null,
+            status: 'active'
+          }
+        });
+        if (remainingActive === 0) {
+          await tx.reservation.updateMany({
+            where: { booking_ref },
+            data: { attendance: 'completed' }
+          });
+        }
+      } else if (action === 'restart') {
+        await tx.reservation.updateMany({
+          where: { booking_ref, attendance: 'completed' },
+          data: { attendance: 'checked_in' }
+        });
+      }
     });
 
     return res.json({ success: true, server_now: new Date().toISOString() });

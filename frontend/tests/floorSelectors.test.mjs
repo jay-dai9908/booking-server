@@ -9,6 +9,7 @@ import {
   personTimerState,
   formatOverdueText,
   groupTimerPill,
+  isBookingCompleted,
 } from '../src/utils/admin/floorSelectors.js';
 
 test('floorSelectors pure function tests', async (t) => {
@@ -268,5 +269,26 @@ test('floorSelectors pure function tests', async (t) => {
     const elapsed = personElapsedMinutes(rawPerson, now);
     assert.strictEqual(elapsed, 39);
     assert.strictEqual(formatElapsedText(elapsed), '0:39');
+  });
+
+  await t.test('11. Spec 2.2: isBookingCompleted returns true when all persons have ended timer', () => {
+    const activeBooking = {
+      attendance: 'checked_in',
+      persons: [
+        { person_no: 1, timer: { timer_started_at: '2026-11-08T10:00:00+08:00', timer_ended_at: null } },
+        { person_no: 2, timer: { timer_started_at: '2026-11-08T10:00:00+08:00', timer_ended_at: '2026-11-08T12:00:00+08:00' } }
+      ]
+    };
+    assert.strictEqual(isBookingCompleted(activeBooking), false);
+
+    const allEndedBooking = {
+      attendance: 'checked_in',
+      billing: { status: 'paid' },
+      persons: [
+        { person_no: 1, timer: { timer_started_at: '2026-11-08T10:00:00+08:00', timer_ended_at: '2026-11-08T12:00:00+08:00' } },
+        { person_no: 2, timer: { timer_started_at: '2026-11-08T10:00:00+08:00', timer_ended_at: '2026-11-08T12:00:00+08:00' } }
+      ]
+    };
+    assert.strictEqual(isBookingCompleted(allEndedBooking), true);
   });
 });
