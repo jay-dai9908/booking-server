@@ -349,6 +349,7 @@ export async function getLiveFloorData(dateStr = null) {
       seat_source: firstRes.seat_source || 'auto',
       is_seat_locked: Boolean(firstRes.is_seat_locked),
       assigned_seats: firstRes.assigned_seats || [],
+      allocation_reason: firstRes.allocation_reason || null,
       needs_seating: Boolean((resolvedAttendance === 'checked_in' || firstRes.checked_in_at) && bPersons.length === 0),
       billing: {
         status: statusObj.code,

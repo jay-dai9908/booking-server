@@ -147,4 +147,10 @@ describe('Customer booking selection mode switching (Section 2.2)', () => {
     assert.ok(!fileContent.includes('假日 (09:00~21:00)'), 'Must not have hardcoded preset button');
     assert.ok(!fileContent.includes('全天 (10:00~22:00)'), 'Must not have hardcoded preset button');
   });
+
+  test('6. Spec 2.6: CheckInPanel does not contain hardcoded fallback reason', () => {
+    const filePath = path.resolve('frontend/src/components/admin/floor/CheckInPanel.jsx');
+    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    assert.ok(!fileContent.includes('已避開冷氣出風口並優先安排同側或相鄰座位。'), 'Must not have hardcoded fallback reason');
+  });
 });

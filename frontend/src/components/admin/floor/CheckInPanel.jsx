@@ -178,7 +178,7 @@ export default function CheckInPanel({
 
   const timeRangeText = bookingTimeRange(target);
   const pax = target.pax || 1;
-  const reasonText = target.allocation_reason || target.reason || '已避開冷氣出風口並優先安排同側或相鄰座位。';
+  const reasonText = target.allocation_reason || target.reason || null;
 
   const boardsList = (target.boards && target.boards.length > 0)
     ? target.boards
@@ -226,7 +226,7 @@ export default function CheckInPanel({
           <span className="font-bold block">
             系統建議座位：{target.assigned_seats?.join('、') || '自動指派'}
           </span>
-          <span className="text-[11px] opacity-90">{reasonText}</span>
+          {reasonText && <span className="text-[11px] opacity-90">{reasonText}</span>}
         </div>
 
         {/* Seat selection - CompactPlan (Spec 6.3) */}
