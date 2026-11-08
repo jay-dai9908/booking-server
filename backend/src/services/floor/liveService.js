@@ -309,18 +309,39 @@ export async function getLiveFloorData(dateStr = null) {
     for (const eq of bEquipments) {
       const uGroup = eq.unit_group || `single-${eq.id}`;
       if (!boardGroupMap.has(uGroup)) {
+        let personNo = eq.person_id ? bPersons.find(p => p.id === eq.person_id)?.person_no || null : null;
+        if (personNo == null && bPersons.length === 1) {
+          personNo = bPersons[0].person_no;
+        }
         boardGroupMap.set(uGroup, {
           unit_group: eq.unit_group,
-          person_no: eq.person_id ? bPersons.find(p => p.id === eq.person_id)?.person_no || null : null,
+          person_no: personNo,
           segments: []
         });
       }
+
+      let segStart = eq.start_at ? eq.start_at.toISOString() : null;
+      let segEnd = eq.end_at ? eq.end_at.toISOString() : null;
+      let segPlannedEnd = eq.planned_end_at ? eq.planned_end_at.toISOString() : null;
+
+      if (!segStart && Array.isArray(eq.covered_sessions) && eq.covered_sessions.length > 0) {
+        const first = eq.covered_sessions[0];
+        const last = eq.covered_sessions[eq.covered_sessions.length - 1];
+        const st = first.includes('-') ? first.split('-')[0] : (first.includes(':') ? first : null);
+        const et = last.includes('-') ? last.split('-')[1] : (last.includes(':') ? last : null);
+        if (st && et) {
+          segStart = new Date(`${targetDateStr}T${st}:00+08:00`).toISOString();
+          segEnd = new Date(`${targetDateStr}T${et}:00+08:00`).toISOString();
+          if (!segPlannedEnd) segPlannedEnd = segEnd;
+        }
+      }
+
       boardGroupMap.get(uGroup).segments.push({
         equipment_id: eq.equipment_id,
         name: eq.equipment?.name || eq.equipment_name_snapshot,
-        start_at: eq.start_at ? eq.start_at.toISOString() : null,
-        end_at: eq.end_at ? eq.end_at.toISOString() : null,
-        planned_end_at: eq.planned_end_at ? eq.planned_end_at.toISOString() : null,
+        start_at: segStart,
+        end_at: segEnd,
+        planned_end_at: segPlannedEnd,
         ended_reason: eq.ended_reason,
         unit_group: eq.unit_group
       });

@@ -1120,9 +1120,10 @@ export async function addBoardRental(req, res) {
         throw { status: 404, message: `找不到第 ${person_no} 位顧客` };
       }
 
-      const targetConfig = await tx.equipmentConfig.findUnique({
-        where: { id: equipment_id }
-      });
+      const targetConfigs = await tx.$queryRaw`
+        SELECT * FROM "EquipmentConfig" WHERE id = ${equipment_id} FOR UPDATE
+      `;
+      const targetConfig = targetConfigs[0];
       if (!targetConfig) {
         throw { status: 404, message: '找不到此設備尺寸' };
       }
@@ -1135,7 +1136,10 @@ export async function addBoardRental(req, res) {
         : toTaipeiDateString(sessionDate);
 
       const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
-      const bookingEndDt = new Date(`${dStr}T${lastRes.session.end_time}:00+08:00`);
+      let bookingEndDt = new Date(`${dStr}T${lastRes.session.end_time}:00+08:00`);
+      if (bookingEndDt <= bookingStartDt) {
+        bookingEndDt = new Date(bookingEndDt.getTime() + 24 * 60 * 60 * 1000);
+      }
 
       let fromDt;
       if (from_at) {
@@ -1144,6 +1148,12 @@ export async function addBoardRental(req, res) {
         } else if (typeof from_at === 'string' && from_at.includes(':')) {
           const t = from_at.length === 5 ? `${from_at}:00` : from_at;
           fromDt = new Date(`${dStr}T${t}+08:00`);
+          if (fromDt < bookingStartDt && bookingEndDt > bookingStartDt) {
+            const nextDayFrom = new Date(fromDt.getTime() + 24 * 60 * 60 * 1000);
+            if (nextDayFrom <= bookingEndDt) {
+              fromDt = nextDayFrom;
+            }
+          }
         } else {
           fromDt = new Date(from_at);
         }
@@ -1159,6 +1169,9 @@ export async function addBoardRental(req, res) {
         } else if (typeof to_at === 'string' && to_at.includes(':')) {
           const t = to_at.length === 5 ? `${to_at}:00` : to_at;
           toDt = new Date(`${dStr}T${t}+08:00`);
+          if (toDt <= fromDt) {
+            toDt = new Date(toDt.getTime() + 24 * 60 * 60 * 1000);
+          }
         } else {
           toDt = new Date(to_at);
         }
@@ -1198,12 +1211,15 @@ export async function addBoardRental(req, res) {
       });
 
       const coveredSessions = allSessionsOnDate.filter(s => {
-        const sStart = new Date(`${dStr}T${s.start_time}:00+08:00`).getTime();
-        const sEnd = new Date(`${dStr}T${s.end_time}:00+08:00`).getTime();
+        let sStart = new Date(`${dStr}T${s.start_time}:00+08:00`).getTime();
+        let sEnd = new Date(`${dStr}T${s.end_time}:00+08:00`).getTime();
+        if (sEnd <= sStart) {
+          sEnd += 24 * 60 * 60 * 1000;
+        }
         return Math.max(fromDt.getTime(), sStart) < Math.min(toDt.getTime(), sEnd);
       });
 
-      const coveredSessionIds = coveredSessions.map(s => s.id);
+      const coveredSessionStrings = coveredSessions.map(s => `${s.start_time}-${s.end_time}`);
 
       // Inventory check: "檢查庫存，庫存不足回 409"
       const totalStock = targetConfig.total_stock;
@@ -1226,9 +1242,15 @@ export async function addBoardRental(req, res) {
 
         for (const sess of coveredSessions) {
           const sId = sess.id;
+          const sessTimeStr = `${sess.start_time}-${sess.end_time}`;
           const occupiedCount = uncancelledEquips.filter(be => {
-            const cSessions = (be.covered_sessions || []).map(Number);
-            return cSessions.includes(sId);
+            const isCovered = (be.covered_sessions || []).some(cs => {
+              if (typeof cs === 'number' || (!isNaN(Number(cs)) && !String(cs).includes(':'))) {
+                return Number(cs) === sId;
+              }
+              return cs === sess.start_time || cs === sessTimeStr || String(cs).startsWith(sess.start_time);
+            });
+            return isCovered;
           }).reduce((sum, be) => sum + (be.quantity || 1), 0);
 
           const available = totalStock - occupiedCount;
@@ -1263,7 +1285,7 @@ export async function addBoardRental(req, res) {
           unit_rate: unitRate,
           rental_hours: rentalHours,
           subtotal_price: subtotalPrice,
-          covered_sessions: coveredSessionIds.map(String)
+          covered_sessions: coveredSessionStrings
         }
       });
 

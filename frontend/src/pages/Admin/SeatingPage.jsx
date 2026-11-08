@@ -1720,7 +1720,11 @@ export default function SeatingPage() {
               const pausedMins = Math.round(pausedSecs / 60);
 
               // Smart boards for this person
-              const personBoards = (timerTarget?.boards || []).filter(b => b.person_no === p.person_no);
+              const personBoards = (timerTarget?.boards || []).filter(b => {
+                if (b.person_no != null) return b.person_no === p.person_no;
+                if ((timerTarget?.persons || []).length === 1 && p.person_no === 1) return true;
+                return false;
+              });
               const hasBoard = personBoards.length > 0;
               const primaryBoard = personBoards[0] || null;
 

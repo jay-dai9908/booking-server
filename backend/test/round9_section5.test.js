@@ -180,13 +180,137 @@ test('Round 9 Section 5: POST /floor/:ref/boards validation and creation', async
     await addBoardRental(req4, res4Res);
     assert.strictEqual(res4Res.getStatusCode(), 200);
     assert.strictEqual(res4Res.getResponseData().success, true);
+    // Verify covered_sessions contains time ranges (e.g. "13:00-14:00") rather than plain session IDs
+    const createdEq = res4Res.getResponseData().booking_equipment;
+    assert.ok(Array.isArray(createdEq.covered_sessions));
+    assert.ok(createdEq.covered_sessions.every(s => s.includes('-')), `covered_sessions must be time ranges like 13:00-14:00, got: ${JSON.stringify(createdEq.covered_sessions)}`);
+
+    // -------------------------------------------------------------
+    // Test 5: Out of stock check against online-booked equipment
+    // (covered_sessions = ["13:00-14:00"], format from online booking)
+    // -------------------------------------------------------------
+    const otherRef = 'BK-TEST-SEC5-ONLINE';
+    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: otherRef } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: otherRef } });
+
+    await prisma.reservation.create({
+      data: {
+        booking_ref: otherRef,
+        session: { connect: { id: s1.id } },
+        user: { connect: { id: user.id } },
+        pax: 1,
+        status: 'confirmed',
+        assigned_seats: ['B1-1']
+      }
+    });
+
+    // Medium board total_stock is 1, let's create a booking with covered_sessions: ["13:00-14:00"]
+    await prisma.bookingEquipment.create({
+      data: {
+        booking_ref: otherRef,
+        equipment_id: 'medium',
+        equipment_name_snapshot: '智能拼豆板（中板）',
+        quantity: 1,
+        rental_hours: 1,
+        subtotal_price: 120,
+        covered_sessions: ['13:00-14:00']
+      }
+    });
+
+    // Clean up previous rental by person 1 for clean check
+    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: bookingRef, equipment_id: 'medium' } });
+
+    const { req: req5, res: res5Res } = createMockReqRes({
+      params: { booking_ref: bookingRef },
+      body: {
+        person_no: 1,
+        equipment_id: 'medium',
+        from_at: '13:00',
+        to_at: '14:00'
+      }
+    });
+
+    await addBoardRental(req5, res5Res);
+    assert.strictEqual(res5Res.getStatusCode(), 409, 'Must return 409 when online booking occupied the only medium board in stock');
+    assert.match(res5Res.getResponseData().error, /庫存不足/);
+
+    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: otherRef } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: otherRef } });
+
+    // -------------------------------------------------------------
+    // Test 6: Overnight booking spanning past midnight (23:00 to 01:00)
+    // -------------------------------------------------------------
+    const sNight1 = await prisma.session.upsert({
+      where: { session_date_start_time: { session_date: testDate, start_time: '23:00' } },
+      update: { end_time: '00:00', max_capacity: 10 },
+      create: { session_date: testDate, start_time: '23:00', end_time: '00:00', max_capacity: 10 }
+    });
+    const sNight2 = await prisma.session.upsert({
+      where: { session_date_start_time: { session_date: testDate, start_time: '00:00' } },
+      update: { end_time: '01:00', max_capacity: 10 },
+      create: { session_date: testDate, start_time: '00:00', end_time: '01:00', max_capacity: 10 }
+    });
+
+    const overnightRef = 'BK-TEST-SEC5-OVERNIGHT';
+    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: overnightRef } });
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: overnightRef } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: overnightRef } });
+
+    await prisma.reservation.create({
+      data: {
+        booking_ref: overnightRef,
+        session: { connect: { id: sNight1.id } },
+        user: { connect: { id: user.id } },
+        pax: 1,
+        status: 'confirmed',
+        assigned_seats: ['C1-1']
+      }
+    });
+    await prisma.reservation.create({
+      data: {
+        booking_ref: overnightRef,
+        session: { connect: { id: sNight2.id } },
+        user: { connect: { id: user.id } },
+        pax: 1,
+        status: 'confirmed',
+        assigned_seats: ['C1-1']
+      }
+    });
+    await prisma.bookingPerson.create({
+      data: {
+        booking_ref: overnightRef,
+        person_no: 1,
+        seat_code: 'C1-1',
+        status: 'active'
+      }
+    });
+
+    const { req: req6, res: res6Res } = createMockReqRes({
+      params: { booking_ref: overnightRef },
+      body: {
+        person_no: 1,
+        equipment_id: 'small',
+        from_at: '23:00',
+        to_at: '01:00'
+      }
+    });
+
+    await addBoardRental(req6, res6Res);
+    assert.strictEqual(res6Res.getStatusCode(), 200, `Expected 200 for overnight rental, got: ${res6Res.getStatusCode()} ${JSON.stringify(res6Res.getResponseData())}`);
+    const overnightEq = res6Res.getResponseData().booking_equipment;
+    assert.strictEqual(overnightEq.rental_hours, 2);
+    assert.strictEqual(overnightEq.subtotal_price, 180);
+
+    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: overnightRef } });
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: overnightRef } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: overnightRef } });
 
   } finally {
     // Cleanup
-    await prisma.accountingEvent.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
-    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
-    await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
-    await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
+    await prisma.accountingEvent.deleteMany({ where: { booking_ref: { in: [bookingRef, 'BK-TEST-SEC5-ONLINE', 'BK-TEST-SEC5-OVERNIGHT'] } } }).catch(() => {});
+    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: { in: [bookingRef, 'BK-TEST-SEC5-ONLINE', 'BK-TEST-SEC5-OVERNIGHT'] } } }).catch(() => {});
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [bookingRef, 'BK-TEST-SEC5-ONLINE', 'BK-TEST-SEC5-OVERNIGHT'] } } }).catch(() => {});
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [bookingRef, 'BK-TEST-SEC5-ONLINE', 'BK-TEST-SEC5-OVERNIGHT'] } } }).catch(() => {});
     await prisma.session.deleteMany({ where: { session_date: testDate } }).catch(() => {});
   }
 });
