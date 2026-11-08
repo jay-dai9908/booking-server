@@ -315,6 +315,25 @@ export async function runSeatingTests() {
       assert.ok(updatedCardText.includes('A1-3'), 'Card/seating should display new seat A1-3');
       console.log('  ✔ Step 6 PASSED: Move seat reflected on Seating page');
 
+      // Step 6b (Spec 2.5): Move to WAIT-1 and verify MiniMap waiting count matches waitPax
+      console.log('Step 6b (Spec 2.5): Moving seat to WAIT-1 and verifying MiniMap waiting pax...');
+      await page.request.post(`${API_BASE}/floor/${testRef1}/move-seat`, {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { from_seat: 'A1-3', to_seat: 'WAIT-1', mode: 'move' }
+      });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(600);
+
+      const floorTabMini = page.locator('button:has-text("平面圖")').first();
+      if (await floorTabMini.isVisible().catch(() => false)) {
+        await floorTabMini.click();
+        await page.waitForTimeout(600);
+        const miniMapWaitBadge = page.locator('button:has-text("等待區 2")').first();
+        await miniMapWaitBadge.waitFor({ state: 'visible', timeout: 5000 });
+        console.log('  ✔ Step 6b PASSED: MiniMap waiting pax matches waitPax (2)');
+      }
+
       // Step 7: 已報到但沒有帶位的訂單：顯示「這組還沒帶位」橫幅，按「帶位並開始計時」可以完成帶位
       console.log('Step 7: Creating unseated checked-in booking (needs_seating: true)...');
       await prisma.reservation.create({

@@ -715,6 +715,7 @@ export default function SeatingPage() {
               seatStates={seatStatesMap}
               activeTableId={activeMobileTableId}
               onTableClick={handleMiniMapTableClick}
+              waitingPaxCount={waitPax}
               waitPax={waitPax}
             />
           </div>

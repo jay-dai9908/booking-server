@@ -6,8 +6,10 @@ export default function MiniMap({
   activeTableId = null,
   onTableClick = null,
   waitingPaxCount = 0,
+  waitPax = null,
   className = ''
 }) {
+  const effectiveWaitPax = waitPax != null ? waitPax : waitingPaxCount;
   const containerRef = useRef(null);
   const [containerW, setContainerW] = useState(340);
 
@@ -189,7 +191,7 @@ export default function MiniMap({
         className="absolute bottom-1.5 right-1.5 z-20 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sg-paper border border-sg-line text-sg-brown shadow-xs hover:bg-sg-brown-soft transition flex items-center gap-1"
       >
         <span className="w-2 h-2 rounded-full bg-sg-honey" />
-        <span>等待區 {waitingPaxCount}</span>
+        <span>等待區 {effectiveWaitPax}</span>
       </button>
     </div>
   );
