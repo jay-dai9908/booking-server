@@ -5,6 +5,9 @@ export function RangeSlider({
   minHours = 2,
   from = 0, // 0..totalHours
   to = 6,   // 0..totalHours
+  boundStart = 0,
+  boundEnd = totalHours,
+  blockedSlots = [],
   onChange,
   onCommit,
   boundaryTimes = [], // ['12:00', '13:00', ... '18:00']
@@ -15,6 +18,8 @@ export function RangeSlider({
   const draggingHandleRef = useRef(null); // 'from' | 'to'
 
   const effectiveMin = Math.min(minHours, totalHours);
+  const safeBoundStart = Math.max(0, boundStart);
+  const safeBoundEnd = Math.min(totalHours, boundEnd);
 
   const getPercent = (hourIdx) => (totalHours > 0 ? (hourIdx / totalHours) * 100 : 0);
 
@@ -43,13 +48,13 @@ export function RangeSlider({
 
     if (handleType === 'from') {
       const maxAllowed = to - effectiveMin;
-      const newFrom = Math.max(0, Math.min(maxAllowed, targetHour));
+      const newFrom = Math.max(safeBoundStart, Math.min(maxAllowed, targetHour));
       if (newFrom !== from) {
         onChange({ from: newFrom, to });
       }
     } else if (handleType === 'to') {
       const minAllowed = from + effectiveMin;
-      const newTo = Math.max(minAllowed, Math.min(totalHours, targetHour));
+      const newTo = Math.max(minAllowed, Math.min(safeBoundEnd, targetHour));
       if (newTo !== to) {
         onChange({ from, to: newTo });
       }
@@ -70,12 +75,12 @@ export function RangeSlider({
 
     if (distToFrom <= distToTo) {
       const maxAllowed = to - effectiveMin;
-      const newFrom = Math.max(0, Math.min(maxAllowed, targetHour));
+      const newFrom = Math.max(safeBoundStart, Math.min(maxAllowed, targetHour));
       onChange({ from: newFrom, to });
       if (onCommit) onCommit({ from: newFrom, to });
     } else {
       const minAllowed = from + effectiveMin;
-      const newTo = Math.max(minAllowed, Math.min(totalHours, targetHour));
+      const newTo = Math.max(minAllowed, Math.min(safeBoundEnd, targetHour));
       onChange({ from, to: newTo });
       if (onCommit) onCommit({ from, to: newTo });
     }
@@ -93,14 +98,14 @@ export function RangeSlider({
 
     if (handleType === 'from') {
       const maxAllowed = to - effectiveMin;
-      let newFrom = delta === -999 ? 0 : delta === 999 ? maxAllowed : from + delta;
-      newFrom = Math.max(0, Math.min(maxAllowed, newFrom));
+      let newFrom = delta === -999 ? safeBoundStart : delta === 999 ? maxAllowed : from + delta;
+      newFrom = Math.max(safeBoundStart, Math.min(maxAllowed, newFrom));
       onChange({ from: newFrom, to });
       if (onCommit) onCommit({ from: newFrom, to });
     } else {
       const minAllowed = from + effectiveMin;
-      let newTo = delta === -999 ? minAllowed : delta === 999 ? totalHours : to + delta;
-      newTo = Math.max(minAllowed, Math.min(totalHours, newTo));
+      let newTo = delta === -999 ? minAllowed : delta === 999 ? safeBoundEnd : to + delta;
+      newTo = Math.max(minAllowed, Math.min(safeBoundEnd, newTo));
       onChange({ from, to: newTo });
       if (onCommit) onCommit({ from, to: newTo });
     }
@@ -124,9 +129,24 @@ export function RangeSlider({
         {/* Clickable Track */}
         <div
           ref={trackRef}
+          data-testid="slider-track"
           onPointerDown={handleTrackPointerDown}
-          className="sg-range-track cursor-pointer"
-        />
+          className="sg-range-track cursor-pointer relative"
+        >
+          {/* Muted blocked slot indicators */}
+          {blockedSlots.map((slotIdx) => {
+            const leftPct = getPercent(slotIdx);
+            const widthPct = getPercent(slotIdx + 1) - leftPct;
+            return (
+              <div
+                key={slotIdx}
+                className="absolute top-0 bottom-0 bg-stone-300/70 rounded-[3px] pointer-events-none"
+                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                title="已租用其他智能板"
+              />
+            );
+          })}
+        </div>
 
         {/* Selected Fill Range */}
         <div
@@ -137,8 +157,9 @@ export function RangeSlider({
         {/* Start Handle (from) */}
         <div
           role="slider"
+          data-testid="handle-start"
           tabIndex={0}
-          aria-valuemin={0}
+          aria-valuemin={safeBoundStart}
           aria-valuemax={to - effectiveMin}
           aria-valuenow={from}
           aria-valuetext={boundaryTimes[from] || `${from}:00`}
@@ -152,9 +173,10 @@ export function RangeSlider({
         {/* End Handle (to) */}
         <div
           role="slider"
+          data-testid="handle-end"
           tabIndex={0}
           aria-valuemin={from + effectiveMin}
-          aria-valuemax={totalHours}
+          aria-valuemax={safeBoundEnd}
           aria-valuenow={to}
           aria-valuetext={boundaryTimes[to] || `${to}:00`}
           aria-label={`第 ${boardIndex} 台結束時間`}
@@ -193,6 +215,9 @@ export function BoardTimeBox({
   boardIndex = 1,
   totalHours: totalHoursProp,
   boundaryTimes: boundaryTimesProp,
+  boundStart,
+  boundEnd,
+  blockedSlots,
   onChange,
   onCommit,
   className = '',
@@ -220,7 +245,7 @@ export function BoardTimeBox({
   const startTime = boundaryTimes[from] || '';
   const endTime = boundaryTimes[to] || '';
 
-  const isFullSpan = totalHours <= minHours;
+  const isFullSpan = totalHours <= minHours && (!blockedSlots || blockedSlots.length === 0);
 
   const fireChange = (val) => {
     if (!onChange) return;
@@ -266,6 +291,9 @@ export function BoardTimeBox({
             minHours={minHours}
             from={from}
             to={to}
+            boundStart={boundStart}
+            boundEnd={boundEnd}
+            blockedSlots={blockedSlots}
             boardIndex={boardIndex}
             boundaryTimes={boundaryTimes}
             onChange={fireChange}

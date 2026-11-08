@@ -140,6 +140,28 @@ export function calcPromoDiscount(promo, { pax, hours, seatingAmount, equipmentA
   return Math.min(targetBase, Math.max(0, amt));
 }
 
+export function getBoardDiscountNote(hours, discountCfg) {
+  if (!discountCfg || (discountCfg.enabled === false && !discountCfg.tier2_enabled)) return null;
+  const t2Enabled = discountCfg.tier2_enabled === true;
+  const t2Buy = Math.max(1, parseInt(discountCfg.tier2_buy_hours, 10) || 8);
+  const t2Free = Math.max(1, parseInt(discountCfg.tier2_free_hours, 10) || 4);
+  const t1Enabled = discountCfg.enabled !== false;
+  const t1Buy = Math.max(1, parseInt(discountCfg.buy_hours, 10) || 3);
+  const t1Free = Math.max(1, parseInt(discountCfg.free_hours, 10) || 1);
+  const toZh = (n) => ({ 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '七', 8: '八', 9: '九', 10: '十' }[n] || String(n));
+
+  const p = equipmentUnitPrice({ hourly_rate: 100 }, hours, discountCfg);
+  if (p.freeHours > 0) {
+    if (t2Enabled && hours >= (t2Buy + t2Free)) {
+      return `買${toZh(t2Buy)}送${toZh(t2Free)}，以 ${p.chargeable} 小時計`;
+    }
+    if (t1Enabled && hours >= (t1Buy + t1Free)) {
+      return `買${toZh(t1Buy)}送${toZh(t1Free)}，以 ${p.chargeable} 小時計`;
+    }
+  }
+  return null;
+}
+
 export function buildPriceLines({ pax, hours, startTime, endTime, day, mode, units = [], configs = {}, discountCfg, promo, bookingSessions = [] }) {
   const lines = [];
   const seat = seatPrice({ pax, hours, hourly: day.hourly, cap: day.cap, allowUnlimited: day.allowUnlimited, mode });
@@ -153,17 +175,18 @@ export function buildPriceLines({ pax, hours, startTime, endTime, day, mode, uni
     }
   }
 
-  const texts = boardDiscountTexts(discountCfg);
   let equipmentTotal = 0, equipmentSaving = 0;
   const groups = groupUnits(units, bookingSessions);
   for (const group of groups) {
     const cfg = configs[group.equipment_id];
     if (!cfg) continue;
     const p = equipmentUnitPrice(cfg, group.hours, discountCfg);
-    lines.push({ label: `智能拼豆板 ${shortBoardName(cfg.name)} ×${group.qty} · ${group.start} 到 ${group.end}`, amount: p.raw * group.qty });
-    if (p.discountSaving > 0 && texts) {
-      lines.push({ label: texts.lineLabel(group.hours, p.freeHours), amount: -p.discountSaving * group.qty, tone: 'save' });
-    }
+    const discountNote = p.freeHours > 0 ? getBoardDiscountNote(group.hours, discountCfg) : null;
+    lines.push({
+      label: `智能拼豆板 ${shortBoardName(cfg.name)} ×${group.qty} · ${group.start} 到 ${group.end} · ${group.hours} 小時`,
+      amount: p.price * group.qty,
+      note: discountNote
+    });
     if (p.capSaving > 0) {
       lines.push({ label: `智能板單日上限（每台 ${formatMoney(cfg.daily_cap)}）`, amount: -p.capSaving * group.qty, tone: 'save' });
     }

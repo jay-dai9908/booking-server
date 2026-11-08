@@ -105,7 +105,31 @@ export default function StepDone({ result }) {
     (e) => (e.equipment_id || e.id) !== 'bring_own'
   );
   const eqSummary = filteredEquipments
-    .map((e) => `${shortBoardName(e.equipment_name_snapshot || e.name || '智能板')} ×${e.quantity || 1}`)
+    .map((e) => {
+      const name = shortBoardName(e.equipment_name_snapshot || e.name || '智能板');
+      let timeSpan = '';
+      let hours = e.rental_hours || 0;
+      if (Array.isArray(e.covered_sessions) && e.covered_sessions.length > 0) {
+        const first = e.covered_sessions[0];
+        const last = e.covered_sessions[e.covered_sessions.length - 1];
+        const st = first.includes('-') ? first.split('-')[0] : first;
+        const et = last.includes('-') ? last.split('-')[1] : last;
+        timeSpan = `${st} 到 ${et}`;
+        hours = e.covered_sessions.length;
+      } else if (startTime && e.rental_hours) {
+        const [sh, sm] = startTime.split(':').map(Number);
+        const eh = sh + e.rental_hours;
+        timeSpan = `${startTime} 到 ${String(eh).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}`;
+      }
+      let discountNote = '';
+      if (hours >= 4) {
+        const freeH = Math.floor(hours / 4);
+        const chargeable = hours - freeH;
+        discountNote = `，買三送一，以 ${chargeable} 小時計`;
+      }
+      const timePart = timeSpan ? ` · ${timeSpan} · ${hours} 小時` : ` · ${hours} 小時`;
+      return `${name} ×${e.quantity || 1}${timePart}${discountNote ? `（${discountNote.replace(/^，/, '')}）` : ''}`;
+    })
     .join('、');
 
   // Formatted date string

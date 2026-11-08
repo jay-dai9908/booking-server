@@ -559,14 +559,35 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
 
             {reservation.equipments && reservation.equipments.length > 0 ? (
               <div className="space-y-2">
-                {reservation.equipments.map((eq, i) => (
-                  <div key={i} className="flex items-center justify-between bg-white px-3.5 py-2.5 rounded-xl border border-[#E8DEC8] text-sm">
-                    <span className="font-bold text-gray-800">{eq.equipment_name_snapshot} × {eq.quantity} 台</span>
-                    <span className="text-xs font-bold text-[#8B5B43]">
-                      時數: {eq.rental_hours} 小時 ｜ 加購小計: NT$ {eq.subtotal_price}
-                    </span>
-                  </div>
-                ))}
+                {reservation.equipments.map((eq, i) => {
+                  let timeSpan = '';
+                  let hours = eq.rental_hours || 0;
+                  if (Array.isArray(eq.covered_sessions) && eq.covered_sessions.length > 0) {
+                    const first = eq.covered_sessions[0];
+                    const last = eq.covered_sessions[eq.covered_sessions.length - 1];
+                    const st = first.includes('-') ? first.split('-')[0] : first;
+                    const et = last.includes('-') ? last.split('-')[1] : last;
+                    timeSpan = `${st} 到 ${et}`;
+                    hours = eq.covered_sessions.length;
+                  }
+                  let discountNote = '';
+                  if (hours >= 4) {
+                    const freeH = Math.floor(hours / 4);
+                    const chargeable = hours - freeH;
+                    discountNote = `（買三送一，以 ${chargeable} 小時計）`;
+                  }
+                  return (
+                    <div key={i} className="flex items-center justify-between bg-white px-3.5 py-2.5 rounded-xl border border-[#E8DEC8] text-sm">
+                      <span className="font-bold text-gray-800">
+                        {eq.equipment_name_snapshot} × {eq.quantity} 台
+                        {timeSpan && <span className="font-normal text-gray-600 ml-2">· {timeSpan} · {hours} 小時</span>}
+                      </span>
+                      <span className="text-xs font-bold text-[#8B5B43]">
+                        加購小計: NT$ {eq.subtotal_price} {discountNote && <span className="font-normal text-gray-500">{discountNote}</span>}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="flex items-center justify-between bg-white/80 px-3.5 py-2.5 rounded-xl border border-dashed border-[#DED7CE] text-xs sm:text-sm text-gray-600">

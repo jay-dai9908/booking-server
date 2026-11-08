@@ -51,14 +51,16 @@ function parseReservationDate(datePart) {
   return [d.getFullYear(), d.getMonth() + 1, d.getDate()];
 }
 
-function formatBoardTimeRange(e, resStartTime) {
+function formatBoardDetails(e, resStartTime) {
   let startT = '';
   let endT = '';
+  let hours = e.rental_hours || 0;
   if (Array.isArray(e.covered_sessions) && e.covered_sessions.length > 0) {
     const firstCovered = e.covered_sessions[0];
     const lastCovered = e.covered_sessions[e.covered_sessions.length - 1];
     startT = firstCovered.includes('-') ? firstCovered.split('-')[0] : firstCovered;
     endT = lastCovered.includes('-') ? lastCovered.split('-')[1] : lastCovered;
+    hours = e.covered_sessions.length;
   } else if ((e.start_time || resStartTime) && e.rental_hours) {
     const baseStart = e.start_time || resStartTime;
     const [sh, sm] = baseStart.split(':').map(Number);
@@ -66,10 +68,23 @@ function formatBoardTimeRange(e, resStartTime) {
     const eh = sh + (e.rental_hours || 0);
     endT = `${String(eh).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}`;
   }
+  let timeStr = '';
   if (startT && endT) {
-    return `${startT} 到 ${endT}`;
+    timeStr = `${startT} 到 ${endT} · ${hours} 小時`;
+  } else if (hours) {
+    timeStr = `${hours} 小時`;
   }
-  return e.rental_hours ? `${e.rental_hours} 小時` : '';
+  let discountNote = '';
+  if (hours >= 4) {
+    const freeH = Math.floor(hours / 4);
+    const chargeable = hours - freeH;
+    discountNote = `買三送一，以 ${chargeable} 小時計`;
+  }
+  return { timeStr, hours, discountNote };
+}
+
+function formatBoardTimeRange(e, resStartTime) {
+  return formatBoardDetails(e, resStartTime).timeStr;
 }
 
 // Pill status helper for reservations (Section 6.13)
@@ -485,10 +500,10 @@ export default function HistoryPage() {
                       .filter((e) => e.equipment_id !== 'bring_own')
                       .map((e, idx) => {
                         const name = shortBoardName(e.equipment_name_snapshot || e.name || '智能板');
-                        const timeSpan = formatBoardTimeRange(e, r.start_time || r.session?.start_time);
+                        const { timeStr, discountNote } = formatBoardDetails(e, r.start_time || r.session?.start_time);
                         return (
                           <div key={idx}>
-                            {name} ×{e.quantity || 1}（{timeSpan}）
+                            {name} ×{e.quantity || 1}（{timeStr}）{discountNote ? <span className="text-xs text-sg-muted ml-1">（{discountNote}）</span> : null}
                           </div>
                         );
                       })}
@@ -809,8 +824,8 @@ export default function HistoryPage() {
                                   {filteredBoards
                                     .map((e) => {
                                       const name = shortBoardName(e.equipment_name_snapshot || e.name || '智能板');
-                                      const timeSpan = formatBoardTimeRange(e, r.start_time || r.session?.start_time);
-                                      return `${name} ×${e.quantity || 1} · ${timeSpan}`;
+                                      const { timeStr, discountNote } = formatBoardDetails(e, r.start_time || r.session?.start_time);
+                                      return `${name} ×${e.quantity || 1} · ${timeStr}${discountNote ? `（${discountNote}）` : ''}`;
                                     })
                                     .join('、')}
                                 </span>

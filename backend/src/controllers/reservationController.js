@@ -52,7 +52,7 @@ function mergeCustomerEquipments(rawList = []) {
 
   const mergedMap = new Map();
   for (const eq of withoutUnitGroup) {
-    const key = eq.equipment_id;
+    const key = `${eq.equipment_id}|${(eq.covered_sessions || []).join(',')}|${eq.rental_hours}`;
     if (!mergedMap.has(key)) {
       mergedMap.set(key, { ...eq });
     } else {
@@ -496,19 +496,6 @@ export const createReservation = async (req, res) => {
 
         const globalSetting = await tx.globalSetting.findUnique({ where: { id: 1 } });
         const allowExceedPax = globalSetting?.allow_equipment_exceed_pax === true;
-
-        // Verify total requested boards against pax quota
-        let totalNonOwnBoards = 0;
-        for (const eq of equipments) {
-          const qty = parseInt(eq.quantity, 10) || 0;
-          if (qty > 0 && eq.equipment_id !== 'bring_own') {
-            totalNonOwnBoards += qty;
-          }
-        }
-        if (!allowExceedPax && totalNonOwnBoards > parseInt(pax, 10)) {
-          throw new Error('EQUIPMENT_EXCEED_PAX');
-        }
-
         const discountConfig = {
           enabled: globalSetting ? globalSetting.equipment_discount_enabled !== false : true,
           buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
@@ -521,6 +508,27 @@ export const createReservation = async (req, res) => {
 
         const totalHours = session_ids.length;
         const sortedReqSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+        // Verify concurrent boards against pax quota across all covered sessions
+        if (!allowExceedPax) {
+          for (const session of sortedReqSessions) {
+            let concurrentBoards = 0;
+            for (const eq of equipments) {
+              if (eq.equipment_id === 'bring_own') continue;
+              const qty = parseInt(eq.quantity, 10) || 0;
+              if (qty <= 0) continue;
+              const config = configMap[eq.equipment_id];
+              const minHours = config?.min_contiguous_hours || 2;
+              const { windowSessions } = resolveEquipmentWindow(sortedReqSessions, eq, minHours);
+              if (windowSessions.some(ws => ws.id === session.id)) {
+                concurrentBoards += qty;
+              }
+            }
+            if (concurrentBoards > parseInt(pax, 10)) {
+              throw new Error('EQUIPMENT_EXCEED_PAX');
+            }
+          }
+        }
 
         // Pre-fetch all confirmed reservations and their equipment on this date to verify stock
         const dateReservations = await tx.reservation.findMany({

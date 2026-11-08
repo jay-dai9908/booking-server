@@ -762,17 +762,31 @@ export const modifyBookingEquipment = async (req, res) => {
       }
     }
 
+    const sortedReservations = [...reservations].sort((a, b) => a.session.start_time.localeCompare(b.session.start_time));
+    const sortedBookingSessions = sortedReservations.map(r => r.session);
+
     // Verification 5: Pax quota & stock check (do not count bring_own)
-    const totalBoardsRequested = equipments
-      .filter(e => e.equipment_id !== 'bring_own')
-      .reduce((sum, e) => sum + (parseInt(e.quantity, 10) || 0), 0);
     const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
     if (!globalSetting?.allow_equipment_exceed_pax && !isAdmin) {
-      if (totalBoardsRequested > firstRes.pax) {
-        return res.status(400).json({ 
-          error: `預約總人數為 ${firstRes.pax} 人，智能板配置總數不能超過 ${firstRes.pax} 台`, 
-          code: 'EXCEED_PAX_LIMIT' 
-        });
+      for (const session of sortedBookingSessions) {
+        let concurrentBoards = 0;
+        for (const eq of equipments) {
+          if (eq.equipment_id === 'bring_own') continue;
+          const qty = parseInt(eq.quantity, 10) || 0;
+          if (qty <= 0) continue;
+          const config = configMap[eq.equipment_id];
+          const minHours = config?.min_contiguous_hours || 2;
+          const { windowSessions } = resolveEquipmentWindow(sortedBookingSessions, eq, minHours);
+          if (windowSessions.some(ws => ws.id === session.id)) {
+            concurrentBoards += qty;
+          }
+        }
+        if (concurrentBoards > firstRes.pax) {
+          return res.status(400).json({ 
+            error: `預約時段內同時使用的智能板不能超過 ${firstRes.pax} 台`, 
+            code: 'EXCEED_PAX_LIMIT' 
+          });
+        }
       }
     }
 
@@ -806,8 +820,6 @@ export const modifyBookingEquipment = async (req, res) => {
         })
       : [];
 
-    const sortedReservations = [...reservations].sort((a, b) => a.session.start_time.localeCompare(b.session.start_time));
-    const sortedBookingSessions = sortedReservations.map(r => r.session);
     const requestUsage = {};
 
     for (const eq of equipments) {

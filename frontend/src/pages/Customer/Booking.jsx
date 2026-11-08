@@ -184,13 +184,14 @@ export default function Booking() {
       return;
     }
 
+    if (sessionsLoading) return;
     if (step === '2' || step === '3') {
       // Must have selected sessions
       if (bookingSessions.length === 0) {
         navigate('/booking?step=1', { replace: true });
       }
     }
-  }, [step, bookingSessions.length, location.state, navigate]);
+  }, [step, bookingSessions.length, location.state, navigate, sessionsLoading]);
 
   // Date change handler
   const handleDateChange = (newDate) => {

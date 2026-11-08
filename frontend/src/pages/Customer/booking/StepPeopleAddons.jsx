@@ -101,7 +101,61 @@ export default function StepPeopleAddons({
     return units.filter((u) => u.equipment_id !== 'bring_own').length;
   }, [units]);
 
-  // Handle Pax change with board auto-trimming
+  const getCandidateWindow = (eq, currentUnits = units) => {
+    const eqId = eq.equipment_id || eq.id;
+    const isBringOwn = eqId === 'bring_own';
+    const minH = Math.min(eq.min_contiguous_hours || 2, H);
+
+    if (allowExceedPax || isBringOwn) {
+      return { canAdd: true, from: 0, to: H, reason: null };
+    }
+
+    // Check usage across all slots 0..H
+    const slotUsage = (k) => currentUnits.filter(u => u.equipment_id !== 'bring_own' && u.from <= k && k < u.to).length;
+
+    // Find all slots where slotUsage < pax
+    const freeSlots = [];
+    for (let k = 0; k < H; k++) {
+      if (slotUsage(k) < pax) freeSlots.push(k);
+    }
+
+    if (freeSlots.length === 0) {
+      return { canAdd: false, reason: '每個時段都已經有板子了' };
+    }
+
+    // Build contiguous free intervals
+    const freeIntervals = [];
+    let curStart = freeSlots[0];
+    let prev = freeSlots[0];
+    for (let i = 1; i < freeSlots.length; i++) {
+      if (freeSlots[i] === prev + 1) {
+        prev = freeSlots[i];
+      } else {
+        freeIntervals.push({ from: curStart, to: prev + 1 });
+        curStart = freeSlots[i];
+        prev = freeSlots[i];
+      }
+    }
+    freeIntervals.push({ from: curStart, to: prev + 1 });
+
+    // Look for first free interval with length >= minH
+    const validInterval = freeIntervals.find(inv => inv.to - inv.from >= minH);
+    if (validInterval) {
+      return { canAdd: true, from: validInterval.from, to: validInterval.to, reason: null };
+    }
+
+    // If first interval is shorter than minH, can we extend from its start?
+    const firstInv = freeIntervals[0];
+    const targetEnd = firstInv.from + minH;
+    if (targetEnd <= H && Array.from({ length: minH }, (_, i) => firstInv.from + i).every(k => slotUsage(k) < pax)) {
+      return { canAdd: true, from: firstInv.from, to: targetEnd, reason: null };
+    }
+
+    // No free interval can satisfy minH
+    return { canAdd: false, reason: '剩下的時間不到 2 小時' };
+  };
+
+  // Handle Pax change with board auto-trimming based on concurrent slots
   const handlePaxChange = (newPax) => {
     if (newPax > maxPax) {
       toast.show(`這段時間最多還能預約 ${maxPax} 位`, { type: 'info' });
@@ -109,22 +163,22 @@ export default function StepPeopleAddons({
     }
     onChangePax(newPax);
 
-    // If newPax is less than current non-bring-own board count, trim boards from the end
-    if (!allowExceedPax && nonBringOwnTotal > newPax) {
-      const allowedCount = newPax;
-      let keptCount = 0;
-      const trimmed = [];
-      // Keep bring_own, and keep up to allowedCount non-bring_own
-      for (const u of units) {
-        if (u.equipment_id === 'bring_own') {
-          trimmed.push(u);
-        } else if (keptCount < allowedCount) {
-          trimmed.push(u);
-          keptCount++;
+    if (!allowExceedPax) {
+      let adjustedUnits = [...units];
+      let needsAdjustment = false;
+      for (let k = 0; k < H; k++) {
+        while (adjustedUnits.filter(u => u.equipment_id !== 'bring_own' && u.from <= k && k < u.to).length > newPax) {
+          needsAdjustment = true;
+          const revIdx = [...adjustedUnits].reverse().findIndex(u => u.equipment_id !== 'bring_own' && u.from <= k && k < u.to);
+          if (revIdx === -1) break;
+          const targetIdx = adjustedUnits.length - 1 - revIdx;
+          adjustedUnits.splice(targetIdx, 1);
         }
       }
-      onChangeUnits(trimmed);
-      toast.show(`人數改成 ${newPax} 位，智能板也調整成 ${allowedCount} 台`, { type: 'info' });
+      if (needsAdjustment) {
+        onChangeUnits(adjustedUnits);
+        toast.show(`人數改成 ${newPax} 位，智能板也同步調整`, { type: 'info' });
+      }
     }
   };
 
@@ -132,23 +186,25 @@ export default function StepPeopleAddons({
   const handleAddBoard = (eq) => {
     const eqId = eq.equipment_id || eq.id;
     const isBringOwn = eqId === 'bring_own';
-    if (!allowExceedPax && !isBringOwn && nonBringOwnTotal >= pax) {
-      toast.show(`只有需要的人租就好，最多 ${pax} 台`, { type: 'info' });
+    const candWin = getCandidateWindow(eq);
+    if (!candWin.canAdd) {
+      toast.show(candWin.reason || '無法加租', { type: 'info' });
       return;
     }
 
-    const minH = Math.min(eq.min_contiguous_hours || 2, H);
     const candidate = {
       uid: Math.random().toString(36).substring(2, 9),
       equipment_id: eqId,
-      from: 0,
-      to: H,
+      from: candWin.from,
+      to: candWin.to,
     };
 
-    const check = canPlace(units, candidate, availBySession, hourStartTimes);
-    if (!check.ok) {
-      toast.show(`${shortBoardName(eq.name)} ${check.hour} 已經租完了`, { type: 'error' });
-      return;
+    if (!isBringOwn) {
+      const check = canPlace(units, candidate, availBySession, hourStartTimes);
+      if (!check.ok) {
+        toast.show(`${shortBoardName(eq.name)} ${check.hour} 已經租完了`, { type: 'error' });
+        return;
+      }
     }
 
     onChangeUnits([...units, candidate]);
@@ -186,7 +242,7 @@ export default function StepPeopleAddons({
     if (!check.ok) {
       toast.show(`${shortBoardName(cfg?.name || '')} ${check.hour} 已經租完了`, { type: 'error' });
       onChangeUnits(
-        units.map((u) => (u.uid === uid ? { ...u, from: 0, to: H } : u))
+        units.map((u) => (u.uid === uid ? { ...u, from: target.from, to: target.to } : u))
       );
     }
   };
@@ -299,7 +355,9 @@ export default function StepPeopleAddons({
           <div>
             <div className="text-[15px] font-bold">智能拼豆板（選租）</div>
             <div className="sg-small">
-              {allowExceedPax ? '只有需要的人租就好' : `只有需要的人租就好，最多 ${pax} 台`}
+              {allowExceedPax
+                ? '只有需要的人租就好，可以分段租不同尺寸'
+                : `只有需要的人租就好，同一時間最多 ${pax} 台；可以分段租不同尺寸`}
             </div>
           </div>
 
@@ -332,10 +390,9 @@ export default function StepPeopleAddons({
               const displayName = nameParts ? nameParts[1].trim() : eq.name;
               const sizePart = nameParts && nameParts[2] ? nameParts[2].trim() : '';
 
-              const canAdd =
-                !isMaintenance &&
-                (allowExceedPax || isBringOwn || nonBringOwnTotal < pax) &&
-                (isBringOwn || stockRemaining > 0);
+              const candWin = getCandidateWindow(eq);
+              const canAdd = !isMaintenance && candWin.canAdd && (isBringOwn || stockRemaining > 0);
+              const disableReason = !candWin.canAdd ? candWin.reason : (stockRemaining <= 0 ? '已租完' : '');
 
               return (
                 <div key={eqId} className="grid gap-2">
@@ -359,6 +416,9 @@ export default function StepPeopleAddons({
                                 {stockText}
                               </span>
                             )}
+                            {disableReason && (
+                              <span className="text-sg-muted ml-1.5 font-bold"> · {disableReason}</span>
+                            )}
                           </>
                         )}
                       </div>
@@ -367,7 +427,7 @@ export default function StepPeopleAddons({
                     <Stepper
                       value={count}
                       min={0}
-                      max={isBringOwn ? 99 : allowExceedPax ? 99 : pax}
+                      max={99}
                       disabledMinus={count <= 0}
                       disabledPlus={!canAdd}
                       onMinus={() => handleRemoveBoard(eqId)}
@@ -377,19 +437,38 @@ export default function StepPeopleAddons({
                   </div>
 
                   {/* BoardTimeBoxes for this board */}
-                  {eqUnits.map((u, uIdx) => (
-                    <BoardTimeBox
-                      key={u.uid}
-                      unit={u}
-                      config={eq}
-                      boardIndex={uIdx + 1}
-                      totalHours={H}
-                      boundaryTimes={[...bookingSessions.map((s) => s.start_time), bookingSessions[H - 1]?.end_time]}
-                      bookingSessions={bookingSessions}
-                      onChange={(newFrom, newTo) => handleUnitTimeChange(u.uid, newFrom, newTo)}
-                      onCommit={(newFrom, newTo) => handleUnitTimeCommit(u.uid, newFrom, newTo)}
-                    />
-                  ))}
+                  {eqUnits.map((u, uIdx) => {
+                    const otherUnits = units.filter((o) => o.uid !== u.uid && o.equipment_id !== 'bring_own');
+                    const blockedSlots = [];
+                    for (let k = 0; k < H; k++) {
+                      if (!allowExceedPax && otherUnits.filter((o) => o.from <= k && k < o.to).length >= pax) {
+                        blockedSlots.push(k);
+                      }
+                    }
+                    let boundStart = 0;
+                    let boundEnd = H;
+                    for (const b of blockedSlots) {
+                      if (b < u.from) boundStart = Math.max(boundStart, b + 1);
+                      if (b >= u.to) boundEnd = Math.min(boundEnd, b);
+                    }
+
+                    return (
+                      <BoardTimeBox
+                        key={u.uid}
+                        unit={u}
+                        config={eq}
+                        boardIndex={uIdx + 1}
+                        totalHours={H}
+                        boundStart={boundStart}
+                        boundEnd={boundEnd}
+                        blockedSlots={blockedSlots}
+                        boundaryTimes={[...bookingSessions.map((s) => s.start_time), bookingSessions[H - 1]?.end_time]}
+                        bookingSessions={bookingSessions}
+                        onChange={(newFrom, newTo) => handleUnitTimeChange(u.uid, newFrom, newTo)}
+                        onCommit={(newFrom, newTo) => handleUnitTimeCommit(u.uid, newFrom, newTo)}
+                      />
+                    );
+                  })}
                 </div>
               );
             })}
