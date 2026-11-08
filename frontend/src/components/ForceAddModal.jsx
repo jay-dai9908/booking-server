@@ -3,6 +3,7 @@ import { User, Phone, Users, Clock, Sparkles } from 'lucide-react';
 import api from '../api/axios';
 import ResponsivePanel from './admin/ResponsivePanel';
 import Button from './customer/Button';
+import { isSessionPast } from '../utils/admin/floorSelectors';
 
 export default function ForceAddModal({
   isOpen,
@@ -37,13 +38,15 @@ export default function ForceAddModal({
     }
 
     if (sortedSessions.length > 0) {
-      const now = new Date();
-      const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const foundIdx = sortedSessions.findIndex(s => s.start_time <= currentHHMM && s.end_time > currentHHMM);
-      const startIdx = foundIdx >= 0 ? foundIdx : 0;
-      // Default select 2 hours if available
-      const endIdx = Math.min(sortedSessions.length - 1, startIdx + 1);
-      setSelectedSessionIds(sortedSessions.slice(startIdx, endIdx + 1).map(s => s.id));
+      const foundIdx = sortedSessions.findIndex(s => !isSessionPast(s));
+      const startIdx = foundIdx >= 0 ? foundIdx : -1;
+      if (startIdx >= 0) {
+        const endIdx = Math.min(sortedSessions.length - 1, startIdx + 1);
+        const validRange = sortedSessions.slice(startIdx, endIdx + 1).filter(s => !isSessionPast(s));
+        setSelectedSessionIds(validRange.map(s => s.id));
+      } else {
+        setSelectedSessionIds([]);
+      }
     } else {
       setSelectedSessionIds([]);
     }
@@ -53,7 +56,7 @@ export default function ForceAddModal({
 
   const handleToggleSession = (sId) => {
     const sIndex = sortedSessions.findIndex(s => s.id === sId);
-    if (sIndex < 0) return;
+    if (sIndex < 0 || isSessionPast(sortedSessions[sIndex])) return;
 
     if (selectedSessionIds.length === 0) {
       setSelectedSessionIds([sId]);
@@ -277,21 +280,27 @@ export default function ForceAddModal({
 
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-48 overflow-y-auto p-1 bg-sg-paper/40 rounded-2xl border border-sg-line">
             {sortedSessions.map((s) => {
+              const isPast = isSessionPast(s);
               const isSelected = selectedSessionIds.includes(s.id);
               const remaining = s.remaining_capacity ?? s.max_capacity ?? 0;
               return (
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => handleToggleSession(s.id)}
+                  disabled={isPast}
+                  onClick={() => !isPast && handleToggleSession(s.id)}
                   className={`p-2 rounded-xl border text-center transition ${
-                    isSelected
+                    isPast
+                      ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
+                      : isSelected
                       ? 'bg-sg-brown text-white border-sg-brown font-bold shadow-xs'
                       : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
                   }`}
                 >
                   <span className="block text-[12px] font-num">{s.start_time}</span>
-                  <span className="block text-[10px] opacity-75">餘 {remaining}</span>
+                  <span className="block text-[10px] opacity-75">
+                    {isPast ? '已過' : `餘 ${remaining}`}
+                  </span>
                 </button>
               );
             })}

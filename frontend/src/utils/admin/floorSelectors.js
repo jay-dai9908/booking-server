@@ -279,3 +279,23 @@ export function isBookingCompleted(booking) {
   return false;
 }
 
+export function isSessionPast(session, now = new Date()) {
+  if (!session) return false;
+  const nowTaipeiStr = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+  const currentHHMM = new Date(now).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
+
+  if (session.session_date) {
+    const sDateStr = typeof session.session_date === 'string'
+      ? session.session_date.slice(0, 10)
+      : new Date(session.session_date).toISOString().slice(0, 10);
+    if (sDateStr < nowTaipeiStr) return true;
+    if (sDateStr > nowTaipeiStr) return false;
+  }
+
+  if (session.end_time) {
+    return session.end_time <= currentHHMM;
+  }
+  return false;
+}
+
+

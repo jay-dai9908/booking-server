@@ -10,6 +10,7 @@ import {
   formatOverdueText,
   groupTimerPill,
   isBookingCompleted,
+  isSessionPast,
 } from '../src/utils/admin/floorSelectors.js';
 
 test('floorSelectors pure function tests', async (t) => {
@@ -290,5 +291,22 @@ test('floorSelectors pure function tests', async (t) => {
       ]
     };
     assert.strictEqual(isBookingCompleted(allEndedBooking), true);
+  });
+
+  await t.test('12. Spec 2.8: isSessionPast disables past sessions', () => {
+    // Current time: 2026-11-08 20:00 (Asia/Taipei)
+    const now2000 = new Date('2026-11-08T20:00:00+08:00');
+    
+    // 14:00~15:00 on same day -> ended at 15:00 <= 20:00 -> true
+    assert.strictEqual(isSessionPast({ start_time: '14:00', end_time: '15:00', session_date: '2026-11-08' }, now2000), true);
+    
+    // 19:00~20:00 on same day -> ended at 20:00 <= 20:00 -> true
+    assert.strictEqual(isSessionPast({ start_time: '19:00', end_time: '20:00', session_date: '2026-11-08' }, now2000), true);
+    
+    // 20:00~21:00 on same day -> ends at 21:00 > 20:00 -> false
+    assert.strictEqual(isSessionPast({ start_time: '20:00', end_time: '21:00', session_date: '2026-11-08' }, now2000), false);
+    
+    // Tomorrow 14:00~15:00 -> false
+    assert.strictEqual(isSessionPast({ start_time: '14:00', end_time: '15:00', session_date: '2026-11-09' }, now2000), false);
   });
 });
