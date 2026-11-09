@@ -10,7 +10,9 @@ const DEFAULT_BUSINESS_HOURS = {
 export const DEFAULT_PAYMENT_METHODS = [
   { key: 'cash', label: '現金', enabled: true },
   { key: 'linepay', label: 'LINE Pay', enabled: true },
-  { key: 'transfer', label: '銀行轉帳', enabled: true }
+  { key: 'transfer', label: '銀行轉帳', enabled: true },
+  { key: 'card', label: '信用卡', enabled: true },
+  { key: 'pass', label: '體驗券 / 票券', enabled: true }
 ];
 
 export const getDailySetting = async (req, res) => {

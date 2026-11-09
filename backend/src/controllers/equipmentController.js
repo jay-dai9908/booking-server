@@ -765,6 +765,57 @@ export const modifyBookingEquipment = async (req, res) => {
     const sortedReservations = [...reservations].sort((a, b) => a.session.start_time.localeCompare(b.session.start_time));
     const sortedBookingSessions = sortedReservations.map(r => r.session);
 
+    // Verification 4.5: Check mid-session past hours - newly added boards cannot start earlier than current hour
+    if (now >= bookingStartTime && now < bookingEndTime) {
+      const curH = parseInt(
+        new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', hour: 'numeric', hour12: false }).format(now),
+        10
+      );
+      const currentHourStr = `${String(curH).padStart(2, '0')}:00`;
+
+      // Pool of existing equipment start times
+      const existingPool = [];
+      for (const ex of existingEquipments) {
+        let exStart = firstSession.start_time;
+        if (Array.isArray(ex.covered_sessions) && ex.covered_sessions.length > 0) {
+          exStart = ex.covered_sessions[0].split('-')[0];
+        }
+        for (let i = 0; i < ex.quantity; i++) {
+          existingPool.push({
+            equipment_id: ex.equipment_id,
+            start_time: exStart
+          });
+        }
+      }
+
+      for (const eq of equipments) {
+        const qty = parseInt(eq.quantity, 10) || 0;
+        if (qty <= 0) continue;
+        if (eq.equipment_id === 'bring_own') continue;
+
+        const config = configMap[eq.equipment_id];
+        const minHours = config?.min_contiguous_hours || 2;
+        const { windowSessions } = resolveEquipmentWindow(sortedBookingSessions, eq, minHours);
+        const unitStart = windowSessions[0]?.start_time;
+
+        for (let i = 0; i < qty; i++) {
+          if (unitStart && unitStart < currentHourStr) {
+            const matchIdx = existingPool.findIndex(
+              (p) => p.equipment_id === eq.equipment_id && p.start_time <= unitStart
+            );
+            if (matchIdx >= 0) {
+              existingPool.splice(matchIdx, 1);
+            } else {
+              return res.status(422).json({
+                error: '已經過去的時段不能加租',
+                code: 'PAST_HOURS_FORBIDDEN'
+              });
+            }
+          }
+        }
+      }
+    }
+
     // Verification 5: Pax quota & stock check (do not count bring_own)
     const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
     if (!globalSetting?.allow_equipment_exceed_pax && !isAdmin) {

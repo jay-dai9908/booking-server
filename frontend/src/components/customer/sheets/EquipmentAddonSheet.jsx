@@ -107,6 +107,36 @@ export default function EquipmentAddonSheet({
     return now.getTime() >= startDt.getTime() - 60 * 60 * 1000;
   }, [reservation]);
 
+  // Reservation started check & current hour index
+  const isBookingStarted = useMemo(() => {
+    if (!reservation) return false;
+    const now = new Date();
+    const datePart = reservation.session_date || reservation.session?.session_date;
+    if (!datePart) return false;
+    const cleanDate = String(datePart).split('T')[0];
+    const taipeiDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    if (cleanDate !== taipeiDate) return false;
+
+    const [sH, sM] = (reservation.start_time || reservation.session?.start_time || '00:00').split(':').map(Number);
+    const curH = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', hour: 'numeric', hour12: false }).format(now));
+    const curM = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', minute: 'numeric' }).format(now));
+    return curH > sH || (curH === sH && curM >= sM);
+  }, [reservation]);
+
+  const currentHourIdx = useMemo(() => {
+    if (!reservation || !isBookingStarted) return 0;
+    const now = new Date();
+    const curH = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', hour: 'numeric', hour12: false }).format(now));
+    const idx = bookingSessions.findIndex((s) => {
+      const [sh] = s.start_time.split(':').map(Number);
+      return sh === curH;
+    });
+    if (idx >= 0) return idx;
+    const firstH = Number(bookingSessions[0]?.start_time?.split(':')[0] || 0);
+    if (curH < firstH) return 0;
+    return H;
+  }, [reservation, isBookingStarted, bookingSessions, H]);
+
   // Load availability
   useEffect(() => {
     if (!isOpen || !reservation || bookingSessions.length === 0) return;
@@ -157,6 +187,7 @@ export default function EquipmentAddonSheet({
               equipment_id: e.equipment_id,
               from,
               to,
+              isExisting: true,
             });
           }
         });
@@ -221,35 +252,19 @@ export default function EquipmentAddonSheet({
     }
 
     const minH = Math.min(eq.min_contiguous_hours || 2, H);
-    // If reservation has started, check current hour
-    let from = 0;
-    const now = new Date();
-    const datePart = reservation.session_date || reservation.session?.session_date;
-    if (datePart) {
-      const cleanDate = String(datePart).split('T')[0];
-      const taipeiDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
-      const isToday = cleanDate === taipeiDate;
-      const curH = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', hour: 'numeric', hour12: false }).format(now));
-      if (isToday) {
-        const curIdx = bookingSessions.findIndex((s) => {
-          const [sh] = s.start_time.split(':').map(Number);
-          return sh === curH;
-        });
-        if (curIdx >= 0) {
-          from = curIdx;
-        }
-      }
-    }
+    // If reservation has started, start time cannot be earlier than current hour
+    const from = isBookingStarted ? currentHourIdx : 0;
 
     const candidate = {
       uid: Math.random().toString(36).substring(2, 9),
       equipment_id: eqId,
       from,
       to: H,
+      isExisting: false,
     };
 
     if (candidate.to - candidate.from < minH) {
-      candidate.from = Math.max(0, H - minH);
+      candidate.from = Math.max(isBookingStarted ? currentHourIdx : 0, H - minH);
     }
 
     // Check inventory
@@ -418,6 +433,12 @@ export default function EquipmentAddonSheet({
           </div>
         )}
 
+        {isBookingStarted && (
+          <div className="text-[12px] text-sg-honey-ink bg-sg-honey-soft px-3 py-1.5 rounded-[10px] font-bold">
+            已經過去的時段不能加租
+          </div>
+        )}
+
         {errorMessage && <ErrorBanner message={errorMessage} />}
 
         {loading ? (
@@ -504,18 +525,26 @@ export default function EquipmentAddonSheet({
                     </div>
 
                     {/* Render BoardTimeBox for each rented unit */}
-                    {eqUnits.map((u, uIdx) => (
-                      <BoardTimeBox
-                        key={u.uid}
-                        unit={u}
-                        config={eq}
-                        boardIndex={uIdx + 1}
-                        totalHours={H}
-                        boundaryTimes={[...bookingSessions.map((s) => s.start_time), bookingSessions[H - 1]?.end_time]}
-                        bookingSessions={bookingSessions}
-                        onChange={(newFrom, newTo) => handleUnitChange(u.uid, newFrom, newTo)}
-                      />
-                    ))}
+                    {eqUnits.map((u, uIdx) => {
+                      const boundStart = isBookingStarted ? (u.isExisting ? Math.min(u.from, currentHourIdx) : currentHourIdx) : 0;
+                      const pastSlots = isBookingStarted ? Array.from({ length: currentHourIdx }, (_, i) => i) : [];
+
+                      return (
+                        <BoardTimeBox
+                          key={u.uid}
+                          unit={u}
+                          config={eq}
+                          boardIndex={uIdx + 1}
+                          totalHours={H}
+                          boundStart={boundStart}
+                          pastSlots={pastSlots}
+                          hasPastSlots={isBookingStarted && currentHourIdx > 0}
+                          boundaryTimes={[...bookingSessions.map((s) => s.start_time), bookingSessions[H - 1]?.end_time]}
+                          bookingSessions={bookingSessions}
+                          onChange={(newFrom, newTo) => handleUnitChange(u.uid, newFrom, newTo)}
+                        />
+                      );
+                    })}
 
                     <Divider />
                   </div>

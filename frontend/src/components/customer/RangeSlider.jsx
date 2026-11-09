@@ -8,6 +8,7 @@ export function RangeSlider({
   boundStart = 0,
   boundEnd = totalHours,
   blockedSlots = [],
+  pastSlots = [],
   onChange,
   onCommit,
   boundaryTimes = [], // ['12:00', '13:00', ... '18:00']
@@ -146,6 +147,25 @@ export function RangeSlider({
               />
             );
           })}
+
+          {/* Past slots marked with "已過" */}
+          {pastSlots.map((slotIdx) => {
+            const leftPct = getPercent(slotIdx);
+            const widthPct = getPercent(slotIdx + 1) - leftPct;
+            return (
+              <div
+                key={`past-${slotIdx}`}
+                data-testid={`past-slot-${slotIdx}`}
+                className="absolute -top-[5px] -bottom-[5px] bg-stone-200/90 border border-dashed border-stone-300 rounded-[4px] pointer-events-none flex items-center justify-center z-[1]"
+                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                title="已過"
+              >
+                <span className="text-[10px] text-stone-400 font-bold leading-none select-none">
+                  已過
+                </span>
+              </div>
+            );
+          })}
         </div>
 
         {/* Selected Fill Range */}
@@ -192,12 +212,13 @@ export function RangeSlider({
         {boundaryTimes.map((time, idx) => {
           const pct = getPercent(idx);
           const isInRange = idx >= from && idx <= to;
+          const isPast = pastSlots.includes(idx) || idx < safeBoundStart;
           const displayLabel = showShortTickLabel ? time.split(':')[0] : time;
 
           return (
             <span
               key={idx}
-              className={isInRange ? 'sg-tick-in' : ''}
+              className={`${isInRange ? 'sg-tick-in' : ''} ${isPast ? 'text-stone-300 line-through' : ''}`}
               style={{ left: `${pct}%` }}
             >
               {displayLabel}
@@ -218,6 +239,8 @@ export function BoardTimeBox({
   boundStart,
   boundEnd,
   blockedSlots,
+  pastSlots = [],
+  hasPastSlots = false,
   onChange,
   onCommit,
   className = '',
@@ -245,7 +268,7 @@ export function BoardTimeBox({
   const startTime = boundaryTimes[from] || '';
   const endTime = boundaryTimes[to] || '';
 
-  const isFullSpan = totalHours <= minHours && (!blockedSlots || blockedSlots.length === 0);
+  const isFullSpan = totalHours <= minHours && (!blockedSlots || blockedSlots.length === 0) && pastSlots.length === 0;
 
   const fireChange = (val) => {
     if (!onChange) return;
@@ -294,13 +317,18 @@ export function BoardTimeBox({
             boundStart={boundStart}
             boundEnd={boundEnd}
             blockedSlots={blockedSlots}
+            pastSlots={pastSlots}
             boardIndex={boardIndex}
             boundaryTimes={boundaryTimes}
             onChange={fireChange}
             onCommit={fireCommit}
           />
           <div className="sg-small mt-1">
-            拖曳兩端的圓點調整，至少 {minHours} 小時；其他時間用傳統板
+            {hasPastSlots || pastSlots.length > 0 ? (
+              <>拖曳兩端的圓點調整，至少 {minHours} 小時；已經過去的時段不能加租；其他時間用傳統板</>
+            ) : (
+              <>拖曳兩端的圓點調整，至少 {minHours} 小時；其他時間用傳統板</>
+            )}
           </div>
         </>
       )}

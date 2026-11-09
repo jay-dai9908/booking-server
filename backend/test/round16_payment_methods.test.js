@@ -106,7 +106,9 @@ test('Round 16 Item 2: Payment methods configuration & validation', async (t) =>
         payment_methods_json: [
           { key: 'cash', label: '現金', enabled: true },
           { key: 'linepay', label: 'LINE Pay', enabled: true },
-          { key: 'transfer', label: '銀行轉帳', enabled: true }
+          { key: 'transfer', label: '銀行轉帳', enabled: true },
+          { key: 'card', label: '信用卡', enabled: true },
+          { key: 'pass', label: '體驗券 / 票券', enabled: true }
         ]
       }
     }).catch(() => {});
@@ -120,7 +122,9 @@ test('Round 16 Item 2: Payment methods configuration & validation', async (t) =>
         payment_methods_json: [
           { key: 'cash', label: '現金', enabled: false },
           { key: 'linepay', label: 'LINE Pay', enabled: false },
-          { key: 'transfer', label: '銀行轉帳', enabled: true }
+          { key: 'transfer', label: '銀行轉帳', enabled: true },
+          { key: 'card', label: '信用卡', enabled: true },
+          { key: 'pass', label: '體驗券 / 票券', enabled: true }
         ]
       }
     });
@@ -144,7 +148,7 @@ test('Round 16 Item 2: Payment methods configuration & validation', async (t) =>
       body: {
         person_nos: [1],
         method: 'linepay',
-        expected_amount: 200
+        expected_amount: 180
       }
     });
 
@@ -162,7 +166,9 @@ test('Round 16 Item 2: Payment methods configuration & validation', async (t) =>
         payment_methods_json: [
           { key: 'cash', label: '現金', enabled: true },
           { key: 'linepay', label: 'LINE Pay', enabled: true },
-          { key: 'transfer', label: '銀行轉帳', enabled: true }
+          { key: 'transfer', label: '銀行轉帳', enabled: true },
+          { key: 'card', label: '信用卡', enabled: true },
+          { key: 'pass', label: '體驗券 / 票券', enabled: true }
         ]
       }
     });
