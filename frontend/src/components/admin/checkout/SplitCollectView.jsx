@@ -255,12 +255,13 @@ export default function SplitCollectView({
       if (onPaymentSuccess) {
         onPaymentSuccess({
           booking_ref: bookingRef,
-          status: res.data?.status || { code: 'unpaid', label: '未結帳' }
+          status: res.data?.status || { code: 'unpaid', label: '未結帳' },
+          message: '已標記未結帳'
         });
       }
       setTimeout(() => {
         onClose();
-      }, 500);
+      }, 800);
     } catch (err) {
       console.error('[handleMarkUnpaid] Error:', err);
       setErrorMessage(err.response?.data?.error || err.response?.data?.message || '標記未結帳失敗');
@@ -426,7 +427,7 @@ export default function SplitCollectView({
 
               <div className="space-y-2">
                 {persons.map((p) => {
-                  const isPaid = Boolean(p.paid || p.is_paid);
+                  const isPaid = Boolean(p.paid || p.is_paid || p.is_frozen);
                   const isSelected = selectedPersonNos.includes(p.person_no);
                   const hoursVal = p.entry?.hours ?? p.hours ?? 2;
 
@@ -443,7 +444,14 @@ export default function SplitCollectView({
                               <div className="text-[13px] font-bold text-sg-ink">
                                 第 {p.person_no} 位 ({p.seat_code || '未帶位'})
                               </div>
-                              <div className="text-[11px] text-sg-sage-ink font-bold">已結清 NT${p.total}</div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] text-sg-sage-ink font-bold">已結清 NT${p.total}</span>
+                                {p.pending_supplement > 0 && (
+                                  <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                                    待補收 NT${p.pending_supplement}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
 
@@ -726,7 +734,7 @@ export default function SplitCollectView({
       {toastMsg && (
         <div
           data-testid="split-toast"
-          className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 bg-emerald-600 text-white text-[13px] font-bold rounded-2xl shadow-xl animate-in fade-in slide-in-from-top duration-200"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[250] px-4 py-2 bg-emerald-600 text-white text-[13px] font-bold rounded-2xl shadow-xl animate-in fade-in slide-in-from-top duration-200"
         >
           {toastMsg}
         </div>

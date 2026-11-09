@@ -138,8 +138,7 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
 /**
  * Get live floor data for a business date (spec 5.2)
  */
-export async function getLiveFloorData(dateStr = null) {
-  const serverNow = new Date();
+export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
   const targetDateStr = dateStr || toTaipeiDateString(serverNow);
   const targetDate = dateOnly(targetDateStr);
 

@@ -202,11 +202,12 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     });
 
     // 1. 先結帳、還沒帶位：在待入座
-    const liveBeforeCheckIn = await getLiveFloorData(todayStr);
+    const midSlotTime = new Date(`${todayStr}T21:00:00+08:00`);
+    const liveBeforeCheckIn = await getLiveFloorData(todayStr, midSlotTime);
     const bookingBefore = liveBeforeCheckIn.bookings.find(b => b.booking_ref === ref);
     assert.ok(bookingBefore, 'Booking should exist in live floor data');
     assert.equal(bookingBefore.attendance, 'pending', '還沒帶位時 attendance 為 pending（待入座）');
-    assert.equal(isBookingCompleted(bookingBefore), false, '未離場');
+    assert.equal(isBookingCompleted(bookingBefore, midSlotTime), false, '未離場');
 
     // 2. 店員帶位
     const checkInMock = createMockReqRes({
@@ -225,7 +226,7 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     assert.equal(person.timer_started_at, null, '已付款的人不設定 timer_started_at（不開始計時）');
 
     // 在使用中、座位被佔用、同時段排位不會用到這些座位
-    const liveAfterCheckIn = await getLiveFloorData(todayStr);
+    const liveAfterCheckIn = await getLiveFloorData(todayStr, midSlotTime);
     const liveBooking = liveAfterCheckIn.bookings.find(b => b.booking_ref === ref);
     assert.ok(liveBooking);
     assert.equal(liveBooking.attendance, 'checked_in', 'live 數據中仍為 checked_in（使用中）');
@@ -235,7 +236,6 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     assert.equal(occ[session.id]?.['B1-1'], ref, '同時段排位時該座位被此預約佔用');
 
     // 3. 已結清、時段還沒結束：在使用中
-    const midSlotTime = new Date(`${todayStr}T21:00:00+08:00`);
     assert.equal(isBookingCompleted(liveBooking, midSlotTime), false, '時段還沒結束時留在使用中');
 
     // 時段結束後：自動移到已離場

@@ -67,6 +67,7 @@ export default function CheckoutWorkbench({
   const [showCollectModal, setShowCollectModal] = useState(false);
   const [showSplitCollect, setShowSplitCollect] = useState(false);
   const [showSharedSplitPanel, setShowSharedSplitPanel] = useState(false);
+  const [selectedSharedAddonKey, setSelectedSharedAddonKey] = useState(null);
   const [showAddonManager, setShowAddonManager] = useState(false);
   const [showQuickPromoModal, setShowQuickPromoModal] = useState(false);
   const [isPrintingSplit, setIsPrintingSplit] = useState(false);
@@ -743,10 +744,13 @@ export default function CheckoutWorkbench({
   // Addons handling
   const handleAddPreset = (preset) => {
     if (addonTarget === 'order') {
-      const hasAnyPaid = (billData?.payments || []).some(p => p.status === 'valid' && (p.kind === 'charge' || p.kind === 'waive')) || (billData?.status?.covered > 0);
+      const hasAnyPaid = (billData?.payments || []).some(p => p.status === 'valid' && (p.kind === 'charge' || p.kind === 'waive' || p.kind === 'pass')) ||
+        (billData?.status?.covered > 0) ||
+        (billData?.status?.code === 'partial') ||
+        (billData?.bill?.persons || []).some(p => p.is_paid || p.is_frozen || p.paid);
       updateDraft(prev => {
         const list = [...(prev.order_addons || [])];
-        const existingIdx = list.findIndex(a => a.name === preset.name);
+        const existingIdx = list.findIndex(a => a.name === preset.name && Boolean(a.added_after_payment) === Boolean(hasAnyPaid));
         if (existingIdx >= 0) {
           list[existingIdx] = { ...list[existingIdx], qty: list[existingIdx].qty + 1 };
         } else {
@@ -1023,7 +1027,7 @@ export default function CheckoutWorkbench({
 
   // Print split slips (Section 8.2 & Round 14 Item 4)
   const handlePrintSplitSlips = async () => {
-    const computedBill = clientComputedBill || billData?.bill;
+    const computedBill = billData?.bill;
     const allPersons = computedBill?.persons || [];
     if (allPersons.length === 0) {
       setToastMsg('無任何顧客資料可列印分單');
@@ -1049,7 +1053,7 @@ export default function CheckoutWorkbench({
           }
         };
 
-        const commands = buildReceipt(personPayment, billData?.booking || {}, {
+        const commands = buildReceipt(personPayment, { ...(billData?.booking || {}), booking_ref: bookingRef }, {
           isFullOrder: false,
           staffName: '櫃檯'
         });
@@ -1678,42 +1682,49 @@ export default function CheckoutWorkbench({
                     已加購項目清單
                   </span>
                   {/* Order level */}
-                  {(draftState?.order_addons || []).map((a) => (
-                    <div
-                      key={a.key}
-                      className="flex items-center justify-between p-2 rounded-xl bg-sg-paper/40 border border-sg-line text-[12px]"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sg-ink">{a.name} ×{a.qty}</span>
-                        <span className="px-1.5 py-0.5 rounded bg-sg-paper border border-sg-line text-[10px] text-sg-muted">
-                          整單共同
-                        </span>
-                        {a.added_after_payment && (
-                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold">
-                            第 1 位付款後才加
+                  {(draftState?.order_addons || []).map((a) => {
+                    const firstPaidPerson = (billData?.bill?.persons || []).find(p => p.paid || p.is_paid || p.is_frozen);
+                    const paidPersonTag = firstPaidPerson ? `第 ${firstPaidPerson.person_no} 位付款後才加` : '付款後才加';
+                    return (
+                      <div
+                        key={a.key}
+                        className="flex items-center justify-between p-2 rounded-xl bg-sg-paper/40 border border-sg-line text-[12px]"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sg-ink">{a.name} ×{a.qty}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-sg-paper border border-sg-line text-[10px] text-sg-muted">
+                            整單共同
                           </span>
-                        )}
-                        <span className="font-num text-sg-muted">NT${a.price * a.qty}</span>
+                          {a.added_after_payment && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold">
+                              {paidPersonTag}
+                            </span>
+                          )}
+                          <span className="font-num text-sg-muted">NT${a.price * a.qty}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            data-testid="open-shared-split-panel-btn-workbench"
+                            onClick={() => {
+                              setSelectedSharedAddonKey(a.key);
+                              setShowSharedSplitPanel(true);
+                            }}
+                            className="px-2 py-0.5 rounded text-[11px] font-bold text-sg-brown bg-sg-brown-soft hover:bg-sg-brown/20 transition cursor-pointer"
+                          >
+                            改分攤
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAddon(true, null, a.key)}
+                            className="text-sg-danger hover:opacity-80 p-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          data-testid="open-shared-split-panel-btn-workbench"
-                          onClick={() => setShowSharedSplitPanel(true)}
-                          className="px-2 py-0.5 rounded text-[11px] font-bold text-sg-brown bg-sg-brown-soft hover:bg-sg-brown/20 transition cursor-pointer"
-                        >
-                          改分攤
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveAddon(true, null, a.key)}
-                          className="text-sg-danger hover:opacity-80 p-1"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {/* Per person */}
                   {persons.map(p => (
                     (p.addons || []).map(a => (
@@ -2339,7 +2350,7 @@ export default function CheckoutWorkbench({
       {toastMsg && (
         <div
           data-testid="workbench-toast"
-          className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 bg-emerald-600 text-white text-[13px] font-bold rounded-2xl shadow-xl animate-in fade-in slide-in-from-top duration-200"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[250] px-4 py-2 bg-emerald-600 text-white text-[13px] font-bold rounded-2xl shadow-xl animate-in fade-in slide-in-from-top duration-200"
         >
           {toastMsg}
         </div>
@@ -2360,7 +2371,10 @@ export default function CheckoutWorkbench({
           onOpenSharedSplit={() => setShowSharedSplitPanel(true)}
           onPaymentSuccess={(data) => {
             const statusCode = data?.status?.code || data?.status?.status || (typeof data?.status === 'string' ? data.status : 'paid');
-            const statusLabel = data?.status?.label || (statusCode === 'paid' ? '已結清' : '部分已付');
+            const statusLabel = data?.status?.label || (statusCode === 'paid' ? '已結清' : (statusCode === 'unpaid' ? '未結帳' : '部分已付'));
+            if (data?.message) {
+              showToast(data.message);
+            }
             setBillData(prev => ({
               ...prev,
               status: { ...(prev?.status || {}), ...(data?.status || {}), code: statusCode, label: statusLabel },
@@ -2381,9 +2395,13 @@ export default function CheckoutWorkbench({
       {/* Shared Items Split Panel */}
       <SharedItemsSplitPanel
         isOpen={showSharedSplitPanel}
-        onClose={() => setShowSharedSplitPanel(false)}
+        onClose={() => {
+          setShowSharedSplitPanel(false);
+          setSelectedSharedAddonKey(null);
+        }}
         draftState={draftState}
         billData={billData}
+        initialAddonKey={selectedSharedAddonKey}
         onUpdateDraft={updateDraft}
       />
 

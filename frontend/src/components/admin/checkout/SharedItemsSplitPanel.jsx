@@ -8,7 +8,8 @@ export default function SharedItemsSplitPanel({
   onClose,
   draftState,
   billData,
-  onUpdateDraft
+  onUpdateDraft,
+  initialAddonKey = null
 }) {
   const bill = billData?.bill || {};
   const orderAddons = draftState?.order_addons || [];
@@ -19,7 +20,14 @@ export default function SharedItemsSplitPanel({
 
   // Find post-payment items or treat all addons
   const postPaymentAddons = orderAddons.filter(a => a.added_after_payment);
-  const activePostAddon = postPaymentAddons[0] || orderAddons[orderAddons.length - 1] || null;
+
+  // Active addon key: prefer initialAddonKey, else first post-payment addon, else last addon
+  const [selectedAddonKey, setSelectedAddonKey] = useState(() => {
+    if (initialAddonKey && orderAddons.some(a => a.key === initialAddonKey)) return initialAddonKey;
+    return postPaymentAddons[0]?.key || orderAddons[orderAddons.length - 1]?.key || null;
+  });
+
+  const activePostAddon = orderAddons.find(a => a.key === selectedAddonKey) || postPaymentAddons[0] || orderAddons[orderAddons.length - 1] || null;
 
   // Split mode selection state: 'unpaid_only' | 'include_paid' | 'person'
   const [splitOption, setSplitOption] = useState(() => {
@@ -35,6 +43,28 @@ export default function SharedItemsSplitPanel({
   const [targetPersonNo, setTargetPersonNo] = useState(() => {
     return activePostAddon?.target_person_no || activePostAddon?.split?.person_no || 1;
   });
+
+  const handleSelectAddon = (key) => {
+    setSelectedAddonKey(key);
+    const target = orderAddons.find(a => a.key === key);
+    if (target) {
+      if (target.split_mode === 'person' || target.split?.mode === 'person') {
+        setSplitOption('person');
+      } else if (target.include_paid) {
+        setSplitOption('include_paid');
+      } else {
+        setSplitOption('unpaid_only');
+      }
+      setTargetPersonNo(target.target_person_no || target.split?.person_no || 1);
+    }
+  };
+
+  const isTargetAddon = (a) => {
+    if (activePostAddon) {
+      return a.key ? a.key === activePostAddon.key : a.name === activePostAddon.name;
+    }
+    return Boolean(a.added_after_payment);
+  };
 
   // Calculate baseline bill (without post-payment items)
   const baselineBill = useMemo(() => {
@@ -66,10 +96,11 @@ export default function SharedItemsSplitPanel({
     try {
       // Build simulated order addons with currently selected split settings
       const simulatedAddons = orderAddons.map(a => {
-        if (!a.added_after_payment) return a;
+        if (!isTargetAddon(a)) return a;
         if (splitOption === 'include_paid') {
           return {
             ...a,
+            added_after_payment: true,
             include_paid: true,
             split_mode: 'proportional',
             split: { mode: 'proportional' },
@@ -79,6 +110,7 @@ export default function SharedItemsSplitPanel({
         if (splitOption === 'person') {
           return {
             ...a,
+            added_after_payment: true,
             include_paid: false,
             split_mode: 'person',
             split: { mode: 'person', person_no: Number(targetPersonNo) },
@@ -88,6 +120,7 @@ export default function SharedItemsSplitPanel({
         // unpaid_only (default)
         return {
           ...a,
+          added_after_payment: true,
           include_paid: false,
           split_mode: 'proportional',
           split: { mode: 'proportional' },
@@ -112,7 +145,7 @@ export default function SharedItemsSplitPanel({
       console.error('[SharedItemsSplitPanel] Simulation error:', err);
       return null;
     }
-  }, [billData, draftState, orderAddons, splitOption, targetPersonNo]);
+  }, [billData, draftState, orderAddons, splitOption, targetPersonNo, activePostAddon]);
 
   // Build the live delta text summary (e.g. "第 1 位要補收 NT$29，第 2 位 +NT$51")
   const personDeltas = useMemo(() => {
@@ -146,10 +179,11 @@ export default function SharedItemsSplitPanel({
     if (!onUpdateDraft) return;
     onUpdateDraft(prev => {
       const list = (prev.order_addons || []).map(a => {
-        if (!a.added_after_payment) return a;
+        if (!isTargetAddon(a)) return a;
         if (splitOption === 'include_paid') {
           return {
             ...a,
+            added_after_payment: true,
             include_paid: true,
             split_mode: 'proportional',
             split: { mode: 'proportional' },
@@ -159,6 +193,7 @@ export default function SharedItemsSplitPanel({
         if (splitOption === 'person') {
           return {
             ...a,
+            added_after_payment: true,
             include_paid: false,
             split_mode: 'person',
             split: { mode: 'person', person_no: Number(targetPersonNo) },
@@ -167,6 +202,7 @@ export default function SharedItemsSplitPanel({
         }
         return {
           ...a,
+          added_after_payment: true,
           include_paid: false,
           split_mode: 'proportional',
           split: { mode: 'proportional' },
@@ -210,30 +246,45 @@ export default function SharedItemsSplitPanel({
             </div>
           ) : (
             <div className="space-y-2">
-              {orderAddons.map(a => (
-                <div
-                  key={a.key || a.name}
-                  className="p-3 rounded-2xl border border-sg-line bg-white flex items-center justify-between"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-bold text-sg-ink">{a.name} ×{a.qty || 1}</span>
-                      {a.added_after_payment ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                          {paidPersonLabel}
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] text-sg-muted bg-sg-paper border border-sg-line">
-                          付款前已加入
-                        </span>
-                      )}
+              {orderAddons.map(a => {
+                const isSelected = activePostAddon && (a.key ? a.key === activePostAddon.key : a.name === activePostAddon.name);
+                const itemQty = a.qty ?? a.quantity ?? 1;
+                const itemPrice = Number(a.price) || 0;
+                return (
+                  <div
+                    key={a.key || a.name}
+                    onClick={() => handleSelectAddon(a.key)}
+                    className={`p-3 rounded-2xl border flex items-center justify-between cursor-pointer transition select-none ${
+                      isSelected
+                        ? 'bg-sg-brown-soft/40 border-sg-brown ring-1 ring-sg-brown/30'
+                        : 'border-sg-line bg-white hover:border-sg-muted'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] font-bold text-sg-ink">{a.name} ×{itemQty}</span>
+                        {a.added_after_payment ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                            {paidPersonLabel}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] text-sg-muted bg-sg-paper border border-sg-line">
+                            付款前已加入
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[12px] font-num text-sg-muted">
+                        單價 NT${itemPrice} · 小計 NT${itemPrice * itemQty}
+                      </div>
                     </div>
-                    <div className="text-[12px] font-num text-sg-muted">
-                      單價 NT${a.price} · 小計 NT${(Number(a.price) || 0) * (Number(a.qty) || 1)}
-                    </div>
+                    {isSelected && (
+                      <span className="text-[11px] font-bold text-sg-brown bg-sg-brown/10 px-2 py-0.5 rounded-full">
+                        設定中
+                      </span>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

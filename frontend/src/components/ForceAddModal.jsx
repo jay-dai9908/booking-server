@@ -39,14 +39,12 @@ export default function ForceAddModal({
 
     if (sortedSessions.length > 0) {
       const foundIdx = sortedSessions.findIndex(s => !isSessionPast(s));
-      const startIdx = foundIdx >= 0 ? foundIdx : -1;
-      if (startIdx >= 0) {
-        const endIdx = Math.min(sortedSessions.length - 1, startIdx + 1);
-        const validRange = sortedSessions.slice(startIdx, endIdx + 1).filter(s => !isSessionPast(s));
-        setSelectedSessionIds(validRange.map(s => s.id));
-      } else {
-        setSelectedSessionIds([]);
-      }
+      const startIdx = foundIdx >= 0 ? foundIdx : Math.max(0, sortedSessions.length - 1);
+      const endIdx = foundIdx >= 0 ? Math.min(sortedSessions.length - 1, startIdx + 1) : startIdx;
+      const validRange = foundIdx >= 0
+        ? sortedSessions.slice(startIdx, endIdx + 1).filter(s => !isSessionPast(s))
+        : [sortedSessions[startIdx]];
+      setSelectedSessionIds(validRange.map(s => s.id));
     } else {
       setSelectedSessionIds([]);
     }
@@ -56,7 +54,8 @@ export default function ForceAddModal({
 
   const handleToggleSession = (sId) => {
     const sIndex = sortedSessions.findIndex(s => s.id === sId);
-    if (sIndex < 0 || isSessionPast(sortedSessions[sIndex])) return;
+    const hasUpcoming = sortedSessions.some(s => !isSessionPast(s));
+    if (sIndex < 0 || (hasUpcoming && isSessionPast(sortedSessions[sIndex]))) return;
 
     if (selectedSessionIds.length === 0) {
       setSelectedSessionIds([sId]);
@@ -280,7 +279,8 @@ export default function ForceAddModal({
 
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-48 overflow-y-auto p-1 bg-sg-paper/40 rounded-2xl border border-sg-line">
             {sortedSessions.map((s) => {
-              const isPast = isSessionPast(s);
+              const hasUpcoming = sortedSessions.some(sess => !isSessionPast(sess));
+              const isPast = hasUpcoming && isSessionPast(s);
               const isSelected = selectedSessionIds.includes(s.id);
               const remaining = s.remaining_capacity ?? s.max_capacity ?? 0;
               return (

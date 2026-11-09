@@ -108,6 +108,61 @@ async function run() {
   });
   console.log(`Initial accounting events count for ${testRef}: ${initialEventsCount}`);
 
+  // Create second paid reservation to test ReservationDetailsModal "標記未結帳"
+  const testRef2 = `BK-R14-2-${Date.now().toString().slice(-6)}`;
+  await prisma.reservation.create({
+    data: {
+      booking_ref: testRef2,
+      session: { connect: { id: session.id } },
+      user: { connect: { id: testUser.id } },
+      pax: 1,
+      status: 'confirmed',
+      assigned_seats: ['A1-2'],
+      attendance: 'checked_in',
+      checked_in_at: new Date(),
+      is_paid: true,
+      paid_persons: 1,
+      billing_status: 'paid',
+      checkout_details: {
+        version: 2,
+        rev: 0,
+        split_mode: 'proportional',
+        persons: [{ person_no: 1, seat_code: 'A1-2', mode: 'hourly' }]
+      }
+    }
+  });
+
+  await prisma.bookingPerson.create({
+    data: {
+      booking_ref: testRef2,
+      person_no: 1,
+      seat_code: 'A1-2',
+      status: 'active',
+      billing_start_at: new Date(),
+      timer_started_at: new Date()
+    }
+  });
+
+  await prisma.payment.create({
+    data: {
+      booking_ref: testRef2,
+      payment_no: `R-${(Date.now() + 1).toString().slice(-4)}`,
+      batch_no: `B-${Date.now()}-2`,
+      kind: 'charge',
+      status: 'valid',
+      method: 'cash',
+      amount: 300,
+      cash_received: 300,
+      change_given: 0,
+      person_nos: [1],
+      staff_name: '門市人員',
+      device_label: '櫃檯',
+      breakdown_json: {
+        persons: [{ person_no: 1, seat_code: 'A1-2', entry: { amount: 300, hours: 2 }, board: { amount: 0 }, addons: [], total: 300 }]
+      }
+    }
+  });
+
   const launchOptions = { headless: HEADLESS };
   if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
     launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
@@ -221,6 +276,69 @@ async function run() {
     assert.ok(markedUnpaidEvent, 'marked_unpaid accounting event must exist');
     console.log(`Marked unpaid event: ${markedUnpaidEvent.event_type}, summary: ${markedUnpaidEvent.summary}`);
     assert.ok(markedUnpaidEvent.summary.includes('收錯訂單'), 'Event summary should mention 收錯訂單');
+
+    // 8. Test ReservationDetailsModal "標記未結帳" on testRef2
+    console.log(`Testing ReservationDetailsModal "標記未結帳" on ${testRef2}...`);
+    // Close workbench if still open
+    const closeWorkbenchBtn = page.locator('button[aria-label="關閉"], button:has-text("✕")').first();
+    if (await closeWorkbenchBtn.isVisible()) {
+      await closeWorkbenchBtn.click();
+      await page.waitForTimeout(300);
+    }
+
+    // Refresh reservations list
+    await page.goto(`${BASE_URL}/admin/reservations`, { waitUntil: 'networkidle' });
+    const card2 = page.locator(`[data-testid="reservation-card-${testRef2}"]`).first();
+    await card2.waitFor({ state: 'visible', timeout: 10000 });
+    await card2.click();
+
+    // Verify modal status pill initially says 已結清
+    const modalStatusPill = page.locator('[data-testid="reservation-status-pill"]').first();
+    await modalStatusPill.waitFor({ state: 'visible', timeout: 5000 });
+    const modalInitialStatus = await modalStatusPill.innerText();
+    console.log(`ReservationDetailsModal opened, status pill: ${modalInitialStatus}`);
+    assert.ok(modalInitialStatus.includes('已結清') || modalInitialStatus.includes('已結'), 'Modal initial status should be paid');
+
+    // Click modal more menu
+    console.log('Clicking details modal "⋯" more button...');
+    const modalMoreBtn = page.locator('[data-testid="reservation-more-btn"]').first();
+    await modalMoreBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await modalMoreBtn.click();
+
+    // Click 標記未結帳
+    const modalMarkUnpaidBtn = page.locator('[data-testid="reservation-mark-unpaid-btn"]').first();
+    await modalMarkUnpaidBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await modalMarkUnpaidBtn.click();
+
+    // ConfirmPanel opens
+    const modalConfirmTitle = page.locator('h4:has-text("標記未結帳？")');
+    await modalConfirmTitle.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Select reason
+    const chip2 = page.locator('button:has-text("收錯訂單")').first();
+    await chip2.click();
+
+    const confirmBtn2 = page.locator('button:has-text("確認")').first();
+    await confirmBtn2.click();
+
+    // Verify toast
+    const toast2 = page.locator('text=已標記未結帳');
+    await toast2.waitFor({ state: 'visible', timeout: 8000 });
+    console.log('PASS: Details modal mark-unpaid toast appeared');
+
+    // Verify status pill updated to 未結帳
+    await page.waitForTimeout(500);
+    const modalUpdatedStatus = await modalStatusPill.innerText();
+    console.log(`ReservationDetailsModal updated status pill: ${modalUpdatedStatus}`);
+    assert.ok(modalUpdatedStatus.includes('未結帳'), 'Modal status pill should update to 未結帳');
+
+    // Verify AccountingEvent for testRef2
+    const event2 = await prisma.accountingEvent.findFirst({
+      where: { booking_ref: testRef2, event_type: 'marked_unpaid' },
+      orderBy: { created_at: 'desc' }
+    });
+    assert.ok(event2, 'marked_unpaid event for testRef2 must exist');
+    console.log(`Marked unpaid event for testRef2: ${event2.event_type}, summary: ${event2.summary}`);
 
     console.log('--- Round 14 Mark Unpaid Playwright Test Passed Successfully! ---');
   } finally {
