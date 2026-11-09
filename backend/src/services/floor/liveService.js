@@ -5,6 +5,7 @@ import { computeBill, billingStatus } from '../../../../shared/billing.js';
 import { toTaipeiDateString, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
+import { formatBookingRef } from '../../../../shared/receipts.js';
 
 /**
  * Split booking equipment with quantity > 1 into individual 1-unit records (spec 3.3 item 1)
@@ -508,19 +509,22 @@ export async function getLiveFloorData(dateStr = null) {
     }
 
     // Check if any seat does not exist in the active layout (Spec 5.1 step 6)
-    const activeSeatCodes = new Set((layout?.seats || []).filter(s => s.is_active).map(s => s.code));
-    const missingSeats = (firstRes.assigned_seats || []).filter(s => !s.startsWith('WAIT-') && !activeSeatCodes.has(s));
-    if (missingSeats.length > 0) {
-      const alertText = `座位 ${missingSeats.join('、')} 已不存在，請重新帶位`;
-      const alertHint = `原座位佔用者（${user.name || '客人'} · ${bRef}）的座位已在新生效版面中刪除或停用`;
-      alerts.push({
-        type: 'seat_missing',
-        booking_ref: bRef,
-        title: alertText,
-        subtitle: alertHint,
-        text: alertText,
-        hint: alertHint
-      });
+    if (!completed && firstRes.status !== 'cancelled') {
+      const activeSeatCodes = new Set((layout?.seats || []).filter(s => s.is_active).map(s => s.code));
+      const missingSeats = (firstRes.assigned_seats || []).filter(s => !s.startsWith('WAIT-') && !activeSeatCodes.has(s));
+      if (missingSeats.length > 0) {
+        const displayRef = formatBookingRef(bRef);
+        const alertText = `座位 ${missingSeats.join('、')} 已不存在，請重新帶位`;
+        const alertHint = `${user.name || '客人'} · ${displayRef} · 原座位已在新版面刪除或停用`;
+        alerts.push({
+          type: 'seat_missing',
+          booking_ref: bRef,
+          title: alertText,
+          subtitle: alertHint,
+          text: alertText,
+          hint: alertHint
+        });
+      }
     }
   }
 

@@ -196,4 +196,71 @@ test('Live floor alerts overtime and ended timer test', async (t) => {
     const alert = liveData.alerts.find(a => a.booking_ref === bRef);
     assert.equal(alert, undefined, 'Customer whose entire order was paid should not trigger overtime alert');
   });
+
+  await t.test('Item 1: Deleted seat alert is not generated for completed bookings, but is generated for pending bookings without raw UUID', async () => {
+    const rawUuid = 'b843d1a8-7970-4283-a123-456789abcdef';
+    const bRefCompleted = `BK-ALERT-${ts}-COMPLETED`;
+    const bRefPending = rawUuid;
+
+    const testUser = await prisma.user.upsert({
+      where: { line_user_id: `test_user_missing_seat_${ts}` },
+      update: { name: '王小華' },
+      create: { line_user_id: `test_user_missing_seat_${ts}`, name: '王小華', phone: '0988777666' }
+    });
+
+    // 1. Completed booking assigned to a nonexistent seat
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bRefCompleted,
+        user_id: testUser.id,
+        session_id: session.id,
+        pax: 2,
+        status: 'confirmed',
+        attendance: 'completed',
+        is_paid: true,
+        assigned_seats: ['DEL-1', 'DEL-2'],
+        total_amount: 300
+      }
+    });
+
+    // 2. Pending booking assigned to a nonexistent seat
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bRefPending,
+        user_id: testUser.id,
+        session_id: session.id,
+        pax: 2,
+        status: 'confirmed',
+        attendance: null,
+        is_paid: false,
+        assigned_seats: ['DEL-1', 'DEL-2'],
+        total_amount: 300
+      }
+    });
+
+    try {
+      const liveData = await getLiveFloorData(dStr);
+
+      // Completed booking alert should NOT exist
+      const completedAlert = liveData.alerts.find(a => a.booking_ref === bRefCompleted && a.type === 'seat_missing');
+      assert.equal(completedAlert, undefined, 'Completed booking should NOT have seat_missing alert');
+
+      // Pending booking alert SHOULD exist
+      const pendingAlert = liveData.alerts.find(a => a.booking_ref === bRefPending && a.type === 'seat_missing');
+      assert.ok(pendingAlert, 'Pending booking on deleted seat SHOULD have seat_missing alert');
+      assert.equal(pendingAlert.title, '座位 DEL-1、DEL-2 已不存在，請重新帶位');
+      
+      // Subtitle should not contain the raw UUID
+      assert.equal(pendingAlert.subtitle.includes(rawUuid), false, 'Subtitle must NOT contain raw UUID');
+      // Subtitle should follow format: 王小華 · BK-XXXX-XXXX · 原座位已在新版面刪除或停用
+      assert.match(pendingAlert.subtitle, /^王小華 · BK-[A-Z0-9]{4}-[A-Z0-9]{4} · 原座位已在新版面刪除或停用$/);
+    } finally {
+      await prisma.reservation.deleteMany({
+        where: { booking_ref: { in: [bRefCompleted, bRefPending] } }
+      });
+      await prisma.user.deleteMany({
+        where: { id: testUser.id }
+      });
+    }
+  });
 });
