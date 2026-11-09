@@ -93,15 +93,19 @@ export async function checkIn(req, res) {
           status: { not: 'cancelled' },
           assigned_seats: { hasSome: seats }
         },
-        include: { user: true }
+        include: { user: true, session: true }
       });
 
       for (const cr of conflictReservations) {
         if (cr.is_seat_locked || cr.attendance === 'checked_in' || cr.seat_source === 'staff') {
+          const conflictingSeat = cr.assigned_seats.find(s => seats.includes(s)) || seats[0];
+          const crTime = cr.session?.start_time || '16:00';
           throw {
             status: 409,
             code: 'SEAT_CONFLICT',
-            message: `座位已被固定的預約（${cr.user?.name || '客人'} · ${cr.booking_ref}）佔用，無法排入`
+            conflict_seat: conflictingSeat,
+            conflict_time: crTime,
+            message: `${conflictingSeat} 在 ${crTime} 有已鎖定的預約，請選其他座位`
           };
         }
       }

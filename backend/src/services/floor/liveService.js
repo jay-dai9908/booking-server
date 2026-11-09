@@ -382,6 +382,18 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
       resolvedAttendance = 'completed';
     }
 
+    let unseatedCount = 0;
+    if (resolvedAttendance === 'checked_in') {
+      if (bPersons.length > 0) {
+        const seatedCount = bPersons.filter(p => p.status === 'active' && p.seat_code).length;
+        unseatedCount = Math.max(0, firstRes.pax - seatedCount);
+      } else if (firstRes.assigned_seats && firstRes.assigned_seats.length > 0) {
+        unseatedCount = Math.max(0, firstRes.pax - firstRes.assigned_seats.length);
+      } else {
+        unseatedCount = firstRes.pax;
+      }
+    }
+
     const bookingItem = {
       booking_ref: bRef,
       ref_display: refDisplay,
@@ -393,6 +405,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
       is_walk_in: Boolean(firstRes.is_walk_in),
       is_paid: Boolean(firstRes.is_paid),
       attendance: resolvedAttendance,
+      unseated_count: unseatedCount,
       checked_in_at: firstRes.checked_in_at ? firstRes.checked_in_at.toISOString() : null,
       checked_in_by: firstRes.checked_in_by || null,
       seat_source: firstRes.seat_source || 'auto',

@@ -535,6 +535,8 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
         state: 'reserved',
         isPaid: Boolean(b.is_paid),
         timerText: `${startTimeStr} 到`,
+        startTimeStr,
+        isLocked: Boolean(b.is_seat_locked || b.seat_source === 'staff'),
         paxName: b.name,
         bookingRef: b.booking_ref,
         booking: b,

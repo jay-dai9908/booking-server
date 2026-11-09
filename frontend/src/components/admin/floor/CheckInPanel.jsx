@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
 import api from '../../../api/axios';
-import { bookingTimeRange } from '../../../utils/admin/floorSelectors';
+import { bookingTimeRange, extractTimeHHMM } from '../../../utils/admin/floorSelectors';
 import { shortBoardName } from '../../../utils/customer/pricing';
+import { Clock, Info, AlertTriangle } from 'lucide-react';
 
 export default function CheckInPanel({
   isOpen,
@@ -12,22 +13,36 @@ export default function CheckInPanel({
   activeSeats: propActiveSeats,
   seatStatesMap: propSeatStatesMap,
   layout: propLayout,
-  onSuccess
+  onSuccess,
+  showToast: propShowToast
 }) {
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [boardAssign, setBoardAssign] = useState({});
   const [startTimer, setStartTimer] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [conflictSeat, setConflictSeat] = useState(null);
+  const [internalToast, setInternalToast] = useState(null);
+  const toastTimeoutRef = useRef(null);
+
   const [loadedSeats, setLoadedSeats] = useState([]);
   const [loadedSeatStates, setLoadedSeatStates] = useState({});
   const [loadedLayout, setLoadedLayout] = useState(null);
+
+  const displayToast = (msg) => {
+    setInternalToast(msg);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => setInternalToast(null), 3500);
+    if (propShowToast) propShowToast(msg);
+  };
 
   useEffect(() => {
     if (!target) return;
     setSelectedSeats(target.assigned_seats || []);
     setStartTimer(true);
     setError(null);
+    setConflictSeat(null);
+    setInternalToast(null);
 
     // Initial board assignment
     const initialAssign = {};
@@ -58,7 +73,18 @@ export default function CheckInPanel({
           for (const b of (res.data?.bookings || [])) {
             if (b.attendance === 'checked_in') {
               for (const sc of (b.assigned_seats || [])) {
-                sMap[sc] = { state: 'in_use' };
+                sMap[sc] = { state: 'in_use', booking: b };
+              }
+            } else if (b.attendance !== 'cancelled') {
+              for (const sc of (b.assigned_seats || [])) {
+                sMap[sc] = {
+                  state: 'reserved',
+                  booking: b,
+                  booking_ref: b.booking_ref,
+                  name: b.name || '客人',
+                  start_time: b.start_at ? String(b.start_at).slice(11, 16) : '16:00',
+                  is_locked: b.is_seat_locked || b.seat_source === 'staff'
+                };
               }
             }
           }
@@ -73,6 +99,56 @@ export default function CheckInPanel({
   const activeSeats = (propActiveSeats && propActiveSeats.length > 0) ? propActiveSeats : loadedSeats;
   const seatStatesMap = propSeatStatesMap || loadedSeatStates;
   const layout = propLayout || loadedLayout;
+
+  const scheduledStartTimeStr = useMemo(() => {
+    if (!target) return '16:00';
+    return (
+      extractTimeHHMM(target.start_at || target.start_time || target.session?.start_time) ||
+      (target.start_at ? String(target.start_at).slice(11, 16) : '') ||
+      '16:00'
+    );
+  }, [target]);
+
+  // Early / late timing hint (Spec 6.3 item 1)
+  const timingHint = useMemo(() => {
+    if (!target) return null;
+    let schedMs = null;
+    if (target.start_at) {
+      schedMs = new Date(target.start_at).getTime();
+    } else if (scheduledStartTimeStr) {
+      const nowD = new Date();
+      const [h, m] = scheduledStartTimeStr.split(':').map(Number);
+      if (!isNaN(h) && !isNaN(m)) {
+        nowD.setHours(h, m, 0, 0);
+        schedMs = nowD.getTime();
+      }
+    }
+    if (!schedMs || isNaN(schedMs)) return null;
+
+    const diffMinutes = Math.round((Date.now() - schedMs) / 60000);
+    if (diffMinutes <= -1) {
+      return `提早 ${Math.abs(diffMinutes)} 分到，計費從 ${scheduledStartTimeStr} 開始`;
+    }
+    if (diffMinutes >= 1) {
+      return `遲到 ${diffMinutes} 分，計費仍從 ${scheduledStartTimeStr} 開始`;
+    }
+    return null;
+  }, [target, scheduledStartTimeStr]);
+
+  // Conflict warnings for chosen seats (Spec 6.3 item 2)
+  const conflictWarnings = useMemo(() => {
+    if (!selectedSeats || selectedSeats.length === 0) return [];
+    const warnings = [];
+    for (const sc of selectedSeats) {
+      const st = seatStatesMap[sc];
+      if (st?.booking && st.booking.booking_ref !== target?.booking_ref) {
+        const otherName = st.paxName || st.booking?.name || '客人';
+        const otherTime = st.startTimeStr || (st.timerText ? st.timerText.replace(' 到', '') : '') || extractTimeHHMM(st.booking?.start_at) || '16:00';
+        warnings.push(`${sc} 在 ${otherTime} 有${otherName}的預約，入座後會幫${otherName}改排其他座位`);
+      }
+    }
+    return warnings;
+  }, [selectedSeats, seatStatesMap, target]);
 
   // Group activeSeats into CompactPlan (Zones -> Tables -> Left/Right sides)
   const groupedPlan = useMemo(() => {
@@ -137,11 +213,26 @@ export default function CheckInPanel({
     return result;
   }, [activeSeats, layout]);
 
+  const handleSeatClick = (sCode, isSelected, isOccupied) => {
+    if (isOccupied) return;
+    if (isSelected) {
+      setSelectedSeats(prev => prev.filter(c => c !== sCode));
+      if (conflictSeat === sCode) setConflictSeat(null);
+    } else {
+      if (selectedSeats.length >= pax) {
+        displayToast(`已選滿 ${pax} 位，先點已選的座位取消`);
+        return;
+      }
+      setSelectedSeats(prev => [...prev, sCode]);
+    }
+  };
+
   const handleSubmit = async (deferSeating = false) => {
     if (!target) return;
     try {
       setIsSubmitting(true);
       setError(null);
+      setConflictSeat(null);
 
       const boardAssignments = Object.entries(boardAssign).map(([uGroup, sCode]) => {
         const pIdx = selectedSeats.indexOf(sCode);
@@ -158,6 +249,15 @@ export default function CheckInPanel({
         defer_seating: deferSeating
       });
 
+      const displacedList = res.data?.displaced_reservations || res.data?.displaced || [];
+      if (displacedList.length > 0) {
+        displacedList.forEach((d) => {
+          const toSeats = (d.new_seats || d.to || []).join('、');
+          const dTime = d.start_time || '16:00';
+          displayToast(`${d.name} ${dTime} 的預約已改排到 ${toSeats}`);
+        });
+      }
+
       if (onSuccess) {
         onSuccess(res.data, deferSeating);
       }
@@ -165,7 +265,11 @@ export default function CheckInPanel({
     } catch (err) {
       console.error(err);
       if (err.response?.status === 409) {
-        setError(err.response?.data?.error || err.response?.data?.message || '座位已被鎖定，請選其他座位');
+        const errData = err.response?.data || {};
+        const cSeat = errData.conflict_seat || (errData.message?.match(/^([A-Za-z0-9-]+)\s*在/)?.[1]) || selectedSeats[0];
+        setConflictSeat(cSeat);
+        const timeStr = errData.conflict_time || scheduledStartTimeStr || '16:00';
+        setError(errData.message || `${cSeat} 在 ${timeStr} 有已鎖定的預約，請選其他座位`);
       } else {
         setError(err.response?.data?.error || err.response?.data?.message || '報到帶位失敗');
       }
@@ -195,10 +299,19 @@ export default function CheckInPanel({
       footer={
         <div className="space-y-2">
           {error && (
-            <div className="p-2.5 rounded-xl bg-sg-danger-soft text-sg-danger text-[12px] font-bold">
-              {error}
+            <div className="p-2.5 rounded-xl bg-sg-danger-soft text-sg-danger text-[12px] font-bold flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
             </div>
           )}
+
+          {/* Partial seating hint (Spec 6.3 item 4) */}
+          {selectedSeats.length > 0 && selectedSeats.length < pax && (
+            <div className="text-[12px] text-sg-brown font-bold text-center bg-sg-brown-soft/60 py-1.5 px-3 rounded-xl border border-sg-brown/20">
+              先帶位 {selectedSeats.length} 位，另 {pax - selectedSeats.length} 位稍後再帶位
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <button
               type="button"
@@ -221,6 +334,21 @@ export default function CheckInPanel({
       }
     >
       <div className="space-y-4 py-2">
+        {/* Floating internal toast */}
+        {internalToast && (
+          <div className="p-2.5 rounded-xl bg-sg-ink text-white text-[12px] font-bold flex items-center justify-center text-center shadow-md animate-fade-in">
+            <span>{internalToast}</span>
+          </div>
+        )}
+
+        {/* Early / late timing hint */}
+        {timingHint && (
+          <div className="p-2.5 rounded-xl bg-sg-paper border border-sg-line text-[12px] font-bold text-sg-ink flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-sg-brown shrink-0" />
+            <span>{timingHint}</span>
+          </div>
+        )}
+
         {/* Allocator suggestion box */}
         <div className="p-3 rounded-2xl bg-sg-brown-soft text-[12px] text-sg-brown border border-sg-brown/20 space-y-1">
           <span className="font-bold block">
@@ -228,6 +356,18 @@ export default function CheckInPanel({
           </span>
           {reasonText && <span className="text-[11px] opacity-90">{reasonText}</span>}
         </div>
+
+        {/* Conflict warnings */}
+        {conflictWarnings.length > 0 && (
+          <div className="space-y-1.5">
+            {conflictWarnings.map((warn, wIdx) => (
+              <div key={wIdx} className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[12px] flex items-center gap-1.5 font-medium">
+                <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>{warn}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Seat selection - CompactPlan (Spec 6.3) */}
         <div>
@@ -238,7 +378,10 @@ export default function CheckInPanel({
             {selectedSeats.length > 0 && (
               <button
                 type="button"
-                onClick={() => setSelectedSeats([])}
+                onClick={() => {
+                  setSelectedSeats([]);
+                  setConflictSeat(null);
+                }}
                 className="text-[11px] text-sg-brown hover:underline"
               >
                 清除重選
@@ -265,23 +408,18 @@ export default function CheckInPanel({
                           {t.left.map((s) => {
                             const isSelected = selectedSeats.includes(s.code);
                             const isOccupied = seatStatesMap[s.code]?.state === 'in_use' && !target.assigned_seats?.includes(s.code);
+                            const isConflict = conflictSeat === s.code;
 
                             return (
                               <button
                                 key={s.code}
                                 type="button"
                                 disabled={isOccupied}
-                                onClick={() => {
-                                  if (isSelected) {
-                                    setSelectedSeats(selectedSeats.filter(c => c !== s.code));
-                                  } else {
-                                    if (selectedSeats.length < pax) {
-                                      setSelectedSeats([...selectedSeats, s.code]);
-                                    }
-                                  }
-                                }}
+                                onClick={() => handleSeatClick(s.code, isSelected, isOccupied)}
                                 className={`w-full p-2 rounded-xl border text-center transition ${
-                                  isOccupied
+                                  isConflict
+                                    ? 'border-2 border-sg-danger ring-2 ring-sg-danger/40 bg-sg-danger-soft text-sg-danger font-bold'
+                                    : isOccupied
                                     ? 'bg-sg-paper text-sg-muted border-sg-line cursor-not-allowed opacity-50'
                                     : isSelected
                                     ? 'bg-sg-brown text-white border-sg-brown font-bold shadow-sm'
@@ -289,7 +427,9 @@ export default function CheckInPanel({
                                 }`}
                               >
                                 <span className="block text-[13px] font-num">{s.code}</span>
-                                <span className="block text-[10px] opacity-80">{isOccupied ? '有人' : isSelected ? '已選' : '空位'}</span>
+                                <span className="block text-[10px] opacity-80">
+                                  {isConflict ? '衝突鎖定' : isOccupied ? '有人' : isSelected ? '已選' : '空位'}
+                                </span>
                               </button>
                             );
                           })}
@@ -302,23 +442,18 @@ export default function CheckInPanel({
                             t.right.map((s) => {
                               const isSelected = selectedSeats.includes(s.code);
                               const isOccupied = seatStatesMap[s.code]?.state === 'in_use' && !target.assigned_seats?.includes(s.code);
+                              const isConflict = conflictSeat === s.code;
 
                               return (
                                 <button
                                   key={s.code}
                                   type="button"
                                   disabled={isOccupied}
-                                  onClick={() => {
-                                    if (isSelected) {
-                                      setSelectedSeats(selectedSeats.filter(c => c !== s.code));
-                                    } else {
-                                      if (selectedSeats.length < pax) {
-                                        setSelectedSeats([...selectedSeats, s.code]);
-                                      }
-                                    }
-                                  }}
+                                  onClick={() => handleSeatClick(s.code, isSelected, isOccupied)}
                                   className={`w-full p-2 rounded-xl border text-center transition ${
-                                    isOccupied
+                                    isConflict
+                                      ? 'border-2 border-sg-danger ring-2 ring-sg-danger/40 bg-sg-danger-soft text-sg-danger font-bold'
+                                      : isOccupied
                                       ? 'bg-sg-paper text-sg-muted border-sg-line cursor-not-allowed opacity-50'
                                       : isSelected
                                       ? 'bg-sg-brown text-white border-sg-brown font-bold shadow-sm'
@@ -326,7 +461,9 @@ export default function CheckInPanel({
                                   }`}
                                 >
                                   <span className="block text-[13px] font-num">{s.code}</span>
-                                  <span className="block text-[10px] opacity-80">{isOccupied ? '有人' : isSelected ? '已選' : '空位'}</span>
+                                  <span className="block text-[10px] opacity-80">
+                                    {isConflict ? '衝突鎖定' : isOccupied ? '有人' : isSelected ? '已選' : '空位'}
+                                  </span>
                                 </button>
                               );
                             })

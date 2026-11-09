@@ -453,7 +453,7 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
       // Fetch original reservations for this booking
       const targetResvs = await tx.reservation.findMany({
         where: { booking_ref: uRef, status: { not: 'cancelled' } },
-        include: { user: true }
+        include: { user: true, session: true }
       });
       if (!targetResvs.length) continue;
       const origSeats = targetResvs[0].assigned_seats || [];
@@ -488,6 +488,7 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
         displaced.push({
           booking_ref: uRef,
           name: targetResvs[0].user?.name || '客人',
+          start_time: targetResvs[0].session?.start_time || '',
           from: origSeats,
           to: newSeats
         });

@@ -1031,6 +1031,11 @@ export default function SeatingPage() {
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-[15px] text-sg-ink">{b.name}</span>
                             <span className="text-[13px] text-sg-muted">· {b.pax} 位</span>
+                            {b.unseated_count > 0 && (
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-sg-danger-soft text-sg-danger font-bold">
+                                {b.unseated_count} 位未帶位
+                              </span>
+                            )}
                             {isWaitOnly && (
                               <span className="text-[11px] px-1.5 py-0.5 rounded bg-sg-brown-soft text-sg-brown font-bold">
                                 等待區
@@ -1465,7 +1470,14 @@ export default function SeatingPage() {
                       {pendingBookings.map((b) => (
                         <div key={b.booking_ref} className="p-2.5 rounded-2xl bg-sg-paper/40 border border-sg-line flex items-center justify-between text-[12px]">
                           <div>
-                            <div className="font-bold text-sg-ink">{b.name} · {b.pax} 位</div>
+                            <div className="font-bold text-sg-ink flex items-center gap-1.5">
+                              <span>{b.name} · {b.pax} 位</span>
+                              {b.unseated_count > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sg-danger-soft text-sg-danger font-bold">
+                                  {b.unseated_count} 位未帶位
+                                </span>
+                              )}
+                            </div>
                             <div className="text-sg-muted text-[11px]">{bookingTimeRange(b.start_at, b.end_at)}</div>
                           </div>
                           <Button
@@ -1516,14 +1528,19 @@ export default function SeatingPage() {
         activeSeats={activeSeats}
         seatStatesMap={seatStatesMap}
         layout={floorData?.layout}
+        showToast={showToast}
         onSuccess={(data, deferSeating) => {
           refresh();
           showToast(deferSeating ? '已報到，稍後再帶位' : '已入座，開始計時');
-          if (data?.displaced_reservations?.length) {
-            const displacedNames = data.displaced_reservations
-              .map(d => `${d.name} (${d.new_seats?.join('、')})`)
-              .join('、');
-            showToast(`已自動改排其他預約：${displacedNames}`);
+          const displacedList = data?.displaced_reservations || data?.displaced || [];
+          if (displacedList.length > 0) {
+            displacedList.forEach((d, idx) => {
+              const newSeatStr = (d.new_seats || d.to || []).join('、');
+              const timeStr = d.start_time || '16:00';
+              setTimeout(() => {
+                showToast(`${d.name} ${timeStr} 的預約已改排到 ${newSeatStr}`);
+              }, 800 * (idx + 1));
+            });
           }
         }}
       />
