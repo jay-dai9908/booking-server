@@ -11,6 +11,7 @@ import {
   groupTimerPill,
   isBookingCompleted,
   isSessionPast,
+  buildSeatStates
 } from '../src/utils/admin/floorSelectors.js';
 
 test('floorSelectors pure function tests', async (t) => {
@@ -348,5 +349,80 @@ test('floorSelectors pure function tests', async (t) => {
     const pill = groupTimerPill(paidOverdueBooking, now1400);
     assert.strictEqual(pill.variant, 'muted');
     assert.strictEqual(pill.label, '已結清');
+  });
+
+  await t.test('14. Round 13b item 1: buildSeatStates prevents in-use guest from being overwritten by pending bookings', () => {
+    const layout = {
+      seats: [
+        { id: 1, code: 'A1-1', is_active: true },
+        { id: 2, code: 'A1-2', is_active: true }
+      ]
+    };
+
+    // Guest A: In-use, 14:00~18:00, checked-in
+    const bookingA = {
+      booking_ref: 'BK-A',
+      name: '計時甲',
+      attendance: 'checked_in',
+      assigned_seats: ['A1-1'],
+      start_at: '2026-11-10T14:00:00+08:00',
+      end_at: '2026-11-10T18:00:00+08:00',
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-1',
+          timer: {
+            timer_started_at: '2026-11-10T14:00:00+08:00',
+            billing_start_at: '2026-11-10T14:00:00+08:00',
+            timer_ended_at: null,
+            paused_at: null
+          }
+        }
+      ]
+    };
+
+    // Guest B: Unattended 12:00 booking (ended at 14:00), pending
+    const bookingB = {
+      booking_ref: 'BK-B',
+      name: '王小華',
+      attendance: 'pending',
+      assigned_seats: ['A1-1'],
+      start_at: '2026-11-10T12:00:00+08:00',
+      end_at: '2026-11-10T14:00:00+08:00'
+    };
+
+    // Guest C: Evening 19:00 booking, pending
+    const bookingC = {
+      booking_ref: 'BK-C',
+      name: '預約丙',
+      attendance: 'pending',
+      assigned_seats: ['A1-1'],
+      start_at: '2026-11-10T19:00:00+08:00',
+      end_at: '2026-11-10T21:00:00+08:00'
+    };
+
+    // Case 1: At 15:00, A is in-use. A must be displayed on A1-1. B and C must not overwrite A.
+    const now1500 = new Date('2026-11-10T15:00:00+08:00');
+    const statesAt1500 = buildSeatStates(layout, [bookingA, bookingB, bookingC], now1500);
+    assert.strictEqual(statesAt1500['A1-1'].state, 'in_use');
+    assert.strictEqual(statesAt1500['A1-1'].paxName, '計時甲');
+    assert.strictEqual(statesAt1500['A1-1'].bookingRef, 'BK-A');
+
+    // B does not appear on seat A1-1, but is listed in attention list
+    assert.ok(statesAt1500.attentionList.some(al => al.booking_ref === 'BK-B' && al.title.includes('王小華 12:00 的預約沒有報到')));
+
+    // Case 2: A departs (marked completed)
+    const bookingADeparted = {
+      ...bookingA,
+      attendance: 'completed'
+    };
+    const statesAfterADeparted = buildSeatStates(layout, [bookingADeparted, bookingB, bookingC], now1500);
+    // Now seat A1-1 is free for pending bookings whose end_at is not past.
+    // B's end_at is 14:00 (past), so B still never appears on seat A1-1.
+    // C's end_at is 21:00 (not past), so C is displayed.
+    assert.strictEqual(statesAfterADeparted['A1-1'].state, 'reserved');
+    assert.strictEqual(statesAfterADeparted['A1-1'].paxName, '預約丙');
+    assert.strictEqual(statesAfterADeparted['A1-1'].bookingRef, 'BK-C');
+    assert.notStrictEqual(statesAfterADeparted['A1-1'].paxName, '王小華');
   });
 });

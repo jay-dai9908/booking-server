@@ -2,6 +2,8 @@
  * Floor selectors and pure calculation functions for SeatingPage & Checkout
  */
 import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
+import { formatTimerHMM, formatDiffMinutesText } from '../../../../shared/time.js';
+import { displayBoardName } from '../../../../shared/billing.js';
 
 export function extractTimeHHMM(isoString) {
   if (!isoString) return '';
@@ -321,5 +323,233 @@ export function isSessionPast(session, now = new Date()) {
   }
   return false;
 }
+
+export function getBookingTimeRangeMs(b, fallbackDateStr = null) {
+  let startMs = null;
+  let endMs = null;
+
+  if (b?.start_at && b?.end_at) {
+    const s = new Date(b.start_at).getTime();
+    const e = new Date(b.end_at).getTime();
+    if (!isNaN(s) && !isNaN(e)) {
+      startMs = s;
+      endMs = e;
+    }
+  }
+
+  const d = b?.session_date || b?.date || b?.session?.session_date || fallbackDateStr || new Date().toISOString().slice(0, 10);
+  const dStr = typeof d === 'string' ? d.slice(0, 10) : (d instanceof Date ? d.toISOString().slice(0, 10) : '');
+
+  if ((startMs === null || endMs === null) && Array.isArray(b?.sessions) && b.sessions.length > 0) {
+    const sorted = [...b.sessions].sort((x, y) => (x.start_time || '').localeCompare(y.start_time || ''));
+    const firstS = sorted[0];
+    const lastS = sorted[sorted.length - 1];
+    const sDate = firstS.session_date ? (typeof firstS.session_date === 'string' ? firstS.session_date.slice(0, 10) : firstS.session_date.toISOString().slice(0, 10)) : dStr;
+    if (sDate && firstS.start_time && lastS.end_time) {
+      startMs = new Date(`${sDate}T${firstS.start_time}:00+08:00`).getTime();
+      endMs = new Date(`${sDate}T${lastS.end_time}:00+08:00`).getTime();
+    }
+  }
+
+  if (startMs === null || endMs === null) {
+    const sess = b?.session || b;
+    const st = sess?.start_time || b?.start_time;
+    const et = sess?.end_time || b?.end_time;
+    if (dStr && st && et) {
+      startMs = new Date(`${dStr}T${st}:00+08:00`).getTime();
+      endMs = new Date(`${dStr}T${et}:00+08:00`).getTime();
+    }
+  }
+
+  if (startMs !== null && endMs === null) {
+    endMs = startMs + bookedMinutes(b) * 60000;
+  }
+
+  return { startMs, endMs };
+}
+
+/**
+ * Builds seat states map and attention list for FloorPlan and SeatTiles
+ *
+ * Rules (Round 13b item 1):
+ * 1. 已入座、還沒離場的組別永遠優先，不能被覆蓋。
+ * 2. 座位空著時，才顯示待入座的預約，而且只看「預約結束時間還沒過」的；有好幾筆時，取開始時間最接近現在的那筆。
+ * 3. 預約時段已經結束、還沒報到的（沒來的客人），不佔座位，改列在「需要注意」：「王小華 12:00 的預約沒有報到」，提供「標記未到」。
+ *
+ * @param {object} layout
+ * @param {Array} bookings
+ * @param {Date|string|number} [now=new Date()]
+ * @returns {object} map keyed by seat code with .attentionList attached
+ */
+export function buildSeatStates(layout = {}, bookings = [], now = new Date()) {
+  const currentNow = now instanceof Date ? now : new Date(now);
+  const currentMs = currentNow.getTime();
+
+  const map = {};
+  for (const s of (layout.seats || [])) {
+    map[s.code] = {
+      state: s.is_active ? 'empty' : 'off',
+      isPaid: false,
+      timerText: s.is_active ? '空位' : '已停用',
+      paxName: null,
+      bookingRef: null,
+      booking: null,
+      boards: [],
+      personNo: null
+    };
+  }
+
+  // Filter bookings:
+  // Checked-in active: attendance === 'checked_in' and not completed
+  const checkedInActiveBookings = [];
+  const candidatePendingBookings = [];
+  const unattendedPastBookings = [];
+
+  for (const b of (bookings || [])) {
+    if (b.status === 'cancelled') continue;
+    const completed = isBookingCompleted(b, currentNow);
+
+    if (b.attendance === 'checked_in') {
+      if (!completed) {
+        checkedInActiveBookings.push(b);
+      }
+    } else if (b.attendance === 'pending' || !b.attendance) {
+      if (completed) continue;
+      const { startMs, endMs } = getBookingTimeRangeMs(b);
+      const isPast = endMs !== null && endMs <= currentMs;
+      if (isPast) {
+        unattendedPastBookings.push(b);
+      } else {
+        candidatePendingBookings.push({
+          booking: b,
+          startMs: startMs ?? currentMs,
+          endMs,
+          diffFromNow: Math.abs((startMs ?? currentMs) - currentMs)
+        });
+      }
+    }
+  }
+
+  // 1. Populate checked-in active bookings (ALWAYS PRIORITY, cannot be overwritten)
+  for (const b of checkedInActiveBookings) {
+    const isPaid =
+      b.billing?.status === 'paid' ||
+      b.billing?.status === 'waived' ||
+      b.billing_status === 'paid' ||
+      b.billing_status === 'waived' ||
+      b.status === 'paid' ||
+      b.status === 'waived' ||
+      Boolean(b.is_paid);
+
+    const bSeats = b.assigned_seats || [];
+    bSeats.forEach((seatCode, idx) => {
+      if (!seatCode || seatCode.startsWith('WAIT-')) return;
+      if (!map[seatCode]) return;
+
+      const person = (b.persons || [])[idx];
+      let timerText = '計時中';
+      let state = 'in_use';
+
+      if (isPaid) {
+        state = 'in_use';
+        timerText = '已結清';
+      } else if (person) {
+        const tm = person.timer || person;
+        const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
+        const rawElapsed = personElapsedMinutes(person, currentNow);
+        const totalBooked = bookedMinutes(b);
+        const diffMins = rawElapsed - totalBooked;
+
+        if (isPaused) {
+          state = 'paused';
+          timerText = rawElapsed > 0 ? `暫停 ${formatTimerHMM(rawElapsed)}` : '已暫停';
+        } else if (diffMins > 0) {
+          state = 'over';
+          timerText = formatDiffMinutesText(diffMins);
+        } else if (totalBooked - rawElapsed <= 15 && totalBooked > 0) {
+          state = 'warn';
+          timerText = formatTimerHMM(rawElapsed);
+        } else {
+          state = 'in_use';
+          timerText = formatTimerHMM(rawElapsed);
+        }
+      }
+
+      const personBoards = (b.boards || []).filter(bd => bd.person_no === (idx + 1));
+      const boardLabels = personBoards.map(bd => {
+        const segs = bd.segments || [];
+        return segs.map(s => displayBoardName(s.name)).join('→');
+      });
+
+      map[seatCode] = {
+        state,
+        isPaid,
+        timerText,
+        paxName: b.name,
+        bookingRef: b.booking_ref,
+        booking: b,
+        boards: boardLabels,
+        personNo: idx + 1
+      };
+    });
+  }
+
+  // 2. Populate pending candidate bookings for empty seats only
+  for (const s of (layout.seats || [])) {
+    const seatCode = s.code;
+    if (!map[seatCode] || map[seatCode].state !== 'empty') {
+      // Seat is inactive (off) or already occupied by checked-in active booking
+      continue;
+    }
+
+    const seatCandidates = candidatePendingBookings.filter(c => {
+      const seats = c.booking.assigned_seats || [];
+      return seats.includes(seatCode);
+    });
+
+    if (seatCandidates.length > 0) {
+      // Sort by diffFromNow asc (closest to currentNow)
+      seatCandidates.sort((a, b) => a.diffFromNow - b.diffFromNow);
+      const best = seatCandidates[0];
+      const b = best.booking;
+      const seatIdx = (b.assigned_seats || []).indexOf(seatCode);
+      const startTimeStr = extractTimeHHMM(b.start_at || b.start_time || (b.sessions && b.sessions[0]?.start_time)) ||
+        (b.start_at ? new Date(b.start_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : '');
+
+      map[seatCode] = {
+        state: 'reserved',
+        isPaid: Boolean(b.is_paid),
+        timerText: `${startTimeStr} 到`,
+        paxName: b.name,
+        bookingRef: b.booking_ref,
+        booking: b,
+        boards: [],
+        personNo: seatIdx >= 0 ? seatIdx + 1 : 1
+      };
+    }
+  }
+
+  // 3. Build attention list for un-checked-in past bookings
+  const attentionList = unattendedPastBookings.map(b => {
+    const startTimeStr = extractTimeHHMM(b.start_at || b.start_time || (b.sessions && b.sessions[0]?.start_time)) ||
+      (b.start_at ? new Date(b.start_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : '12:00');
+    const title = `${b.name || '客人'} ${startTimeStr} 的預約沒有報到`;
+    return {
+      type: 'unattended_past',
+      booking_ref: b.booking_ref,
+      title,
+      subtitle: '預約時段已過，尚未報到',
+      text: title,
+      hint: '提供標記未到',
+      action: 'mark_no_show',
+      booking: b
+    };
+  });
+
+  map.attentionList = attentionList;
+
+  return map;
+}
+
 
 

@@ -65,7 +65,8 @@ import {
   formatOverdueText,
   groupTimerPill,
   formatBookingRef,
-  isBookingCompleted
+  isBookingCompleted,
+  buildSeatStates
 } from '../../utils/admin/floorSelectors';
 
 function getBookingHourSlots(booking) {
@@ -321,7 +322,7 @@ export default function SeatingPage() {
 
   const layout = floorData?.layout || {};
   const bookings = floorData?.bookings || [];
-  const alerts = floorData?.alerts || [];
+  const backendAlerts = floorData?.alerts || [];
   const boardUsage = floorData?.board_usage || [];
   const sessions = floorData?.sessions || [];
 
@@ -390,94 +391,22 @@ export default function SeatingPage() {
     return { waitSlots: slots, waitPax: totalWaitPax };
   }, [bookings]);
 
-  // Seat state map for FloorPlan and SeatTiles
+  // Seat state map for FloorPlan and SeatTiles (Round 13b Item 1)
   const seatStatesMap = useMemo(() => {
-    const map = {};
-    for (const s of (layout.seats || [])) {
-      map[s.code] = {
-        state: s.is_active ? 'empty' : 'off',
-        isPaid: false,
-        timerText: s.is_active ? '空位' : '已停用',
-        paxName: null,
-        boards: []
-      };
+    return buildSeatStates(layout, bookings, getServerNow());
+  }, [layout, bookings, getServerNow]);
+
+  // Combined alerts (backend alerts + unattended un-checked-in bookings past their slot)
+  const alerts = useMemo(() => {
+    const list = [...backendAlerts];
+    const unattended = seatStatesMap?.attentionList || [];
+    for (const u of unattended) {
+      if (!list.some(a => a.booking_ref === u.booking_ref)) {
+        list.push(u);
+      }
     }
-
-    // Populate checked-in bookings
-    for (const b of checkedInBookings) {
-      const isPaid = b.billing?.status === 'paid' || Boolean(b.is_paid);
-      const bSeats = b.assigned_seats || [];
-      bSeats.forEach((seatCode, idx) => {
-        if (!seatCode || seatCode.startsWith('WAIT-')) return;
-        const person = (b.persons || [])[idx];
-        let timerText = '計時中';
-        let state = 'in_use';
-
-        if (isPaid) {
-          state = 'in_use';
-          timerText = '已結清';
-        } else if (person) {
-          const tm = person.timer || person;
-          const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
-          const rawElapsed = personElapsedMinutes(person, getServerNow());
-          const totalBooked = bookedMinutes(b);
-          const diffMins = rawElapsed - totalBooked;
-
-          if (isPaused) {
-            state = 'paused';
-            timerText = rawElapsed > 0 ? `暫停 ${formatTimerHMM(rawElapsed)}` : '已暫停';
-          } else if (diffMins > 0) {
-            state = 'over';
-            timerText = formatDiffMinutesText(diffMins);
-          } else if (totalBooked - rawElapsed <= 15 && totalBooked > 0) {
-            state = 'warn';
-            timerText = formatTimerHMM(rawElapsed);
-          } else {
-            state = 'in_use';
-            timerText = formatTimerHMM(rawElapsed);
-          }
-        }
-
-        const personBoards = (b.boards || []).filter(bd => bd.person_no === (idx + 1));
-        const boardLabels = personBoards.map(bd => {
-          const segs = bd.segments || [];
-          return segs.map(s => displayBoardName(s.name)).join('→');
-        });
-
-        map[seatCode] = {
-          state,
-          isPaid,
-          timerText,
-          paxName: b.name,
-          bookingRef: b.booking_ref,
-          booking: b,
-          boards: boardLabels,
-          personNo: idx + 1
-        };
-      });
-    }
-
-    // Populate pending bookings
-    for (const b of pendingBookings) {
-      const bSeats = b.assigned_seats || [];
-      const startTimeStr = b.start_at ? new Date(b.start_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : '';
-      bSeats.forEach((seatCode) => {
-        if (map[seatCode]) {
-          map[seatCode] = {
-            state: 'reserved',
-            isPaid: false,
-            timerText: `${startTimeStr} 到`,
-            paxName: b.name,
-            bookingRef: b.booking_ref,
-            booking: b,
-            boards: []
-          };
-        }
-      });
-    }
-
-    return map;
-  }, [activeSeats, checkedInBookings, pendingBookings, getServerNow]);
+    return list;
+  }, [backendAlerts, seatStatesMap]);
 
   // Group tables by zone
   const zoneGroupedTables = useMemo(() => {
@@ -1460,11 +1389,28 @@ export default function SeatingPage() {
                             key={idx}
                             onClick={() => {
                               const b = bookings.find(bk => bk.booking_ref === al.booking_ref);
-                              if (b) setTimerTarget(b);
+                              if (b) {
+                                if (b.attendance === 'checked_in') setTimerTarget(b);
+                                else setCheckInTarget(b);
+                              }
                             }}
-                            className="p-2.5 rounded-2xl bg-white border border-sg-line cursor-pointer hover:border-sg-brown text-[12px] space-y-0.5"
+                            className="p-2.5 rounded-2xl bg-white border border-sg-line cursor-pointer hover:border-sg-brown text-[12px] space-y-1"
                           >
-                            <div className="font-bold text-sg-ink">{al.title || al.text}</div>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-bold text-sg-ink truncate">{al.title || al.text}</div>
+                              {al.action === 'mark_no_show' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMarkNoShow(al.booking_ref);
+                                  }}
+                                  className="px-2 py-0.5 rounded-lg bg-sg-danger-soft text-sg-danger font-bold text-[11px] hover:bg-sg-danger hover:text-white transition shrink-0"
+                                >
+                                  標記未到
+                                </button>
+                              )}
+                            </div>
                             <div className="text-sg-muted">{al.subtitle || al.hint}</div>
                           </div>
                         ))}
