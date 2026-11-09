@@ -4,6 +4,33 @@
  * 保存最近最多 5 筆 state，提供 30 分鐘有效期限校驗，兼顧資安防護與顧客在多裝置/多頁面切換時的登入彈性
  */
 
+/**
+ * 依訪客環境 (User Agent) 與所在頁面判斷 LINE 按鈕動作
+ * @param {'home' | 'preview' | string} [page='home']
+ * @param {string} [customUa] 選填，供單元測試或特定環境注入 UA
+ * @returns {'login' | 'oa'}
+ */
+export function getGuestLineAction(page = 'home', customUa) {
+  const ua = typeof customUa === 'string'
+    ? customUa
+    : (typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '');
+
+  // 1. 在 LINE 裡打開（UA 含 Line/）：一律 'login'（避免在 LINE 內繞圈回官方帳號）
+  if (/Line\//i.test(ua)) {
+    return 'login';
+  }
+
+  // 2. 在 Instagram、Facebook、Threads、Messenger 裡打開：一律 'oa'
+  // (UA 含 Instagram、FBAN、FBAV、Barcelona、MessengerForiOS、FB_IAB)
+  if (/(Instagram|FBAN|FBAV|Barcelona|MessengerForiOS|FB_IAB)/i.test(ua)) {
+    return 'oa';
+  }
+
+  // 3. 其他一般瀏覽器：首頁回 'login'，預覽頁回 'oa'
+  const isPreview = page === 'preview' || page === '/preview';
+  return isPreview ? 'oa' : 'login';
+}
+
 const OAUTH_STATE_KEY = 'shiguang_line_oauth_state';
 const MAX_SAVED_STATES = 5;
 const STATE_EXPIRES_MS = 30 * 60 * 1000; // 放寬至 30 分鐘效期

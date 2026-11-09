@@ -377,6 +377,7 @@ export default function Home({ userRole }) {
         {/* 3. Fixed Bottom Area */}
         <div className="sticky bottom-0 z-40 bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))] grid gap-2">
           <GuestLineLoginButton
+            page="home"
             globalSettings={globalSettings}
             returnPath="/booking"
             onClick={() => {
