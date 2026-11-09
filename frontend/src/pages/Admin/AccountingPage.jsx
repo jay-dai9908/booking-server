@@ -35,7 +35,7 @@ import { printJobOnThisDevice } from '../../utils/sunmiPrinter';
 import { buildClosingSlip, commandsToPreviewHtml } from '@shared/receipts.js';
 import { toTaipeiDateString } from '@shared/time.js';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
-import { formatMinus } from '../../utils/format';
+import { formatMoney, formatMinus } from '../../utils/format';
 import { buildPaymentsCsv, buildEventsCsv, computeDailyRevenue } from '../../utils/admin/accountingExport';
 
 function flattenObject(obj, prefix = '') {
@@ -619,17 +619,17 @@ export default function AccountingPage() {
             <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
               <span className="text-sg-muted text-[12px] font-medium block">期間實收淨額</span>
               <div className="text-[24px] font-bold text-sg-ink font-num">
-                NT${(summary?.net_revenue ?? 0).toLocaleString()}
+                {formatMoney(summary?.net_revenue ?? 0)}
               </div>
               <span className="text-[11px] text-sg-sage-ink block font-medium">
-                已扣除退款 NT${(summary?.total_refunds || 0).toLocaleString()}
+                已扣除退款 {formatMoney(summary?.total_refunds || 0)}
               </span>
             </div>
 
             <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
               <span className="text-sg-muted text-[12px] font-medium block">預期收益（已預約未結帳）</span>
               <div className="text-[24px] font-bold text-sg-brown font-num">
-                NT${(summary?.unpaid?.amount ?? 0).toLocaleString()}
+                {formatMoney(summary?.unpaid?.amount ?? 0)}
               </div>
               <span className="text-[11px] text-sg-muted block">
                 共 {summary?.unpaid?.count || 0} 組預約未結帳
@@ -639,7 +639,7 @@ export default function AccountingPage() {
             <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
               <span className="text-sg-muted text-[12px] font-medium block">平均客單價 (客組)</span>
               <div className="text-[24px] font-bold text-sg-ink font-num">
-                NT${avgTicket.toLocaleString()}
+                {formatMoney(avgTicket)}
               </div>
               <span className="text-[11px] text-sg-muted block">
                 共 {paidOrdersCount} 組已結帳
@@ -672,10 +672,10 @@ export default function AccountingPage() {
                     <line x1="40" y1="150" x2="580" y2="150" stroke="#D1D5DB" />
 
                     <text x="35" y="24" textAnchor="end" fontSize="10" fill="#9CA3AF">
-                      NT${maxDailyRev}
+                      {formatMoney(maxDailyRev)}
                     </text>
                     <text x="35" y="89" textAnchor="end" fontSize="10" fill="#9CA3AF">
-                      NT${Math.round(maxDailyRev / 2)}
+                      {formatMoney(Math.round(maxDailyRev / 2))}
                     </text>
                     <text x="35" y="154" textAnchor="end" fontSize="10" fill="#9CA3AF">
                       0
@@ -735,25 +735,25 @@ export default function AccountingPage() {
             <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
               <span className="text-sg-muted text-[11px] block">現金實收</span>
               <span className="text-[18px] font-bold text-sg-ink font-num">
-                NT${(summary?.by_method?.cash?.amount || 0).toLocaleString()}
+                {formatMoney(summary?.by_method?.cash?.amount || 0)}
               </span>
             </div>
             <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
               <span className="text-sg-muted text-[11px] block">LINE Pay</span>
               <span className="text-[18px] font-bold text-sg-ink font-num">
-                NT${(summary?.by_method?.line_pay?.amount || 0).toLocaleString()}
+                {formatMoney(summary?.by_method?.line_pay?.amount || 0)}
               </span>
             </div>
             <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
               <span className="text-sg-muted text-[11px] block">刷卡 / 轉帳</span>
               <span className="text-[18px] font-bold text-sg-ink font-num">
-                NT${((summary?.by_method?.card?.amount || 0) + (summary?.by_method?.transfer?.amount || 0)).toLocaleString()}
+                {formatMoney((summary?.by_method?.card?.amount || 0) + (summary?.by_method?.transfer?.amount || 0))}
               </span>
             </div>
             <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
               <span className="text-sg-muted text-[11px] block">卡券折抵額</span>
               <span className="text-[18px] font-bold text-sg-brown font-num">
-                NT${(summary?.pass_value || 0).toLocaleString()}
+                {formatMoney(summary?.pass_value || 0)}
               </span>
             </div>
           </div>
@@ -769,19 +769,19 @@ export default function AccountingPage() {
               <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
                 <span className="text-sg-muted text-[11px] block">實收淨額</span>
                 <span className="text-[18px] font-bold text-sg-ink font-num">
-                  NT${summary.net_revenue}
+                  {formatMoney(summary.net_revenue)}
                 </span>
               </div>
               <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
                 <span className="text-sg-muted text-[11px] block">現金實收</span>
                 <span className="text-[18px] font-bold text-sg-ink font-num">
-                  NT${summary.by_method?.cash?.amount || 0}
+                  {formatMoney(summary.by_method?.cash?.amount || 0)}
                 </span>
               </div>
               <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
                 <span className="text-sg-muted text-[11px] block">LINE Pay</span>
                 <span className="text-[18px] font-bold text-sg-ink font-num">
-                  NT${summary.by_method?.line_pay?.amount || 0}
+                  {formatMoney(summary.by_method?.line_pay?.amount || 0)}
                 </span>
               </div>
               <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
@@ -793,7 +793,7 @@ export default function AccountingPage() {
               <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
                 <span className="text-sg-muted text-[11px] block">卡券折抵額</span>
                 <span className="text-[18px] font-bold text-sg-brown font-num">
-                  NT${summary.pass_value || 0}
+                  {formatMoney(summary.pass_value || 0)}
                 </span>
               </div>
             </div>
@@ -901,7 +901,7 @@ export default function AccountingPage() {
                           {getMethodLabel(p.method)}
                         </td>
                         <td className="py-3 px-3 text-right font-bold text-sg-ink font-num">
-                          {p.kind === 'refund' ? `-NT$${p.amount}` : `NT$${p.amount}`}
+                          {p.kind === 'refund' ? formatMinus(p.amount) : formatMoney(p.amount)}
                         </td>
                         <td className="py-3 px-3 text-[12px]">
                           <span className="font-bold text-sg-ink">{p.staff_name || '門市人員'}</span>
@@ -979,7 +979,7 @@ export default function AccountingPage() {
                       <span className={`font-num font-bold text-[15px] ${
                         p.kind === 'refund' ? 'text-sg-danger' : 'text-sg-ink'
                       }`}>
-                        {p.kind === 'refund' ? `-NT$${p.amount}` : `NT$${p.amount}`}
+                        {p.kind === 'refund' ? formatMinus(p.amount) : formatMoney(p.amount)}
                       </span>
                     </div>
 
@@ -1254,40 +1254,40 @@ export default function AccountingPage() {
               <div>
                 <span className="text-sg-muted text-[12px] block">今日實收淨額</span>
                 <span className="text-[28px] font-bold text-sg-ink font-num">
-                  NT${closingPreview.net_revenue}
+                  {formatMoney(closingPreview.net_revenue)}
                 </span>
               </div>
 
               <div className="divide-y divide-sg-line text-[13px] pt-2">
                 <div className="py-2 flex justify-between">
                   <span className="text-sg-ink">現金收款（{closingPreview.by_method?.cash?.count || 0} 筆）</span>
-                  <span className="font-num font-bold">NT${closingPreview.by_method?.cash?.amount || 0}</span>
+                  <span className="font-num font-bold">{formatMoney(closingPreview.by_method?.cash?.amount || 0)}</span>
                 </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-sg-ink">LINE Pay（{closingPreview.by_method?.line_pay?.count || 0} 筆）</span>
-                  <span className="font-num font-bold">NT${closingPreview.by_method?.line_pay?.amount || 0}</span>
+                  <span className="font-num font-bold">{formatMoney(closingPreview.by_method?.line_pay?.amount || 0)}</span>
                 </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-sg-ink">銀行轉帳（{closingPreview.by_method?.transfer?.count || 0} 筆）</span>
-                  <span className="font-num font-bold">NT${closingPreview.by_method?.transfer?.amount || 0}</span>
+                  <span className="font-num font-bold">{formatMoney(closingPreview.by_method?.transfer?.amount || 0)}</span>
                 </div>
                 {closingPreview.refunds?.cash?.amount > 0 && (
                   <div className="py-2 flex justify-between text-sg-danger">
                     <span>退款（{closingPreview.refunds?.cash?.count || 0} 筆）</span>
-                    <span className="font-num font-bold">-NT${closingPreview.refunds?.cash?.amount || 0}</span>
+                    <span className="font-num font-bold">{formatMinus(closingPreview.refunds?.cash?.amount || 0)}</span>
                   </div>
                 )}
                 <div className="py-2 flex justify-between text-sg-muted">
                   <span>卡券折抵（{closingPreview.passes?.count || 0} 筆，不計入）</span>
-                  <span className="font-num">NT${closingPreview.passes?.amount || 0}</span>
+                  <span className="font-num">{formatMoney(closingPreview.passes?.amount || 0)}</span>
                 </div>
                 <div className="py-2 flex justify-between text-sg-muted">
                   <span>作廢（{closingPreview.voids?.count || 0} 筆，不計入）</span>
-                  <span className="font-num">NT${closingPreview.voids?.amount || 0}</span>
+                  <span className="font-num">{formatMoney(closingPreview.voids?.amount || 0)}</span>
                 </div>
                 <div className="py-2 flex justify-between text-sg-honey font-bold">
                   <span>未結（{closingPreview.unpaid?.count || 0} 筆）</span>
-                  <span className="font-num">NT${closingPreview.unpaid?.amount || 0}</span>
+                  <span className="font-num">{formatMoney(closingPreview.unpaid?.amount || 0)}</span>
                 </div>
               </div>
             </div>
@@ -1313,7 +1313,7 @@ export default function AccountingPage() {
                 <div className="flex items-center justify-between text-[14px]">
                   <span className="text-sg-ink font-bold">現金應有總額</span>
                   <span className="text-[18px] font-bold text-sg-ink font-num">
-                    NT${closingPreview.expected_cash}
+                    {formatMoney(closingPreview.expected_cash)}
                   </span>
                 </div>
 
@@ -1342,13 +1342,13 @@ export default function AccountingPage() {
                   } else if (diff < 0) {
                     return (
                       <div className="p-3 rounded-2xl bg-sg-danger-soft text-sg-danger font-bold text-[13px] text-center">
-                        短少 NT${Math.abs(diff)}
+                        短少 {formatMoney(Math.abs(diff))}
                       </div>
                     );
                   } else {
                     return (
                       <div className="p-3 rounded-2xl bg-sg-honey-soft text-sg-honey font-bold text-[13px] text-center">
-                        多出 NT${diff}
+                        多出 {formatMoney(diff)}
                       </div>
                     );
                   }
@@ -1391,9 +1391,9 @@ export default function AccountingPage() {
                       <span className="text-sg-muted">{c.staff_name}</span>
                     </div>
                     <div>
-                      <span className="text-sg-muted mr-3">實點 NT${c.counted_cash}</span>
+                      <span className="text-sg-muted mr-3">實點 {formatMoney(c.counted_cash)}</span>
                       <span className={`font-bold ${c.difference === 0 ? 'text-sg-sage-ink' : 'text-sg-danger'}`}>
-                        差額 NT${c.difference}
+                        差額 {c.difference < 0 ? formatMinus(Math.abs(c.difference)) : formatMoney(c.difference)}
                       </span>
                     </div>
                   </div>
@@ -1454,7 +1454,7 @@ export default function AccountingPage() {
                           <StatusPill status={r.billing_status || 'unpaid'} />
                         </td>
                         <td className="py-3 px-3 text-right font-bold text-sg-danger font-num">
-                          NT${due}
+                          {formatMoney(due)}
                         </td>
                         <td className="py-3 px-3 text-right">
                           <Button
@@ -1482,7 +1482,7 @@ export default function AccountingPage() {
         onClose={() => setVoidPaymentTarget(null)}
         onConfirm={handleConfirmVoid}
         title="作廢這筆收款？"
-        message={`確定要作廢 ${voidPaymentTarget?.payment_no}（NT$${voidPaymentTarget?.amount}）？作廢會記到帳務異動紀錄，資料不會刪除。`}
+        message={`確定要作廢 ${voidPaymentTarget?.payment_no}（${formatMoney(voidPaymentTarget?.amount)}）？作廢會記到帳務異動紀錄，資料不會刪除。`}
         danger={true}
         loading={voidLoading}
       >
