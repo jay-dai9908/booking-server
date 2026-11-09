@@ -23,6 +23,7 @@ import {
   buildDiscountConfig,
   calcPromoDiscount,
 } from '../../../utils/customer/pricing';
+import { validateCouponPax } from '../../../utils/customer/couponPaxValidation';
 
 const QUICK_TAGS = ['第一次玩', '有小孩同行', '生日慶祝', '希望坐一起'];
 
@@ -97,6 +98,17 @@ export default function StepConfirm({
     });
   }, [pax, H, startTime, endTime, dayPricing, mode, units, configsMap, discountCfg, promo, bookingSessions]);
 
+  // Auto-cancel promo if pax requirement not met (Round 18 Item 2)
+  useEffect(() => {
+    if (promo) {
+      const check = validateCouponPax(promo, pax);
+      if (check.cancelled) {
+        onChangePromo(null);
+        toast.show(check.message, { type: 'info' });
+      }
+    }
+  }, [pax, promo]);
+
   // Validate Promo Code
   const handleApplyPromo = async () => {
     const cleanCode = promoInput.trim().toUpperCase();
@@ -120,6 +132,12 @@ export default function StepConfirm({
 
       const res = await api.post('/checkout/promo-codes/validate', payload);
       const promoData = res.data?.promo_code || res.data;
+      const check = validateCouponPax(promoData, pax);
+      if (check.cancelled) {
+        setPromoError(check.message);
+        toast.show(check.message, { type: 'error' });
+        return;
+      }
       onChangePromo(promoData);
       setPromoInput('');
       toast.show('已套用折扣碼', { type: 'success' });

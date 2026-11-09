@@ -22,6 +22,7 @@ import {
 } from '../../../utils/customer/pricing';
 import { boardDiscountTexts } from '../../../utils/customer/discountText';
 import { canPlace } from '../../../utils/customer/availability';
+import { validateCouponPax } from '../../../utils/customer/couponPaxValidation';
 
 export default function StepPeopleAddons({
   date,
@@ -29,6 +30,8 @@ export default function StepPeopleAddons({
   bookingSessions = [],
   pax,
   onChangePax,
+  promo = null,
+  onChangePromo = null,
   units,
   onChangeUnits,
   globalSettings,
@@ -162,6 +165,15 @@ export default function StepPeopleAddons({
       return;
     }
     onChangePax(newPax);
+
+    // Auto-cancel coupon if pax requirement is not met (Round 18 Item 2)
+    if (promo && onChangePromo) {
+      const check = validateCouponPax(promo, newPax);
+      if (check.cancelled) {
+        onChangePromo(null);
+        toast.show(check.message, { type: 'info' });
+      }
+    }
 
     if (!allowExceedPax) {
       let adjustedUnits = [...units];

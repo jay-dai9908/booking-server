@@ -286,6 +286,8 @@ export default function Booking() {
           bookingSessions={bookingSessions}
           pax={pax}
           onChangePax={setPax}
+          promo={promo}
+          onChangePromo={setPromo}
           units={units}
           onChangeUnits={setUnits}
           globalSettings={globalSettings}
