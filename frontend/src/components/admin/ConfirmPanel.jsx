@@ -12,13 +12,14 @@ export default function ConfirmPanel({
   cancelText = '取消',
   danger = false,
   loading = false,
+  disabled = false,
   children
 }) {
   if (!isOpen) return null;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/45 backdrop-blur-[2px] animate-in fade-in duration-150"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/45 backdrop-blur-[2px] animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
     >
@@ -41,6 +42,7 @@ export default function ConfirmPanel({
             size="sm"
             onClick={onConfirm}
             loading={loading}
+            disabled={disabled || loading}
           >
             {confirmText}
           </Button>

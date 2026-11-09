@@ -13,13 +13,14 @@ const STATUS_CONFIGS = {
   cancelled: { label: '已取消', bg: 'bg-sg-full-soft text-sg-muted border-sg-line' }
 };
 
-export default function StatusPill({ status = 'unpaid', label = null, className = '', children }) {
+export default function StatusPill({ status = 'unpaid', label = null, className = '', children, ...props }) {
   const conf = STATUS_CONFIGS[status] || STATUS_CONFIGS.unpaid;
   const displayLabel = children || label || conf.label;
 
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-bold border whitespace-nowrap leading-[1.6] ${conf.bg} ${className}`}
+      {...props}
     >
       {displayLabel}
     </span>

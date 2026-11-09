@@ -11,10 +11,13 @@ import {
   MessageCircle,
   Clock,
   Plus,
-  CreditCard
+  CreditCard,
+  MoreVertical
 } from 'lucide-react';
 import api from '../api/axios';
 import ConfirmPanel from './admin/ConfirmPanel';
+import ReasonChips from './admin/ReasonChips';
+import StatusPill from './admin/StatusPill';
 import ErrorBoundary from './common/ErrorBoundary';
 import { formatBookingRef } from '../utils/admin/floorSelectors';
 import { safeFormatDate } from '../utils/format';
@@ -70,6 +73,10 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
   const [showEquipmentModal, setShowEquipmentModal] = useState(false);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showLineModal, setShowLineModal] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showMarkUnpaidModal, setShowMarkUnpaidModal] = useState(false);
+  const [unpaidReason, setUnpaidReason] = useState('收錯訂單');
+  const [unpaidLoading, setUnpaidLoading] = useState(false);
   const [adminNoteInput, setAdminNoteInput] = useState(reservation?.admin_note || '');
   const [isSavingAdminNote, setIsSavingAdminNote] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
@@ -79,6 +86,33 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
   const showToast = (text, isError = false) => {
     setToastMsg({ text, isError });
     setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  const handleMarkUnpaid = async () => {
+    if (!unpaidReason || !unpaidReason.trim()) return;
+    try {
+      setUnpaidLoading(true);
+      await api.post(`/billing/${reservation.booking_ref}/mark-unpaid`, {
+        reason: unpaidReason.trim()
+      });
+      setShowMarkUnpaidModal(false);
+      setReservation(prev => ({
+        ...prev,
+        is_paid: false,
+        billing_status: 'unpaid'
+      }));
+      showToast('已標記未結帳');
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+      if (onUpdate) {
+        onUpdate({ is_paid: false, billing_status: 'unpaid' });
+      }
+      fetchDetails();
+    } catch (err) {
+      console.error('[handleMarkUnpaid] Error:', err);
+      showToast(err.response?.data?.error || err.response?.data?.message || '標記未結帳失敗', true);
+    } finally {
+      setUnpaidLoading(false);
+    }
   };
 
   const onUpdateRef = useRef(onUpdate);
@@ -267,9 +301,44 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
           <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
             訂單詳細資訊
           </h2>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-200 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {!readOnly && (
+              <div className="relative">
+                <button
+                  type="button"
+                  data-testid="reservation-more-btn"
+                  onClick={() => setShowMoreMenu(prev => !prev)}
+                  className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-200 transition-colors"
+                  title="更多操作"
+                  aria-label="更多操作"
+                >
+                  <MoreVertical className="w-5 h-5" />
+                </button>
+                {showMoreMenu && (
+                  <div
+                    className="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-2xl shadow-xl z-30 py-1 text-sm animate-in fade-in"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      data-testid="reservation-mark-unpaid-btn"
+                      onClick={() => {
+                        setShowMoreMenu(false);
+                        setUnpaidReason('收錯訂單');
+                        setShowMarkUnpaidModal(true);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 text-red-600 font-bold"
+                    >
+                      標記未結帳
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-200 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
         
         <ErrorBoundary>
@@ -344,6 +413,7 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                             <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ${statusUI.bgClass} ${statusUI.colorClass}`}>
                               {statusUI.icon} {statusUI.text}
                             </span>
+                            <StatusPill data-testid="reservation-status-pill" status={reservation.billing_status || (reservation.is_paid ? 'paid' : 'unpaid')} />
                             {reservation.attendance === 'checked_in' && (
                               <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-bold text-sg-brown bg-sg-brown-soft px-2.5 py-1 rounded-lg border border-sg-line">
                                 <Clock className="w-3.5 h-3.5" />
@@ -672,10 +742,13 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                       {reservation.is_paid && (
                         <button 
                           type="button"
-                          onClick={() => handleUpdatePayment(false)}
+                          onClick={() => {
+                            setUnpaidReason('收錯訂單');
+                            setShowMarkUnpaidModal(true);
+                          }}
                           className="px-3 py-2 bg-white border border-gray-200 text-gray-500 hover:bg-gray-50 rounded-xl text-xs font-medium transition-colors"
                         >
-                          重置為未付
+                          標記未結帳
                         </button>
                       )}
                       <button 
@@ -798,6 +871,26 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
           )}
         </ConfirmPanel>
       )}
+
+      {/* Mark Unpaid Modal */}
+      <ConfirmPanel
+        isOpen={showMarkUnpaidModal}
+        onClose={() => setShowMarkUnpaidModal(false)}
+        onConfirm={handleMarkUnpaid}
+        title="標記未結帳？"
+        message="將作廢此預約的所有收款紀錄並重設為未結帳狀態，此動作將記入帳務異動紀錄。"
+        danger={true}
+        loading={unpaidLoading}
+        disabled={!unpaidReason?.trim()}
+      >
+        <ReasonChips
+          presets={['收錯訂單']}
+          value={unpaidReason}
+          onChange={setUnpaidReason}
+          label="原因"
+          required={true}
+        />
+      </ConfirmPanel>
     </div>
   );
 }

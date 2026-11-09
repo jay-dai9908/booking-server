@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Lock, Plus, RotateCcw, AlertTriangle, Check, Ticket, Printer, MoreVertical } from 'lucide-react';
 import api from '../../../api/axios';
 import ResponsivePanel from '../ResponsivePanel';
+import StatusPill from '../StatusPill';
 import PayMethodGrid from '../PayMethodGrid';
 import CashPad from '../CashPad';
 import ReasonChips from '../ReasonChips';
@@ -39,6 +40,10 @@ export default function SplitCollectView({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showMarkUnpaidModal, setShowMarkUnpaidModal] = useState(false);
+  const [unpaidReason, setUnpaidReason] = useState('收錯訂單');
+  const [unpaidLoading, setUnpaidLoading] = useState(false);
+  const [toastMsg, setToastMsg] = useState(null);
   const [successPaymentData, setSuccessPaymentData] = useState(null);
 
   // Sub-modal states
@@ -229,6 +234,33 @@ export default function SplitCollectView({
     }
   };
 
+  const handleMarkUnpaid = async () => {
+    if (!unpaidReason || !unpaidReason.trim()) return;
+    try {
+      setUnpaidLoading(true);
+      const res = await api.post(`/billing/${bookingRef}/mark-unpaid`, {
+        reason: unpaidReason.trim()
+      });
+      setShowMarkUnpaidModal(false);
+      setToastMsg('已標記未結帳');
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+      if (onPaymentSuccess) {
+        onPaymentSuccess({
+          booking_ref: bookingRef,
+          status: res.data?.status || { code: 'unpaid', label: '未結帳' }
+        });
+      }
+      setTimeout(() => {
+        onClose();
+      }, 500);
+    } catch (err) {
+      console.error('[handleMarkUnpaid] Error:', err);
+      setErrorMessage(err.response?.data?.error || err.response?.data?.message || '標記未結帳失敗');
+    } finally {
+      setUnpaidLoading(false);
+    }
+  };
+
   return (
     <>
       <ResponsivePanel
@@ -236,6 +268,7 @@ export default function SplitCollectView({
         onClose={onClose}
         title={successPaymentData ? '收款完成' : '分開收款與帳務作業'}
         subtitle={`預約單號 ${billData?.booking?.ref_display || bookingRef}`}
+        headerRight={<StatusPill data-testid="split-status-pill" status={billData?.status?.code || 'unpaid'} label={billData?.status?.label} />}
         footer={
           successPaymentData ? null : (
             <div className="space-y-2.5">
@@ -266,6 +299,7 @@ export default function SplitCollectView({
                 <div className="relative">
                   <button
                     type="button"
+                    data-testid="split-more-btn"
                     onClick={() => setShowMoreMenu(!showMoreMenu)}
                     className="p-2 rounded-xl border border-sg-line bg-white hover:bg-sg-paper text-sg-muted hover:text-sg-ink transition"
                     title="更多帳務操作"
@@ -285,6 +319,18 @@ export default function SplitCollectView({
                         className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium disabled:opacity-40"
                       >
                         免收此對象
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="split-mark-unpaid-btn"
+                        onClick={() => {
+                          setShowMoreMenu(false);
+                          setUnpaidReason('收錯訂單');
+                          setShowMarkUnpaidModal(true);
+                        }}
+                        className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-danger font-medium"
+                      >
+                        標記未結帳
                       </button>
                     </div>
                   )}
@@ -595,6 +641,36 @@ export default function SplitCollectView({
           title="確認作廢收款"
           message={`確定要作廢收款 ${voidTargetPayment.payment_no} (NT$${voidTargetPayment.amount}) 嗎？作廢後不可復原。`}
         />
+      )}
+
+      {/* Mark Unpaid Modal */}
+      <ConfirmPanel
+        isOpen={showMarkUnpaidModal}
+        onClose={() => setShowMarkUnpaidModal(false)}
+        onConfirm={handleMarkUnpaid}
+        title="標記未結帳？"
+        message="將作廢此預約的所有收款紀錄並重設為未結帳狀態，此動作將記入帳務異動紀錄。"
+        danger={true}
+        loading={unpaidLoading}
+        disabled={!unpaidReason?.trim()}
+      >
+        <ReasonChips
+          presets={['收錯訂單']}
+          value={unpaidReason}
+          onChange={setUnpaidReason}
+          label="原因"
+          required={true}
+        />
+      </ConfirmPanel>
+
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div
+          data-testid="split-toast"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 bg-emerald-600 text-white text-[13px] font-bold rounded-2xl shadow-xl animate-in fade-in slide-in-from-top duration-200"
+        >
+          {toastMsg}
+        </div>
       )}
     </>
   );

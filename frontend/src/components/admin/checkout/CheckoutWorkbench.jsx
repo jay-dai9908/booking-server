@@ -65,6 +65,11 @@ export default function CheckoutWorkbench({
   const [showSplitCollect, setShowSplitCollect] = useState(false);
   const [showWaiveModal, setShowWaiveModal] = useState(false);
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
+  const [showMarkUnpaidModal, setShowMarkUnpaidModal] = useState(false);
+  const [unpaidReason, setUnpaidReason] = useState('收錯訂單');
+  const [unpaidLoading, setUnpaidLoading] = useState(false);
+  const [unpaidError, setUnpaidError] = useState(null);
+  const [toastMsg, setToastMsg] = useState(null);
   const [successPaymentData, setSuccessPaymentData] = useState(null);
 
   // Addon inputs
@@ -932,6 +937,45 @@ export default function CheckoutWorkbench({
     }
   };
 
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  const handleMarkUnpaid = async () => {
+    if (!unpaidReason || !unpaidReason.trim()) {
+      setUnpaidError('請填寫原因');
+      return;
+    }
+    try {
+      setUnpaidLoading(true);
+      setUnpaidError(null);
+      const res = await api.post(`/billing/${bookingRef}/mark-unpaid`, {
+        reason: unpaidReason.trim()
+      });
+      setShowMarkUnpaidModal(false);
+      setBillData(prev => ({
+        ...prev,
+        status: res.data?.status || { code: 'unpaid', label: '未結帳' },
+        bill: res.data?.bill || prev?.bill
+      }));
+      showToast('已標記未結帳');
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+      await loadBill();
+      if (onPaymentSuccess) {
+        onPaymentSuccess({
+          booking_ref: bookingRef,
+          status: { code: 'unpaid', label: '未結帳' }
+        });
+      }
+    } catch (err) {
+      console.error('[handleMarkUnpaid] Error:', err);
+      setUnpaidError(err.response?.data?.error || err.response?.data?.message || '標記未結帳失敗');
+    } finally {
+      setUnpaidLoading(false);
+    }
+  };
+
   // Preview receipt
   const handleOpenPreview = () => {
     try {
@@ -957,7 +1001,7 @@ export default function CheckoutWorkbench({
   const netDue = unpaidPersons.reduce((s, p) => s + (p.total || 0), 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-sg-ink/50 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-2 sm:p-4 bg-sg-ink/50 backdrop-blur-sm animate-fade-in">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[96vh] flex flex-col overflow-hidden border border-sg-line">
         {/* Header */}
         <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-sg-line flex items-center justify-between bg-sg-paper/40">
@@ -968,7 +1012,7 @@ export default function CheckoutWorkbench({
             <span className="font-mono text-[11px] sm:text-[12px] bg-sg-paper px-2 py-0.5 rounded-lg border border-sg-line text-sg-muted whitespace-nowrap flex-shrink-0">
               {booking.ref_display || bookingRef}
             </span>
-            <StatusPill status={currentStatusCode} label={currentStatusLabel} className="hidden xs:inline-flex flex-shrink-0" />
+            <StatusPill data-testid="workbench-status-pill" status={currentStatusCode} label={currentStatusLabel} className="inline-flex flex-shrink-0" />
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
@@ -1767,6 +1811,7 @@ export default function CheckoutWorkbench({
               <div className="relative">
                 <button
                   type="button"
+                  data-testid="workbench-more-btn"
                   onClick={() => setShowMobileMoreMenu(prev => !prev)}
                   className="p-1.5 rounded-xl border border-sg-line hover:bg-sg-paper text-sg-muted hover:text-sg-ink"
                   aria-label="更多動作"
@@ -1806,6 +1851,19 @@ export default function CheckoutWorkbench({
                       className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper rounded-xl"
                     >
                       卡券中心
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="workbench-mark-unpaid-btn"
+                      onClick={() => {
+                        setShowMobileMoreMenu(false);
+                        setUnpaidReason('收錯訂單');
+                        setUnpaidError(null);
+                        setShowMarkUnpaidModal(true);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl"
+                    >
+                      標記未結帳
                     </button>
                   </div>
                 )}
@@ -1848,6 +1906,52 @@ export default function CheckoutWorkbench({
               >
                 免收（招待）
               </Button>
+              <div className="relative">
+                <button
+                  type="button"
+                  data-testid="workbench-more-btn-desktop"
+                  onClick={() => setShowMobileMoreMenu(prev => !prev)}
+                  className="p-2 rounded-xl border border-sg-line hover:bg-sg-paper text-sg-muted hover:text-sg-ink transition"
+                  aria-label="更多動作"
+                  title="更多動作"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+                {showMobileMoreMenu && (
+                  <div
+                    className="absolute bottom-full left-0 mb-2 w-44 bg-white rounded-2xl shadow-xl border border-sg-line p-1.5 text-left z-30 space-y-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { setShowMobileMoreMenu(false); setShowOverrideModal(true); }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-brown hover:bg-sg-brown-soft rounded-xl"
+                    >
+                      直接改應收金額
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowMobileMoreMenu(false); setShowPassCenter(true); }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper rounded-xl"
+                    >
+                      卡券中心
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="workbench-mark-unpaid-btn-desktop"
+                      onClick={() => {
+                        setShowMobileMoreMenu(false);
+                        setUnpaidReason('收錯訂單');
+                        setUnpaidError(null);
+                        setShowMarkUnpaidModal(true);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl"
+                    >
+                      標記未結帳
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-3">
@@ -2024,6 +2128,44 @@ export default function CheckoutWorkbench({
           onChange={setWaiveReason}
         />
       </ConfirmPanel>
+
+      {/* Mark Unpaid Modal */}
+      <ConfirmPanel
+        isOpen={showMarkUnpaidModal}
+        onClose={() => {
+          setShowMarkUnpaidModal(false);
+          setUnpaidError(null);
+        }}
+        onConfirm={handleMarkUnpaid}
+        title="標記未結帳？"
+        message="將作廢此預約的所有收款紀錄並重設為未結帳狀態，此動作將記入帳務異動紀錄。"
+        danger={true}
+        loading={unpaidLoading}
+        disabled={!unpaidReason?.trim()}
+      >
+        {unpaidError && (
+          <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-bold">
+            {unpaidError}
+          </div>
+        )}
+        <ReasonChips
+          presets={['收錯訂單']}
+          value={unpaidReason}
+          onChange={setUnpaidReason}
+          label="原因"
+          required={true}
+        />
+      </ConfirmPanel>
+
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div
+          data-testid="workbench-toast"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 bg-emerald-600 text-white text-[13px] font-bold rounded-2xl shadow-xl animate-in fade-in slide-in-from-top duration-200"
+        >
+          {toastMsg}
+        </div>
+      )}
 
       {/* Split Collect View */}
       {showSplitCollect && (
