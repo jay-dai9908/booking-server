@@ -287,6 +287,141 @@ test('Section 4.5.5 Paid freeze and items added after payment', () => {
   assert.equal(p2.total, 1100);
 });
 
+test('Section 4.5.5 Three split options for items added after payment (Round 14 Item 3)', () => {
+  const pricing = { hourly: 150, unlimited: 750, allow_unlimited: true };
+  const rules = { grace: 10, block: 30, early_leave_mode: 'booked', default_split_mode: 'proportional' };
+
+  const p1Snapshot = {
+    person_no: 1,
+    seat_code: '2-3',
+    label: '第 1 位',
+    entry: { mode: 'hourly', hours: 4, amount: 600 },
+    board: { amount: 0, units: [] },
+    addons: [],
+    shares: [
+      { source_key: 'order_addon:a1', label: '夜光吊飾扣', amount: 22 },
+      { source_key: 'promo:IG50', label: 'IG 打卡折', amount: -18 },
+      { source_key: 'manual', label: '手動折讓（熟客優惠）', amount: -11 }
+    ],
+    promos: [],
+    adjust: null,
+    total: 593
+  };
+
+  const payment1 = {
+    id: 1,
+    payment_no: 'R-0001',
+    batch_no: 'B-001',
+    kind: 'charge',
+    status: 'valid',
+    method: 'cash',
+    amount: 593,
+    person_nos: [1],
+    breakdown_json: { persons: [p1Snapshot] }
+  };
+
+  const discountConfig = {
+    enabled: true,
+    buy_hours: 3,
+    free_hours: 1,
+    stackable: false,
+    board_discounts: {
+      pegboard_s: { enabled: true, buy_hours: 3, free_hours: 1 },
+      pegboard_m: { enabled: true, buy_hours: 3, free_hours: 1 }
+    }
+  };
+
+  const baseInput = {
+    pricing,
+    rules,
+    discountConfig,
+    booking: { booked_minutes: 240 },
+    persons: [
+      { person_no: 1, seat_code: '2-3', status: 'active' },
+      {
+        person_no: 2,
+        seat_code: '2-4',
+        status: 'active',
+        timer: { timer_started_at: '2026-11-04T14:00:00Z', timer_ended_at: '2026-11-04T18:43:00Z', paused_seconds: 720 },
+        addons: [
+          { key: 'iron_m', name: '代燙 中板', price: 50, qty: 1 }
+        ]
+      }
+    ],
+    boards: [
+      {
+        unit_group: 'b1',
+        person_no: 2,
+        segments: [
+          { hours: 1.5, rate: 90, name: '小板' },
+          { hours: 2.5, rate: 120, name: '中板' }
+        ]
+      }
+    ],
+    orderPromos: [
+      { key: 'p1', code: 'IG50', name: 'IG 打卡折', discount_type: 'fixed_order', discount_value: 50, target_scope: 'all', split: { mode: 'proportional' } }
+    ],
+    manualDiscount: {
+      amount: 30,
+      reason: '熟客優惠',
+      split: { mode: 'proportional' }
+    },
+    payments: [payment1]
+  };
+
+  // Option 1: 只算給還沒付的人 (預設)
+  const billOpt1 = computeBill({
+    ...baseInput,
+    orderAddons: [
+      { key: 'a1', name: '夜光吊飾扣', price: 60, qty: 1, split: { mode: 'proportional' } },
+      { key: 'a_post_iron', name: '代燙大板', price: 80, qty: 1, added_after_payment: true, include_paid: false, split: { mode: 'proportional' } }
+    ]
+  });
+  const p1_1 = billOpt1.persons.find(p => p.person_no === 1);
+  const p2_1 = billOpt1.persons.find(p => p.person_no === 2);
+  assert.equal(p1_1.pending_supplement || 0, 0, 'Option 1: Person 1 pending supplement is 0');
+  assert.equal(p2_1.total, 1137, 'Option 1: Person 2 total is 1057 + 80 = 1137');
+
+  // Option 2: 也分給已付的人 (Section 4.5.5 範例)
+  const billOpt2 = computeBill({
+    ...baseInput,
+    orderAddons: [
+      { key: 'a1', name: '夜光吊飾扣', price: 60, qty: 1, split: { mode: 'proportional' } },
+      { key: 'a_post_iron', name: '代燙大板', price: 80, qty: 1, added_after_payment: true, include_paid: true, split: { mode: 'proportional' } }
+    ]
+  });
+  const p1_2 = billOpt2.persons.find(p => p.person_no === 1);
+  const p2_2 = billOpt2.persons.find(p => p.person_no === 2);
+  assert.equal(p1_2.pending_supplement, 29, 'Option 2: Person 1 pending supplement is 29 (80 * 600 / 1670)');
+  assert.equal(p2_2.total, 1108, 'Option 2: Person 2 total is 1057 + 51 = 1108');
+
+  // Option 3a: 指定給某一位（指定給第 1 位已付者）
+  const billOpt3a = computeBill({
+    ...baseInput,
+    orderAddons: [
+      { key: 'a1', name: '夜光吊飾扣', price: 60, qty: 1, split: { mode: 'proportional' } },
+      { key: 'a_post_iron', name: '代燙大板', price: 80, qty: 1, added_after_payment: true, split_mode: 'person', target_person_no: 1 }
+    ]
+  });
+  const p1_3a = billOpt3a.persons.find(p => p.person_no === 1);
+  const p2_3a = billOpt3a.persons.find(p => p.person_no === 2);
+  assert.equal(p1_3a.pending_supplement, 80, 'Option 3a: Person 1 pending supplement is 80');
+  assert.equal(p2_3a.total, 1057, 'Option 3a: Person 2 total is unchanged at 1057');
+
+  // Option 3b: 指定給某一位（指定給第 2 位未付者）
+  const billOpt3b = computeBill({
+    ...baseInput,
+    orderAddons: [
+      { key: 'a1', name: '夜光吊飾扣', price: 60, qty: 1, split: { mode: 'proportional' } },
+      { key: 'a_post_iron', name: '代燙大板', price: 80, qty: 1, added_after_payment: true, split_mode: 'person', target_person_no: 2 }
+    ]
+  });
+  const p1_3b = billOpt3b.persons.find(p => p.person_no === 1);
+  const p2_3b = billOpt3b.persons.find(p => p.person_no === 2);
+  assert.equal(p1_3b.pending_supplement || 0, 0, 'Option 3b: Person 1 pending supplement is 0');
+  assert.equal(p2_3b.total, 1137, 'Option 3b: Person 2 total is 1057 + 80 = 1137');
+});
+
 test('Section 4.4.2 1-24 hours comparison between shared board pricing and legacy DP', () => {
   function legacyDP(hours, discountConfig) {
     if (hours <= 0) return 0;

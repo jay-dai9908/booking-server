@@ -31,6 +31,7 @@ import Button from '../../customer/Button';
 import SplitCollectView from './SplitCollectView';
 import PaymentCompleteView from './PaymentCompleteView';
 import PassTenderSheet from './PassTenderSheet';
+import SharedItemsSplitPanel from './SharedItemsSplitPanel';
 import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
@@ -63,6 +64,8 @@ export default function CheckoutWorkbench({
   const [previewHtml, setPreviewHtml] = useState('');
   const [showCollectModal, setShowCollectModal] = useState(false);
   const [showSplitCollect, setShowSplitCollect] = useState(false);
+  const [showSharedSplitPanel, setShowSharedSplitPanel] = useState(false);
+  const [supplementPerson, setSupplementPerson] = useState(null);
   const [showWaiveModal, setShowWaiveModal] = useState(false);
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
   const [showMarkUnpaidModal, setShowMarkUnpaidModal] = useState(false);
@@ -735,6 +738,7 @@ export default function CheckoutWorkbench({
   // Addons handling
   const handleAddPreset = (preset) => {
     if (addonTarget === 'order') {
+      const hasAnyPaid = (billData?.payments || []).some(p => p.status === 'valid' && (p.kind === 'charge' || p.kind === 'waive')) || (billData?.status?.covered > 0);
       updateDraft(prev => {
         const list = [...(prev.order_addons || [])];
         const existingIdx = list.findIndex(a => a.name === preset.name);
@@ -746,6 +750,8 @@ export default function CheckoutWorkbench({
             name: preset.name,
             price: Number(preset.price) || 0,
             qty: 1,
+            added_after_payment: hasAnyPaid,
+            include_paid: false,
             split: { mode: prev.split_mode || 'proportional' },
             split_mode: prev.split_mode || 'proportional'
           });
@@ -1214,6 +1220,25 @@ export default function CheckoutWorkbench({
                               已付清
                             </span>
                           )}
+                          {p.pending_supplement > 0 && (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                                待補收 NT${p.pending_supplement}
+                              </span>
+                              <button
+                                type="button"
+                                data-testid={`mobile-supplement-btn-${p.person_no}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSupplementPerson(p);
+                                  setShowSplitCollect(true);
+                                }}
+                                className="px-2 py-0.5 text-[10px] font-bold bg-sg-brown text-white rounded hover:bg-sg-brown-dark transition cursor-pointer"
+                              >
+                                補收
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -1324,6 +1349,25 @@ export default function CheckoutWorkbench({
                                 <span className="inline-block mt-0.5 text-[10px] text-sg-sage-ink font-bold bg-sg-sage-soft px-1.5 py-0.2 rounded">
                                   已付清
                                 </span>
+                              )}
+                              {p.pending_supplement > 0 && (
+                                <div className="mt-1 flex items-center gap-1.5">
+                                  <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                                    待補收 NT${p.pending_supplement}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    data-testid={`supplement-btn-${p.person_no}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSupplementPerson(p);
+                                      setShowSplitCollect(true);
+                                    }}
+                                    className="px-2 py-0.5 text-[10px] font-bold bg-sg-brown text-white rounded hover:bg-sg-brown-dark transition cursor-pointer"
+                                  >
+                                    補收
+                                  </button>
+                                </div>
                               )}
                             </td>
                             <td className="py-3 px-2">
@@ -1570,15 +1614,30 @@ export default function CheckoutWorkbench({
                         <span className="px-1.5 py-0.5 rounded bg-sg-paper border border-sg-line text-[10px] text-sg-muted">
                           整單共同
                         </span>
+                        {a.added_after_payment && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold">
+                            第 1 位付款後才加
+                          </span>
+                        )}
                         <span className="font-num text-sg-muted">NT${a.price * a.qty}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveAddon(true, null, a.key)}
-                        className="text-sg-danger hover:opacity-80 p-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          data-testid="open-shared-split-panel-btn-workbench"
+                          onClick={() => setShowSharedSplitPanel(true)}
+                          className="px-2 py-0.5 rounded text-[11px] font-bold text-sg-brown bg-sg-brown-soft hover:bg-sg-brown/20 transition cursor-pointer"
+                        >
+                          改分攤
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAddon(true, null, a.key)}
+                          className="text-sg-danger hover:opacity-80 p-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {/* Per person */}
@@ -2185,10 +2244,13 @@ export default function CheckoutWorkbench({
           isOpen={showSplitCollect}
           onClose={() => {
             setShowSplitCollect(false);
+            setSupplementPerson(null);
             loadBill();
           }}
           bookingRef={bookingRef}
           billData={billData}
+          initialSupplementPerson={supplementPerson}
+          onOpenSharedSplit={() => setShowSharedSplitPanel(true)}
           onPaymentSuccess={(data) => {
             const statusCode = data?.status?.code || data?.status?.status || (typeof data?.status === 'string' ? data.status : 'paid');
             const statusLabel = data?.status?.label || (statusCode === 'paid' ? '已結清' : '部分已付');
@@ -2208,6 +2270,15 @@ export default function CheckoutWorkbench({
           }}
         />
       )}
+
+      {/* Shared Items Split Panel */}
+      <SharedItemsSplitPanel
+        isOpen={showSharedSplitPanel}
+        onClose={() => setShowSharedSplitPanel(false)}
+        draftState={draftState}
+        billData={billData}
+        onUpdateDraft={updateDraft}
+      />
 
       {/* Member Pass Center Modal */}
       {showPassCenter && (

@@ -21,7 +21,8 @@ export default function SplitCollectView({
   billData,
   onPaymentSuccess,
   initialPersonNo = null,
-  onOpenSharedSplit = null
+  onOpenSharedSplit = null,
+  initialSupplementPerson = null
 }) {
   const bill = billData?.bill || {};
   const persons = bill.persons || [];
@@ -49,15 +50,21 @@ export default function SplitCollectView({
 
   // Sub-modal states
   const [passSheetPersonNo, setPassSheetPersonNo] = useState(null);
-  const [supplementTarget, setSupplementTarget] = useState(null);
+  const [supplementTarget, setSupplementTarget] = useState(initialSupplementPerson || null);
   const [refundTarget, setRefundTarget] = useState(null);
   const [voidTargetPayment, setVoidTargetPayment] = useState(null);
   const [showWaiveModal, setShowWaiveModal] = useState(false);
 
   // Sub-modal form states
   const [actionReason, setActionReason] = useState('');
-  const [actionAmount, setActionAmount] = useState(0);
-  const [actionItemLabel, setActionItemLabel] = useState('加時 0.5 小時');
+  const [actionAmount, setActionAmount] = useState(() => {
+    if (initialSupplementPerson?.pending_supplement > 0) return initialSupplementPerson.pending_supplement;
+    return 60;
+  });
+  const [actionItemLabel, setActionItemLabel] = useState(() => {
+    if (initialSupplementPerson?.pending_supplement > 0) return '整單共同項目補收';
+    return '加時 0.5 小時';
+  });
 
   const selectedPersons = persons.filter(p => selectedPersonNos.includes(p.person_no));
   const rawDueAmount = selectedPersons.reduce((sum, p) => sum + (p.total || 0), 0);

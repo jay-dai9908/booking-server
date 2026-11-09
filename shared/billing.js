@@ -363,7 +363,22 @@ export function computeBill({
       }
     } else {
       // Added after payment (Section 4.5.5)
-      if (includePaid && paidPersons.length > 0) {
+      if (splitMode === 'person' && targetPersonNo != null) {
+        const isPaidTarget = paidPersons.find(p => p.person_no === targetPersonNo);
+        if (isPaidTarget) {
+          pendingSupplements.push({
+            person_no: targetPersonNo,
+            source_key,
+            label,
+            amount: totalAmount
+          });
+        } else {
+          const up = unpaidPersons.find(u => u.person_no === targetPersonNo);
+          if (up) {
+            up.shares.push({ source_key, label, amount: totalAmount });
+          }
+        }
+      } else if (includePaid && paidPersons.length > 0) {
         // Also split to paid persons -> becomes pending supplement
         const allPersons = computedPersons;
         let weights = [];
@@ -393,8 +408,6 @@ export function computeBill({
         let weights = [];
         if (splitMode === 'even') {
           weights = unpaidPersons.map(p => ({ person_no: p.person_no, weight: 1 }));
-        } else if (splitMode === 'person' && targetPersonNo != null) {
-          weights = unpaidPersons.map(p => ({ person_no: p.person_no, weight: p.person_no === targetPersonNo ? 1 : 0 }));
         } else {
           weights = unpaidPersons.map(p => ({ person_no: p.person_no, weight: Math.max(0, p.base_amount || 0) }));
         }
