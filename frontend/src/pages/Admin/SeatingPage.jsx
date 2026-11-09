@@ -403,9 +403,13 @@ export default function SeatingPage() {
   }, [selectedSlot, selectedDate, getServerNow]);
 
   // Seat state map for FloorPlan and SeatTiles (Round 13b Item 1 & 3)
+  const isSlotSelected = Boolean(selectedSlot && selectedSlot !== '現在' && selectedSlot !== 'now');
   const seatStatesMap = useMemo(() => {
-    return buildSeatStates(layout, bookings, effectiveNow);
-  }, [layout, bookings, effectiveNow]);
+    return buildSeatStates(layout, bookings, effectiveNow, {
+      isSlotPreview: isSlotSelected,
+      realNow: getServerNow()
+    });
+  }, [layout, bookings, effectiveNow, isSlotSelected, getServerNow]);
 
   // Combined alerts (backend alerts + unattended un-checked-in bookings past their slot)
   const alerts = useMemo(() => {
@@ -1276,6 +1280,11 @@ export default function SeatingPage() {
 
             {/* Mobile Table Cards List */}
             <div className="lg:hidden space-y-5">
+              {isSlotSelected && (
+                <div className="px-1 text-[12px] font-normal text-sg-muted">
+                  顯示 {selectedSlot} 的座位
+                </div>
+              )}
               {zoneGroupedTables.map((group) => (
                 <div key={group.zone?.id || 'unzoned'} className="space-y-3">
                   <div className="bg-sg-paper/90 border border-sg-line px-3.5 py-2 rounded-2xl flex items-center justify-between text-[13px] font-bold text-sg-ink">

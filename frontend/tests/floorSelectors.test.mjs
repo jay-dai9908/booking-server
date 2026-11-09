@@ -11,7 +11,8 @@ import {
   groupTimerPill,
   isBookingCompleted,
   isSessionPast,
-  buildSeatStates
+  buildSeatStates,
+  getPersonStatusText
 } from '../src/utils/admin/floorSelectors.js';
 
 test('floorSelectors pure function tests', async (t) => {
@@ -425,4 +426,172 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(statesAfterADeparted['A1-1'].bookingRef, 'BK-C');
     assert.notStrictEqual(statesAfterADeparted['A1-1'].paxName, '王小華');
   });
+
+  await t.test('15. Round 13b item 3: time slot chip selection previews scheduled seats and respects ending bookings', () => {
+    const layout = {
+      seats: [
+        { id: 1, code: 'A1-1', is_active: true },
+        { id: 2, code: 'A1-2', is_active: true }
+      ]
+    };
+
+    // Guest A: In-use, 11:00~14:00, checked-in on A1-1
+    const bookingA = {
+      booking_ref: 'BK-A',
+      name: '計時甲',
+      attendance: 'checked_in',
+      assigned_seats: ['A1-1'],
+      start_at: '2026-11-10T11:00:00+08:00',
+      end_at: '2026-11-10T14:00:00+08:00',
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-1',
+          timer: {
+            timer_started_at: '2026-11-10T11:00:00+08:00',
+            billing_start_at: '2026-11-10T11:00:00+08:00',
+            timer_ended_at: null
+          }
+        }
+      ]
+    };
+
+    // Guest X: In-use, 17:00~20:00, checked-in on A1-2 (crosses 19:00 slot)
+    const bookingX = {
+      booking_ref: 'BK-X',
+      name: '跨時段客人',
+      attendance: 'checked_in',
+      assigned_seats: ['A1-2'],
+      start_at: '2026-11-10T17:00:00+08:00',
+      end_at: '2026-11-10T20:00:00+08:00',
+      persons: [
+        {
+          person_no: 1,
+          seat_code: 'A1-2',
+          timer: {
+            timer_started_at: '2026-11-10T17:00:00+08:00',
+            billing_start_at: '2026-11-10T17:00:00+08:00',
+            timer_ended_at: null
+          }
+        }
+      ]
+    };
+
+    // Guest C: 19:00~21:00 pending reservation on A1-1
+    const bookingC = {
+      booking_ref: 'BK-C',
+      name: '預約丙',
+      attendance: 'pending',
+      assigned_seats: ['A1-1'],
+      start_at: '2026-11-10T19:00:00+08:00',
+      end_at: '2026-11-10T21:00:00+08:00'
+    };
+
+    // Guest F: 17:00~18:00 future booking relative to realNow 15:00
+    const bookingF = {
+      booking_ref: 'BK-F',
+      name: '未來客人',
+      attendance: 'pending',
+      assigned_seats: ['A1-2'],
+      start_at: '2026-11-10T17:00:00+08:00',
+      end_at: '2026-11-10T18:00:00+08:00'
+    };
+
+    const realNow1500 = new Date('2026-11-10T15:00:00+08:00');
+    const slot1900 = new Date('2026-11-10T19:00:00+08:00');
+
+    // Case 1: Slot chip 19:00 selected (isSlotPreview: true)
+    const statesAt1900 = buildSeatStates(layout, [bookingA, bookingX, bookingC, bookingF], slot1900, {
+      isSlotPreview: true,
+      realNow: realNow1500
+    });
+
+    // 1. Booking A ended at 14:00 (before 19:00), so A does NOT show on seat A1-1 at 19:00.
+    // Instead, seat A1-1 displays Booking C (reserved at 19:00 到).
+    assert.strictEqual(statesAt1900['A1-1'].state, 'reserved');
+    assert.strictEqual(statesAt1900['A1-1'].paxName, '預約丙');
+    assert.strictEqual(statesAt1900['A1-1'].timerText, '19:00 到');
+
+    // 2. Booking X (17:00~20:00) has NOT ended at 19:00, so X照樣顯示 on A1-2.
+    assert.strictEqual(statesAt1900['A1-2'].state, 'in_use');
+    assert.strictEqual(statesAt1900['A1-2'].paxName, '跨時段客人');
+
+    // 3. Attention list must NOT flag future 17:00 bookingF as unattended when realNow is 15:00
+    assert.ok(!statesAt1900.attentionList.some(al => al.booking_ref === 'BK-F'));
+
+    // Case 2: Selected "現在" (isSlotPreview: false, realNow 15:00)
+    const statesAtNow1500 = buildSeatStates(layout, [bookingA, bookingX, bookingC, bookingF], realNow1500, {
+      isSlotPreview: false,
+      realNow: realNow1500
+    });
+    // In real-time at 15:00, Booking A is physically in-use (overtime 1 hour) and cannot be overwritten by C
+    assert.strictEqual(statesAtNow1500['A1-1'].paxName, '計時甲');
+    assert.strictEqual(statesAtNow1500['A1-1'].state, 'over');
+  });
+
+  await t.test('16. Round 13b item 4: getPersonStatusText shows 已付款 for paid seated guest until actual departure', () => {
+    // 1. Paid member, timer ended at checkout, but reservation attendance is still checked_in
+    const seatedPaidPerson = {
+      person_no: 1,
+      paid: true,
+      timer: {
+        timer_started_at: '2026-11-10T16:00:00+08:00',
+        timer_ended_at: '2026-11-10T18:00:00+08:00',
+        paused_at: null
+      }
+    };
+    const checkedInBooking = {
+      attendance: 'checked_in',
+      is_paid: true
+    };
+    assert.strictEqual(getPersonStatusText(seatedPaidPerson, checkedInBooking), '已付款');
+
+    // 2. Paid member, staff clicked "全組離場", reservation attendance is completed
+    const departedBooking = {
+      attendance: 'completed',
+      is_paid: true
+    };
+    assert.strictEqual(getPersonStatusText(seatedPaidPerson, departedBooking), '已離場 18:00');
+
+    // 3. Unpaid customer whose timer ended
+    const unpaidEndedPerson = {
+      person_no: 1,
+      paid: false,
+      timer: {
+        timer_started_at: '2026-11-10T16:00:00+08:00',
+        timer_ended_at: '2026-11-10T18:06:00+08:00',
+        paused_at: null
+      }
+    };
+    const unpaidBooking = {
+      attendance: 'checked_in',
+      is_paid: false
+    };
+    assert.strictEqual(getPersonStatusText(unpaidEndedPerson, unpaidBooking), '已離場 18:06');
+
+    // 4. Running timer customer
+    const runningPerson = {
+      person_no: 1,
+      paid: false,
+      timer: {
+        timer_started_at: '2026-11-10T16:00:00+08:00',
+        timer_ended_at: null,
+        paused_at: null
+      }
+    };
+    assert.strictEqual(getPersonStatusText(runningPerson, unpaidBooking), '計時中');
+
+    // 5. Paused customer
+    const pausedPerson = {
+      person_no: 1,
+      paid: false,
+      timer: {
+        timer_started_at: '2026-11-10T16:00:00+08:00',
+        timer_ended_at: null,
+        paused_at: '2026-11-10T17:00:00+08:00'
+      }
+    };
+    assert.strictEqual(getPersonStatusText(pausedPerson, unpaidBooking), '已暫停');
+  });
 });
+

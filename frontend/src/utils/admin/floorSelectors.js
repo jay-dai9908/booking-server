@@ -379,11 +379,14 @@ export function getBookingTimeRangeMs(b, fallbackDateStr = null) {
  * @param {object} layout
  * @param {Array} bookings
  * @param {Date|string|number} [now=new Date()]
+ * @param {object} [options={}] - { isSlotPreview: boolean, realNow: Date|string|number }
  * @returns {object} map keyed by seat code with .attentionList attached
  */
-export function buildSeatStates(layout = {}, bookings = [], now = new Date()) {
+export function buildSeatStates(layout = {}, bookings = [], now = new Date(), options = {}) {
   const currentNow = now instanceof Date ? now : new Date(now);
   const currentMs = currentNow.getTime();
+  const isSlotPreview = Boolean(options.isSlotPreview);
+  const realNowMs = (options.realNow ? (options.realNow instanceof Date ? options.realNow : new Date(options.realNow)) : currentNow).getTime();
 
   const map = {};
   for (const s of (layout.seats || [])) {
@@ -407,18 +410,30 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date()) {
 
   for (const b of (bookings || [])) {
     if (b.status === 'cancelled') continue;
+    if (b.attendance === 'completed') continue;
     const completed = isBookingCompleted(b, currentNow);
 
     if (b.attendance === 'checked_in') {
-      if (!completed) {
-        checkedInActiveBookings.push(b);
+      if (completed) continue;
+      if (isSlotPreview) {
+        // Round 13b Item 3: 選了某個時段時，已入座的人，如果預約到那時還沒結束就照樣顯示
+        const { endMs } = getBookingTimeRangeMs(b);
+        if (endMs !== null && endMs <= currentMs) {
+          // Booking has ended before this preview slot; seat is available for that slot's bookings
+          continue;
+        }
       }
+      checkedInActiveBookings.push(b);
     } else if (b.attendance === 'pending' || !b.attendance) {
       if (completed) continue;
       const { startMs, endMs } = getBookingTimeRangeMs(b);
-      const isPast = endMs !== null && endMs <= currentMs;
-      if (isPast) {
-        unattendedPastBookings.push(b);
+      const isPastForSlot = endMs !== null && endMs <= currentMs;
+      const isPastForAlert = endMs !== null && endMs <= realNowMs;
+
+      if (isPastForSlot) {
+        if (isPastForAlert) {
+          unattendedPastBookings.push(b);
+        }
       } else {
         candidatePendingBookings.push({
           booking: b,
@@ -549,6 +564,39 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date()) {
   map.attentionList = attentionList;
 
   return map;
+}
+
+/**
+ * Round 13b Item 4: 還沒按離場、已付款的人寫「已付款」；真的離場的人才寫「已離場 18:06」
+ */
+export function getPersonStatusText(p, booking) {
+  const isPaused = Boolean(p?.timer?.paused_at && !p?.timer?.timer_ended_at);
+  if (isPaused) return '已暫停';
+
+  const isPaid = Boolean(
+    p?.paid ||
+    booking?.is_paid ||
+    booking?.billing?.status === 'paid' ||
+    booking?.billing_status === 'paid' ||
+    booking?.status === 'paid'
+  );
+
+  const isDeparted = booking?.attendance === 'completed';
+
+  if (isPaid) {
+    if (isDeparted) {
+      const tStr = extractTimeHHMM(p?.timer?.timer_ended_at);
+      return tStr ? `已離場 ${tStr}` : '已離場';
+    }
+    return '已付款';
+  }
+
+  if (isDeparted || p?.timer?.timer_ended_at) {
+    const tStr = extractTimeHHMM(p?.timer?.timer_ended_at);
+    return tStr ? `已離場 ${tStr}` : '已離場';
+  }
+
+  return '計時中';
 }
 
 

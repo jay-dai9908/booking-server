@@ -462,6 +462,29 @@ async function run() {
     await page.locator('[data-testid="seat-panel-refund-btn"]').waitFor({ state: 'visible', timeout: 5000 });
     const paidSubtitle = await page.locator('[role="dialog"] p').first().textContent();
     assert.ok(paidSubtitle.includes('已付 · 現金 18:10'), `Expected subtitle to include '已付 · 現金 18:10', got: ${paidSubtitle}`);
+
+    // Close panel
+    await page.locator('[aria-label="關閉"]').click();
+    await page.waitForTimeout(400);
+
+    // Round 13b Item 3 Verification: Wire time slot chips & slot indicator subtitle
+    console.log('Verifying Round 13b Item 3: Time slot selector chip updates subtitle...');
+    const slot19Chip = page.locator('button:has-text("19:00")').first();
+    if (await slot19Chip.isVisible()) {
+      await slot19Chip.click();
+      await page.waitForTimeout(300);
+      const slotSubtitle = page.locator('text=顯示 19:00 的座位').first();
+      await slotSubtitle.waitFor({ state: 'visible', timeout: 5000 });
+      console.log('Confirmed slot chip 19:00 shows subtitle "顯示 19:00 的座位"');
+
+      // Click "現在" chip to restore
+      const nowChip = page.locator('button:has-text("現在")').first();
+      await nowChip.click();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('text=顯示 19:00 的座位').count(), 0, 'Subtitle must disappear when "現在" is selected');
+      console.log('Confirmed selecting "現在" clears slot subtitle');
+    }
+
     // Screenshot 2: 手機平面圖
     console.log('Capturing Screenshot 2: mobile floor plan...');
     const mobileContext = await browser.newContext({

@@ -15,7 +15,7 @@ import {
 import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
 import { displayBoardName } from '../../../../../shared/billing.js';
-import { isBookingCompleted } from '../../../../../shared/floorSelectors.js';
+import { getPersonStatusText } from '../../../utils/admin/floorSelectors.js';
 
 function formatTimeHHMM(val) {
   if (!val) return '';
@@ -27,42 +27,6 @@ function formatTimeHHMM(val) {
   } catch {
     return '';
   }
-}
-
-// Round 13b Item 4: 還沒按離場、已付款的人寫「已付款」；真的離場的人才寫「已離場 18:06」
-function getPersonStatusText(p, booking) {
-  const isPaused = Boolean(p.timer?.paused_at && !p.timer?.timer_ended_at);
-  if (isPaused) return '已暫停';
-
-  const isPaid = Boolean(
-    p.paid ||
-    booking?.is_paid ||
-    booking?.billing?.status === 'paid' ||
-    booking?.billing_status === 'paid' ||
-    booking?.status === 'paid'
-  );
-
-  const isDeparted = Boolean(
-    booking?.attendance === 'completed' ||
-    isBookingCompleted(booking) ||
-    (!isPaid && p.timer?.timer_ended_at)
-  );
-
-  if (isDeparted) {
-    const tStr = formatTimeHHMM(p.timer?.timer_ended_at);
-    return tStr ? `已離場 ${tStr}` : '已離場';
-  }
-
-  if (isPaid) {
-    return '已付款';
-  }
-
-  if (p.timer?.timer_ended_at) {
-    const tStr = formatTimeHHMM(p.timer?.timer_ended_at);
-    return tStr ? `已離場 ${tStr}` : '已離場';
-  }
-
-  return '計時中';
 }
 
 export default function SeatActionPanel({
