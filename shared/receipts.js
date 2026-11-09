@@ -699,7 +699,7 @@ export function buildTestPage(station = {}, opts = {}) {
   commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
   commands.push({ type: 'text', text: '印表機測試頁', size: 28, align: 1, bold: true });
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
-  commands.push({ type: 'text', text: `列印站：${station.name || '櫃檯商米'}`, size: 22 });
+  commands.push({ type: 'text', text: `列印站：${station?.name || '櫃檯商米'}`, size: 22 });
   commands.push({ type: 'text', text: '狀態：正常在線', size: 22 });
   commands.push({ type: 'text', text: `時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`, size: 22 });
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });

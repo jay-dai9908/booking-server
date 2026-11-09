@@ -320,3 +320,70 @@ test('Section 8.7 buildClosingSlip generates daily cash closing slip', () => {
     }
   }
 });
+
+
+test('Receipt width budgeting with Taipei date serial numbers (R-261110-0001 <= 31 width)', () => {
+  const paymentWithDateSerial = {
+    payment_no: 'R-261110-0001',
+    booking_ref: 'BK-9D35-74F1',
+    created_at: '2026-11-10T14:30:00+08:00',
+    staff_name: '門市人員小陳',
+    amount: 1580,
+    method: 'cash',
+    cash_received: 2000,
+    change_given: 420,
+    person_nos: [1],
+    breakdown_json: {
+      persons: [
+        {
+          label: '第 1 位',
+          person_no: 1,
+          seat_code: 'A1-1',
+          entry: { hours: 2, amount: 360 },
+          board: { amount: 150, units: [{ name: '智能板(大)', total: 150 }] },
+          addons: [{ name: '精美手作鑰匙圈配件包', qty: 2, subtotal: 360 }],
+          shares: [{ label: '加購分攤', amount: 100 }],
+          total: 970
+        }
+      ]
+    }
+  };
+
+  const booking = {
+    booking_ref: 'BK-9D35-74F1',
+    name: '林小美',
+    session_date: '2026-11-10',
+    start_time: '14:00',
+    end_time: '18:00',
+    table_label: 'A1',
+    pax: 1
+  };
+
+  const receiptCmds = buildReceipt(paymentWithDateSerial, booking);
+  for (const cmd of receiptCmds) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      assert.ok(!cmd.text.endsWith('\n'));
+      for (const line of cmd.text.split('\n')) {
+        assert.ok(strWidth(line) <= 31, `Receipt line exceeds 31: "${line}" (width: ${strWidth(line)})`);
+      }
+    }
+  }
+
+  const supplementCmds = buildSupplementReceipt(paymentWithDateSerial, booking);
+  for (const cmd of supplementCmds) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      for (const line of cmd.text.split('\n')) {
+        assert.ok(strWidth(line) <= 31, `Supplement line exceeds 31: "${line}" (width: ${strWidth(line)})`);
+      }
+    }
+  }
+
+  const refundCmds = buildRefundSlip(paymentWithDateSerial, booking, { bothCopies: true });
+  for (const cmd of refundCmds) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      for (const line of cmd.text.split('\n')) {
+        assert.ok(strWidth(line) <= 31, `Refund line exceeds 31: "${line}" (width: ${strWidth(line)})`);
+      }
+    }
+  }
+});

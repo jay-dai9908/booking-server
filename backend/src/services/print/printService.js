@@ -9,7 +9,7 @@ import {
   buildTestPage,
   formatBookingRef
 } from '../../../../shared/receipts.js';
-import { getNextDailySeq } from '../billing/billService.js';
+import { getNextDailySeq, nextSerialNo } from '../billing/billService.js';
 import { log as auditLog } from '../audit/auditService.js';
 
 const printEvents = new EventEmitter();
@@ -29,7 +29,8 @@ export async function queuePrintJob({
   device = {},
   commands: passedCommands = null,
   title: passedTitle = null,
-  opts: passedOpts = {}
+  opts: passedOpts = {},
+  now: passedNow = null
 }, clientTx = null) {
   const staffName = user?.name || '系統';
   const staffId = user?.id || null;
@@ -167,8 +168,8 @@ export async function queuePrintJob({
 
   // Create PrintJob with daily sequence
   const executeInTx = async (tx) => {
-    const seq = await getNextDailySeq(tx, 'job');
-    const jobNo = `P-${String(seq).padStart(4, '0')}`;
+    const jobDate = passedNow || passedOpts?.now || passedOpts?.job_date;
+    const jobNo = await nextSerialNo(tx, 'job', jobDate);
 
     const createdJob = await tx.printJob.create({
       data: {

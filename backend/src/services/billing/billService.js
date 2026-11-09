@@ -9,8 +9,9 @@ import { buildBillInput } from './billInput.js';
 import { queuePrintJob } from '../print/printService.js';
 
 export async function getNextDailySeq(tx, key, date = new Date()) {
+  const client = tx || prisma;
   const d = dateOnly(date);
-  const counter = await tx.dailyCounter.upsert({
+  const counter = await client.dailyCounter.upsert({
     where: {
       date_key: {
         date: d,
@@ -27,6 +28,24 @@ export async function getNextDailySeq(tx, key, date = new Date()) {
     }
   });
   return counter.value;
+}
+
+/**
+ * Generate unique serial number with Taipei date prefix:
+ * - payment: R-YYMMDD-XXXX (e.g. R-261110-0001)
+ * - job:     P-YYMMDD-XXXX (e.g. P-261110-0001)
+ * Scoped by Taipei date aligning with getNextDailySeq.
+ */
+export async function nextSerialNo(tx, type = 'payment', customDate = null) {
+  const rawDate = customDate ? (customDate instanceof Date ? customDate : new Date(customDate)) : new Date();
+  const dateObj = isNaN(rawDate.getTime()) ? new Date() : rawDate;
+  const dateStr = toTaipeiDateString(dateObj);
+  const normalizedType = String(type || 'payment').toLowerCase();
+  const seq = await getNextDailySeq(tx, normalizedType, dateObj);
+  const [y, m, d] = dateStr.split('-');
+  const yymmdd = `${y.slice(-2)}${m}${d}`;
+  const prefix = normalizedType === 'job' || normalizedType === 'print' ? 'P' : 'R';
+  return `${prefix}-${yymmdd}-${String(seq).padStart(4, '0')}`;
 }
 
 export function currentRevOf(checkout_details) {
@@ -505,8 +524,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
 
         discountValue = Math.min(discountValue, remainingAmount);
         if (discountValue > 0) {
-          const passSeq = await getNextDailySeq(tx, 'payment');
-          const passPayNo = `R-${String(passSeq).padStart(4, '0')}`;
+          const passPayNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
 
           await deductPass(tx, {
             user_pass_id: pass.id,
@@ -571,8 +589,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
 
     // Collect remaining amount with chosen method
     if (remainingAmount > 0 || (calculatedTotal === 0 && createdPayments.length === 0)) {
-      const paySeq = await getNextDailySeq(tx, 'payment');
-      const payNo = `R-${String(paySeq).padStart(4, '0')}`;
+      const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
 
       let change = 0;
       if (method === 'cash') {
@@ -673,7 +690,8 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           booking_ref,
           payment_id: pay.id,
           user: staffUser,
-          device: deviceInfo
+          device: deviceInfo,
+          now: payload?.now || payload?.payment_date
         }, tx);
         print_jobs.push(job);
       }
@@ -694,7 +712,8 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           type: 'summary',
           booking_ref,
           user: staffUser,
-          device: deviceInfo
+          device: deviceInfo,
+          now: payload?.now || payload?.payment_date
         }, tx);
         print_jobs.push(sumJob);
       }
@@ -766,8 +785,7 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
       }
     }
 
-    const paySeq = await getNextDailySeq(tx, 'payment');
-    const payNo = `R-${String(paySeq).padStart(4, '0')}`;
+    const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     let change = 0;
@@ -823,7 +841,8 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
         booking_ref,
         payment_id: payment.id,
         user: staffUser,
-        device: deviceInfo
+        device: deviceInfo,
+        now: payload?.now || payload?.payment_date
       }, tx);
       print_jobs.push(job);
     }
@@ -874,8 +893,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       throw { status: 400, message: `退款金額超過此顧客已付金額上限（最多可退 NT$${maxRefundable}）` };
     }
 
-    const paySeq = await getNextDailySeq(tx, 'payment');
-    const payNo = `R-${String(paySeq).padStart(4, '0')}`;
+    const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const payment = await tx.payment.create({
@@ -955,7 +973,8 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
         booking_ref,
         payment_id: payment.id,
         user: staffUser,
-        device: deviceInfo
+        device: deviceInfo,
+        now: payload?.now || payload?.payment_date
       }, tx);
       print_jobs.push(job);
     }
@@ -1239,8 +1258,7 @@ export async function waivePayment(booking_ref, payload, staffUser, deviceInfo) 
 
     const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
     const waiveAmount = targetPersons.reduce((sum, p) => sum + (p.total || 0), 0);
-    const paySeq = await getNextDailySeq(tx, 'payment');
-    const payNo = `R-${String(paySeq).padStart(4, '0')}`;
+    const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const payment = await tx.payment.create({
