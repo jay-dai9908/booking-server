@@ -52,7 +52,7 @@ import EquipmentAddonModal from '../../components/EquipmentAddonModal';
 import ExtendTimeModal from '../../components/ExtendTimeModal';
 import SendLineMessageModal from '../../components/SendLineMessageModal';
 
-import { swapBoundaryOptions, formatTimerHMM, formatTimeHHmm, formatDiffMinutesText } from '@shared/time.js';
+import { swapBoundaryOptions, formatTimerHMM, formatTimeHHmm, formatDiffMinutesText, toTaipeiDateString } from '@shared/time.js';
 import { calculateBoardTotal } from '@shared/boardPricing.js';
 import { displayBoardName } from '@shared/billing.js';
 import {
@@ -109,8 +109,8 @@ export default function SeatingPage() {
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // Time slot filter for floor plan: 'now' | '10:00' | '11:00' ...
-  const [selectedSlot, setSelectedSlot] = useState('now');
+  // Time slot filter for floor plan: '現在' | '10:00' | '11:00' ...
+  const [selectedSlot, setSelectedSlot] = useState('現在');
 
   // Search input state
   const [searchQuery, setSearchQuery] = useState('');
@@ -391,10 +391,21 @@ export default function SeatingPage() {
     return { waitSlots: slots, waitPax: totalWaitPax };
   }, [bookings]);
 
-  // Seat state map for FloorPlan and SeatTiles (Round 13b Item 1)
+  // Effective now: when a time slot chip is selected, use that slot's start time (Round 13b Item 3)
+  const effectiveNow = useMemo(() => {
+    if (!selectedSlot || selectedSlot === '現在' || selectedSlot === 'now') {
+      return getServerNow();
+    }
+    const dateStr = selectedDate || toTaipeiDateString(getServerNow());
+    const slotIso = `${dateStr}T${selectedSlot}:00+08:00`;
+    const d = new Date(slotIso);
+    return isNaN(d.getTime()) ? getServerNow() : d;
+  }, [selectedSlot, selectedDate, getServerNow]);
+
+  // Seat state map for FloorPlan and SeatTiles (Round 13b Item 1 & 3)
   const seatStatesMap = useMemo(() => {
-    return buildSeatStates(layout, bookings, getServerNow());
-  }, [layout, bookings, getServerNow]);
+    return buildSeatStates(layout, bookings, effectiveNow);
+  }, [layout, bookings, effectiveNow]);
 
   // Combined alerts (backend alerts + unattended un-checked-in bookings past their slot)
   const alerts = useMemo(() => {
@@ -1189,7 +1200,12 @@ export default function SeatingPage() {
             {/* Left: Floor canvas (Desktop / Tablet) */}
             <div className="hidden lg:block lg:col-span-8 bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-sg-line">
-                <div className="text-[13px] font-bold text-sg-ink">全店座位平面圖</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-bold text-sg-ink">全店座位平面圖</span>
+                  {selectedSlot && selectedSlot !== '現在' && selectedSlot !== 'now' && (
+                    <span className="text-[12px] font-normal text-sg-muted">顯示 {selectedSlot} 的座位</span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 text-[11px] text-sg-muted">
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-sg-sage" />計時中</span>
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-sg-honey" />快到時</span>
