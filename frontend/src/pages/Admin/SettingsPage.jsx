@@ -40,6 +40,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [unpairingStation, setUnpairingStation] = useState(null);
+  const [renamingStation, setRenamingStation] = useState(null);
+  const [renameInput, setRenameInput] = useState('');
 
   // 1. Access & Preview Controls
   const [requireLineLoginEveryTime, setRequireLineLoginEveryTime] = useState(false);
@@ -293,6 +295,48 @@ export default function SettingsPage() {
   const handleQuickToggle = async (field, nextValue, setter) => {
     setter(nextValue);
     await handleSaveAll({ [field]: nextValue });
+  };
+
+  const handleRenameStation = (st) => {
+    setRenamingStation(st);
+    setRenameInput(st.name || '');
+  };
+
+  const handleSaveRename = async () => {
+    if (!renamingStation) return;
+    const newName = renameInput.trim();
+    if (!newName) {
+      alert('請輸入列印站名稱');
+      return;
+    }
+    try {
+      await api.patch(`/print/stations/${renamingStation.id}`, { name: newName });
+      setPrintStations(prev => prev.map(s => s.id === renamingStation.id ? { ...s, name: newName } : s));
+      showToast('已修改列印站名稱');
+      setRenamingStation(null);
+    } catch (err) {
+      alert(err.response?.data?.error || '修改名稱失敗');
+    }
+  };
+
+  const handleToggleStationAccepting = async (st) => {
+    const nextAccepting = st.accepting === false ? true : false;
+    try {
+      await api.patch(`/print/stations/${st.id}`, { accepting: nextAccepting });
+      setPrintStations(prev => prev.map(s => s.id === st.id ? { ...s, accepting: nextAccepting } : s));
+      showToast(nextAccepting ? '已恢復接單' : '已暫停接單');
+    } catch (err) {
+      alert(err.response?.data?.error || '操作失敗');
+    }
+  };
+
+  const handleTestStationPrint = async (st) => {
+    try {
+      await api.post(`/print/stations/${st.id}/test`);
+      showToast(`已對「${st.name}」送出測試列印工作！`);
+    } catch (err) {
+      alert(err.response?.data?.error || '測試列印失敗');
+    }
   };
 
   if (loading) {
@@ -1551,29 +1595,80 @@ export default function SettingsPage() {
                 目前尚未配對任何商米列印站
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {printStations.map((st) => (
-                  <div key={st.id} className="p-3.5 rounded-2xl border border-gray-200 bg-white flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-bold text-gray-800 flex items-center gap-1.5">
-                        <Printer className="w-4 h-4 text-[#8B5B43]" />
-                        <span>{st.name}</span>
-                        {st.is_default && <span className="text-[10px] bg-[#FAF7F2] text-[#8B5B43] font-bold px-1.5 py-0.5 rounded border border-[#E8DEC8]">預設</span>}
-                      </div>
-                      <span className="text-[11px] text-gray-400 block mt-0.5">
-                        最後回報：{st.last_seen_at ? new Date(st.last_seen_at).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' }) : '從未'}
-                      </span>
-                    </div>
+              <div className="space-y-3">
+                {printStations.map((st) => {
+                  const isOnline = Boolean(st.last_seen_at && (Date.now() - new Date(st.last_seen_at).getTime() <= 75000));
+                  const lastSeen = st.last_seen_at
+                    ? new Date(st.last_seen_at).toLocaleTimeString('zh-TW', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false,
+                        timeZone: 'Asia/Taipei'
+                      })
+                    : '從未';
+                  const isAccepting = st.accepting !== false;
 
-                    <button
-                      type="button"
-                      onClick={() => setUnpairingStation(st)}
-                      className="text-xs text-red-600 font-bold hover:underline"
+                  return (
+                    <div
+                      key={st.id}
+                      data-testid={`station-card-${st.id}`}
+                      className="p-4 rounded-2xl border border-gray-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
                     >
-                      解除配對
-                    </button>
-                  </div>
-                ))}
+                      <div className="space-y-1">
+                        <div className="text-sm font-bold text-gray-800 flex items-center gap-2 flex-wrap">
+                          <Printer className="w-4 h-4 text-[#8B5B43]" />
+                          <span>{st.name} · {isOnline ? '在線' : '離線'} · 最後回報 {lastSeen}</span>
+                          {st.is_default && (
+                            <span className="text-[10px] bg-[#FAF7F2] text-[#8B5B43] font-bold px-1.5 py-0.5 rounded border border-[#E8DEC8]">
+                              預設
+                            </span>
+                          )}
+                          {!isAccepting && (
+                            <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-1.5 py-0.5 rounded border border-amber-200">
+                              暫停接單中
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleRenameStation(st)}
+                          className="px-2.5 py-1 text-xs font-bold text-[#8B5B43] bg-[#FAF7F2] hover:bg-[#E8DEC8]/50 border border-[#E8DEC8] rounded-lg transition"
+                        >
+                          改名
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleStationAccepting(st)}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition ${
+                            isAccepting
+                              ? 'text-gray-700 bg-white hover:bg-gray-50 border-gray-200'
+                              : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                          }`}
+                        >
+                          {isAccepting ? '暫停接單' : '恢復接單'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTestStationPrint(st)}
+                          className="px-2.5 py-1 text-xs font-bold text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg transition"
+                        >
+                          測試列印
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUnpairingStation(st)}
+                          className="px-2.5 py-1 text-xs font-bold text-red-600 hover:text-red-700 hover:underline transition"
+                        >
+                          解除配對
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -1613,6 +1708,38 @@ export default function SettingsPage() {
             }
           }}
         />
+      )}
+
+      {renamingStation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl animate-fade-in">
+            <h3 className="text-base font-bold text-gray-900">修改列印站名稱</h3>
+            <input
+              type="text"
+              value={renameInput}
+              onChange={(e) => setRenameInput(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:border-[#8B5B43] focus:outline-none"
+              placeholder="例如：櫃檯商米主機"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRenamingStation(null)}
+                className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveRename}
+                className="px-4 py-2 text-xs font-bold text-white bg-[#8B5B43] hover:bg-[#724a35] rounded-xl"
+              >
+                儲存名稱
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
