@@ -101,6 +101,7 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "receipt_footer_text" TEXT DEFAULT '謝謝光臨，作品記得帶回家'`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "print_lease_seconds" INTEGER NOT NULL DEFAULT 60`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "seat_layout_enabled" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "default_session_capacity" INTEGER NOT NULL DEFAULT 16`,
 
     `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "checkout_effect" TEXT`,
     `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "checkout_scope" TEXT NOT NULL DEFAULT 'entry'`,

@@ -161,6 +161,7 @@ model GlobalSetting {
   receipt_footer_text           String?  @default("謝謝光臨，作品記得帶回家")
   print_lease_seconds           Int      @default(60)
   seat_layout_enabled           Boolean  @default(false)
+  default_session_capacity      Int      @default(16)
   // 快速選項與訪客提示 (Round 9)
   booking_note_chips            Json?    @default("[\"第一次玩\", \"有小孩同行\", \"生日慶祝\", \"希望坐一起\"]")
   guest_line_hint_text          String?  @default("會打開拾光製所的官方 LINE，從選單點『預約』就能登入")

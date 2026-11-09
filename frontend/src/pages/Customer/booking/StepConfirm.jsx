@@ -187,11 +187,11 @@ export default function StepConfirm({
 
       if (status === 409 && errorMsg.includes('拆散')) {
         setShowSplitSheet(true);
-      } else if (status === 409) {
-        toast.show(errorMsg || '智能板庫存不足', { type: 'error' });
-      } else if (status === 400 && (errorMsg.includes('capacity') || errorMsg.includes('額滿') || errorMsg.includes('Not enough'))) {
+      } else if ((status === 409 || status === 400) && (errorMsg.includes('capacity') || errorMsg.includes('額滿') || errorMsg.includes('Not enough'))) {
         toast.show('剛剛有人訂走了部分時段，請重新選擇', { type: 'error' });
         onGoBackToSelectTime();
+      } else if (status === 409) {
+        toast.show(errorMsg || '智能板庫存不足', { type: 'error' });
       } else if (status === 401) {
         toast.show('登入已過期，請重新用 LINE 登入', { type: 'error' });
         setTimeout(() => {

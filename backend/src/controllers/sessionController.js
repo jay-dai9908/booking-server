@@ -35,18 +35,33 @@ export const getSessions = async (req, res) => {
       ]
     });
 
+    const activeLayoutMap = new Map();
+    for (const s of sessions) {
+      const dStr = s.session_date.toISOString().slice(0, 10);
+      if (!activeLayoutMap.has(dStr)) {
+        const layout = await getActiveLayoutForDate(prisma, s.session_date);
+        activeLayoutMap.set(dStr, layout);
+      }
+    }
+
     // Calculate remaining capacity
     const formattedSessions = sessions.map(session => {
       const bookedPax = session.reservations.reduce((sum, res) => {
         return sum + res.pax;
       }, 0);
+      const dStr = session.session_date.toISOString().slice(0, 10);
+      const layout = activeLayoutMap.get(dStr);
+      const totalSeats = (layout?.capacity && layout.capacity > 0) ? layout.capacity : (layout?.seats || []).filter(s => s.is_active).length || 16;
+
       return {
         id: session.id,
         session_date: session.session_date,
         start_time: session.start_time,
         end_time: session.end_time,
         max_capacity: session.max_capacity,
-        remaining_capacity: Math.max(0, session.max_capacity - bookedPax)
+        remaining_capacity: Math.max(0, session.max_capacity - bookedPax),
+        remaining_seats: Math.max(0, totalSeats - bookedPax),
+        total_seats: totalSeats
       };
     });
 
@@ -65,10 +80,6 @@ export const createBulkSessions = async (req, res) => {
     return res.status(400).json({ error: 'Dates, start time and end time are required' });
   }
 
-  if (max_capacity !== undefined && max_capacity !== null && max_capacity !== '') {
-    console.log('[createBulkSessions] max_capacity provided by client was ignored in favor of layout capacity:', max_capacity);
-  }
-
   try {
     const startHour = parseInt(start_time.split(':')[0], 10);
     const endHour = parseInt(end_time.split(':')[0], 10);
@@ -77,12 +88,22 @@ export const createBulkSessions = async (req, res) => {
       return res.status(400).json({ error: 'End time must be after start time' });
     }
 
+    let capacity = null;
+    if (max_capacity !== undefined && max_capacity !== null && max_capacity !== '') {
+      const parsed = parseInt(max_capacity, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        capacity = parsed;
+      }
+    }
+    if (capacity === null) {
+      const gs = await prisma.globalSetting.findUnique({ where: { id: 1 } });
+      capacity = (gs && gs.default_session_capacity) ? gs.default_session_capacity : 16;
+    }
+
     const sessionsToCreate = [];
     
     for (const d of dates) {
       const targetDate = dateOnly(d);
-      const activeLayout = await getActiveLayoutForDate(prisma, targetDate);
-      const capacity = activeLayout?.capacity || (max_capacity ? parseInt(max_capacity, 10) : 10);
 
       for (let h = startHour; h < endHour; h++) {
         sessionsToCreate.push({

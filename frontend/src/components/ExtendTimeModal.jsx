@@ -67,7 +67,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
   // Calculate the minimum remaining capacity among the selected sessions
   const getMinRemainingCapacity = () => {
     if (selectedSessions.length === 0) return 999;
-    return Math.min(...selectedSessions.map(s => s.remaining_capacity));
+    return Math.min(...selectedSessions.map(s => s.remaining_seats ?? s.remaining_capacity));
   };
 
   const minCapacity = getMinRemainingCapacity();
@@ -165,7 +165,8 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {sessions.map(session => {
                   const isSelected = selectedSessions.some(s => s.id === session.id);
-                  const isFull = session.remaining_capacity < pax;
+                  const rem = session.remaining_seats ?? session.remaining_capacity;
+                  const isFull = rem < pax;
                   
                   return (
                     <div 
@@ -187,7 +188,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
                         {session.start_time} - {session.end_time}
                       </div>
                       <div className={`text-xs text-center font-medium ${isFull ? 'text-red-500' : 'text-emerald-600'}`}>
-                        剩餘 {session.remaining_capacity} 位
+                        剩餘 {rem} 位
                       </div>
                     </div>
                   );

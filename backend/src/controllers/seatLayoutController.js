@@ -449,6 +449,7 @@ export async function previewPublish(req, res) {
       capacity_after: evaluation.capacityAfter,
       capacity: evaluation.capacityAfter,
       sessions_over_capacity: evaluation.sessionsOverCapacity,
+      sessions_capacity_exceeding_seats_count: evaluation.sessionsCapacityExceedingSeatsCount,
       affected_bookings: evaluation.affectedBookings,
       category_c: evaluation.category_c,
       category_b: evaluation.category_b,
@@ -784,10 +785,13 @@ async function evaluateLayoutImpact(client, draft, effDate) {
     }))
   ];
 
+  const sessionsCapacityExceedingSeats = sessions.filter(s => s.max_capacity > capacityAfter);
+
   return {
     capacityBefore,
     capacityAfter,
     sessionsOverCapacity,
+    sessionsCapacityExceedingSeatsCount: sessionsCapacityExceedingSeats.length,
     affectedBookings,
     category_c: processedCategoryC,
     category_b: processedCategoryB,
@@ -852,11 +856,7 @@ export async function publishLayout(req, res) {
         }
       });
 
-      // 3. Update session max_capacity on/after effective_from
-      await tx.session.updateMany({
-        where: { session_date: { gte: effDate } },
-        data: { max_capacity: capacity }
-      });
+      // 3. Do NOT modify session max_capacity (capacity is decoupled from online max_capacity)
 
       // 4. Enable seat_layout_enabled in GlobalSetting
       await tx.globalSetting.upsert({

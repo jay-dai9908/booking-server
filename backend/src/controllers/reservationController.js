@@ -2,7 +2,7 @@ import prisma from '../prismaClient.js';
 import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
-import { loadAllocatorContext } from '../services/seating/layoutService.js';
+import { loadAllocatorContext, getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { evaluatePromoCode } from './checkoutController.js';
@@ -788,7 +788,7 @@ export const createReservation = async (req, res) => {
       return res.status(404).json({ error: 'One or more sessions not found.' });
     }
     if (error.message === 'INSUFFICIENT_CAPACITY') {
-      return res.status(400).json({ error: 'Not enough capacity remaining for one or more selected sessions.' });
+      return res.status(409).json({ error: '該時段已額滿或剩餘人數不足，請選擇其他時段。', code: 'INSUFFICIENT_CAPACITY' });
     }
     if (error.message === 'SPLIT_REQUIRED') {
       return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
@@ -1899,12 +1899,14 @@ export const extendReservation = async (req, res) => {
           mySeats.push(`WAIT-${waitCounter++}`);
         }
       } else {
-        // Capacity check for non-wait modes
+        // Capacity check for non-wait modes against actual layout seats
         for (const session of sessions) {
           const bookedPax = session.reservations.reduce((sum, res) => {
             return sum + res.pax;
           }, 0);
-          if (session.max_capacity - bookedPax < pax) {
+          const activeLayout = await getActiveLayoutForDate(tx, session.session_date);
+          const layoutCapacity = (activeLayout?.capacity && activeLayout.capacity > 0) ? activeLayout.capacity : (activeLayout?.seats || []).filter(s => s.is_active).length || 16;
+          if (layoutCapacity - bookedPax < pax) {
             throw new Error('INSUFFICIENT_CAPACITY');
           }
         }

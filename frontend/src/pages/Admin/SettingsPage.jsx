@@ -64,12 +64,14 @@ export default function SettingsPage() {
   const [weekendHourly, setWeekendHourly] = useState(150);
   const [weekendUnlimited, setWeekendUnlimited] = useState(800);
 
-  // 3.1 Business Hours Presets
+  // 3.1 Business Hours Presets & Session Capacity
   const [businessHours, setBusinessHours] = useState({
     weekday: { start: '10:00', end: '21:00' },
     saturday: { start: '09:00', end: '21:00' },
     sunday: { start: '09:00', end: '21:00' }
   });
+  const [defaultSessionCapacity, setDefaultSessionCapacity] = useState(16);
+  const [layoutSeatCount, setLayoutSeatCount] = useState(16);
 
   // 4. Smart Board Global Rules
   const [allowEquipmentExceedPax, setAllowEquipmentExceedPax] = useState(false);
@@ -157,6 +159,13 @@ export default function SettingsPage() {
         });
       }
 
+      setDefaultSessionCapacity(d.default_session_capacity ?? 16);
+      try {
+        const lRes = await api.get('/seat-layouts/active');
+        const count = lRes.data?.capacity ?? (lRes.data?.seats || []).filter(s => s.is_active)?.length ?? 16;
+        setLayoutSeatCount(count);
+      } catch (e) {}
+
       setAllowEquipmentExceedPax(!!d.allow_equipment_exceed_pax);
       setShowEquipmentLiveStock(d.show_equipment_live_stock !== false);
       setEquipmentDiscountEnabled(d.equipment_discount_enabled !== false);
@@ -237,6 +246,7 @@ export default function SettingsPage() {
         auto_print_summary: autoPrintSummary,
         receipt_footer_text: receiptFooterText,
         business_hours_json: businessHours,
+        default_session_capacity: parseInt(defaultSessionCapacity, 10) || 16,
         ...overridePatch
       };
 
@@ -985,6 +995,28 @@ export default function SettingsPage() {
           >
             {saving ? '儲存中...' : '儲存營業時間預設'}
           </button>
+        </div>
+
+        {/* 每個時段可預約人數（預設） */}
+        <div className="bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <label className="block text-sm font-bold text-[#3E332B] mb-0.5">
+              每個時段可預約人數（預設）
+            </label>
+            <div className="text-xs text-gray-500">
+              座位 {layoutSeatCount} 個，保留 {layoutSeatCount - (parseInt(defaultSessionCapacity, 10) || 0)} 個給現場
+            </div>
+          </div>
+          <div className="w-full sm:w-36">
+            <input
+              type="number"
+              min="1"
+              data-testid="default-session-capacity-input"
+              value={defaultSessionCapacity}
+              onChange={e => setDefaultSessionCapacity(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43] focus:outline-none focus:border-[#8B5B43]"
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -148,7 +148,8 @@ export const getGlobalSetting = async (req, res) => {
       line_auto_notify_booking: setting.line_auto_notify_booking ?? false,
       line_auto_notify_cancel: setting.line_auto_notify_cancel ?? false,
       shop_enabled: setting.shop_enabled ?? true,
-      show_shop_button: setting.show_shop_button ?? setting.shop_enabled ?? true
+      show_shop_button: setting.show_shop_button ?? setting.shop_enabled ?? true,
+      default_session_capacity: setting.default_session_capacity ?? 16
     };
     delete safeSetting.line_messaging_token;
 
@@ -191,11 +192,18 @@ export const updateGlobalSetting = async (req, res) => {
     shop_enabled,
     business_hours_json,
     booking_note_chips,
-    guest_line_hint_text
+    guest_line_hint_text,
+    default_session_capacity
   } = req.body;
 
   try {
     const dataToUpdate = {};
+    if (default_session_capacity !== undefined && default_session_capacity !== null && default_session_capacity !== '') {
+      const parsed = parseInt(default_session_capacity, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        dataToUpdate.default_session_capacity = parsed;
+      }
+    }
     if (business_hours_json !== undefined) {
       dataToUpdate.business_hours_json = business_hours_json;
     }
@@ -286,7 +294,8 @@ export const updateGlobalSetting = async (req, res) => {
         require_line_login_every_time: dataToUpdate.require_line_login_every_time ?? false,
         enable_preview_page: dataToUpdate.enable_preview_page ?? true,
         preview_disabled_text: dataToUpdate.preview_disabled_text ?? "系統維護中，請點擊下方按鈕使用 LINE 進行預約",
-        business_hours_json: dataToUpdate.business_hours_json ?? DEFAULT_BUSINESS_HOURS
+        business_hours_json: dataToUpdate.business_hours_json ?? DEFAULT_BUSINESS_HOURS,
+        default_session_capacity: dataToUpdate.default_session_capacity ?? 16
       }
     });
 

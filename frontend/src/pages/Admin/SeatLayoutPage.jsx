@@ -2683,13 +2683,18 @@ export default function SeatLayoutPage() {
       >
         <div className="space-y-3.5 text-[13px] max-h-[70vh] overflow-y-auto pr-1">
           {previewPublishData && (
-            <div className="bg-sg-paper p-3 rounded-2xl border border-sg-line text-[12px] space-y-1">
-              <div className="font-bold text-sg-ink">
-                每個時段的預約上限：{previewPublishData.capacity_before ?? 20} 人 → {previewPublishData.capacity_after ?? previewPublishData.capacity} 人
-              </div>
+            <div className="bg-sg-paper p-3 rounded-2xl border border-sg-line text-[12px] space-y-1.5">
               <div className="text-sg-muted">
                 生效日期：<span className="font-bold text-sg-brown">{publishDate}</span>
               </div>
+              {previewPublishData.sessions_capacity_exceeding_seats_count > 0 && (
+                <div className="text-amber-800 font-bold bg-amber-50 border border-amber-200 rounded-xl p-2.5 flex items-center gap-1.5" data-testid="publish-capacity-warning">
+                  <span>⚠️</span>
+                  <span>
+                    {(publishDate ? `${parseInt(publishDate.split('-')[1], 10)}/${parseInt(publishDate.split('-')[2], 10)}` : '')} 起有 {previewPublishData.sessions_capacity_exceeding_seats_count} 個時段的可預約人數比座位多
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

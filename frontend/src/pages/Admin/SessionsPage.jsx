@@ -54,7 +54,8 @@ export default function SessionsPage() {
     saturday: { start: '09:00', end: '21:00' },
     sunday: { start: '09:00', end: '21:00' }
   });
-  const [maxCapacity, setMaxCapacity] = useState(10);
+  const [maxCapacity, setMaxCapacity] = useState(16);
+  const [seatCount, setSeatCount] = useState(16);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -92,11 +93,23 @@ export default function SessionsPage() {
   useEffect(() => {
     fetchSessions(listDate);
     fetchDailySetting(listDate);
+    fetchSeatCount(listDate);
   }, [listDate]);
 
   useEffect(() => {
     fetchMonthSessions(currentMonth);
   }, [currentMonth]);
+
+  const fetchSeatCount = async (date = listDate) => {
+    try {
+      const url = date ? `/seat-layouts/active?date=${date}` : '/seat-layouts/active';
+      const layoutRes = await api.get(url);
+      const activeCount = layoutRes.data?.capacity ?? (layoutRes.data?.seats || []).filter(s => s.is_active)?.length ?? 16;
+      setSeatCount(activeCount);
+    } catch (lErr) {
+      setSeatCount(16);
+    }
+  };
 
   const fetchGlobalSetting = async () => {
     try {
@@ -131,13 +144,8 @@ export default function SessionsPage() {
           setEndTime(res.data.business_hours_json.weekday.end);
         }
       }
-      try {
-        const layoutRes = await api.get('/seat-layouts/active');
-        const activeCount = layoutRes.data?.layout?.seats?.filter(s => s.is_active)?.length || 16;
-        setMaxCapacity(activeCount);
-      } catch (lErr) {
-        setMaxCapacity(16);
-      }
+      setMaxCapacity(res.data?.default_session_capacity ?? 16);
+      fetchSeatCount(listDate);
     } catch (err) {
       console.error('Error fetching global setting:', err);
     }
@@ -665,23 +673,31 @@ export default function SessionsPage() {
                 />
               </div>
 
-              {/* Max Capacity Input (Readonly per Spec 4.9 & 6.26) */}
+              {/* Max Capacity Input */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-sm font-semibold text-gray-700">
-                    時段人數上限
+                    可預約人數
                   </label>
-                  <a
-                    href="/admin/seat-layout"
-                    className="text-xs text-[#8B5B43] font-bold hover:underline"
-                  >
-                    修改座位設定 ↗
-                  </a>
+                  <span className="text-xs text-gray-400">
+                    目前座位數：{seatCount} 個
+                  </span>
                 </div>
-                <div className="w-full px-4 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-sm font-bold text-gray-600 flex items-center justify-between">
-                  <span>依座位設定：{maxCapacity || 16} 人</span>
-                  <span className="text-xs font-normal text-gray-400">已由座位圖自動同步</span>
-                </div>
+                <input
+                  type="number"
+                  min="1"
+                  data-testid="session-capacity-input"
+                  value={maxCapacity}
+                  onChange={(e) => setMaxCapacity(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-sg-brown"
+                  placeholder="請輸入可預約人數"
+                />
+                {parseInt(maxCapacity, 10) > seatCount && (
+                  <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1" data-testid="capacity-exceed-warning">
+                    <span>⚠️</span>
+                    <span>可預約人數比座位多 {parseInt(maxCapacity, 10) - seatCount} 位，可能會有人沒位子坐</span>
+                  </p>
+                )}
               </div>
 
               {/* Submit Button */}
@@ -772,8 +788,8 @@ export default function SessionsPage() {
                     <thead>
                       <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-200">
                         <th className="px-6 py-4 font-medium">時段</th>
-                        <th className="px-6 py-4 font-medium">總座位</th>
-                        <th className="px-6 py-4 font-medium">剩餘座位</th>
+                        <th className="px-6 py-4 font-medium">可預約</th>
+                        <th className="px-6 py-4 font-medium">剩餘</th>
                         <th className="px-6 py-4 font-medium">狀態</th>
                         <th className="px-6 py-4 font-medium text-right">操作</th>
                       </tr>
@@ -839,7 +855,7 @@ export default function SessionsPage() {
                             )}
                           </div>
                           <div className="text-xs text-gray-500">
-                            剩餘 <strong className={`font-bold ${isFull ? 'text-gray-400' : 'text-gray-900'}`}>{s.remaining_capacity}</strong> / 總座位 {s.max_capacity} 人
+                            剩餘 <strong className={`font-bold ${isFull ? 'text-gray-400' : 'text-gray-900'}`}>{s.remaining_capacity}</strong> / 可預約 {s.max_capacity} 人
                           </div>
                         </div>
 

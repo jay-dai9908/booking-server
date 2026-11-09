@@ -632,7 +632,7 @@ export async function addPerson(req, res) {
         });
       }
 
-      // Check session capacities
+      // Check physical layout seat capacity instead of online max_capacity
       if (!force) {
         for (const r of reservations) {
           const bookedPax = await tx.reservation.aggregate({
@@ -640,11 +640,13 @@ export async function addPerson(req, res) {
             _sum: { pax: true }
           });
           const totalBooked = (bookedPax._sum.pax || 0) + 1;
-          if (totalBooked > r.session.max_capacity) {
+          const activeLayout = await getActiveLayoutForDate(tx, r.session.session_date);
+          const layoutCapacity = (activeLayout?.capacity && activeLayout.capacity > 0) ? activeLayout.capacity : (activeLayout?.seats || []).filter(s => s.is_active).length || 16;
+          if (totalBooked > layoutCapacity) {
             throw {
               status: 409,
               code: 'OVER_CAPACITY',
-              message: `該時段（${r.session.start_time} - ${r.session.end_time}）人數已達上限 ${r.session.max_capacity} 人`
+              message: `該時段（${r.session.start_time} - ${r.session.end_time}）座位已滿（共 ${layoutCapacity} 個座位）`
             };
           }
         }

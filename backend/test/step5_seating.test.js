@@ -449,16 +449,17 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
     const pinnedRes = await prisma.reservation.findFirst({ where: { booking_ref: bPinned } });
     assert.notEqual(pinnedRes.assigned_seats[0], 'B2-3', 'Pinned reservation on deleted seat must not retain B2-3');
 
-    // Verify session max_capacity updated to 14
+    // Verify session max_capacity is NOT changed by publishLayout
     const updatedFutureSession = await prisma.session.findUnique({ where: { id: futureSession.id } });
-    assert.equal(updatedFutureSession.max_capacity, 14);
+    assert.equal(updatedFutureSession.max_capacity, 20, 'publishLayout must not modify session max_capacity');
 
-    // Test createBulkSessions inherits layout capacity
+    // Test createBulkSessions with max_capacity
     const bulkRes = createMockReqRes({
       body: {
         session_dates: ['2026-11-26'],
         start_time: '10:00',
-        end_time: '12:00'
+        end_time: '12:00',
+        max_capacity: 14
       }
     });
     await createBulkSessions(bulkRes.req, bulkRes.res);
@@ -467,7 +468,7 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
       where: { session_date: dateOnly('2026-11-26') }
     });
     assert.equal(createdSessions.length, 2);
-    assert.equal(createdSessions[0].max_capacity, 14, 'createBulkSessions should inherit active layout capacity 14');
+    assert.equal(createdSessions[0].max_capacity, 14, 'createBulkSessions should use provided max_capacity 14');
   });
 
   // Cleanup test data
