@@ -118,7 +118,7 @@ async function run() {
     });
     const mobilePage = await mobileContext.newPage();
 
-    await mobilePage.goto(`${BASE_URL}/`, { waitUntil: 'networkidle' });
+    await mobilePage.goto(`${BASE_URL}/preview`, { waitUntil: 'networkidle' });
     const mobLineBtn = mobilePage.locator('a:has-text("加入官方 LINE 預約"), button:has-text("加入官方 LINE 預約")').first();
     await mobLineBtn.waitFor({ state: 'visible', timeout: 8000 });
     assert.strictEqual(await mobLineBtn.getAttribute('href'), officialLineUrl);
