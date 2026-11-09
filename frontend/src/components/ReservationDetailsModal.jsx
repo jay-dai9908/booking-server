@@ -21,6 +21,7 @@ import StatusPill from './admin/StatusPill';
 import ErrorBoundary from './common/ErrorBoundary';
 import { formatBookingRef } from '../utils/admin/floorSelectors';
 import { safeFormatDate } from '../utils/format';
+import { printJobOnThisDevice } from '../utils/sunmiPrinter';
 
 const ExtendTimeModal = lazy(() => import('./ExtendTimeModal'));
 const EquipmentAddonModal = lazy(() => import('./EquipmentAddonModal'));
@@ -77,6 +78,11 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
   const [showMarkUnpaidModal, setShowMarkUnpaidModal] = useState(false);
   const [unpaidReason, setUnpaidReason] = useState('收錯訂單');
   const [unpaidLoading, setUnpaidLoading] = useState(false);
+  const [payments, setPayments] = useState([]);
+  const [voidPaymentTarget, setVoidPaymentTarget] = useState(null);
+  const [voidReason, setVoidReason] = useState('收錯付款方式');
+  const [voidLoading, setVoidLoading] = useState(false);
+  const [activePaymentMenuId, setActivePaymentMenuId] = useState(null);
   const [adminNoteInput, setAdminNoteInput] = useState(reservation?.admin_note || '');
   const [isSavingAdminNote, setIsSavingAdminNote] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
@@ -87,6 +93,19 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
     setToastMsg({ text, isError });
     setTimeout(() => setToastMsg(null), 3000);
   };
+
+  const fetchBillingPayments = useCallback(() => {
+    if (!ref) return;
+    api
+      .get(`/billing/${ref}`)
+      .then(res => {
+        setPayments(res.data?.payments || []);
+      })
+      .catch(err => {
+        console.error('[ReservationDetailsModal] Error loading billing payments:', err);
+        setPayments([]);
+      });
+  }, [ref]);
 
   const handleMarkUnpaid = async () => {
     if (!unpaidReason || !unpaidReason.trim()) return;
@@ -107,12 +126,81 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
         onUpdate({ is_paid: false, billing_status: 'unpaid' });
       }
       fetchDetails();
+      fetchBillingPayments();
     } catch (err) {
       console.error('[handleMarkUnpaid] Error:', err);
       showToast(err.response?.data?.error || err.response?.data?.message || '標記未結帳失敗', true);
     } finally {
       setUnpaidLoading(false);
     }
+  };
+
+  const handleReprintPayment = async (pay) => {
+    try {
+      const res = await api.post('/print/jobs', {
+        type: 'receipt',
+        payment_id: pay.id,
+        booking_ref: reservation?.booking_ref || ref,
+        is_reprint: true
+      });
+      if (res.data?.job) {
+        await printJobOnThisDevice(res.data.job);
+      }
+      showToast('補印收據已送出');
+    } catch (err) {
+      showToast(err.response?.data?.error || err.response?.data?.message || '補印失敗', true);
+    }
+  };
+
+  const handleConfirmVoid = async () => {
+    if (!voidPaymentTarget) return;
+    try {
+      setVoidLoading(true);
+      await api.post(`/billing/payments/${voidPaymentTarget.id}/void`, {
+        reason: voidReason
+      });
+      showToast(`已作廢收款 ${voidPaymentTarget.payment_no}`);
+      setVoidPaymentTarget(null);
+      fetchBillingPayments();
+      fetchDetails();
+      if (onUpdate) onUpdate();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+    } catch (err) {
+      showToast(err.response?.data?.error || err.response?.data?.message || '作廢失敗', true);
+    } finally {
+      setVoidLoading(false);
+    }
+  };
+
+  const getKindBadge = (pay) => {
+    if (pay.method === 'pass' || pay.pass_json || pay.kind === 'pass') {
+      return { label: '卡券', bg: 'bg-purple-50 text-purple-700 border-purple-200' };
+    }
+    if (pay.kind === 'refund') {
+      return { label: '退款', bg: 'bg-rose-50 text-rose-700 border-rose-200' };
+    }
+    if (pay.kind === 'supplement') {
+      return { label: '補收', bg: 'bg-sky-50 text-sky-700 border-sky-200' };
+    }
+    if (pay.kind === 'waive') {
+      return { label: '免收', bg: 'bg-gray-100 text-gray-700 border-gray-200' };
+    }
+    return { label: '收款', bg: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+  };
+
+  const getMethodName = (m) => {
+    const map = {
+      cash: '現金',
+      line_pay: 'LINE Pay',
+      linepay: 'LINE Pay',
+      transfer: '銀行轉帳',
+      pass: '卡券',
+      jkopay: '街口支付',
+      card: '信用卡',
+      other: '其他',
+      none: '無'
+    };
+    return map[m] || m || '現金';
   };
 
   const onUpdateRef = useRef(onUpdate);
@@ -144,11 +232,13 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
   useEffect(() => {
     if (!ref) {
       setReservation(null);
+      setPayments([]);
       setLoading(false);
       return;
     }
     fetchDetails();
-  }, [ref, fetchDetails]);
+    fetchBillingPayments();
+  }, [ref, fetchDetails, fetchBillingPayments]);
 
   useEffect(() => {
     if (reservation?.admin_note !== undefined) {
@@ -675,6 +765,102 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
             )}
           </div>
 
+          {/* 收款紀錄區塊 (Round 15 Item 1) */}
+          <div className="mb-8 bg-white border border-gray-200 rounded-2xl p-4 shadow-2xs">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center justify-between">
+              <span>收款紀錄</span>
+              {payments.length > 0 && (
+                <span className="text-xs text-gray-400 font-normal">共 {payments.length} 筆</span>
+              )}
+            </h3>
+            {payments.length === 0 ? (
+              <p className="text-xs sm:text-sm text-gray-400 py-3 text-center">還沒有收款</p>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {payments.map((p) => {
+                  const isVoided = p.status === 'voided';
+                  const kindBadge = getKindBadge(p);
+                  const timeStr = p.created_at
+                    ? new Date(p.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' })
+                    : '—';
+                  const personStr = (p.person_nos && p.person_nos.length > 0)
+                    ? `第 ${p.person_nos.join('、')} 位`
+                    : '整單';
+                  const amtStr = p.kind === 'refund'
+                    ? `-NT$${Number(p.amount || 0).toLocaleString('en-US')}`
+                    : `NT$${Number(p.amount || 0).toLocaleString('en-US')}`;
+
+                  return (
+                    <div
+                      key={p.id}
+                      className={`py-2.5 flex items-center justify-between text-xs sm:text-sm transition-colors ${
+                        isVoided ? 'opacity-50 line-through text-gray-400' : 'text-gray-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                        <span className="font-mono text-gray-500">{timeStr}</span>
+                        <span className="font-medium text-gray-600">{personStr}</span>
+                        <span className={`px-2 py-0.5 rounded-md border text-[11px] font-bold ${kindBadge.bg}`}>
+                          {kindBadge.label}
+                        </span>
+                        <span className="text-gray-600">{getMethodName(p.method)}</span>
+                        <span className="font-bold font-num">{amtStr}</span>
+                        {isVoided && (
+                          <span className="text-[10px] text-rose-500 font-bold no-underline">
+                            (已作廢)
+                          </span>
+                        )}
+                      </div>
+
+                      {!readOnly && (
+                        <div className="relative shrink-0 ml-2">
+                          <button
+                            type="button"
+                            onClick={() => setActivePaymentMenuId(activePaymentMenuId === p.id ? null : p.id)}
+                            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                            title="更多操作"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                          {activePaymentMenuId === p.id && (
+                            <div
+                              className="absolute right-0 top-full mt-1 w-28 bg-white border border-gray-200 rounded-xl shadow-lg z-30 py-1 text-xs"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActivePaymentMenuId(null);
+                                  handleReprintPayment(p);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-gray-50 text-gray-700 font-medium"
+                              >
+                                補印
+                              </button>
+                              {!isVoided && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActivePaymentMenuId(null);
+                                    setVoidPaymentTarget(p);
+                                    setVoidReason('收錯付款方式');
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 hover:bg-gray-50 text-red-600 font-bold"
+                                >
+                                  作廢
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {toastMsg && (
             <div className={`mb-4 p-3 rounded-xl text-xs font-bold border ${
               toastMsg.isError ? 'bg-rose-50 text-rose-800 border-rose-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
@@ -891,6 +1077,25 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
           required={true}
         />
       </ConfirmPanel>
+
+      {/* Void Payment Modal */}
+      {voidPaymentTarget && (
+        <ConfirmPanel
+          isOpen={Boolean(voidPaymentTarget)}
+          onClose={() => setVoidPaymentTarget(null)}
+          onConfirm={handleConfirmVoid}
+          title="作廢這筆收款？"
+          message={`確定要作廢 ${voidPaymentTarget?.payment_no}（NT$${voidPaymentTarget?.amount}）？作廢會記到帳務異動紀錄，資料不會刪除。`}
+          danger={true}
+          loading={voidLoading}
+        >
+          <ReasonChips
+            presets={['收錯付款方式', '收錯金額', '客人改用其他方式', '其他']}
+            value={voidReason}
+            onChange={setVoidReason}
+          />
+        </ConfirmPanel>
+      )}
     </div>
   );
 }
