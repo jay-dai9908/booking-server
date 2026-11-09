@@ -114,6 +114,34 @@ export default function TimelineGrid({
         </div>
       </div>
 
+      {/* Legend (Round 17 Item 4): Tablet shows all 6; Mobile omits '已結束' */}
+      <div className="flex items-center gap-3 text-[11px] flex-wrap px-1 py-1">
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-sg-sage-soft border border-sg-sage inline-block shrink-0" />
+          <span className="text-sg-ink font-medium">使用中</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-sg-honey-soft border border-sg-honey inline-block shrink-0" />
+          <span className="text-sg-ink font-medium">快到時</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-sg-danger-soft border border-sg-danger inline-block shrink-0" />
+          <span className="text-sg-ink font-medium">超時</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-white border-2 border-sg-brown inline-block shrink-0" />
+          <span className="text-sg-ink font-medium">已預約</span>
+        </div>
+        <div className="hidden md:flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded bg-sg-paper border border-sg-line/60 inline-block opacity-60 shrink-0" />
+          <span className="text-sg-ink font-medium">已結束</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded border-2 border-dashed border-sg-sage/60 bg-sg-sage-soft/30 inline-block shrink-0" />
+          <span className="text-sg-ink font-medium">預約剩下的時間</span>
+        </div>
+      </div>
+
       <div
         ref={containerRef}
         className="overflow-x-auto bg-white border border-sg-line rounded-2xl"
@@ -202,32 +230,131 @@ export default function TimelineGrid({
                       const bStartHour = getTaipeiDecimalHour(startDt);
                       const bEndHour = getTaipeiDecimalHour(endDt);
 
-                      const leftPx = Math.max(0, (bStartHour - startHour) * hourWidth);
-                      const widthPx = Math.max(20, (bEndHour - bStartHour) * hourWidth - 4);
-
                       const isCheckedIn = b.attendance === 'checked_in';
-                      const isPaid = b.billing?.status === 'paid' || b.billing?.status === 'waived';
+                      const isCompleted = b.attendance === 'completed' || (!isCheckedIn && now > endDt);
+                      const isReserved = !isCheckedIn && !isCompleted;
+                      const isPaid = b.billing?.status === 'paid' || b.billing?.status === 'waived' || b.is_paid;
                       const timeStr = `${extractTimeHHMM(b.start_at)}-${extractTimeHHMM(b.end_at)}`;
 
+                      // 1. 已結束 (灰)
+                      if (isCompleted) {
+                        const leftPx = Math.max(0, (bStartHour - startHour) * hourWidth);
+                        const widthPx = Math.max(20, (bEndHour - bStartHour) * hourWidth - 4);
+                        return (
+                          <div
+                            key={b.booking_ref}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onBookingClick) onBookingClick(b);
+                            }}
+                            style={{ left: leftPx, width: widthPx }}
+                            className="absolute top-1.5 bottom-1.5 px-2 rounded-xl text-[12px] font-bold flex items-center justify-between border shadow-2xs truncate z-10 cursor-pointer transition bg-sg-paper text-sg-muted border-sg-line/60 opacity-60"
+                          >
+                            <span className="truncate">{b.name} {b.pax}位 · {timeStr}</span>
+                            {isPaid && <Check className="w-3 h-3 ml-1 shrink-0" />}
+                          </div>
+                        );
+                      }
+
+                      // 2. 已預約 (brown 外框)
+                      if (isReserved) {
+                        const leftPx = Math.max(0, (bStartHour - startHour) * hourWidth);
+                        const widthPx = Math.max(20, (bEndHour - bStartHour) * hourWidth - 4);
+                        return (
+                          <div
+                            key={b.booking_ref}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onBookingClick) onBookingClick(b);
+                            }}
+                            style={{ left: leftPx, width: widthPx }}
+                            className="absolute top-1.5 bottom-1.5 px-2 rounded-xl text-[12px] font-bold flex items-center justify-between border-2 border-sg-brown bg-white text-sg-brown shadow-xs truncate z-10 cursor-pointer active:scale-95 transition"
+                          >
+                            <span className="truncate">{b.name} {b.pax}位 · {timeStr}</span>
+                            {isPaid && <Check className="w-3 h-3 ml-1 shrink-0" />}
+                          </div>
+                        );
+                      }
+
+                      // 3. 已入座 (使用中 / 快到時 / 超時 / 預約剩下的時間)
+                      const remainingMins = (endDt.getTime() - now.getTime()) / 60000;
+                      const isOvertime = now > endDt;
+                      const isExpiring = !isOvertime && remainingMins <= 30;
+
+                      const activeColorClass = isExpiring
+                        ? 'bg-sg-honey-soft text-sg-honey-ink border-sg-honey font-bold'
+                        : 'bg-sg-sage-soft text-sg-sage-ink border-sg-sage font-bold';
+
+                      // 超時（danger，超過預約結束的部分一路畫到現在）
+                      if (isOvertime) {
+                        const baseLeft = Math.max(0, (bStartHour - startHour) * hourWidth);
+                        const baseWidth = Math.max(20, (bEndHour - bStartHour) * hourWidth - 2);
+                        const extLeft = Math.max(0, (bEndHour - startHour) * hourWidth);
+                        const extWidth = Math.max(20, (Math.max(currentHour, bEndHour) - bEndHour) * hourWidth - 2);
+                        const overMins = Math.round((now.getTime() - endDt.getTime()) / 60000);
+
+                        return (
+                          <React.Fragment key={b.booking_ref}>
+                            {/* Base duration */}
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onBookingClick) onBookingClick(b);
+                              }}
+                              style={{ left: baseLeft, width: baseWidth }}
+                              className={`absolute top-1.5 bottom-1.5 px-2 rounded-l-xl text-[12px] font-bold flex items-center justify-between border shadow-xs truncate z-10 cursor-pointer active:scale-95 transition ${activeColorClass}`}
+                            >
+                              <span className="truncate">{b.name} {b.pax}位</span>
+                            </div>
+                            {/* Overtime extension一路畫到現在 */}
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onBookingClick) onBookingClick(b);
+                              }}
+                              style={{ left: extLeft, width: extWidth }}
+                              className="absolute top-1.5 bottom-1.5 px-2 rounded-r-xl text-[12px] font-bold flex items-center justify-between border-y border-r border-sg-danger bg-sg-danger-soft text-sg-danger shadow-xs truncate z-10 cursor-pointer active:scale-95 transition"
+                            >
+                              <span className="truncate">超時 {overMins}分</span>
+                              {isPaid && <Check className="w-3 h-3 ml-1 shrink-0" />}
+                            </div>
+                          </React.Fragment>
+                        );
+                      }
+
+                      // 已入座且進行中：現在到預約結束這段，用淡色虛線框表示「預約剩下的時間」
+                      const effectiveCurrentHour = Math.max(bStartHour, Math.min(bEndHour, currentHour));
+                      const elapsedLeft = Math.max(0, (bStartHour - startHour) * hourWidth);
+                      const elapsedWidth = Math.max(16, (effectiveCurrentHour - bStartHour) * hourWidth);
+                      const remainingLeft = elapsedLeft + elapsedWidth;
+                      const remainingWidth = Math.max(16, (bEndHour - effectiveCurrentHour) * hourWidth - 4);
+
                       return (
-                        <div
-                          key={b.booking_ref}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (onBookingClick) onBookingClick(b);
-                          }}
-                          style={{ left: leftPx, width: widthPx }}
-                          className={`absolute top-1.5 bottom-1.5 px-2 rounded-xl text-[12px] font-bold flex items-center justify-between border shadow-xs truncate z-10 cursor-pointer active:scale-95 transition ${
-                            isCheckedIn
-                              ? 'bg-sg-sage-soft text-sg-sage-ink border-sg-sage/40'
-                              : 'bg-sg-paper text-sg-ink border-sg-line'
-                          }`}
-                        >
-                          <span className="truncate">
-                            {b.name} {b.pax} 位 · {timeStr}
-                          </span>
-                          {isPaid && <Check className="w-3 h-3 ml-1 shrink-0" />}
-                        </div>
+                        <React.Fragment key={b.booking_ref}>
+                          {/* Elapsed solid block (使用中 / 快到時) */}
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onBookingClick) onBookingClick(b);
+                            }}
+                            style={{ left: elapsedLeft, width: elapsedWidth }}
+                            className={`absolute top-1.5 bottom-1.5 px-2 rounded-l-xl text-[12px] font-bold flex items-center justify-between border shadow-xs truncate z-10 cursor-pointer active:scale-95 transition ${activeColorClass}`}
+                          >
+                            <span className="truncate">{b.name} {b.pax}位</span>
+                          </div>
+                          {/* Remaining duration dashed block (預約剩下的時間) */}
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onBookingClick) onBookingClick(b);
+                            }}
+                            style={{ left: remainingLeft, width: remainingWidth }}
+                            className="absolute top-1.5 bottom-1.5 px-2 rounded-r-xl text-[12px] font-bold flex items-center justify-between border-2 border-dashed border-sg-sage/60 bg-sg-sage-soft/30 text-sg-muted shadow-2xs truncate z-10 cursor-pointer active:scale-95 transition"
+                          >
+                            <span className="truncate">還有 {Math.round(remainingMins)}分</span>
+                            {isPaid && <Check className="w-3 h-3 ml-1 shrink-0" />}
+                          </div>
+                        </React.Fragment>
                       );
                     })}
                   </div>
