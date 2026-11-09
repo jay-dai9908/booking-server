@@ -38,6 +38,33 @@ import { formatBookingRef } from '../../utils/admin/floorSelectors';
 import { formatMinus } from '../../utils/format';
 import { buildPaymentsCsv, buildEventsCsv, computeDailyRevenue } from '../../utils/admin/accountingExport';
 
+function flattenObject(obj, prefix = '') {
+  if (obj === null || obj === undefined) return {};
+  if (typeof obj !== 'object') {
+    return { [prefix]: obj };
+  }
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      Object.assign(result, flattenObject(value, fullKey));
+    } else if (Array.isArray(value)) {
+      if (value.length === 0) {
+        result[fullKey] = '[]';
+      } else if (value.every(v => typeof v !== 'object')) {
+        result[fullKey] = JSON.stringify(value);
+      } else {
+        value.forEach((item, idx) => {
+          Object.assign(result, flattenObject(item, `${fullKey}[${idx}]`));
+        });
+      }
+    } else {
+      result[fullKey] = value;
+    }
+  }
+  return result;
+}
+
 export default function AccountingPage() {
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 640) {
@@ -1429,30 +1456,152 @@ export default function AccountingPage() {
         />
       </ResponsivePanel>
 
-      {/* Event Detail Modal */}
+      {/* Event Detail Modal (Round 15 Item 2) */}
       <ResponsivePanel
         isOpen={Boolean(selectedEventDetail)}
         onClose={() => setSelectedEventDetail(null)}
         title="異動詳細紀錄"
         subtitle={`事件 #${selectedEventDetail?.id} · ${selectedEventDetail?.created_at ? new Date(selectedEventDetail.created_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : ''}`}
       >
-        {selectedEventDetail && (
-          <div className="space-y-4 py-2 text-[13px]">
-            <div className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line space-y-1">
-              <div><span className="text-sg-muted">操作人員：</span><span className="font-bold">{selectedEventDetail.staff_name}</span></div>
-              <div><span className="text-sg-muted">操作裝置：</span><span>{selectedEventDetail.device_label}</span></div>
-              <div><span className="text-sg-muted">關聯訂單：</span><span className="font-mono text-sg-brown font-bold">{selectedEventDetail.booking_ref ? formatBookingRef(selectedEventDetail.booking_ref) : '無'}</span></div>
-              <div><span className="text-sg-muted">填寫原因：</span><span className="font-bold text-sg-danger">{selectedEventDetail.reason || '無'}</span></div>
-            </div>
+        {selectedEventDetail && (() => {
+          const flatBefore = flattenObject(selectedEventDetail.before_json);
+          const flatAfter = flattenObject(selectedEventDetail.after_json);
+          const allKeys = Array.from(new Set([...Object.keys(flatBefore), ...Object.keys(flatAfter)])).sort();
 
-            <div>
-              <span className="font-bold text-sg-ink block mb-1">異動前後快照 (Snapshot)</span>
-              <pre className="p-3 rounded-2xl bg-sg-ink text-sg-paper text-[11px] overflow-x-auto max-h-60">
-                {JSON.stringify({ before: selectedEventDetail.before_snapshot, after: selectedEventDetail.after_snapshot }, null, 2)}
-              </pre>
+          return (
+            <div className="space-y-4 py-2 text-[13px]">
+              {/* 上方：時間、誰（店員和裝置）、訂單（可以點，打開訂單詳情）、summary */}
+              <div className="p-3.5 rounded-2xl bg-sg-paper/40 border border-sg-line space-y-2">
+                <div className="flex items-center justify-between text-xs text-sg-muted">
+                  <span>{new Date(selectedEventDetail.created_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}</span>
+                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                    selectedEventDetail.category === 'void' ? 'bg-sg-danger-soft text-sg-danger' :
+                    selectedEventDetail.category === 'refund' ? 'bg-sg-peach-soft text-sg-peach' :
+                    'bg-sg-paper text-sg-muted'
+                  }`}>
+                    {selectedEventDetail.category}
+                  </span>
+                </div>
+
+                <div className="text-[14px] font-bold text-sg-ink">
+                  {selectedEventDetail.summary}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[12px] pt-1 border-t border-sg-line/60">
+                  <div>
+                    <span className="text-sg-muted">操作人員：</span>
+                    <span className="font-bold text-sg-ink">{selectedEventDetail.staff_name || '門市人員'}</span>
+                    <span className="text-sg-muted text-[11px] ml-1">({selectedEventDetail.device_label || '裝置'})</span>
+                  </div>
+                  <div>
+                    <span className="text-sg-muted">訂單：</span>
+                    {selectedEventDetail.booking_ref ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailsBookingRef(selectedEventDetail.booking_ref);
+                        }}
+                        className="font-mono text-sg-brown font-bold hover:underline cursor-pointer inline-flex items-center gap-1"
+                        title="點擊查看訂單詳情"
+                      >
+                        {formatBookingRef(selectedEventDetail.booking_ref)}
+                        <span className="text-[10px] bg-sg-brown-soft text-sg-brown px-1.5 py-0.2 rounded font-normal">查看</span>
+                      </button>
+                    ) : (
+                      <span className="text-sg-muted">無</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 原因與相關連結 */}
+                {(selectedEventDetail.reason || selectedEventDetail.payment_id || selectedEventDetail.print_job_id) && (
+                  <div className="pt-2 border-t border-sg-line/60 text-[12px] space-y-1">
+                    {selectedEventDetail.reason && (
+                      <div>
+                        <span className="text-sg-muted">原因：</span>
+                        <span className="font-bold text-sg-danger">{selectedEventDetail.reason}</span>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                      {selectedEventDetail.payment_id && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveTab('payments');
+                            setSearchTerm(String(selectedEventDetail.payment_id));
+                            setSelectedEventDetail(null);
+                          }}
+                          className="text-xs text-sg-brown bg-sg-brown-soft px-2 py-0.5 rounded font-bold hover:bg-sg-line transition"
+                        >
+                          相關收款紀錄 #{selectedEventDetail.payment_id} &rarr;
+                        </button>
+                      )}
+                      {selectedEventDetail.print_job_id && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveTab('print-jobs');
+                            setSelectedEventDetail(null);
+                          }}
+                          className="text-xs text-sg-muted bg-sg-paper px-2 py-0.5 rounded font-bold hover:bg-sg-line transition"
+                        >
+                          相關列印單 #{selectedEventDetail.print_job_id} &rarr;
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 「改前／改後」：把 before_json、after_json 攤平成 KV，左右對照，有變的欄位加底色 */}
+              <div>
+                <span className="font-bold text-sg-ink block mb-1.5 text-xs">改前 / 改後對照</span>
+                {allKeys.length === 0 ? (
+                  <div className="p-4 rounded-2xl bg-sg-paper/40 border border-sg-line text-center text-sg-muted text-xs">
+                    此紀錄無快照內容
+                  </div>
+                ) : (
+                  <div className="border border-sg-line rounded-2xl overflow-hidden bg-white max-h-72 overflow-y-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-sg-paper text-sg-muted border-b border-sg-line text-[11px]">
+                          <th className="py-2 px-3 font-semibold w-1/3">欄位</th>
+                          <th className="py-2 px-3 font-semibold w-1/3">改前</th>
+                          <th className="py-2 px-3 font-semibold w-1/3">改後</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-sg-line">
+                        {allKeys.map((key) => {
+                          const valBefore = flatBefore[key];
+                          const valAfter = flatAfter[key];
+                          const isChanged = JSON.stringify(valBefore) !== JSON.stringify(valAfter);
+                          const strBefore = valBefore === undefined ? '—' : (typeof valBefore === 'object' ? JSON.stringify(valBefore) : String(valBefore));
+                          const strAfter = valAfter === undefined ? '—' : (typeof valAfter === 'object' ? JSON.stringify(valAfter) : String(valAfter));
+
+                          return (
+                            <tr
+                              key={key}
+                              className={isChanged ? 'bg-amber-100/60 font-medium' : 'hover:bg-sg-paper/20'}
+                            >
+                              <td className="py-2 px-3 font-mono text-[11px] text-sg-ink break-all">{key}</td>
+                              <td className="py-2 px-3 text-sg-muted break-all">{strBefore}</td>
+                              <td className={`py-2 px-3 break-all ${isChanged ? 'text-amber-900 font-bold' : 'text-sg-ink'}`}>{strAfter}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 底部說明（逐字） */}
+              <p className="text-[11px] text-sg-muted text-center pt-2 border-t border-sg-line/50">
+                每一筆都記錄改之前和改之後的內容，不能刪除；作廢、退款、改金額一定要填原因。
+              </p>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </ResponsivePanel>
 
       {/* Checkout Workbench Modal */}
