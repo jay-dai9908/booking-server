@@ -11,7 +11,7 @@ export default function MiniMap({
 }) {
   const effectiveWaitPax = waitPax != null ? waitPax : waitingPaxCount;
   const containerRef = useRef(null);
-  const [containerW, setContainerW] = useState(340);
+  const [containerW, setContainerW] = useState(360);
 
   const canvasW = layout.canvas_w || 1000;
   const canvasH = layout.canvas_h || 625;
@@ -22,7 +22,7 @@ export default function MiniMap({
     if (!containerRef.current) return;
     const updateWidth = () => {
       if (containerRef.current) {
-        setContainerW(containerRef.current.clientWidth || 340);
+        setContainerW(containerRef.current.clientWidth || 360);
       }
     };
     updateWidth();
@@ -31,18 +31,42 @@ export default function MiniMap({
     return () => ro.disconnect();
   }, []);
 
-  const availableH = 84;
+  const availableH = 96;
   const availableW = Math.max(100, containerW - 16);
   const scale = Math.min(availableW / canvasW, availableH / canvasH);
   const mapW = canvasW * scale;
   const mapH = canvasH * scale;
 
+  const getSeatStatusStyle = (sCode) => {
+    const seatInfo = seatStates[sCode] || {};
+    const state = seatInfo.state;
+    if (state === 'in_use' || state === 'run') {
+      return 'bg-sg-sage text-white border border-sg-sage-ink/20 shadow-2xs';
+    }
+    if (state === 'over' || state === 'overtime') {
+      return 'bg-sg-danger text-white border border-sg-danger shadow-2xs animate-pulse';
+    }
+    if (state === 'warn' || state === 'expiring') {
+      return 'bg-sg-honey text-white border border-sg-honey shadow-2xs';
+    }
+    if (state === 'paused' || state === 'pause') {
+      return 'bg-sg-vent text-white border border-sg-vent shadow-2xs';
+    }
+    if (state === 'reserved' || state === 'wait' || state === 'pending') {
+      return 'bg-white text-sg-brown border-2 border-sg-brown shadow-2xs';
+    }
+    if (state === 'off') {
+      return 'bg-sg-paper text-sg-muted border border-sg-line/50 opacity-40';
+    }
+    return 'bg-white text-sg-ink border border-sg-line';
+  };
+
   return (
     <div
       ref={containerRef}
-      className={`relative overflow-hidden bg-white/95 backdrop-blur-md border border-sg-line rounded-2xl shadow-sm select-none flex flex-col h-[120px] ${className}`}
+      className={`relative overflow-hidden bg-white/95 backdrop-blur-md border border-sg-line rounded-2xl shadow-sm select-none flex flex-col h-[136px] ${className}`}
     >
-      {/* Header bar: Spec 6.5 */}
+      {/* Header bar */}
       <div className="flex items-center justify-between px-3 py-1 border-b border-sg-line/60 bg-sg-paper/80 shrink-0">
         <span className="font-bold text-sg-ink text-[12px]">全店縮圖</span>
         <span className="text-[11px] text-sg-muted">點桌子跳到下方</span>
@@ -51,17 +75,18 @@ export default function MiniMap({
       {/* Map canvas container */}
       <div className="flex-1 flex items-center justify-center overflow-hidden p-1">
         <div
-          className="relative origin-top-left"
+          className="relative"
           style={{
-            width: canvasW,
-            height: canvasH,
-            transform: `scale(${scale})`,
-            marginBottom: `-${canvasH * (1 - scale)}px`,
-            marginRight: `-${canvasW * (1 - scale)}px`
+            width: mapW,
+            height: mapH
           }}
         >
           {/* Architectural elements (walls, counters, doors, windows, pillars) */}
-          <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${canvasW} ${canvasH}`}>
+          <svg
+            className="absolute inset-0 pointer-events-none"
+            style={{ width: mapW, height: mapH }}
+            viewBox={`0 0 ${canvasW} ${canvasH}`}
+          >
             {(layout.elements_json || layout.elements || []).map((el, idx) => {
               if (el.type === 'wall' && el.points && el.points.length > 1) {
                 return (
@@ -111,27 +136,28 @@ export default function MiniMap({
           {/* Tables */}
           {tables.map((t) => {
             const isActive = t.id === activeTableId;
-            // Ensure minimum touch target of 44x44px in scaled space
-            const minW = Math.max(t.w, 44 / (scale || 0.1));
-            const minH = Math.max(t.h, 44 / (scale || 0.1));
+            const tLeft = (t.cx - t.w / 2) * scale;
+            const tTop = (t.cy - t.h / 2) * scale;
+            const tWidth = t.w * scale;
+            const tHeight = t.h * scale;
 
             return (
               <React.Fragment key={t.id}>
                 <div
                   className={`absolute border rounded flex items-center justify-center pointer-events-none transition-all ${
                     isActive
-                      ? 'bg-sg-brown text-white border-sg-brown shadow-md ring-4 ring-sg-peach'
-                      : 'bg-[#EADDCF] border-[#C8BEB2] text-sg-brown'
+                      ? 'bg-sg-brown text-white border-sg-brown shadow-md ring-2 ring-sg-peach'
+                      : 'bg-[#EADDCF]/90 border-[#C8BEB2] text-sg-brown'
                   }`}
                   style={{
-                    left: t.cx - t.w / 2,
-                    top: t.cy - t.h / 2,
-                    width: t.w,
-                    height: t.h,
+                    left: tLeft,
+                    top: tTop,
+                    width: tWidth,
+                    height: tHeight,
                     transform: `rotate(${t.rotation || 0}deg)`
                   }}
                 >
-                  <span className="text-[14px] font-bold tracking-tight">{t.label}</span>
+                  <span className="text-[10px] font-bold tracking-tight">{t.label}</span>
                 </div>
 
                 {/* Touch/Click Hit Area */}
@@ -139,19 +165,19 @@ export default function MiniMap({
                   type="button"
                   onClick={() => onTableClick && onTableClick(t)}
                   aria-label={t.label}
-                  className="absolute cursor-pointer -translate-x-1/2 -translate-y-1/2 z-10 opacity-0"
+                  className="absolute cursor-pointer -translate-x-1/2 -translate-y-1/2 z-20 opacity-0"
                   style={{
-                    left: t.cx,
-                    top: t.cy,
-                    width: minW,
-                    height: minH
+                    left: t.cx * scale,
+                    top: t.cy * scale,
+                    width: Math.max(tWidth, 36),
+                    height: Math.max(tHeight, 36)
                   }}
                 />
               </React.Fragment>
             );
           })}
 
-          {/* Miniature seat dots */}
+          {/* Miniature seat cells (Round 17 Item 5): fixed 24x16 in mini mode, not scaled with map */}
           {seats.map((seat) => {
             const table = tables.find(t => t.id === seat.table_id);
             const tRot = (table?.rotation || 0) * (Math.PI / 180);
@@ -162,26 +188,32 @@ export default function MiniMap({
             const cx = (table?.cx || 0) + rotLx;
             const cy = (table?.cy || 0) + rotLy;
 
-            const seatInfo = seatStates[seat.code] || {};
-            let dotColor = 'bg-sg-line border border-sg-muted/30';
-            if (seatInfo.state === 'run' || seatInfo.state === 'in_use') dotColor = 'bg-sg-sage';
-            else if (seatInfo.state === 'over') dotColor = 'bg-sg-danger';
-            else if (seatInfo.state === 'warn') dotColor = 'bg-sg-honey';
-            else if (seatInfo.state === 'pause' || seatInfo.state === 'paused') dotColor = 'bg-sg-vent';
-            else if (seatInfo.state === 'wait' || seatInfo.state === 'pending' || seatInfo.state === 'reserved') dotColor = 'bg-white border-2 border-sg-brown';
+            const miniX = cx * scale;
+            const miniY = cy * scale;
+            const statusClass = getSeatStatusStyle(seat.code);
 
             return (
               <div
                 key={seat.code}
-                className={`absolute w-5 h-5 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none shadow-xs ${dotColor}`}
-                style={{ left: cx, top: cy }}
-              />
+                className={`absolute rounded-[4px] pointer-events-none flex items-center justify-center z-10 transition-colors ${statusClass}`}
+                style={{
+                  left: miniX - 12,
+                  top: miniY - 8,
+                  width: 24,
+                  height: 16
+                }}
+                title={seat.code}
+              >
+                <span className="text-[9px] font-num font-bold leading-none select-none truncate px-0.5">
+                  {seat.code}
+                </span>
+              </div>
             );
           })}
         </div>
       </div>
 
-      {/* Waiting area badge in bottom-right (Spec 3.3 item 3) */}
+      {/* Waiting area badge in bottom-right */}
       <button
         type="button"
         onClick={() => {
