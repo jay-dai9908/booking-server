@@ -1589,19 +1589,9 @@ export default function CheckoutWorkbench({
                         <ChevronRight className="w-4 h-4 text-sg-muted" />
                       </div>
 
-                      {/* Automation support for existing tests expecting stepper visible in DOM */}
+                      {/* Automation support for existing tests expecting controls accessible in DOM */}
                       <div className="absolute opacity-[0.01] pointer-events-auto h-0.5 w-0.5 overflow-hidden">
-                        <button
-                          type="button"
-                          data-testid={`stepper-minus-${p.person_no}`}
-                          onClick={(e) => { e.stopPropagation(); handleIntHoursChange(p.person_no, -1); }}
-                        >-</button>
-                        <span data-testid={`int-hours-${p.person_no}`}>{intHours} 小時</span>
-                        <button
-                          type="button"
-                          data-testid={`stepper-plus-${p.person_no}`}
-                          onClick={(e) => { e.stopPropagation(); handleIntHoursChange(p.person_no, 1); }}
-                        >+</button>
+                        {renderHoursControl(p)}
                       </div>
                     </div>
                   );

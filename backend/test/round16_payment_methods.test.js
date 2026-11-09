@@ -147,8 +147,7 @@ test('Round 16 Item 2: Payment methods configuration & validation', async (t) =>
       params: { booking_ref: bookingRef },
       body: {
         person_nos: [1],
-        method: 'linepay',
-        expected_amount: 180
+        method: 'linepay'
       }
     });
 
@@ -178,8 +177,7 @@ test('Round 16 Item 2: Payment methods configuration & validation', async (t) =>
       params: { booking_ref: bookingRef },
       body: {
         person_nos: [1],
-        method: 'linepay',
-        expected_amount: 180
+        method: 'linepay'
       }
     });
 

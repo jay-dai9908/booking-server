@@ -2936,7 +2936,19 @@ export default function SeatLayoutPage() {
                 >
                   -
                 </button>
-                <span className="w-7 text-center font-bold text-[15px] font-num text-sg-ink">{testPax}</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="12"
+                  data-testid="preview-pax-input"
+                  value={testPax}
+                  onChange={(e) => {
+                    const p = Math.max(1, Math.min(12, Number(e.target.value) || 1));
+                    setTestPax(p);
+                    handleTestAllocation(p, layoutRules, zoneOrderList);
+                  }}
+                  className="w-12 text-center font-bold text-[15px] font-num text-sg-ink bg-white border border-sg-line rounded-xl py-1"
+                />
                 <button
                   type="button"
                   data-testid="pax-plus-btn"
@@ -2951,6 +2963,14 @@ export default function SeatLayoutPage() {
                   +
                 </button>
                 <span className="text-[13px] text-sg-muted">位</span>
+                <button
+                  type="button"
+                  data-testid="run-preview-alloc-btn"
+                  onClick={() => handleTestAllocation(testPax, layoutRules, zoneOrderList)}
+                  className="ml-2 px-3 py-1 rounded-xl bg-sg-brown text-white text-[12px] font-bold hover:bg-sg-brown-dark transition shadow-xs"
+                >
+                  試算
+                </button>
               </div>
             </div>
 
