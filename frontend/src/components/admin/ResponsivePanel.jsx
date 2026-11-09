@@ -52,10 +52,17 @@ export default function ResponsivePanel({
       aria-modal="true"
     >
       {/* Panel container */}
+      <style>{`
+        @media (min-width: 768px) {
+          .responsive-panel-w-${width} {
+            width: ${typeof width === 'number' ? `${width}px` : width} !important;
+          }
+        }
+      `}</style>
       <div
         ref={panelRef}
         style={{ maxWidth: '100%' }}
-        className={`w-full md:w-[${width}px] bg-white rounded-t-[20px] md:rounded-none md:rounded-l-[20px] shadow-2xl flex flex-col max-h-[92vh] md:max-h-full overflow-hidden animate-in slide-in-from-bottom md:slide-in-from-right duration-200 ${className}`}
+        className={`w-full md:w-[${width}px] responsive-panel-w-${width} bg-white rounded-t-[20px] md:rounded-none md:rounded-l-[20px] shadow-2xl flex flex-col max-h-[92vh] md:max-h-full overflow-hidden animate-in slide-in-from-bottom md:slide-in-from-right duration-200 ${className}`}
       >
         {/* Mobile drag handle bar */}
         <div className="md:hidden flex justify-center pt-2 pb-1">

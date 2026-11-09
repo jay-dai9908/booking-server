@@ -42,6 +42,7 @@ import MiniMap from '../../components/admin/floor/MiniMap';
 import TableCard from '../../components/admin/floor/TableCard';
 import TimelineGrid from '../../components/admin/floor/TimelineGrid';
 import CheckInPanel from '../../components/admin/floor/CheckInPanel';
+import SeatActionPanel from '../../components/admin/floor/SeatActionPanel';
 
 // Modals
 import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
@@ -2206,172 +2207,76 @@ export default function SeatingPage() {
         message={`目標座位 ${swapConfirmTarget?.toSeat} 目前由「${swapConfirmTarget?.occupantName}」使用中。確定要進行互換對調嗎？`}
       />
 
-      {/* Seat Action Panel (Spec 3.1, 3.3.4) */}
-      <ResponsivePanel
+      {/* Seat Action Panel (Spec 3.1, 3.3.4, 6.6) */}
+      <SeatActionPanel
         isOpen={Boolean(seatActionTarget)}
         onClose={() => setSeatActionTarget(null)}
-        title={seatActionTarget?.seat ? `座位 ${seatActionTarget.seat.code}` : '座位操作'}
-        subtitle={seatActionTarget?.booking ? `${seatActionTarget.booking.name} · ${seatActionTarget.seatInfo?.timerText}` : '空位中'}
-        footer={
-          seatActionTarget?.booking ? (
-            <div className="flex items-center justify-between">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setDetailsBookingRef(seatActionTarget.booking.booking_ref);
-                  setSeatActionTarget(null);
-                }}
-              >
-                訂單詳情
-              </Button>
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => {
-                  const bRef = seatActionTarget.booking.booking_ref;
-                  setSeatActionTarget(null);
-                  setCheckoutBookingRef(bRef);
-                }}
-              >
-                結帳
-              </Button>
-            </div>
-          ) : (
-            <div className="flex justify-end">
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => {
-                  setSeatActionTarget(null);
-                  setShowForceAdd(true);
-                }}
-              >
-                現場加人（坐這裡）
-              </Button>
-            </div>
-          )
-        }
-      >
-        {seatActionTarget?.booking ? (
-          <div className="space-y-3 py-2">
-            <div className="grid grid-cols-2 gap-2 text-[12px]">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  const b = seatActionTarget.booking;
-                  const pNo = seatActionTarget.seatInfo?.personNo || 1;
-                  const isPaused = seatActionTarget.seatInfo?.state === 'paused';
-                  handleTimerAction(b.booking_ref, [pNo], isPaused ? 'resume' : 'pause');
-                  setSeatActionTarget(null);
-                }}
-              >
-                {seatActionTarget.seatInfo?.state === 'paused' ? '繼續計時' : '暫停計時'}
-              </Button>
-
-              {/* Move Seat button */}
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setMoveSeatModalTarget({
-                    booking: seatActionTarget.booking,
-                    fromSeat: seatActionTarget.seat?.code,
-                    personNo: seatActionTarget.seatInfo?.personNo || 1
-                  });
-                  setSeatActionTarget(null);
-                }}
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
-                換座位
-              </Button>
-
-              {/* Move to waiting area */}
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  const b = seatActionTarget.booking;
-                  const fromSeat = seatActionTarget.seat?.code;
-                  handleMoveSeat(b.booking_ref, fromSeat, nextEmptyWaitSeat, 'move');
-                }}
-              >
-                移到等待區
-              </Button>
-
-              {/* Board swap button */}
-              {(() => {
-                const b = seatActionTarget.booking;
-                const pNo = seatActionTarget.seatInfo?.personNo || 1;
-                const personBoard = (b.boards || []).find(bd => bd.person_no === pNo) || (b.boards || [])[0];
-                if (personBoard) {
-                  return (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setBoardSwapTarget({
-                          booking: b,
-                          board: personBoard,
-                          personNo: pNo,
-                          seatCode: seatActionTarget.seat?.code
-                        });
-                        setSelectedSwapSize(null);
-                        setSelectedBoundary(null);
-                        setSwapError(null);
-                        setSeatActionTarget(null);
-                      }}
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                      換板
-                    </Button>
-                  );
-                }
-                return (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setAddonReservation(seatActionTarget.booking);
-                      setSeatActionTarget(null);
-                    }}
-                  >
-                    <Plus className="w-3.5 h-3.5 mr-1" />
-                    加租智能板
-                  </Button>
-                );
-              })()}
-
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setExtendReservation(seatActionTarget.booking);
-                  setSeatActionTarget(null);
-                }}
-              >
-                加時
-              </Button>
-
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setDetailsBookingRef(seatActionTarget.booking.booking_ref);
-                  setSeatActionTarget(null);
-                }}
-              >
-                訂單詳情
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="py-4 text-center text-sg-muted text-[13px]">
-            此座位目前為空位，可直接安排現場客人入座。
-          </div>
-        )}
-      </ResponsivePanel>
+        target={seatActionTarget}
+        onCheckout={(bRef) => {
+          setSeatActionTarget(null);
+          setCheckoutBookingRef(bRef);
+        }}
+        onDetails={(bRef) => {
+          setSeatActionTarget(null);
+          setDetailsBookingRef(bRef);
+        }}
+        onTimerAction={(bRef, personNos, action) => {
+          setSeatActionTarget(null);
+          handleTimerAction(bRef, personNos, action);
+        }}
+        onMoveSeat={({ booking, fromSeat, personNo }) => {
+          setSeatActionTarget(null);
+          setMoveSeatModalTarget({
+            booking,
+            fromSeat,
+            personNo
+          });
+        }}
+        onMoveToWait={(booking, fromSeat) => {
+          setSeatActionTarget(null);
+          handleMoveSeat(booking.booking_ref, fromSeat, nextEmptyWaitSeat, 'move');
+        }}
+        onBoardSwap={({ booking, board, personNo, seatCode }) => {
+          setSeatActionTarget(null);
+          setBoardSwapTarget({
+            booking,
+            board,
+            personNo,
+            seatCode
+          });
+          setSelectedSwapSize(null);
+          setSelectedBoundary(null);
+          setSwapError(null);
+        }}
+        onAddBoard={(booking) => {
+          setSeatActionTarget(null);
+          setAddonReservation(booking);
+        }}
+        onExtendTime={(booking) => {
+          setSeatActionTarget(null);
+          setExtendReservation(booking);
+        }}
+        onForceAdd={(seatCode) => {
+          setSeatActionTarget(null);
+          setShowForceAdd(true);
+        }}
+        onCheckIn={(booking) => {
+          setSeatActionTarget(null);
+          setCheckInTarget(booking);
+        }}
+        onLeave={(bRef, personNo) => {
+          setSeatActionTarget(null);
+          handleTimerAction(bRef, [personNo], 'end');
+        }}
+        onSupplement={(bRef) => {
+          setSeatActionTarget(null);
+          setCheckoutBookingRef(bRef);
+        }}
+        onRefund={(bRef) => {
+          setSeatActionTarget(null);
+          setCheckoutBookingRef(bRef);
+        }}
+      />
 
       {/* Board Swap Sheet */}
       {boardSwapTarget && (() => {
