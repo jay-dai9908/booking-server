@@ -59,7 +59,12 @@ const DEFAULT_WEIGHTS = {
 };
 
 export default function SeatLayoutPage() {
-  const [activeTab, setActiveTab] = useState('editor'); // 'editor' | 'rules' | 'mobile_list'
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return 'mobile_list';
+    }
+    return 'editor';
+  });
   const [layout, setLayout] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1342,6 +1347,11 @@ export default function SeatLayoutPage() {
       )}
 
       {/* Mobile list mode hint banner (Round 17 Item 2) */}
+      <div className="md:hidden p-3.5 bg-sg-paper rounded-2xl border border-sg-line text-[12px] text-sg-muted flex items-start gap-2">
+        <Smartphone className="w-4 h-4 text-sg-brown flex-shrink-0 mt-0.5" />
+        <span>手機可以新增桌子、調整順序和座位標記；要拖曳擺放位置請用平板或電腦。</span>
+      </div>
+
       {/* Mode Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-2 max-w-full">
         <div className="overflow-x-auto max-w-full no-scrollbar">
@@ -1376,7 +1386,7 @@ export default function SeatLayoutPage() {
       {activeTab === 'editor' && layout && (
         <div className="space-y-3">
           {/* Editor Action Toolbar */}
-          <div className="bg-white p-2.5 rounded-2xl border border-sg-line shadow-xs flex flex-wrap items-center justify-between gap-2 text-[12px]">
+          <div className="hidden md:flex bg-white p-2.5 rounded-2xl border border-sg-line shadow-xs flex-wrap items-center justify-between gap-2 text-[12px]">
             {/* Presets to Add */}
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="font-bold text-sg-muted text-[11px] uppercase mr-1">新增桌型：</span>
