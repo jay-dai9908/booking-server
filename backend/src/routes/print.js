@@ -11,6 +11,7 @@ import {
   listJobs,
   retryJob,
   cancelJob,
+  markJobPrinted,
   reportLocalJob,
   getStations,
   updateStation,
@@ -42,6 +43,7 @@ router.get('/jobs/:id', ...printStaffAuth, getJobById);
 router.get('/jobs', ...printStaffAuth, listJobs);
 router.post('/jobs/:id/retry', ...printStaffAuth, retryJob);
 router.post('/jobs/:id/cancel', ...printStaffAuth, cancelJob);
+router.post('/jobs/:id/mark-printed', ...printStaffAuth, markJobPrinted);
 router.post('/jobs/:id/local', ...printStaffAuth, reportLocalJob);
 
 // Station management endpoints

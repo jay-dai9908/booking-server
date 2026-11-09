@@ -271,6 +271,27 @@ export default function AccountingPage() {
     }
   };
 
+  const handleMarkPrinted = async (job) => {
+    try {
+      await api.post(`/print/jobs/${job.id}/mark-printed`);
+      showToast(`已手動標記 #${job.job_no || job.id} 為已印`);
+      fetchPrintJobs();
+      fetchEvents();
+    } catch (err) {
+      showToast(err.response?.data?.error || err.response?.data?.message || '標記已印失敗', true);
+    }
+  };
+
+  const handleRetryPrintJob = async (job) => {
+    try {
+      await api.post(`/print/jobs/${job.id}/retry`);
+      showToast(`已重新排入 #${job.job_no || job.id}`);
+      fetchPrintJobs();
+    } catch (err) {
+      showToast(err.response?.data?.error || err.response?.data?.message || '重印失敗', true);
+    }
+  };
+
   // Submit daily closing
   const handleSubmitClosing = async () => {
     try {
@@ -1147,33 +1168,67 @@ export default function AccountingPage() {
                   printJobs.map((job) => {
                     const timeStr = new Date(job.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
 
+                    const isExpiredClaimed = job.status === 'claimed' && (
+                      job.lease_until ? new Date() > new Date(job.lease_until) :
+                      (job.claimed_at ? (new Date().getTime() - new Date(job.claimed_at).getTime() > 60000) : true)
+                    );
+
                     return (
                       <tr key={job.id} className="hover:bg-sg-paper/30 transition">
-                        <td className="py-3 px-3 font-mono font-bold text-sg-ink text-[12px]">#{job.id}</td>
+                        <td className="py-3 px-3 font-mono font-bold text-sg-ink text-[12px]">#{job.job_no || job.id}</td>
                         <td className="py-3 px-3 font-bold text-sg-ink text-[13px]">{job.title || job.type}</td>
-                        <td className="py-3 px-3 text-[12px] text-sg-muted">{job.source_device || '門市端'}</td>
+                        <td className="py-3 px-3 text-[12px] text-sg-muted">{job.requested_device || job.source_device || '門市端'}</td>
                         <td className="py-3 px-3">
-                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
-                            job.status === 'succeeded' ? 'bg-sg-sage-soft text-sg-sage-ink' :
-                            job.status === 'failed' ? 'bg-sg-danger-soft text-sg-danger' :
-                            job.status === 'claimed' ? 'bg-sg-honey-soft text-sg-honey' :
-                            'bg-sg-paper text-sg-muted'
-                          }`}>
-                            {job.status === 'succeeded' ? '已印出' : job.status === 'failed' ? '失敗' : job.status === 'claimed' ? '列印中' : '排隊中'}
-                          </span>
+                          {isExpiredClaimed ? (
+                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              沒有回報
+                            </span>
+                          ) : (
+                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                              job.status === 'printed' || job.status === 'succeeded' ? 'bg-sg-sage-soft text-sg-sage-ink' :
+                              job.status === 'failed' ? 'bg-sg-danger-soft text-sg-danger' :
+                              job.status === 'claimed' ? 'bg-sg-honey-soft text-sg-honey' :
+                              job.status === 'cancelled' ? 'bg-sg-paper text-sg-muted' :
+                              'bg-sg-paper text-sg-muted'
+                            }`}>
+                              {job.status === 'printed' || job.status === 'succeeded' ? '已印出' :
+                               job.status === 'failed' ? '失敗' :
+                               job.status === 'claimed' ? '列印中' :
+                               job.status === 'cancelled' ? '已取消' : '排隊中'}
+                            </span>
+                          )}
                         </td>
                         <td className="py-3 px-3 font-mono text-[12px] text-sg-muted">{timeStr}</td>
                         <td className="py-3 px-3 text-right">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              await printJobOnThisDevice(job);
-                              showToast('已觸發本機列印');
-                            }}
-                            className="text-sg-brown font-bold text-[12px] hover:underline"
-                          >
-                            本機印
-                          </button>
+                          {isExpiredClaimed ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleMarkPrinted(job)}
+                                className="text-sg-brown font-bold text-[12px] hover:underline"
+                              >
+                                標記已印
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRetryPrintJob(job)}
+                                className="text-sg-muted font-bold text-[12px] hover:underline"
+                              >
+                                重印
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await printJobOnThisDevice(job);
+                                showToast('已觸發本機列印');
+                              }}
+                              className="text-sg-brown font-bold text-[12px] hover:underline"
+                            >
+                              本機印
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );

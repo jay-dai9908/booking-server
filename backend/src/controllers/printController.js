@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { queuePrintJob, claimNextJob, reportJobResult } from '../services/print/printService.js';
+import { log as auditLog } from '../services/audit/auditService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
 // Station endpoints (called by Sunmi App via verifyPrintStation)
@@ -185,6 +186,62 @@ export async function cancelJob(req, res) {
   } catch (error) {
     console.error('[cancelJob] Error:', error);
     return res.status(500).json({ error: '取消列印單失敗' });
+  }
+}
+
+export async function markJobPrinted(req, res) {
+  const { id } = req.params;
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  try {
+    const job = await prisma.printJob.findUnique({ where: { id: Number(id) } });
+    if (!job) return res.status(404).json({ error: '找不到該列印單' });
+
+    if (job.status !== 'claimed') {
+      return res.status(409).json({ error: `單據狀態為 ${job.status}，非 claimed 狀態無法手動標記已印` });
+    }
+
+    const setting = await prisma.globalSetting.findFirst();
+    const leaseSeconds = setting?.print_lease_seconds ?? 60;
+    const now = new Date();
+    const leaseUntil = job.lease_until || (job.claimed_at ? new Date(job.claimed_at.getTime() + leaseSeconds * 1000) : null);
+
+    if (leaseUntil && now <= leaseUntil) {
+      return res.status(409).json({ error: '列印租約尚未過期，無法手動標記已印' });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const updated = await tx.printJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'printed',
+          printed_at: now,
+          printed_by: staffName
+        }
+      });
+
+      await auditLog(tx, {
+        booking_ref: job.booking_ref,
+        event_type: 'manual_printed',
+        category: 'print',
+        summary: `手動標記已印 #${job.job_no}`,
+        print_job_id: job.id,
+        payment_id: job.payment_id,
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id,
+        device_label: deviceInfo?.device_label || '管理後台'
+      });
+
+      return updated;
+    });
+
+    return res.json({ success: true, job: result });
+  } catch (error) {
+    console.error('[markJobPrinted] Error:', error);
+    return res.status(500).json({ error: '手動標記已印失敗' });
   }
 }
 
