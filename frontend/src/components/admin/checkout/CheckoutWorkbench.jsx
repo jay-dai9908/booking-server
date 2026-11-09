@@ -943,6 +943,7 @@ export default function CheckoutWorkbench({
             <PaymentCompleteView
               data={successPaymentData}
               bookingRef={bookingRef}
+              booking={billData?.booking}
               onNextPerson={() => {
                 setSuccessPaymentData(null);
                 setShowSplitCollect(true);

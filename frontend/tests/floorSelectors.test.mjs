@@ -272,9 +272,10 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(formatElapsedText(elapsed), '0:39');
   });
 
-  await t.test('11. Spec 2.2: isBookingCompleted returns true when all persons have ended timer', () => {
+  await t.test('11. Prompt 10: isBookingCompleted only returns true when completed or paid and slot ended', () => {
     const activeBooking = {
       attendance: 'checked_in',
+      end_at: '2026-11-08T15:00:00+08:00',
       persons: [
         { person_no: 1, timer: { timer_started_at: '2026-11-08T10:00:00+08:00', timer_ended_at: null } },
         { person_no: 2, timer: { timer_started_at: '2026-11-08T10:00:00+08:00', timer_ended_at: '2026-11-08T12:00:00+08:00' } }
@@ -285,12 +286,18 @@ test('floorSelectors pure function tests', async (t) => {
     const allEndedBooking = {
       attendance: 'checked_in',
       billing: { status: 'paid' },
+      end_at: '2026-11-08T15:00:00+08:00',
       persons: [
         { person_no: 1, timer: { timer_started_at: '2026-11-08T10:00:00+08:00', timer_ended_at: '2026-11-08T12:00:00+08:00' } },
         { person_no: 2, timer: { timer_started_at: '2026-11-08T10:00:00+08:00', timer_ended_at: '2026-11-08T12:00:00+08:00' } }
       ]
     };
-    assert.strictEqual(isBookingCompleted(allEndedBooking), true);
+    // Slot not ended yet at 13:00 -> false
+    assert.strictEqual(isBookingCompleted(allEndedBooking, new Date('2026-11-08T13:00:00+08:00')), false);
+    // Slot ended at 15:05 -> true
+    assert.strictEqual(isBookingCompleted(allEndedBooking, new Date('2026-11-08T15:05:00+08:00')), true);
+    // Explicit completed attendance -> true
+    assert.strictEqual(isBookingCompleted({ attendance: 'completed' }), true);
   });
 
   await t.test('12. Spec 2.8: isSessionPast disables past sessions', () => {

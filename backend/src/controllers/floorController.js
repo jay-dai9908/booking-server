@@ -205,8 +205,8 @@ export async function checkIn(req, res) {
         }
       }
 
-      const isWholeGroupPaid = isBookingPaid || (allPersonsCovered && targetCount >= pax);
-      const finalAttendance = isWholeGroupPaid ? 'completed' : 'checked_in';
+      // Prompt 10: 整組都已付款時，attendance 仍然是 checked_in，只更新座位，不開始計時
+      const finalAttendance = 'checked_in';
 
       // Update reservation rows
       await tx.reservation.updateMany({
@@ -520,19 +520,29 @@ export async function handleTimer(req, res) {
       }
 
       if (action === 'end') {
-        const remainingRunning = await tx.bookingPerson.count({
-          where: {
-            booking_ref,
-            timer_started_at: { not: null },
-            timer_ended_at: null,
-            status: 'active'
-          }
-        });
-        if (remainingRunning === 0) {
+        if (person_nos === 'all') {
+          await tx.bookingPerson.updateMany({
+            where: { booking_ref, timer_ended_at: null },
+            data: { timer_ended_at: now }
+          });
           await tx.reservation.updateMany({
             where: { booking_ref },
             data: { attendance: 'completed' }
           });
+        } else {
+          const remainingNotEnded = await tx.bookingPerson.count({
+            where: {
+              booking_ref,
+              timer_ended_at: null,
+              status: 'active'
+            }
+          });
+          if (remainingNotEnded === 0) {
+            await tx.reservation.updateMany({
+              where: { booking_ref },
+              data: { attendance: 'completed' }
+            });
+          }
         }
       } else if (action === 'restart') {
         const hasRunningPerson = await tx.bookingPerson.findFirst({

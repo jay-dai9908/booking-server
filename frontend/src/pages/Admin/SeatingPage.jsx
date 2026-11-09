@@ -367,7 +367,10 @@ export default function SeatingPage() {
         let timerText = '計時中';
         let state = 'in_use';
 
-        if (person) {
+        if (isPaid) {
+          state = 'in_use';
+          timerText = '已結清';
+        } else if (person) {
           const tm = person.timer || person;
           const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
           if (isPaused) {
@@ -1039,10 +1042,16 @@ export default function SeatingPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <span className={`text-[11px] px-2 py-0.5 rounded-lg ${timerPill.pillClass}`}>
-                              {timerPill.label}
-                            </span>
-                            <StatusPill status={b.billing?.status || 'unpaid'} />
+                            {timerPill.label === '已結清' ? (
+                              <StatusPill status="paid" />
+                            ) : (
+                              <>
+                                <span className={`text-[11px] px-2 py-0.5 rounded-lg ${timerPill.pillClass}`}>
+                                  {timerPill.label}
+                                </span>
+                                <StatusPill status={b.billing?.status || 'unpaid'} />
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -1530,7 +1539,6 @@ export default function SeatingPage() {
                     variant="secondary"
                     size="sm"
                     data-testid="all-leave-btn"
-                    disabled={!hasActive}
                     onClick={() => setShowAllLeaveConfirm(true)}
                   >
                     全組離場

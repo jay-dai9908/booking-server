@@ -7,11 +7,13 @@ import api from '../../../api/axios';
 export default function PaymentCompleteView({
   data,
   bookingRef,
+  booking = null,
   onNextPerson,
   onDone
 }) {
   const [reprinting, setReprinting] = useState(false);
   const [printLocalMsg, setPrintLocalMsg] = useState(null);
+  const [departing, setDeparting] = useState(false);
 
   const payments = data?.payments || [];
   const firstPay = payments[0] || {};
@@ -26,6 +28,39 @@ export default function PaymentCompleteView({
   const unpaidPersons = allPersons.filter(p => !p.paid && !p.is_paid && !p.is_frozen && p.status !== 'removed');
   const hasUnpaid = unpaidPersons.length > 0;
   const nextUnpaid = unpaidPersons[0];
+
+  // Check if booking session has already ended
+  const endAt = booking?.end_at || data?.bill?.booking?.end_at;
+  const isSessionEnded = (() => {
+    if (endAt) {
+      const endMs = new Date(endAt).getTime();
+      if (!isNaN(endMs)) return endMs <= Date.now();
+    }
+    const sessDate = booking?.session_date || data?.bill?.booking?.session_date;
+    const endTime = booking?.end_time || data?.bill?.booking?.end_time;
+    if (sessDate && endTime) {
+      const dStr = typeof sessDate === 'string' ? sessDate.slice(0, 10) : new Date(sessDate).toISOString().slice(0, 10);
+      const endMs = new Date(`${dStr}T${endTime}:00+08:00`).getTime();
+      if (!isNaN(endMs)) return endMs <= Date.now();
+    }
+    return false;
+  })();
+
+  const handleCompleteAndDepart = async () => {
+    try {
+      setDeparting(true);
+      await api.post(`/floor/${bookingRef}/timer`, {
+        action: 'end',
+        person_nos: 'all'
+      });
+      onDone();
+    } catch (err) {
+      console.error('Depart error:', err);
+      onDone();
+    } finally {
+      setDeparting(false);
+    }
+  };
 
   const handleReprint = async () => {
     if (!firstPay.id) return;
@@ -176,7 +211,7 @@ export default function PaymentCompleteView({
               結第 {nextUnpaid.person_no} 位
             </Button>
           </div>
-        ) : (
+        ) : isSessionEnded ? (
           <Button
             variant="primary"
             size="md"
@@ -185,6 +220,26 @@ export default function PaymentCompleteView({
           >
             完成
           </Button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={onDone}
+              className="flex-1"
+            >
+              客人還沒走
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              loading={departing}
+              onClick={handleCompleteAndDepart}
+              className="flex-1"
+            >
+              完成並離場
+            </Button>
+          </div>
         )}
       </div>
     </div>

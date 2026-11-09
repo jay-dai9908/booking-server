@@ -11,15 +11,16 @@ test('isBookingCompleted shared selector tests', async (t) => {
     assert.strictEqual(isBookingCompleted({ status: 'cancelled' }), true);
   });
 
-  await t.test('3. Checked in with all persons ended timer returns true', () => {
+  await t.test('3. Checked in with all persons ended timer does NOT return true if slot has not ended and attendance not completed', () => {
     const booking = {
       attendance: 'checked_in',
+      end_at: '2026-11-08T14:00:00Z',
       persons: [
         { person_no: 1, timer: { timer_started_at: '2026-11-08T10:00:00Z', timer_ended_at: '2026-11-08T12:00:00Z' } },
         { person_no: 2, timer: { timer_started_at: '2026-11-08T10:00:00Z', timer_ended_at: '2026-11-08T11:30:00Z' } }
       ]
     };
-    assert.strictEqual(isBookingCompleted(booking), true);
+    assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T12:30:00Z')), false);
   });
 
   await t.test('4. Checked in active unpaid returns false', () => {
@@ -48,7 +49,7 @@ test('isBookingCompleted shared selector tests', async (t) => {
     assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T17:56:00Z')), true);
   });
 
-  await t.test('6. Paid booking whose running persons are all covered by payment returns true (e.g. 陳渝忻 paused/running)', () => {
+  await t.test('6. Paid booking whose slot has NOT ended returns false (remains in-use)', () => {
     const booking = {
       attendance: 'checked_in',
       billing: { status: 'paid' },
@@ -57,8 +58,8 @@ test('isBookingCompleted shared selector tests', async (t) => {
         { person_no: 1, timer: { timer_started_at: '2026-11-08T15:00:00Z', timer_ended_at: null, paused_at: '2026-11-08T16:00:00Z' }, paid: true }
       ]
     };
-    // Even if booking time slot is not ended yet, running persons are covered by payment
-    assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T16:30:00Z')), true);
+    // Even though paid, booking time slot is not ended yet -> must return false
+    assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T16:30:00Z')), false);
   });
 
   await t.test('7. Partial paid booking where someone running is not paid returns false', () => {

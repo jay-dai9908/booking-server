@@ -6,6 +6,7 @@ import path from 'node:path';
 import prisma from '../src/prismaClient.js';
 import { checkIn, handleTimer } from '../src/controllers/floorController.js';
 import { getLiveFloorData } from '../src/services/floor/liveService.js';
+import { occupancyForSessions } from '../src/services/seating/layoutService.js';
 import { isBookingCompleted } from '../../shared/floorSelectors.js';
 import { toTaipeiDateString, dateOnly } from '../../shared/time.js';
 
@@ -133,6 +134,12 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
       }
     });
     if (sess) {
+      if (endTime && sess.end_time !== endTime) {
+        sess = await prisma.session.update({
+          where: { id: sess.id },
+          data: { end_time: endTime }
+        });
+      }
       return sess;
     }
     sess = await prisma.session.create({
@@ -150,8 +157,8 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
   await cleanup();
 
   // Test 1: 先結帳、再帶位
-  await t.test('1. 先結帳、再帶位：訂單直接視為已離場，不設定 timer_started_at，無超時警報', async () => {
-    const session = await getOrCreateTestSession('10:00', '23:59');
+  await t.test('1. 先結帳、再帶位：待入座 -> 帶位後在使用中、不計時、座位被佔用、同時段排位不會用到；時段結束自動離場；按全組離場釋出座位', async () => {
+    const session = await getOrCreateTestSession('20:00', '22:00');
     const ref = 'BK-TEST-PAID-FIRST';
     createdBookingRefs.push(ref);
 
@@ -186,7 +193,14 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
       }
     });
 
-    // 店員按「帶位並開始計時」
+    // 1. 先結帳、還沒帶位：在待入座
+    const liveBeforeCheckIn = await getLiveFloorData(todayStr);
+    const bookingBefore = liveBeforeCheckIn.bookings.find(b => b.booking_ref === ref);
+    assert.ok(bookingBefore, 'Booking should exist in live floor data');
+    assert.equal(bookingBefore.attendance, 'pending', '還沒帶位時 attendance 為 pending（待入座）');
+    assert.equal(isBookingCompleted(bookingBefore), false, '未離場');
+
+    // 2. 店員帶位
     const checkInMock = createMockReqRes({
       params: { booking_ref: ref },
       body: { seats: ['B1-1'], start_timer: true }
@@ -194,23 +208,45 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     await checkIn(checkInMock.req, checkInMock.res);
     assert.equal(checkInMock.res.getStatusCode(), 200);
 
-    // 檢查人員計時狀態：已付款者不開始計時
+    // 帶位後：attendance 仍然是 checked_in，只更新座位，不開始計時
+    const updatedResv = await prisma.reservation.findFirst({ where: { booking_ref: ref } });
+    assert.equal(updatedResv.attendance, 'checked_in', '帶位後 attendance 仍為 checked_in');
+
     const person = await prisma.bookingPerson.findFirst({ where: { booking_ref: ref, person_no: 1 } });
     assert.ok(person, 'BookingPerson should exist');
-    assert.equal(person.timer_started_at, null, '已付款的人不設定 timer_started_at');
+    assert.equal(person.timer_started_at, null, '已付款的人不設定 timer_started_at（不開始計時）');
 
-    // 檢查預約出席狀態：整組已付款直接視為 completed
-    const updatedResv = await prisma.reservation.findFirst({ where: { booking_ref: ref } });
-    assert.equal(updatedResv.attendance, 'completed', '整組已付款帶位後直接視為 completed');
-
-    // 檢查 liveData: 出現在 completed，無超時警報
-    const live = await getLiveFloorData(todayStr);
-    const liveBooking = live.bookings.find(b => b.booking_ref === ref);
+    // 在使用中、座位被佔用、同時段排位不會用到這些座位
+    const liveAfterCheckIn = await getLiveFloorData(todayStr);
+    const liveBooking = liveAfterCheckIn.bookings.find(b => b.booking_ref === ref);
     assert.ok(liveBooking);
-    assert.equal(isBookingCompleted(liveBooking), true);
-    assert.equal(liveBooking.attendance, 'completed');
-    const hasOvertimeAlert = (live.alerts || []).some(a => a.booking_ref === ref && a.type === 'overtime');
-    assert.equal(hasOvertimeAlert, false, '已結清的訂單不應有超時警報');
+    assert.equal(liveBooking.attendance, 'checked_in', 'live 數據中仍為 checked_in（使用中）');
+    assert.deepEqual(liveBooking.assigned_seats, ['B1-1'], '座位照常佔用');
+
+    const occ = await occupancyForSessions(prisma, [session.id]);
+    assert.equal(occ[session.id]?.['B1-1'], ref, '同時段排位時該座位被此預約佔用');
+
+    // 3. 已結清、時段還沒結束：在使用中
+    const midSlotTime = new Date(`${todayStr}T21:00:00+08:00`);
+    assert.equal(isBookingCompleted(liveBooking, midSlotTime), false, '時段還沒結束時留在使用中');
+
+    // 時段結束後：自動移到已離場
+    const afterSlotTime = new Date(`${todayStr}T22:05:00+08:00`);
+    assert.equal(isBookingCompleted(liveBooking, afterSlotTime), true, '時段結束後自動移到已離場');
+
+    // 4. 已結清後按全組離場：移到已離場，座位釋出
+    const leaveMock = createMockReqRes({
+      params: { booking_ref: ref },
+      body: { action: 'end', person_nos: 'all' }
+    });
+    await handleTimer(leaveMock.req, leaveMock.res);
+    assert.equal(leaveMock.res.getStatusCode(), 200);
+
+    const departedResv = await prisma.reservation.findFirst({ where: { booking_ref: ref } });
+    assert.equal(departedResv.attendance, 'completed', '按全組離場後 attendance 變為 completed');
+
+    const occAfterLeave = await occupancyForSessions(prisma, [session.id]);
+    assert.equal(occAfterLeave[session.id]?.['B1-1'], undefined, '離場後座位釋出');
   });
 
   // Test 2: 全組離場
@@ -498,8 +534,8 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     assert.ok(pPaid.timer_ended_at != null, 'Paid person timer remains ended');
   });
 
-  // Test 6: 單人離場且有其他已付款無計時成員
-  await t.test('6. 單人離場且有其他已付款無計時成員：所有計時中成員離場後，整筆預約正確標記 completed', async () => {
+  // Test 6: 未結帳或有成員在場：只有每一位都按了離場，整筆預約才標記 completed
+  await t.test('6. 每一位都按了離場：只有一位離場仍為 checked_in；每一位都離場後標記 completed', async () => {
     const session = await getOrCreateTestSession('15:00', '23:59');
     const ref = 'BK-TEST-SINGLE-END-WITH-PAID';
     createdBookingRefs.push(ref);
@@ -518,8 +554,6 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     });
 
     const now = new Date();
-    // Person 1 was paid in advance, so timer_started_at is null
-    // Person 2 is running
     await prisma.bookingPerson.createMany({
       data: [
         { booking_ref: ref, person_no: 1, seat_code: 'B1-1', timer_started_at: null, timer_ended_at: null, status: 'active' },
@@ -527,16 +561,27 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
       ]
     });
 
-    // Person 2 leaves via single departure
-    const leaveMock = createMockReqRes({
+    // 第 2 位按離場
+    const leaveMock2 = createMockReqRes({
       params: { booking_ref: ref },
       body: { action: 'end', person_nos: [2] }
     });
-    await handleTimer(leaveMock.req, leaveMock.res);
-    assert.equal(leaveMock.res.getStatusCode(), 200);
+    await handleTimer(leaveMock2.req, leaveMock2.res);
+    assert.equal(leaveMock2.res.getStatusCode(), 200);
 
-    const resvAfter = await prisma.reservation.findFirst({ where: { booking_ref: ref } });
-    assert.equal(resvAfter.attendance, 'completed', 'Booking must be completed when all running persons departed');
+    const resvAfterOne = await prisma.reservation.findFirst({ where: { booking_ref: ref } });
+    assert.equal(resvAfterOne.attendance, 'checked_in', '還有人尚未離場時維持 checked_in');
+
+    // 第 1 位也按離場（每一位都按了離場）
+    const leaveMock1 = createMockReqRes({
+      params: { booking_ref: ref },
+      body: { action: 'end', person_nos: [1] }
+    });
+    await handleTimer(leaveMock1.req, leaveMock1.res);
+    assert.equal(leaveMock1.res.getStatusCode(), 200);
+
+    const resvAfterBoth = await prisma.reservation.findFirst({ where: { booking_ref: ref } });
+    assert.equal(resvAfterBoth.attendance, 'completed', '每一位都按了離場後整筆預約標記 completed');
   });
 
   await cleanup();
