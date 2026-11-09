@@ -19,12 +19,13 @@ import Button from '../../components/customer/Button';
 import { printJobOnThisDevice } from '../../utils/sunmiPrinter';
 
 export default function PrintStationPage() {
-  const { status: printerStatus, refresh: refreshPrinterStatus } = usePrinterStatus(5000);
+  const { station, refresh: refreshPrinterStatus } = usePrinterStatus(5000);
   const [jobs, setJobs] = useState([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [stationList, setStationList] = useState([]);
   const [isPairing, setIsPairing] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
+  const [isTogglingAccept, setIsTogglingAccept] = useState(false);
 
   // Check if running inside Sunmi Android App WebView
   const isSunmiApp = typeof window !== 'undefined' && Boolean(window.AndroidPrinter?.getStationStatus);
@@ -62,10 +63,43 @@ export default function PrintStationPage() {
     setTimeout(() => setActionMsg(null), 3000);
   };
 
+  const isOnline = Boolean(station?.online);
+  const isAccepting = station ? station.accepting !== false : true;
+
+  const lastSeenFull = station?.last_seen_at
+    ? new Date(station.last_seen_at).toLocaleTimeString('zh-TW', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Taipei'
+      })
+    : null;
+
+  const lastSeenShort = station?.last_seen_at
+    ? new Date(station.last_seen_at).toLocaleTimeString('zh-TW', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Taipei'
+      })
+    : null;
+
+  const getPrinterStateLabel = () => {
+    if (!isOnline) {
+      return lastSeenShort ? `無法取得（最後回報 ${lastSeenShort}）` : '無法取得（離線）';
+    }
+    if (station?.state === 'no_paper') return '缺紙';
+    if (station?.state === 'cover_open') return '上蓋開啟';
+    if (station?.state === 'overheat') return '過熱';
+    if (station?.state === 'error') return station.message || '印表機異常';
+    return station?.message || '正常 · 紙張充足';
+  };
+
   // Test Print
   const handleTestPrint = async () => {
     try {
-      const defaultStation = stationList.find(s => s.is_default) || stationList[0];
+      const defaultStation = station || stationList.find(s => s.is_default) || stationList[0];
       const res = defaultStation
         ? await api.post(`/print/stations/${defaultStation.id}/test`)
         : await api.post('/print/jobs', { type: 'test', title: '印表機測試頁' });
@@ -76,6 +110,28 @@ export default function PrintStationPage() {
       }
     } catch (err) {
       showToast(err.response?.data?.error || '測試列印失敗');
+    }
+  };
+
+  // Toggle accepting orders
+  const handleToggleAccepting = async () => {
+    const targetStation = station || stationList.find(s => s.is_default) || stationList[0];
+    if (!targetStation?.id) {
+      showToast('尚未配對列印站');
+      return;
+    }
+    try {
+      setIsTogglingAccept(true);
+      await api.patch(`/print/stations/${targetStation.id}`, {
+        accepting: !isAccepting
+      });
+      showToast(isAccepting ? '已暫停接單' : '已恢復接單');
+      refreshPrinterStatus();
+      fetchStations();
+    } catch (err) {
+      showToast(err.response?.data?.error || '變更接單狀態失敗');
+    } finally {
+      setIsTogglingAccept(false);
     }
   };
 
@@ -126,8 +182,8 @@ export default function PrintStationPage() {
   };
 
   // Stats calculation
-  const succeededCount = jobs.filter(j => j.status === 'succeeded').length;
-  const pendingCount = jobs.filter(j => j.status === 'pending' || j.status === 'claimed').length;
+  const printedCount = jobs.filter(j => j.status === 'succeeded' || j.status === 'printed').length;
+  const waitingCount = jobs.filter(j => j.status === 'pending' || j.status === 'queued' || j.status === 'claimed').length;
   const failedCount = jobs.filter(j => j.status === 'failed').length;
 
   return (
@@ -146,17 +202,22 @@ export default function PrintStationPage() {
             <Printer className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[13px] font-bold text-sg-ink">商米 POS 櫃檯收據與票券印表機</p>
+            <p className="text-[13px] font-bold text-sg-ink">
+              {station?.name || '商米 POS 櫃檯收據與票券印表機'}
+            </p>
+            {lastSeenFull && (
+              <p className="text-[11px] text-sg-muted">最後回報 {lastSeenFull}</p>
+            )}
           </div>
         </div>
 
         <div>
           <span className={`px-3 py-1 rounded-full text-[12px] font-bold ${
-            printerStatus?.online
+            isOnline
               ? 'bg-sg-sage-soft text-sg-sage-ink'
               : 'bg-sg-danger-soft text-sg-danger'
           }`}>
-            {printerStatus?.online ? '在線' : '離線'}
+            {isOnline ? '在線' : '離線'}
           </span>
         </div>
       </div>
@@ -177,14 +238,18 @@ export default function PrintStationPage() {
           <div className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line">
             <span className="text-sg-muted text-[11px] block">印表機狀態</span>
             <span className="font-bold text-sg-ink">
-              {printerStatus?.label || '正常 · 紙張充足'}
+              {getPrinterStateLabel()}
             </span>
           </div>
 
           <div className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line">
             <span className="text-sg-muted text-[11px] block">背景接單服務</span>
             <span className="font-bold text-sg-ink">
-              {isSunmiApp ? '執行中（螢幕可關閉）' : '一般瀏覽器模式'}
+              {!isAccepting
+                ? '已暫停接單'
+                : isSunmiApp
+                ? '執行中（螢幕可關閉）'
+                : '接單中（一般瀏覽器）'}
             </span>
           </div>
         </div>
@@ -193,8 +258,8 @@ export default function PrintStationPage() {
         <div className="flex items-center justify-between pt-2 border-t border-sg-line text-[13px]">
           <span className="text-sg-muted">今日統計</span>
           <div className="flex items-center gap-3">
-            <span className="text-sg-ink">已印 <strong className="font-num">{succeededCount}</strong></span>
-            <span className="text-sg-brown">等待 <strong className="font-num">{pendingCount}</strong></span>
+            <span className="text-sg-ink">今日已印 <strong className="font-num">{printedCount}</strong> 張</span>
+            <span className="text-sg-brown">等待 <strong className="font-num">{waitingCount}</strong></span>
             <span className="text-sg-danger">失敗 <strong className="font-num">{failedCount}</strong></span>
           </div>
         </div>
@@ -221,8 +286,14 @@ export default function PrintStationPage() {
           <div className="divide-y divide-sg-line">
             {jobs.map((job) => {
               const isFailed = job.status === 'failed';
-              const isSuccess = job.status === 'succeeded';
+              const isSuccess = job.status === 'succeeded' || job.status === 'printed';
               const timeStr = new Date(job.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' });
+              const printedTime = new Date(job.printed_at || job.updated_at || job.created_at).toLocaleTimeString('zh-TW', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'Asia/Taipei'
+              });
 
               return (
                 <div key={job.id} className="py-3 flex items-center justify-between gap-2">
@@ -234,9 +305,10 @@ export default function PrintStationPage() {
                       <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
                         isSuccess ? 'bg-sg-sage-soft text-sg-sage-ink' :
                         isFailed ? 'bg-sg-danger-soft text-sg-danger' :
+                        job.status === 'claimed' ? 'bg-sg-honey-soft text-sg-honey-ink' :
                         'bg-sg-paper text-sg-muted'
                       }`}>
-                        {isSuccess ? '已印出' : isFailed ? '失敗' : '排隊中'}
+                        {isSuccess ? `已印 ${printedTime}` : isFailed ? '失敗' : job.status === 'claimed' ? '列印中' : '排隊中'}
                       </span>
                     </div>
 
@@ -256,7 +328,7 @@ export default function PrintStationPage() {
                           size="sm"
                           onClick={() => handleRetryJob(job.id)}
                         >
-                          重印
+                          換好紙，重印
                         </Button>
                         <Button
                           variant="secondary"
@@ -266,6 +338,10 @@ export default function PrintStationPage() {
                           取消
                         </Button>
                       </>
+                    ) : isSuccess ? (
+                      <span className="text-[12px] text-sg-sage-ink font-bold">
+                        已印 {printedTime}
+                      </span>
                     ) : (
                       <Button
                         variant="secondary"
@@ -288,14 +364,26 @@ export default function PrintStationPage() {
 
       {/* Bottom Actions */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-        <Button
-          variant="secondary"
-          size="md"
-          onClick={handleTestPrint}
-          className="w-full sm:w-auto whitespace-nowrap"
-        >
-          測試列印
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={handleTestPrint}
+            className="w-full sm:w-auto whitespace-nowrap"
+          >
+            測試列印
+          </Button>
+
+          <Button
+            variant={isAccepting ? "secondary" : "primary"}
+            size="md"
+            onClick={handleToggleAccepting}
+            loading={isTogglingAccept}
+            className="w-full sm:w-auto whitespace-nowrap"
+          >
+            {isAccepting ? '暫停接單' : '恢復接單'}
+          </Button>
+        </div>
 
         {isSunmiApp && (
           <Button

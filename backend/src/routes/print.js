@@ -24,7 +24,7 @@ const router = express.Router();
 
 const printStaffAuth = [
   verifyToken,
-  requireAnyPermission(['reservations', 'seating', 'weekly', 'accounting', 'equipment', 'coupons'])
+  requireAnyPermission(['reservations', 'seating', 'weekly', 'accounting', 'equipment', 'coupons', 'settings'])
 ];
 const settingsAuth = [
   verifyToken,
@@ -47,10 +47,10 @@ router.post('/jobs/:id/mark-printed', ...printStaffAuth, markJobPrinted);
 router.post('/jobs/:id/local', ...printStaffAuth, reportLocalJob);
 
 // Station management endpoints
-router.get('/stations', ...settingsAuth, getStations);
-router.patch('/stations/:id', ...settingsAuth, updateStation);
+router.get('/stations', ...printStaffAuth, getStations);
+router.patch('/stations/:id', ...printStaffAuth, updateStation);
 router.post('/stations/pair', ...settingsAuth, pairStation);
 router.post('/stations/:id/unpair', ...settingsAuth, unpairStation);
-router.post('/stations/:id/test', ...settingsAuth, testStation);
+router.post('/stations/:id/test', ...printStaffAuth, testStation);
 
 export default router;
