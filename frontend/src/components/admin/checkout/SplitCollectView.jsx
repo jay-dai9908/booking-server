@@ -20,7 +20,8 @@ export default function SplitCollectView({
   bookingRef,
   billData,
   onPaymentSuccess,
-  initialPersonNo = null
+  initialPersonNo = null,
+  onOpenSharedSplit = null
 }) {
   const bill = billData?.bill || {};
   const persons = bill.persons || [];
@@ -266,7 +267,19 @@ export default function SplitCollectView({
       <ResponsivePanel
         isOpen={isOpen}
         onClose={onClose}
-        title={successPaymentData ? '收款完成' : '分開收款與帳務作業'}
+        title={
+          <div>
+            <button
+              type="button"
+              data-testid="back-to-workbench-btn"
+              onClick={onClose}
+              className="text-[12px] font-normal text-sg-brown hover:text-sg-brown-dark hover:underline flex items-center gap-0.5 mb-1 cursor-pointer"
+            >
+              ‹ 回結帳工作台
+            </button>
+            <span>{successPaymentData ? '收款完成' : '分開收款與帳務作業'}</span>
+          </div>
+        }
         subtitle={`預約單號 ${billData?.booking?.ref_display || bookingRef}`}
         headerRight={<StatusPill data-testid="split-status-pill" status={billData?.status?.code || 'unpaid'} label={billData?.status?.label} />}
         footer={
@@ -369,7 +382,41 @@ export default function SplitCollectView({
           <div className="space-y-4 py-2">
             {/* Persons Checklist */}
             <div className="space-y-2">
-              <span className="text-[13px] font-bold text-sg-ink block">選擇本次結帳對象</span>
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-bold text-sg-ink">選擇本次結帳對象</span>
+                <button
+                  type="button"
+                  data-testid="select-all-unpaid-btn"
+                  onClick={() => {
+                    const unpaidNos = persons.filter(p => !p.paid && !p.is_paid && !p.is_frozen).map(p => p.person_no);
+                    setSelectedPersonNos(unpaidNos);
+                  }}
+                  className="text-[12px] font-bold text-sg-brown hover:text-sg-brown-dark hover:underline cursor-pointer"
+                >
+                  全選未付
+                </button>
+              </div>
+
+              {/* Shared items split row */}
+              <button
+                type="button"
+                data-testid="open-shared-split-panel-btn"
+                onClick={() => {
+                  if (onOpenSharedSplit) {
+                    onOpenSharedSplit();
+                  }
+                }}
+                className="w-full p-2.5 rounded-2xl border border-sg-line bg-white hover:bg-sg-paper/60 transition flex items-center justify-between text-left group"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-bold text-sg-ink">整單共用項目 · 改分攤</span>
+                  {bill.order_addons?.length > 0 && (
+                    <span className="text-[11px] text-sg-muted font-medium">({bill.order_addons.length} 項)</span>
+                  )}
+                </div>
+                <span className="text-[13px] text-sg-muted group-hover:text-sg-ink transition font-bold">›</span>
+              </button>
+
               <div className="space-y-2">
                 {persons.map((p) => {
                   const isPaid = Boolean(p.paid || p.is_paid);
@@ -380,39 +427,44 @@ export default function SplitCollectView({
                     return (
                       <div
                         key={p.person_no}
-                        className="p-3 rounded-2xl bg-sg-paper/60 border border-sg-line flex items-center justify-between"
+                        className="p-3 rounded-2xl bg-sg-paper/60 border border-sg-line space-y-1.5"
                       >
-                        <div className="flex items-center gap-2.5">
-                          <Lock className="w-4 h-4 text-sg-muted" />
-                          <div>
-                            <div className="text-[13px] font-bold text-sg-ink">
-                              第 {p.person_no} 位 ({p.seat_code || '未帶位'})
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <Lock className="w-4 h-4 text-sg-muted flex-shrink-0" />
+                            <div>
+                              <div className="text-[13px] font-bold text-sg-ink">
+                                第 {p.person_no} 位 ({p.seat_code || '未帶位'})
+                              </div>
+                              <div className="text-[11px] text-sg-sage-ink font-bold">已結清 NT${p.total}</div>
                             </div>
-                            <div className="text-[11px] text-sg-sage-ink font-bold">已結清 NT${p.total}</div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSupplementTarget(p);
+                                setActionAmount(p.pending_supplement || 60);
+                              }}
+                              className="px-2.5 py-1 rounded-xl text-[12px] font-bold border border-sg-line bg-white hover:bg-sg-paper"
+                            >
+                              補收
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRefundTarget(p);
+                                setActionAmount(p.total);
+                              }}
+                              className="px-2.5 py-1 rounded-xl text-[12px] font-bold border border-sg-line bg-white hover:bg-sg-paper text-sg-danger"
+                            >
+                              退款
+                            </button>
                           </div>
                         </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSupplementTarget(p);
-                              setActionAmount(60);
-                            }}
-                            className="px-2.5 py-1 rounded-xl text-[12px] font-bold border border-sg-line bg-white hover:bg-sg-paper"
-                          >
-                            補收
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRefundTarget(p);
-                              setActionAmount(p.total);
-                            }}
-                            className="px-2.5 py-1 rounded-xl text-[12px] font-bold border border-sg-line bg-white hover:bg-sg-paper text-sg-danger"
-                          >
-                            退款
-                          </button>
+                        <div className="text-[11px] text-sg-muted pl-6">
+                          第 {p.person_no} 位已付，不能直接改時數。要調整請按「補收」
                         </div>
                       </div>
                     );

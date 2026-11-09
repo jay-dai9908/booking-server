@@ -103,6 +103,7 @@ export default function CheckoutWorkbench({
   // Debounce and queue refs
   const saveTimeoutRef = useRef(null);
   const isInitialLoadRef = useRef(true);
+  const hasAutoOpenedSplitRef = useRef(false);
   const currentRevRef = useRef(0);
   const pendingDraftRef = useRef(null);
   const isSavingRef = useRef(false);
@@ -135,6 +136,16 @@ export default function CheckoutWorkbench({
         setOverrideReason(res.data.draft.total_override.reason || '熟客優惠');
       }
       isInitialLoadRef.current = true;
+
+      // Round 14 Item 2: If status is partial (已結 x/n), default to SplitCollectView
+      if (!hasAutoOpenedSplitRef.current) {
+        hasAutoOpenedSplitRef.current = true;
+        const isPartial = res.data?.status?.code === 'partial' ||
+          (typeof res.data?.status?.label === 'string' && res.data?.status?.label.startsWith('已結 '));
+        if (isPartial) {
+          setShowSplitCollect(true);
+        }
+      }
     } catch (err) {
       console.error('[CheckoutWorkbench] Load error:', err);
       setLoadError(err.response?.data?.error || '價格設定讀不到，暫時無法結帳，請重新整理');
@@ -300,6 +311,7 @@ export default function CheckoutWorkbench({
   useEffect(() => {
     isMountedRef.current = true;
     if (isOpen && bookingRef) {
+      hasAutoOpenedSplitRef.current = false;
       loadBill();
     } else {
       setBillData(null);
