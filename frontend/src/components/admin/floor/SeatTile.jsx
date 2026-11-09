@@ -81,7 +81,7 @@ export default function SeatTile({
       </div>
 
       {/* Middle row: paxName (12px, truncated over 4 chars) */}
-      {size === 'full' && (
+      {(size === 'full' || size === 'demo') && (
         <div className="text-[12px] font-medium leading-tight truncate text-sg-ink">
           {displayName}
         </div>

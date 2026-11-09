@@ -293,10 +293,39 @@ async function run() {
     await guestNameEl.waitFor({ state: 'visible', timeout: 5000 });
     console.log('Guest name is visible on tablet floor plan!');
 
-    // Screenshot 1: 平板平面圖
+    // Screenshot 1: 平板平面圖（預設縮放）
     const shotPath1 = path.join(SCREENSHOT_DIR, 'tablet-floor-plan.png');
     await page.screenshot({ path: shotPath1 });
     console.log(`Screenshot 1 saved: ${shotPath1}`);
+
+    // Round 13b Item 2 Verification: 平板預設畫面中，任兩個座位格的外框不重疊
+    console.log('Verifying Round 13b Item 2: Seat tiles do not overlap in tablet default view...');
+    const allSeatTiles = await page.locator('[data-testid="floor-plan-container"] [data-seat-code]').all();
+    assert.ok(allSeatTiles.length >= 2, 'There should be multiple seat tiles rendered on floor plan');
+
+    const tileBoxes = [];
+    for (const t of allSeatTiles) {
+      const code = await t.getAttribute('data-seat-code');
+      const b = await t.boundingBox();
+      if (b && b.width > 0 && b.height > 0) {
+        tileBoxes.push({ code, box: b });
+      }
+    }
+
+    for (let i = 0; i < tileBoxes.length; i++) {
+      for (let j = i + 1; j < tileBoxes.length; j++) {
+        const a = tileBoxes[i];
+        const b = tileBoxes[j];
+        const overlapX = Math.max(0, Math.min(a.box.x + a.box.width, b.box.x + b.box.width) - Math.max(a.box.x, b.box.x));
+        const overlapY = Math.max(0, Math.min(a.box.y + a.box.height, b.box.y + b.box.height) - Math.max(a.box.y, b.box.y));
+        const overlaps = overlapX > 0.5 && overlapY > 0.5;
+        assert.ok(
+          !overlaps,
+          `Seat tiles ${a.code} and ${b.code} must not overlap! (overlapX=${overlapX.toFixed(1)}, overlapY=${overlapY.toFixed(1)})`
+        );
+      }
+    }
+    console.log(`Verified all ${tileBoxes.length} seat tiles do not overlap in tablet default view!`);
 
     // Verify "置中" button resets zoom to 1
     const centerBtn = page.locator('[data-testid="floor-plan-center-btn"]');
@@ -433,7 +462,36 @@ async function run() {
     await page.locator('[data-testid="seat-panel-refund-btn"]').waitFor({ state: 'visible', timeout: 5000 });
     const paidSubtitle = await page.locator('[role="dialog"] p').first().textContent();
     assert.ok(paidSubtitle.includes('已付 · 現金 18:10'), `Expected subtitle to include '已付 · 現金 18:10', got: ${paidSubtitle}`);
-    console.log('Confirmed paid seat shows correct buttons and subtitle format');
+    // Screenshot 2: 手機平面圖
+    console.log('Capturing Screenshot 2: mobile floor plan...');
+    const mobileContext = await browser.newContext({
+      viewport: { width: 390, height: 844 }
+    });
+    const mobilePage = await mobileContext.newPage();
+    try {
+      await mobilePage.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
+      const mPass = mobilePage.locator('input[type="password"]');
+      await mPass.waitFor({ state: 'visible', timeout: 10000 });
+      await mPass.fill(ADMIN_PASSWORD);
+      await mobilePage.locator('button[type="submit"]').click();
+      await mobilePage.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 10000 });
+      await mobilePage.waitForTimeout(400);
+
+      await mobilePage.goto(`${BASE_URL}/admin/seating`, { waitUntil: 'networkidle' });
+      await mobilePage.waitForTimeout(600);
+
+      const mFloorTab = mobilePage.locator('button:has-text("平面圖")').first();
+      if (await mFloorTab.isVisible()) {
+        await mFloorTab.click();
+        await mobilePage.waitForTimeout(400);
+      }
+
+      const shotPathMobile = path.join(SCREENSHOT_DIR, 'mobile-floor-plan.png');
+      await mobilePage.screenshot({ path: shotPathMobile });
+      console.log(`Screenshot 2 saved: ${shotPathMobile}`);
+    } finally {
+      await mobileContext.close();
+    }
 
     console.log('--- All Round 13 Playwright Verifications Passed! ---');
   } finally {

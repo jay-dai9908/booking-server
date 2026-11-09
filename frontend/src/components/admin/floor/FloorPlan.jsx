@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import SeatTile from './SeatTile';
 
 export default function FloorPlan({
@@ -51,13 +51,97 @@ export default function FloorPlan({
   const bgOpacity = (layout.background_opacity ?? layout.bg_opacity ?? 30) / 100;
   const bgRect = layout.background_rect || { x: 0, y: 0, w: canvasW, h: canvasH };
 
-  // Base ratio k = container width / canvas_w
-  const baseK = (fitContainer && containerWidth > 0)
+  // Calculate seat center positions in canvas coordinates
+  const seatCenters = useMemo(() => {
+    return seats.map(seat => {
+      const table = tables.find(t => t.id === seat.table_id);
+      const tRot = (table?.rotation || 0) * (Math.PI / 180);
+      const lx = seat.lx || 0;
+      const ly = seat.ly || 0;
+      const cos = Math.cos(tRot);
+      const sin = Math.sin(tRot);
+      const rotLx = lx * cos - ly * sin;
+      const rotLy = lx * sin + ly * cos;
+      const rawCx = (table?.cx || 0) + rotLx;
+      const rawCy = (table?.cy || 0) + rotLy;
+      return {
+        seat,
+        code: seat.code,
+        x: rawCx,
+        y: rawCy
+      };
+    });
+  }, [seats, tables]);
+
+  // Find minimum distance between any two seat centers in canvas coordinates
+  const minDistCanvas = useMemo(() => {
+    if (seatCenters.length < 2) return null;
+    let min = Infinity;
+    for (let i = 0; i < seatCenters.length; i++) {
+      for (let j = i + 1; j < seatCenters.length; j++) {
+        const d = Math.hypot(seatCenters[i].x - seatCenters[j].x, seatCenters[i].y - seatCenters[j].y);
+        if (d > 0.001 && d < min) {
+          min = d;
+        }
+      }
+    }
+    return min === Infinity ? null : min;
+  }, [seatCenters]);
+
+  // Round 13b Item 2:
+  // 預設縮放 k 取「塞進寬度」和「最近兩個座位中心距離 ≥ 50px」兩者中比較大的那個
+  const kFit = (fitContainer && containerWidth > 0)
     ? (containerWidth / canvasW)
     : (scale || 1);
+  const kMinDist = minDistCanvas ? (50 / minDistCanvas) : 0;
+  const baseK = Math.max(kFit, kMinDist);
 
   // Total coordinate scale k: baseK * zoom
   const k = baseK * zoom;
+
+  // Center pan calculation: centers the occupied area (or all seats)
+  const getCenteredPan = useCallback((targetZoom = 1) => {
+    const targetK = baseK * targetZoom;
+    const viewW = containerWidth > 0 ? containerWidth : canvasW * targetK;
+    const viewH = canvasH * baseK;
+
+    const occupied = seatCenters.filter(sc => {
+      const info = seatStates[sc.code];
+      if (!info) return false;
+      return (
+        info.state === 'in_use' ||
+        info.state === 'run' ||
+        info.state === 'warn' ||
+        info.state === 'over' ||
+        info.state === 'paused' ||
+        info.state === 'reserved' ||
+        info.state === 'resv' ||
+        Boolean(info.paxName)
+      );
+    });
+
+    const targets = occupied.length > 0 ? occupied : (seatCenters.length > 0 ? seatCenters : [{ x: canvasW / 2, y: canvasH / 2 }]);
+    const minX = Math.min(...targets.map(p => p.x));
+    const maxX = Math.max(...targets.map(p => p.x));
+    const minY = Math.min(...targets.map(p => p.y));
+    const maxY = Math.max(...targets.map(p => p.y));
+    const targetCenterX = (minX + maxX) / 2;
+    const targetCenterY = (minY + maxY) / 2;
+
+    const panX = (viewW / 2) - targetCenterX * targetK;
+    const panY = (viewH / 2) - targetCenterY * targetK;
+
+    return { x: panX, y: panY };
+  }, [baseK, containerWidth, canvasW, canvasH, seatCenters, seatStates]);
+
+  // Initial centering when container width is first measured
+  const initialCenteredRef = useRef(false);
+  useEffect(() => {
+    if (containerWidth > 0 && !initialCenteredRef.current) {
+      initialCenteredRef.current = true;
+      setPan(getCenteredPan(1));
+    }
+  }, [containerWidth, getCenteredPan]);
 
   // Pointer event handlers for pinch zoom & drag pan
   const handlePointerDown = (e) => {
@@ -125,12 +209,30 @@ export default function FloorPlan({
     }
   };
 
-  // Center / Reset zoom and pan
+  // Center / Reset zoom and pan (Round 13b Item 2: 置中回到預設縮放，並把有人的區域置中)
   const handleResetCenter = (e) => {
     e.stopPropagation();
     setZoom(1);
-    setPan({ x: 0, y: 0 });
+    setPan(getCenteredPan(1));
   };
+
+  // Round 13b Item 2: 縮小到格子會重疊時，座位格自動改用 demo 尺寸（48×33，只顯示代號和名字）
+  const hasTileOverlap = useMemo(() => {
+    for (let i = 0; i < seatCenters.length; i++) {
+      for (let j = i + 1; j < seatCenters.length; j++) {
+        const dx = Math.abs(seatCenters[i].x - seatCenters[j].x) * k;
+        const dy = Math.abs(seatCenters[i].y - seatCenters[j].y) * k;
+        if (dx < 58 && dy < 46) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [seatCenters, k]);
+
+  const effectiveSize = (size === 'mini' || size === 'map')
+    ? size
+    : (hasTileOverlap ? 'demo' : size);
 
   // Filter alert bookings
   const alertBookingRefs = new Set((alerts || []).map(a => a.booking_ref));
@@ -384,7 +486,7 @@ export default function FloorPlan({
               <SeatTile
                 code={seat.code}
                 state={state}
-                size={size}
+                size={effectiveSize}
                 isVent={isVent}
                 isPaid={Boolean(seatInfo.isPaid)}
                 boards={seatInfo.boards || []}
