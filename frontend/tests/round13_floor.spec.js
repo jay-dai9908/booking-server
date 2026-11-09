@@ -1,0 +1,286 @@
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
+import { toTaipeiDateString, dateOnly } from '../../shared/time.js';
+
+const require = createRequire(import.meta.url);
+const testDbUrl = process.env.TEST_DATABASE_URL || 'postgresql://user:password@localhost:5432/booking_db_test?schema=public';
+let PrismaClient;
+try {
+  ({ PrismaClient } = require('@prisma/client'));
+} catch (e) {
+  ({ PrismaClient } = require('../../backend/node_modules/@prisma/client/index.js'));
+}
+const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
+
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
+const HEADLESS = process.env.HEADLESS !== 'false';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'gathering.light2609';
+
+const SCREENSHOT_DIR = path.resolve(process.cwd(), 'test-results', 'round13-screenshots');
+if (!fs.existsSync(SCREENSHOT_DIR)) {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+}
+
+async function run() {
+  console.log('--- Starting Round 13 Floor & Seat Panel Playwright Test ---');
+  await ensureFreshDbSeeded(prisma);
+
+  const todayStr = toTaipeiDateString(new Date());
+  const todayDate = dateOnly(todayStr);
+  const ts = Date.now();
+
+  // 1. Create sessions for today
+  await prisma.session.deleteMany({ where: { session_date: todayDate } });
+  const slotHours = [
+    ['10:00', '11:00'],
+    ['11:00', '12:00'],
+    ['12:00', '13:00'],
+    ['13:00', '14:00'],
+    ['14:00', '15:00'],
+    ['15:00', '16:00'],
+    ['16:00', '17:00'],
+    ['17:00', '18:00'],
+    ['18:00', '19:00'],
+    ['19:00', '20:00'],
+    ['20:00', '21:00']
+  ];
+  const sessions = [];
+  for (const [st, et] of slotHours) {
+    const s = await prisma.session.create({
+      data: {
+        session_date: todayDate,
+        start_time: st,
+        end_time: et,
+        max_capacity: 16
+      }
+    });
+    sessions.push(s);
+  }
+
+  // 2. Create User 1 (Pending: 待入座客)
+  const userPending = await prisma.user.create({
+    data: {
+      line_user_id: `user_pending_${ts}`,
+      name: '待入座客',
+      phone: '0912345678'
+    }
+  });
+
+  // Create User 2 (In-use: 計時客)
+  const userInUse = await prisma.user.create({
+    data: {
+      line_user_id: `user_inuse_${ts}`,
+      name: '計時客',
+      phone: '0987654321'
+    }
+  });
+
+  const refPending = `BK-PND-${ts.toString().slice(-6)}`;
+  const refInUse = `BK-USE-${ts.toString().slice(-6)}`;
+
+  // 3. Create Reservations
+  // Pending booking: 16:00 to 18:00 (sessions 6 and 7), assigned A1-1, A1-2
+  for (const s of [sessions[6], sessions[7]]) {
+    await prisma.reservation.create({
+      data: {
+        booking_ref: refPending,
+        session_id: s.id,
+        user_id: userPending.id,
+        pax: 2,
+        status: 'confirmed',
+        attendance: null,
+        is_paid: false,
+        assigned_seats: ['A1-1', 'A1-2'],
+        total_amount: 600
+      }
+    });
+  }
+
+  // In-use booking: 14:00 to 18:00 (sessions 4 to 7), assigned A1-3, A1-4
+  for (const s of [sessions[4], sessions[5], sessions[6], sessions[7]]) {
+    await prisma.reservation.create({
+      data: {
+        booking_ref: refInUse,
+        session_id: s.id,
+        user_id: userInUse.id,
+        pax: 2,
+        status: 'confirmed',
+        attendance: 'checked_in',
+        checked_in_at: new Date(Date.now() - 60 * 60 * 1000),
+        is_paid: false,
+        assigned_seats: ['A1-3', 'A1-4'],
+        total_amount: 1200
+      }
+    });
+  }
+
+  // Booking persons for In-Use booking
+  await prisma.bookingPerson.createMany({
+    data: [
+      {
+        booking_ref: refInUse,
+        person_no: 1,
+        seat_code: 'A1-3',
+        status: 'active',
+        billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
+        timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
+      },
+      {
+        booking_ref: refInUse,
+        person_no: 2,
+        seat_code: 'A1-4',
+        status: 'active',
+        billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
+        timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
+      }
+    ]
+  });
+
+  const launchOptions = { headless: HEADLESS };
+  if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+    launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  }
+
+  const browser = await chromium.launch(launchOptions);
+  // Viewport 1024x768 (Tablet mode)
+  const context = await browser.newContext({
+    viewport: { width: 1024, height: 768 }
+  });
+  const page = await context.newPage();
+
+  try {
+    // 1. Admin login
+    console.log('Logging in as admin...');
+    await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
+    const passInput = page.locator('input[type="password"]');
+    await passInput.waitFor({ state: 'visible', timeout: 15000 });
+    await passInput.fill(ADMIN_PASSWORD);
+    await page.locator('button[type="submit"]').click();
+    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 15000 });
+    await page.waitForTimeout(600);
+
+    // 2. Navigate to Seating Page
+    console.log('Navigating to /admin/seating...');
+    await page.goto(`${BASE_URL}/admin/seating`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+
+    // Switch to Floor Tab if needed
+    const floorTab = page.locator('button:has-text("平面圖")').first();
+    if (await floorTab.isVisible()) {
+      await floorTab.click();
+      await page.waitForTimeout(500);
+    }
+
+    // 3. Verification of Item 3: Tablet Floor Plan
+    console.log('Verifying Item 3: Tablet Floor Plan...');
+    const floorPlanContainer = page.locator('[data-testid="floor-plan-container"]');
+    await floorPlanContainer.waitFor({ state: 'visible', timeout: 10000 });
+
+    // Check seat tile A1-3: size 58px and guest name visible
+    const seatTileA13 = page.locator('[data-seat-code="A1-3"]').first();
+    await seatTileA13.waitFor({ state: 'visible', timeout: 10000 });
+    const box = await seatTileA13.boundingBox();
+    assert.ok(box, 'Seat tile A1-3 should have bounding box');
+    console.log(`Seat tile A1-3 width: ${box.width}px, height: ${box.height}px`);
+    assert.ok(
+      Math.abs(box.width - 58) <= 2,
+      `Expected seat tile width to be 58px (got ${box.width})`
+    );
+
+    // Guest name '計時客' must be visible inside floor plan
+    const guestNameEl = seatTileA13.getByText('計時客', { exact: true });
+    await guestNameEl.waitFor({ state: 'visible', timeout: 5000 });
+    console.log('Guest name is visible on tablet floor plan!');
+
+    // Screenshot 1: 平板平面圖
+    const shotPath1 = path.join(SCREENSHOT_DIR, 'tablet-floor-plan.png');
+    await page.screenshot({ path: shotPath1 });
+    console.log(`Screenshot 1 saved: ${shotPath1}`);
+
+    // Verify "置中" button resets zoom to 1
+    const centerBtn = page.locator('[data-testid="floor-plan-center-btn"]');
+    await centerBtn.click();
+    await page.waitForTimeout(200);
+    const currentZoom = await floorPlanContainer.getAttribute('data-zoom');
+    assert.equal(currentZoom, '1', 'Center button must reset zoom to 1');
+    console.log('Center button successfully reset zoom to 1');
+
+    // 4. Verification of Item 2 (In-Use Seat Action Panel)
+    console.log('Verifying Item 2: Clicking in-use seat A1-3...');
+    await seatTileA13.click();
+    await page.waitForTimeout(500);
+
+    // Panel opens as right-side slide-over
+    const panelContent = page.locator('[data-testid="seat-action-panel-content"]');
+    await panelContent.waitFor({ state: 'visible', timeout: 5000 });
+
+    // Check in-use controls
+    await page.locator('[data-testid="seat-panel-checkout-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+    await page.locator('[data-testid="seat-panel-timer-toggle-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+
+    // Verify panel width on 1024x768 screen is < 512px (half screen width) and matches 380px
+    const panelDialog = page.locator('[role="dialog"] > div');
+    const panelBox = await panelDialog.boundingBox();
+    assert.ok(panelBox, 'Panel must have bounding box');
+    console.log(`Panel bounding width: ${panelBox.width}px`);
+    assert.ok(
+      panelBox.width < 512,
+      `Panel width (${panelBox.width}px) must be less than half of tablet width (512px)`
+    );
+    assert.ok(
+      Math.abs(panelBox.width - 380) <= 5,
+      `Panel width should be ~380px, got ${panelBox.width}`
+    );
+
+    // Screenshot 2: 平板點座位後的右側面板（計時中）
+    const shotPath2 = path.join(SCREENSHOT_DIR, 'tablet-seat-panel-in-use.png');
+    await page.screenshot({ path: shotPath2 });
+    console.log(`Screenshot 2 saved: ${shotPath2}`);
+
+    // Close panel
+    await page.locator('[aria-label="關閉"]').click();
+    await page.waitForTimeout(400);
+
+    // 5. Verification of Item 2 (Pending Seat Action Panel)
+    console.log('Verifying Item 2: Clicking pending seat A1-1...');
+    const seatTileA11 = page.locator('[data-seat-code="A1-1"]').first();
+    await seatTileA11.waitFor({ state: 'visible', timeout: 5000 });
+    await seatTileA11.click();
+    await page.waitForTimeout(500);
+
+    // Panel opens for pending reservation
+    const checkinBtn = page.locator('[data-testid="seat-panel-checkin-btn"]');
+    await checkinBtn.waitFor({ state: 'visible', timeout: 5000 });
+    console.log('Found "報到並帶位" button on pending seat panel!');
+
+    // Verify "暫停計時" is NOT shown
+    const pauseBtn = page.locator('[data-testid="seat-panel-timer-toggle-btn"]');
+    assert.equal(await pauseBtn.count(), 0, '"暫停計時" should NOT appear for pending bookings');
+    console.log('Confirmed "暫停計時" does not appear on pending seat panel');
+
+    // Screenshot 3: 平板點座位後的右側面板（待入座）
+    const shotPath3 = path.join(SCREENSHOT_DIR, 'tablet-seat-panel-pending.png');
+    await page.screenshot({ path: shotPath3 });
+    console.log(`Screenshot 3 saved: ${shotPath3}`);
+
+    console.log('--- All Round 13 Playwright Verifications Passed! ---');
+  } finally {
+    await context.close();
+    await browser.close();
+
+    // Clean up created reservations & users
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [refPending, refInUse] } } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [refPending, refInUse] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [userPending.id, userInUse.id] } } });
+    await prisma.$disconnect().catch(() => {});
+  }
+}
+
+run().catch((err) => {
+  console.error('Playwright Test Failed:', err);
+  process.exit(1);
+});

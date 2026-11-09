@@ -61,7 +61,7 @@ export default function SeatTile({
 
   const content = (
     <div
-      data-seat-code={code}
+      {...(!onClick || state === 'used' || state === 'off' ? { 'data-seat-code': code } : {})}
       className={`relative rounded-xl border flex flex-col justify-between select-none transition ${sizeClasses} ${stateClass} ${className}`}
       style={{ boxSizing: 'border-box' }}
     >
