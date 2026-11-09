@@ -59,16 +59,19 @@ export default function SeatActionPanel({
 
   // Determine seat status / mode
   let mode = 'empty';
+  const isPending = !booking || !booking.attendance || booking.attendance === 'pending';
   if (isInactive) {
     mode = 'inactive';
   } else if (!booking) {
     mode = 'empty';
+  } else if (isPending) {
+    mode = 'reserved'; // 待入座
   } else if (booking.billing?.status === 'paid' || booking.is_paid || seatInfo.isPaid) {
     mode = 'paid';
-  } else if (booking.attendance === 'checked_in') {
-    mode = seatInfo.state === 'paused' ? 'paused' : 'in_use';
+  } else if (seatInfo.state === 'paused') {
+    mode = 'paused';
   } else {
-    mode = 'reserved'; // 待入座
+    mode = 'in_use';
   }
 
   // Header Title
@@ -90,20 +93,55 @@ export default function SeatActionPanel({
     const pax = booking.pax || 1;
     subtitle = `${startStr} 到 · 預定 ${pax} 位`;
   } else if (mode === 'paid') {
-    subtitle = `第 ${personNo} 位 · 已付 · 現金 18:10`;
+    const personPart = `第 ${personNo} 位`;
+    const personBoard = (booking.boards || []).find(bd => bd.person_no === personNo) || (booking.boards || [])[0];
+    let boardPart = '';
+    if (personBoard?.segments?.length) {
+      const curSeg = personBoard.segments.find(s => !s.end_at) || personBoard.segments[personBoard.segments.length - 1];
+      const bName = displayBoardName(curSeg?.name || '小板');
+      const bStart = curSeg?.start_at ? formatTimeHHMM(curSeg.start_at) : (booking.start_at ? formatTimeHHMM(booking.start_at) : '');
+      boardPart = bStart ? `${bName} ${bStart} 起` : bName;
+    }
+
+    const endStr = booking.end_at ? formatTimeHHMM(booking.end_at) : (booking.end_time || '');
+    const endPart = endStr ? `預約到 ${endStr}` : '';
+
+    const payment = (booking?.payments || []).slice().reverse().find(pay =>
+      !pay.person_nos || pay.person_nos.length === 0 || pay.person_nos.includes(personNo)
+    );
+    const methodMap = {
+      cash: '現金',
+      line_pay: 'LINE Pay',
+      card: '信用卡',
+      credit_card: '信用卡',
+      jkopay: '街口',
+      transfer: '轉帳',
+      pass: '票券',
+      waive: '免收',
+      none: '免收'
+    };
+    const methodStr = (payment && (methodMap[payment.method] || payment.method)) || '現金';
+    const payTime = payment?.created_at ? formatTimeHHMM(payment.created_at) : '';
+    const paidDetail = payTime ? `已付 · ${methodStr} ${payTime}` : (payment ? `已付 · ${methodStr}` : '已付');
+
+    subtitle = [personPart, boardPart, endPart, paidDetail].filter(Boolean).join(' · ');
   } else {
     // 計時中 or 暫停
     const personPart = `第 ${personNo} 位`;
-    const statusPart = mode === 'paused'
-      ? `已暫停 ${seatInfo.timerText || ''}`.trim()
-      : `計時中 ${seatInfo.timerText || ''}`.trim();
+    let statusPart = '';
+    const rawTimer = (seatInfo.timerText || '').replace(/^(計時中|已暫停|暫停)\s*/, '').trim();
+    if (mode === 'paused') {
+      statusPart = rawTimer ? `已暫停 ${rawTimer}` : '已暫停';
+    } else {
+      statusPart = rawTimer ? `計時中 ${rawTimer}` : '計時中';
+    }
 
     const personBoard = (booking.boards || []).find(bd => bd.person_no === personNo) || (booking.boards || [])[0];
     let boardPart = '';
     if (personBoard?.segments?.length) {
       const curSeg = personBoard.segments.find(s => !s.end_at) || personBoard.segments[personBoard.segments.length - 1];
       const bName = displayBoardName(curSeg?.name || '小板');
-      const bStart = curSeg?.start_at ? formatTimeHHMM(curSeg.start_at) : '14:00';
+      const bStart = curSeg?.start_at ? formatTimeHHMM(curSeg.start_at) : (booking.start_at ? formatTimeHHMM(booking.start_at) : '');
       boardPart = bStart ? `${bName} ${bStart} 起` : bName;
     }
 
@@ -370,7 +408,7 @@ export default function SeatActionPanel({
                     const isPaused = p.timer?.paused_at && !p.timer?.timer_ended_at;
                     const pStatusText = isPaused ? '已暫停' : (p.timer?.timer_ended_at ? '已離場' : '計時中');
                     const pReason = p.timer?.pause_reason;
-                    const seatCodeStr = p.seat_code || '未排座';
+                    const seatCodeStr = p.seat_code || (booking?.assigned_seats && booking.assigned_seats[p.person_no - 1]) || '未排座';
 
                     return (
                       <div
@@ -468,7 +506,7 @@ export default function SeatActionPanel({
                     const isPaused = p.timer?.paused_at && !p.timer?.timer_ended_at;
                     const pStatusText = isPaused ? '已暫停' : (p.timer?.timer_ended_at ? '已離場' : '計時中');
                     const pReason = p.timer?.pause_reason;
-                    const seatCodeStr = p.seat_code || '未排座';
+                    const seatCodeStr = p.seat_code || (booking?.assigned_seats && booking.assigned_seats[p.person_no - 1]) || '未排座';
 
                     return (
                       <div

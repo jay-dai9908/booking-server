@@ -15,7 +15,7 @@ const STATE_STYLES = {
   pick: 'bg-sg-brown text-white border-sg-brown shadow-sm',
   sugg: 'bg-sg-peach-soft text-sg-peach-ink border-sg-peach border-dashed',
   used: 'bg-sg-paper text-sg-muted border-sg-line opacity-50 cursor-not-allowed',
-  off: 'bg-gray-100 text-gray-400 border-gray-200 opacity-40 cursor-not-allowed'
+  off: 'bg-gray-100 text-gray-400 border-gray-200 opacity-40 cursor-pointer'
 };
 
 export default function SeatTile({
@@ -61,7 +61,7 @@ export default function SeatTile({
 
   const content = (
     <div
-      {...(!onClick || state === 'used' || state === 'off' ? { 'data-seat-code': code } : {})}
+      {...(!onClick || state === 'used' ? { 'data-seat-code': code } : {})}
       className={`relative rounded-xl border flex flex-col justify-between select-none transition ${sizeClasses} ${stateClass} ${className}`}
       style={{ boxSizing: 'border-box' }}
     >
@@ -106,7 +106,7 @@ export default function SeatTile({
     </div>
   );
 
-  if (onClick && state !== 'used' && state !== 'off') {
+  if (onClick && state !== 'used') {
     return (
       <button
         type="button"

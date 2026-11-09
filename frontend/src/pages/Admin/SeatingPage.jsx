@@ -52,10 +52,11 @@ import EquipmentAddonModal from '../../components/EquipmentAddonModal';
 import ExtendTimeModal from '../../components/ExtendTimeModal';
 import SendLineMessageModal from '../../components/SendLineMessageModal';
 
-import { swapBoundaryOptions, formatTimerHMM, formatTimeHHmm } from '@shared/time.js';
+import { swapBoundaryOptions, formatTimerHMM, formatTimeHHmm, formatDiffMinutesText } from '@shared/time.js';
 import { calculateBoardTotal } from '@shared/boardPricing.js';
 import { displayBoardName } from '@shared/billing.js';
 import {
+  bookedMinutes,
   bookingTimeRange,
   bookingDurationText,
   personElapsedMinutes,
@@ -167,6 +168,17 @@ export default function SeatingPage() {
       }
     }
   }, [floorData]);
+
+  // Keep seatActionTarget in sync with live floor data
+  useEffect(() => {
+    if (seatActionTarget?.booking && floorData?.bookings) {
+      const updated = floorData.bookings.find(b => b.booking_ref === seatActionTarget.booking.booking_ref);
+      if (updated) {
+        setSeatActionTarget(prev => prev ? { ...prev, booking: updated } : null);
+      }
+    }
+  }, [floorData]);
+
   const [seatActionTarget, setSeatActionTarget] = useState(null); // seat object + booking
   const [moveSeatModalTarget, setMoveSeatModalTarget] = useState(null); // { booking, fromSeat, personNo }
   const [swapConfirmTarget, setSwapConfirmTarget] = useState(null); // { bookingRef, fromSeat, toSeat, occupantName }
@@ -381,13 +393,19 @@ export default function SeatingPage() {
   // Seat state map for FloorPlan and SeatTiles
   const seatStatesMap = useMemo(() => {
     const map = {};
-    for (const s of activeSeats) {
-      map[s.code] = { state: 'empty', isPaid: false, timerText: '空位', paxName: null, boards: [] };
+    for (const s of (layout.seats || [])) {
+      map[s.code] = {
+        state: s.is_active ? 'empty' : 'off',
+        isPaid: false,
+        timerText: s.is_active ? '空位' : '已停用',
+        paxName: null,
+        boards: []
+      };
     }
 
     // Populate checked-in bookings
     for (const b of checkedInBookings) {
-      const isPaid = b.billing?.status === 'paid';
+      const isPaid = b.billing?.status === 'paid' || Boolean(b.is_paid);
       const bSeats = b.assigned_seats || [];
       bSeats.forEach((seatCode, idx) => {
         if (!seatCode || seatCode.startsWith('WAIT-')) return;
@@ -401,11 +419,21 @@ export default function SeatingPage() {
         } else if (person) {
           const tm = person.timer || person;
           const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
+          const rawElapsed = personElapsedMinutes(person, getServerNow());
+          const totalBooked = bookedMinutes(b);
+          const diffMins = rawElapsed - totalBooked;
+
           if (isPaused) {
             state = 'paused';
-            timerText = '已暫停';
+            timerText = rawElapsed > 0 ? `暫停 ${formatTimerHMM(rawElapsed)}` : '已暫停';
+          } else if (diffMins > 0) {
+            state = 'over';
+            timerText = formatDiffMinutesText(diffMins);
+          } else if (totalBooked - rawElapsed <= 15 && totalBooked > 0) {
+            state = 'warn';
+            timerText = formatTimerHMM(rawElapsed);
           } else {
-            const rawElapsed = personElapsedMinutes(person, getServerNow());
+            state = 'in_use';
             timerText = formatTimerHMM(rawElapsed);
           }
         }

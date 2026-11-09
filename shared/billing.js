@@ -608,8 +608,14 @@ export function billingStatus({
   for (const pay of payments || []) {
     if (pay.status === 'valid' && (pay.kind === 'charge' || pay.kind === 'waive')) {
       if (pay.kind !== 'waive') allWaived = false;
-      for (const pNo of pay.person_nos || []) {
-        coveredSet.add(pNo);
+      if (!pay.person_nos || pay.person_nos.length === 0) {
+        for (const p of activePersons) {
+          coveredSet.add(p.person_no);
+        }
+      } else {
+        for (const pNo of pay.person_nos) {
+          coveredSet.add(pNo);
+        }
       }
     }
   }

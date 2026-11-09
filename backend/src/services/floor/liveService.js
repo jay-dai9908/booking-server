@@ -392,6 +392,7 @@ export async function getLiveFloorData(dateStr = null) {
       start_at: startAtStr,
       end_at: endAtStr,
       is_walk_in: Boolean(firstRes.is_walk_in),
+      is_paid: Boolean(firstRes.is_paid),
       attendance: resolvedAttendance,
       checked_in_at: firstRes.checked_in_at ? firstRes.checked_in_at.toISOString() : null,
       checked_in_by: firstRes.checked_in_by || null,
@@ -435,6 +436,14 @@ export async function getLiveFloorData(dateStr = null) {
         };
       }),
       boards: Array.from(boardGroupMap.values()),
+      payments: bPayments.filter(p => p.status === 'valid').map(p => ({
+        id: p.id,
+        payment_no: p.payment_no,
+        method: p.method,
+        amount: p.amount,
+        created_at: p.created_at ? p.created_at.toISOString() : null,
+        person_nos: p.person_nos || []
+      })),
       customer_note: firstRes.customer_note || null,
       admin_note: firstRes.admin_note || null
     };
@@ -509,7 +518,7 @@ export async function getLiveFloorData(dateStr = null) {
     }
 
     // Check if any seat does not exist in the active layout (Spec 5.1 step 6)
-    if (!completed && firstRes.status !== 'cancelled') {
+    if (layout && !completed && firstRes.status !== 'cancelled') {
       const activeSeatCodes = new Set((layout?.seats || []).filter(s => s.is_active).map(s => s.code));
       const missingSeats = (firstRes.assigned_seats || []).filter(s => !s.startsWith('WAIT-') && !activeSeatCodes.has(s));
       if (missingSeats.length > 0) {

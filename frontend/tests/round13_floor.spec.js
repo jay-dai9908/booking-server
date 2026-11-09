@@ -79,8 +79,34 @@ async function run() {
     }
   });
 
+  // Create User 3 (Paid: 已結清客)
+  const userPaid = await prisma.user.create({
+    data: {
+      line_user_id: `user_paid_${ts}`,
+      name: '已付客',
+      phone: '0933444555'
+    }
+  });
+
+  // Create User 4 (Prepaid Pending: 線上預付客)
+  const userPrepaid = await prisma.user.create({
+    data: {
+      line_user_id: `user_prepaid_${ts}`,
+      name: '預付客',
+      phone: '0955666777'
+    }
+  });
+
   const refPending = `BK-PND-${ts.toString().slice(-6)}`;
   const refInUse = `BK-USE-${ts.toString().slice(-6)}`;
+  const refPaid = `BK-PAD-${ts.toString().slice(-6)}`;
+  const refPrepaid = `BK-PRE-${ts.toString().slice(-6)}`;
+
+  // Deactivate seat B2-4 to test inactive seat state
+  await prisma.seat.updateMany({
+    where: { code: 'B2-4' },
+    data: { is_active: false }
+  });
 
   // 3. Create Reservations
   // Pending booking: 16:00 to 18:00 (sessions 6 and 7), assigned A1-1, A1-2
@@ -118,6 +144,41 @@ async function run() {
     });
   }
 
+  // Paid booking: 14:00 to 21:00 (sessions 4 to 10), assigned B1-1, B1-2
+  for (const s of sessions.slice(4)) {
+    await prisma.reservation.create({
+      data: {
+        booking_ref: refPaid,
+        session_id: s.id,
+        user_id: userPaid.id,
+        pax: 2,
+        status: 'confirmed',
+        attendance: 'checked_in',
+        checked_in_at: new Date(Date.now() - 60 * 60 * 1000),
+        is_paid: true,
+        assigned_seats: ['B1-1', 'B1-2'],
+        total_amount: 1200
+      }
+    });
+  }
+
+  // Prepaid pending booking: 16:00 to 21:00 (sessions 6 to 10), assigned B2-1
+  for (const s of sessions.slice(6)) {
+    await prisma.reservation.create({
+      data: {
+        booking_ref: refPrepaid,
+        session_id: s.id,
+        user_id: userPrepaid.id,
+        pax: 1,
+        status: 'confirmed',
+        attendance: null,
+        is_paid: true,
+        assigned_seats: ['B2-1'],
+        total_amount: 300
+      }
+    });
+  }
+
   // Booking persons for In-Use booking
   await prisma.bookingPerson.createMany({
     data: [
@@ -136,8 +197,44 @@ async function run() {
         status: 'active',
         billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
         timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
+      },
+      {
+        booking_ref: refPaid,
+        person_no: 1,
+        seat_code: 'B1-1',
+        status: 'active',
+        billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
+        timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
+      },
+      {
+        booking_ref: refPaid,
+        person_no: 2,
+        seat_code: 'B1-2',
+        status: 'active',
+        billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
+        timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
       }
     ]
+  });
+
+  // Payment for Paid booking (created_at 18:10 cash)
+  await prisma.payment.create({
+    data: {
+      payment_no: `PAY-R13-${ts}`,
+      batch_no: `B-R13-${ts}`,
+      booking_ref: refPaid,
+      amount: 1200,
+      cash_received: 1200,
+      change_given: 0,
+      method: 'cash',
+      kind: 'charge',
+      status: 'valid',
+      person_nos: [1, 2],
+      staff_name: '測試櫃檯',
+      device_label: '櫃檯平板',
+      breakdown_json: {},
+      created_at: new Date(`${todayStr}T18:10:00+08:00`)
+    }
   });
 
   const launchOptions = { headless: HEADLESS };
@@ -260,12 +357,83 @@ async function run() {
     // Verify "暫停計時" is NOT shown
     const pauseBtn = page.locator('[data-testid="seat-panel-timer-toggle-btn"]');
     assert.equal(await pauseBtn.count(), 0, '"暫停計時" should NOT appear for pending bookings');
-    console.log('Confirmed "暫停計時" does not appear on pending seat panel');
-
     // Screenshot 3: 平板點座位後的右側面板（待入座）
     const shotPath3 = path.join(SCREENSHOT_DIR, 'tablet-seat-panel-pending.png');
     await page.screenshot({ path: shotPath3 });
     console.log(`Screenshot 3 saved: ${shotPath3}`);
+
+    // Close panel
+    await page.locator('[aria-label="關閉"]').click();
+    await page.waitForTimeout(400);
+
+    // 6. Verification of Item 3: Filter chip dimming (opacity: .35)
+    console.log('Verifying Item 3: Filter chip dimming...');
+    // Click "待入座" filter chip
+    await page.locator('button:has-text("待入座")').first().click();
+    await page.waitForTimeout(300);
+
+    // Pending seat A1-1 parent container should have opacity: 1
+    const a11Wrapper = page.locator('[data-seat-code="A1-1"]').first().locator('..');
+    const a11Opacity = await a11Wrapper.evaluate(el => window.getComputedStyle(el).opacity);
+    assert.equal(a11Opacity, '1', 'Matching pending seat must have opacity 1');
+
+    // In-use seat A1-3 parent container should have opacity: 0.35
+    const a13Wrapper = page.locator('[data-seat-code="A1-3"]').first().locator('..');
+    const a13Opacity = await a13Wrapper.evaluate(el => window.getComputedStyle(el).opacity);
+    assert.equal(a13Opacity, '0.35', 'Non-matching in-use seat must be dimmed with opacity 0.35');
+    console.log('Confirmed filter chip "待入座" dims non-matching seats to opacity 0.35');
+
+    // Reset filter to "全部"
+    await page.locator('button:has-text("全部")').first().click();
+    await page.waitForTimeout(300);
+
+    // 7. Verification of Item 2: Inactive Seat Action Panel
+    console.log('Verifying Item 2: Clicking inactive seat B2-4...');
+    const seatTileB24 = page.locator('[data-seat-code="B2-4"]').first();
+    await seatTileB24.waitFor({ state: 'visible', timeout: 5000 });
+    await seatTileB24.click();
+    await page.waitForTimeout(500);
+
+    // Verify inactive seat panel subtitle and link
+    const inactiveSubtitle = page.locator('text=這個座位已暫停使用').first();
+    await inactiveSubtitle.waitFor({ state: 'visible', timeout: 5000 });
+    const seatSettingLink = page.locator('a:has-text("到座位設定")').first();
+    await seatSettingLink.waitFor({ state: 'visible', timeout: 5000 });
+    assert.equal(await seatSettingLink.getAttribute('href'), '/admin/seat-layout');
+    console.log('Confirmed inactive seat B2-4 displays "這個座位已暫停使用" and link to seat settings');
+
+    // Close panel
+    await page.locator('[aria-label="關閉"]').click();
+    await page.waitForTimeout(400);
+
+    // 8. Verification of Item 2: Prepaid Pending Reservation has "報到並帶位"
+    console.log('Verifying Item 2: Prepaid pending reservation on B2-1 has checkin button...');
+    const seatTileB21 = page.locator('[data-seat-code="B2-1"]').first();
+    await seatTileB21.waitFor({ state: 'visible', timeout: 5000 });
+    await seatTileB21.click();
+    await page.waitForTimeout(500);
+
+    const prepaidCheckinBtn = page.locator('[data-testid="seat-panel-checkin-btn"]');
+    await prepaidCheckinBtn.waitFor({ state: 'visible', timeout: 5000 });
+    console.log('Confirmed prepaid pending booking shows "報到並帶位" button');
+
+    // Close panel
+    await page.locator('[aria-label="關閉"]').click();
+    await page.waitForTimeout(400);
+
+    // 9. Verification of Item 2: Paid In-Use Seat Action Panel
+    console.log('Verifying Item 2: Paid in-use seat B1-1 shows leave, supplement, refund...');
+    const seatTileB11 = page.locator('[data-seat-code="B1-1"]').first();
+    await seatTileB11.waitFor({ state: 'visible', timeout: 5000 });
+    await seatTileB11.click();
+    await page.waitForTimeout(500);
+
+    await page.locator('[data-testid="seat-panel-leave-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+    await page.locator('[data-testid="seat-panel-supplement-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+    await page.locator('[data-testid="seat-panel-refund-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+    const paidSubtitle = await page.locator('[role="dialog"] p').first().textContent();
+    assert.ok(paidSubtitle.includes('已付 · 現金 18:10'), `Expected subtitle to include '已付 · 現金 18:10', got: ${paidSubtitle}`);
+    console.log('Confirmed paid seat shows correct buttons and subtitle format');
 
     console.log('--- All Round 13 Playwright Verifications Passed! ---');
   } finally {
@@ -273,9 +441,11 @@ async function run() {
     await browser.close();
 
     // Clean up created reservations & users
-    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [refPending, refInUse] } } });
-    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [refPending, refInUse] } } });
-    await prisma.user.deleteMany({ where: { id: { in: [userPending.id, userInUse.id] } } });
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [refPending, refInUse, refPaid, refPrepaid] } } });
+    await prisma.payment.deleteMany({ where: { booking_ref: { in: [refPending, refInUse, refPaid, refPrepaid] } } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [refPending, refInUse, refPaid, refPrepaid] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [userPending.id, userInUse.id, userPaid.id, userPrepaid.id] } } });
+    await prisma.seat.updateMany({ where: { code: 'B2-4' }, data: { is_active: true } });
     await prisma.$disconnect().catch(() => {});
   }
 }
