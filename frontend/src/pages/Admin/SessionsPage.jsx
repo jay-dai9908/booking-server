@@ -27,7 +27,8 @@ import {
   Sliders,
   Bell,
   CreditCard,
-  MessageSquare
+  MessageSquare,
+  AlertTriangle
 } from 'lucide-react';
 import api from '../../api/axios';
 import HourRangeScrollPicker from '../../components/HourRangeScrollPicker';
@@ -694,7 +695,7 @@ export default function SessionsPage() {
                 />
                 {parseInt(maxCapacity, 10) > seatCount && (
                   <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1" data-testid="capacity-exceed-warning">
-                    <span>⚠️</span>
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
                     <span>可預約人數比座位多 {parseInt(maxCapacity, 10) - seatCount} 位，可能會有人沒位子坐</span>
                   </p>
                 )}

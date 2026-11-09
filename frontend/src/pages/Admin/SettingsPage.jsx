@@ -23,7 +23,8 @@ import {
   Trash2,
   GripVertical,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  AlertTriangle
 } from 'lucide-react';
 import api from '../../api/axios';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
@@ -1063,8 +1064,17 @@ export default function SettingsPage() {
             <label className="block text-sm font-bold text-[#3E332B] mb-0.5">
               每個時段可預約人數（預設）
             </label>
-            <div className="text-xs text-gray-500">
-              座位 {layoutSeatCount} 個，保留 {layoutSeatCount - (parseInt(defaultSessionCapacity, 10) || 0)} 個給現場
+            <div className="text-xs">
+              {(parseInt(defaultSessionCapacity, 10) || 0) > layoutSeatCount ? (
+                <span className="text-amber-700 font-bold flex items-center gap-1" data-testid="capacity-exceed-warning">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                  <span>比座位多 {(parseInt(defaultSessionCapacity, 10) || 0) - layoutSeatCount} 個，可能會有人沒位子坐</span>
+                </span>
+              ) : (
+                <span className="text-gray-500">
+                  座位 {layoutSeatCount} 個，保留 {layoutSeatCount - (parseInt(defaultSessionCapacity, 10) || 0)} 個給現場
+                </span>
+              )}
             </div>
           </div>
           <div className="w-full sm:w-36">

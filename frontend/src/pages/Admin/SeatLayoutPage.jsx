@@ -35,7 +35,8 @@ import {
   Circle,
   DoorOpen,
   Store,
-  Columns
+  Columns,
+  AlertTriangle
 } from 'lucide-react';
 import api from '../../api/axios';
 import SegmentedTabs from '../../components/admin/SegmentedTabs';
@@ -2689,7 +2690,7 @@ export default function SeatLayoutPage() {
               </div>
               {previewPublishData.sessions_capacity_exceeding_seats_count > 0 && (
                 <div className="text-amber-800 font-bold bg-amber-50 border border-amber-200 rounded-xl p-2.5 flex items-center gap-1.5" data-testid="publish-capacity-warning">
-                  <span>⚠️</span>
+                  <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0" />
                   <span>
                     {(publishDate ? `${parseInt(publishDate.split('-')[1], 10)}/${parseInt(publishDate.split('-')[2], 10)}` : '')} 起有 {previewPublishData.sessions_capacity_exceeding_seats_count} 個時段的可預約人數比座位多
                   </span>
