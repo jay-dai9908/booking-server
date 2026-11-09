@@ -314,6 +314,9 @@ export default function ReservationsPage() {
       pending_checkin: 0,
       checked_in: 0,
       unpaid: 0,
+      partial: 0,
+      paid: 0,
+      refund: 0,
       cancelled: 0
     };
     for (const r of reservations) {
@@ -322,7 +325,13 @@ export default function ReservationsPage() {
       } else {
         if (r.attendance === 'checked_in') counts.checked_in++;
         else counts.pending_checkin++;
-        if (!r.is_paid) counts.unpaid++;
+
+        const bp = getBillingStatusPillProps(r);
+        if (bp.status === 'unpaid') counts.unpaid++;
+        else if (bp.status === 'partial') counts.partial++;
+        else if (bp.status === 'paid') counts.paid++;
+
+        if (bp.status === 'refund' || r.has_refund) counts.refund++;
       }
     }
     return counts;
@@ -335,7 +344,12 @@ export default function ReservationsPage() {
       if (r.status === 'cancelled') return false;
       if (statusFilter === 'pending_checkin') return r.attendance !== 'checked_in';
       if (statusFilter === 'checked_in') return r.attendance === 'checked_in';
-      if (statusFilter === 'unpaid') return !r.is_paid;
+
+      const bp = getBillingStatusPillProps(r);
+      if (statusFilter === 'unpaid') return bp.status === 'unpaid';
+      if (statusFilter === 'partial') return bp.status === 'partial';
+      if (statusFilter === 'paid') return bp.status === 'paid';
+      if (statusFilter === 'refund') return bp.status === 'refund' || Boolean(r.has_refund);
       return true;
     });
   }, [reservations, statusFilter]);
@@ -387,7 +401,10 @@ export default function ReservationsPage() {
             { key: 'all', label: `本頁全部 (${filterCounts.all})` },
             { key: 'pending_checkin', label: `待報到 (${filterCounts.pending_checkin})` },
             { key: 'checked_in', label: `已報到 (${filterCounts.checked_in})` },
-            { key: 'unpaid', label: `待結帳 (${filterCounts.unpaid})` },
+            { key: 'unpaid', label: `未結帳 (${filterCounts.unpaid})` },
+            { key: 'partial', label: `部分已付 (${filterCounts.partial})` },
+            { key: 'paid', label: `已結清 (${filterCounts.paid})` },
+            { key: 'refund', label: `有退款 (${filterCounts.refund})` },
             { key: 'cancelled', label: `已取消 (${filterCounts.cancelled})` }
           ].map(tab => (
             <button
