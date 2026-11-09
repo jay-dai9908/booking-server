@@ -1231,37 +1231,46 @@ export async function addBoardRental(req, res) {
 
       const coveredSessionStrings = coveredSessions.map(s => `${s.start_time}-${s.end_time}`);
 
-      // Inventory check: "檢查庫存，庫存不足回 409"
+      // Inventory check: only count same date, non-cancelled, overlapping rentals (matches createReservation)
       const totalStock = targetConfig.total_stock;
       if (totalStock !== null && totalStock !== undefined) {
-        const activeEquips = await tx.bookingEquipment.findMany({
+        const dateReservations = await tx.reservation.findMany({
+          where: {
+            session: { session_date: sessionDate },
+            status: { not: 'cancelled' }
+          },
+          include: { session: true }
+        });
+        const activeBookingRefs = Array.from(new Set(dateReservations.map(r => r.booking_ref)));
+        const bookedEquipments = await tx.bookingEquipment.findMany({
           where: {
             equipment_id,
+            booking_ref: { in: activeBookingRefs },
             ended_reason: null
           }
         });
-        const activeResvs = await tx.reservation.findMany({
-          where: {
-            status: { not: 'cancelled' },
-            booking_ref: { in: activeEquips.map(e => e.booking_ref) }
-          },
-          select: { booking_ref: true }
-        });
-        const activeBookingSet = new Set(activeResvs.map(r => r.booking_ref));
-        const uncancelledEquips = activeEquips.filter(e => activeBookingSet.has(e.booking_ref));
 
         for (const sess of coveredSessions) {
           const sId = sess.id;
           const sessTimeStr = `${sess.start_time}-${sess.end_time}`;
-          const occupiedCount = uncancelledEquips.filter(be => {
-            const isCovered = (be.covered_sessions || []).some(cs => {
-              if (typeof cs === 'number' || (!isNaN(Number(cs)) && !String(cs).includes(':'))) {
-                return Number(cs) === sId;
-              }
-              return cs === sess.start_time || cs === sessTimeStr || String(cs).startsWith(sess.start_time);
-            });
-            return isCovered;
-          }).reduce((sum, be) => sum + (be.quantity || 1), 0);
+          let occupiedCount = 0;
+          for (const be of bookedEquipments) {
+            let isCovered = false;
+            if (Array.isArray(be.covered_sessions) && be.covered_sessions.length > 0) {
+              isCovered = be.covered_sessions.some(cs => {
+                if (typeof cs === 'number' || (!isNaN(Number(cs)) && !String(cs).includes(':'))) {
+                  return Number(cs) === sId;
+                }
+                return cs === sess.start_time || cs === sessTimeStr || String(cs).startsWith(sess.start_time);
+              });
+            } else {
+              const bRes = dateReservations.filter(r => r.booking_ref === be.booking_ref);
+              isCovered = bRes.some(r => r.session?.start_time === sess.start_time);
+            }
+            if (isCovered) {
+              occupiedCount += (be.quantity || 1);
+            }
+          }
 
           const available = totalStock - occupiedCount;
           if (available < 1) {

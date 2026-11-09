@@ -66,6 +66,25 @@ import {
   isBookingCompleted
 } from '../../utils/admin/floorSelectors';
 
+function getBookingHourSlots(booking) {
+  if (!booking?.start_at || !booking?.end_at) return [];
+  const sStr = formatTimeHHmm(booking.start_at);
+  const eStr = formatTimeHHmm(booking.end_at);
+  if (!sStr || !eStr) return [];
+  const sHour = parseInt(sStr.split(':')[0], 10);
+  let eHour = parseInt(eStr.split(':')[0], 10);
+  const eMin = parseInt(eStr.split(':')[1] || '0', 10);
+  if (eMin > 0) eHour += 1;
+  if (eHour < sHour) eHour += 24;
+
+  const slots = [];
+  for (let h = sHour; h <= eHour; h++) {
+    const displayH = (h % 24).toString().padStart(2, '0');
+    slots.push(`${displayH}:00`);
+  }
+  return slots;
+}
+
 export default function SeatingPage() {
   // Navigation & Tabs
   const [activeTab, setActiveTab] = useState(() => {
@@ -1969,15 +1988,37 @@ export default function SeatingPage() {
                                     data-testid={`person-add-board-btn-${p.person_no}`}
                                     onClick={() => {
                                       setPersonMenuOpen(null);
+                                      const bookingSlots = getBookingHourSlots(timerTarget);
+                                      const nowHHmm = formatTimeHHmm(getServerNow());
+                                      const nowH = parseInt(nowHHmm.split(':')[0], 10);
+                                      const nowSlot = `${nowH.toString().padStart(2, '0')}:00`;
+
+                                      const startSlot = bookingSlots[0] || formatTimeHHmm(startMs);
+                                      const endSlot = bookingSlots[bookingSlots.length - 1] || formatTimeHHmm(bookedEndMs);
+
+                                      let defaultFrom = startSlot;
+                                      if (bookingSlots.slice(0, -1).includes(nowSlot)) {
+                                        defaultFrom = nowSlot;
+                                      } else if (nowSlot < startSlot) {
+                                        defaultFrom = startSlot;
+                                      }
+
+                                      let defaultTo = endSlot;
+                                      if (defaultTo <= defaultFrom) {
+                                        const laterSlots = bookingSlots.filter(s => s > defaultFrom);
+                                        defaultTo = laterSlots[laterSlots.length - 1] || laterSlots[0] || endSlot;
+                                      }
+
+                                      const firstAvailableEq = (boardUsage || []).find(b => (b.total - b.in_use) > 0);
+                                      setSelectedAddBoardEqId(firstAvailableEq ? firstAvailableEq.equipment_id : (boardUsage?.[0]?.equipment_id || ''));
+                                      setAddBoardFromTime(defaultFrom);
+                                      setAddBoardToTime(defaultTo);
+                                      setAddBoardError(null);
                                       setAddBoardModalTarget({
                                         booking: timerTarget,
                                         person: p,
                                         personNo: p.person_no
                                       });
-                                      setSelectedAddBoardEqId('medium');
-                                      setAddBoardFromTime(formatTimeHHmm(startMs));
-                                      setAddBoardToTime(formatTimeHHmm(bookedEndMs));
-                                      setAddBoardError(null);
                                     }}
                                     className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
                                   >
@@ -2708,113 +2749,192 @@ export default function SeatingPage() {
       />
 
       {/* Add Board Modal (Section 5.2.4) */}
-      <ResponsivePanel
-        isOpen={Boolean(addBoardModalTarget)}
-        onClose={() => setAddBoardModalTarget(null)}
-        title="加租智能板"
-        subtitle={`${addBoardModalTarget?.booking?.name} · 第 ${addBoardModalTarget?.personNo} 位`}
-        footer={
-          <div className="flex items-center justify-between">
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={() => setAddBoardModalTarget(null)}
-              disabled={addBoardSubmitting}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              data-testid="confirm-add-board-btn"
-              disabled={!selectedAddBoardEqId || addBoardSubmitting}
-              onClick={handleAddBoardSubmit}
-            >
-              {addBoardSubmitting ? '處理中...' : '確認加租'}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-4 py-2">
-          {addBoardError && (
-            <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl flex items-center gap-2 border border-red-200">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>{addBoardError}</span>
-            </div>
-          )}
+      {(() => {
+        const modalBookingSlots = getBookingHourSlots(addBoardModalTarget?.booking);
+        const selectedAddBoardEq = boardUsage.find(b => b.equipment_id === selectedAddBoardEqId);
+        const isSelectedOutOfStock = !selectedAddBoardEq || (selectedAddBoardEq.total - selectedAddBoardEq.in_use) <= 0;
+        const allBoardsOutOfStock = boardUsage.length > 0 && boardUsage.every(b => (b.total - b.in_use) <= 0);
 
-          <div>
-            <span className="text-[13px] font-bold text-sg-ink block mb-2">選擇尺寸</span>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {(boardUsage.length > 0 ? boardUsage : [
-                { equipment_id: 'small', name: '智能拼豆板（小板）', total: 5, in_use: 0 },
-                { equipment_id: 'medium', name: '智能拼豆板（中板）', total: 5, in_use: 0 },
-                { equipment_id: 'large', name: '智能拼豆板（大板）', total: 5, in_use: 0 }
-              ]).map(item => {
-                const stockLeft = Math.max(0, item.total - item.in_use);
-                const isOutOfStock = stockLeft <= 0;
-                const isSelected = selectedAddBoardEqId === item.equipment_id;
+        const addBoardHours = (() => {
+          if (!addBoardFromTime || !addBoardToTime) return 0;
+          const fParts = addBoardFromTime.split(':').map(Number);
+          const tParts = addBoardToTime.split(':').map(Number);
+          let diffMins = (tParts[0] * 60 + (tParts[1] || 0)) - (fParts[0] * 60 + (fParts[1] || 0));
+          if (diffMins <= 0 && tParts[0] < fParts[0]) diffMins += 24 * 60;
+          return Math.max(0, Math.ceil(diffMins / 60));
+        })();
+        const addBoardTotalPrice = addBoardHours * (selectedAddBoardEq?.hourly_rate || 0);
 
-                return (
-                  <button
-                    key={item.equipment_id}
-                    type="button"
-                    data-testid={`board-choice-${item.equipment_id}`}
-                    disabled={isOutOfStock}
-                    onClick={() => setSelectedAddBoardEqId(item.equipment_id)}
-                    className={`p-3 rounded-2xl border text-left transition flex flex-col justify-between ${
-                      isOutOfStock
-                        ? 'bg-gray-100 border-sg-line opacity-50 cursor-not-allowed'
-                        : isSelected
-                        ? 'bg-sg-selected border-sg-brown shadow-xs'
-                        : 'bg-white border-sg-line hover:border-sg-brown cursor-pointer'
-                    }`}
-                  >
-                    <div>
-                      <div className="font-bold text-[13px] text-sg-ink">{item.name}</div>
-                      <div className="text-[11px] text-sg-muted mt-0.5">
-                        {item.equipment_id === 'large' ? 'NT$150 / 時' : item.equipment_id === 'medium' ? 'NT$120 / 時' : 'NT$90 / 時'}
-                      </div>
-                    </div>
-                    <div className="mt-2 text-[11px] font-bold">
-                      {isOutOfStock ? (
-                        <span className="text-sg-danger">已無庫存</span>
-                      ) : (
-                        <span className="text-sg-sage font-num">剩餘 {stockLeft} 台</span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+        return (
+          <ResponsivePanel
+            isOpen={Boolean(addBoardModalTarget)}
+            onClose={() => setAddBoardModalTarget(null)}
+            title="加租智能板"
+            subtitle={`${addBoardModalTarget?.booking?.name || ''} · 第 ${addBoardModalTarget?.personNo} 位`}
+            footer={
+              <div className="flex items-center justify-between w-full">
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => setAddBoardModalTarget(null)}
+                  disabled={addBoardSubmitting}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  data-testid="confirm-add-board-btn"
+                  disabled={!selectedAddBoardEqId || isSelectedOutOfStock || allBoardsOutOfStock || addBoardSubmitting || addBoardHours <= 0}
+                  onClick={handleAddBoardSubmit}
+                >
+                  {addBoardSubmitting ? '處理中...' : '確認加租'}
+                </Button>
+              </div>
+            }
+          >
+            <div className="space-y-4 py-2">
+              {addBoardError && (
+                <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl flex items-center gap-2 border border-red-200">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{addBoardError}</span>
+                </div>
+              )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[12px] font-bold text-sg-ink block mb-1">開始時間</label>
-              <input
-                type="text"
-                data-testid="add-board-from-time"
-                value={addBoardFromTime}
-                onChange={(e) => setAddBoardFromTime(e.target.value)}
-                placeholder="19:00"
-                className="w-full px-3 py-2 rounded-xl border border-sg-line font-num text-[13px] focus:outline-none focus:border-sg-brown"
-              />
+              {allBoardsOutOfStock && (
+                <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl flex items-center gap-2 border border-red-200">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>目前所有尺寸智能板皆無庫存，無法加租</span>
+                </div>
+              )}
+
+              <div>
+                <span className="text-[13px] font-bold text-sg-ink block mb-2">選擇尺寸</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {boardUsage.map(item => {
+                    const stockLeft = Math.max(0, item.total - item.in_use);
+                    const isOutOfStock = stockLeft <= 0;
+                    const isSelected = selectedAddBoardEqId === item.equipment_id;
+
+                    return (
+                      <button
+                        key={item.equipment_id}
+                        type="button"
+                        data-testid={`board-choice-${item.equipment_id}`}
+                        disabled={isOutOfStock}
+                        onClick={() => setSelectedAddBoardEqId(item.equipment_id)}
+                        className={`p-3 rounded-2xl border text-left transition flex flex-col justify-between ${
+                          isOutOfStock
+                            ? 'bg-gray-100 border-sg-line opacity-50 cursor-not-allowed'
+                            : isSelected
+                            ? 'bg-sg-selected border-sg-brown shadow-xs'
+                            : 'bg-white border-sg-line hover:border-sg-brown cursor-pointer'
+                        }`}
+                      >
+                        <div>
+                          <div className="font-bold text-[13px] text-sg-ink">{item.name}</div>
+                          <div className="text-[11px] text-sg-muted mt-0.5">
+                            NT${item.hourly_rate ?? 0} / 時
+                          </div>
+                        </div>
+                        <div className="mt-2 text-[11px] font-bold">
+                          {isOutOfStock ? (
+                            <span className="text-sg-danger">已無庫存</span>
+                          ) : (
+                            <span className="text-sg-sage font-num">剩餘 {stockLeft} 台</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {boardUsage.length === 0 && (
+                  <div className="p-3 bg-amber-50 text-amber-800 text-xs rounded-xl border border-amber-200">
+                    暫無可用的智能板配置
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[12px] font-bold text-sg-ink block mb-1">開始時間</label>
+                  <div className="flex flex-wrap gap-1.5 mb-1.5" data-testid="add-board-from-chips">
+                    {(modalBookingSlots.length > 1 ? modalBookingSlots.slice(0, -1) : (addBoardFromTime ? [addBoardFromTime] : [])).map(slot => (
+                      <button
+                        key={slot}
+                        type="button"
+                        data-testid={`from-chip-${slot}`}
+                        onClick={() => {
+                          setAddBoardFromTime(slot);
+                          if (addBoardToTime <= slot) {
+                            const later = modalBookingSlots.filter(s => s > slot);
+                            setAddBoardToTime(later[later.length - 1] || later[0] || slot);
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-xl border text-[11px] font-num font-bold transition cursor-pointer ${
+                          addBoardFromTime === slot
+                            ? 'bg-sg-brown text-white border-sg-brown shadow-xs'
+                            : 'bg-white border-sg-line text-sg-ink hover:border-sg-brown'
+                        }`}
+                      >
+                        {slot}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    data-testid="add-board-from-time"
+                    value={addBoardFromTime}
+                    onChange={(e) => setAddBoardFromTime(e.target.value)}
+                    placeholder="19:00"
+                    className="w-full px-3 py-1.5 rounded-xl border border-sg-line font-num text-[13px] bg-sg-paper/30 focus:outline-none focus:border-sg-brown"
+                  />
+                </div>
+                <div>
+                  <label className="text-[12px] font-bold text-sg-ink block mb-1">結束時間</label>
+                  <div className="flex flex-wrap gap-1.5 mb-1.5" data-testid="add-board-to-chips">
+                    {(modalBookingSlots.length > 1 ? modalBookingSlots.filter(s => s > addBoardFromTime) : (addBoardToTime ? [addBoardToTime] : [])).map(slot => (
+                      <button
+                        key={slot}
+                        type="button"
+                        data-testid={`to-chip-${slot}`}
+                        onClick={() => setAddBoardToTime(slot)}
+                        className={`px-2.5 py-1 rounded-xl border text-[11px] font-num font-bold transition cursor-pointer ${
+                          addBoardToTime === slot
+                            ? 'bg-sg-brown text-white border-sg-brown shadow-xs'
+                            : 'bg-white border-sg-line text-sg-ink hover:border-sg-brown'
+                        }`}
+                      >
+                        {slot}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    data-testid="add-board-to-time"
+                    value={addBoardToTime}
+                    onChange={(e) => setAddBoardToTime(e.target.value)}
+                    placeholder="21:00"
+                    className="w-full px-3 py-1.5 rounded-xl border border-sg-line font-num text-[13px] bg-sg-paper/30 focus:outline-none focus:border-sg-brown"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-sg-paper border border-sg-line/60 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[13px] font-bold text-sg-ink">預估費用</span>
+                  <span className="text-[14px] font-bold text-sg-brown font-num">
+                    {addBoardHours > 0 ? `${addBoardHours} 小時 · NT$${addBoardTotalPrice}` : '0 小時 · NT$0'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-sg-muted">
+                  結帳時會自動套用買三送一
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="text-[12px] font-bold text-sg-ink block mb-1">結束時間</label>
-              <input
-                type="text"
-                data-testid="add-board-to-time"
-                value={addBoardToTime}
-                onChange={(e) => setAddBoardToTime(e.target.value)}
-                placeholder="21:00"
-                className="w-full px-3 py-2 rounded-xl border border-sg-line font-num text-[13px] focus:outline-none focus:border-sg-brown"
-              />
-            </div>
-          </div>
-        </div>
-      </ResponsivePanel>
+          </ResponsivePanel>
+        );
+      })()}
 
       {/* LINE message modal */}
       {lineMsgReservation && (
