@@ -696,10 +696,6 @@ export default function SeatingPage() {
             </button>
           )}
         </div>
-
-        <div className="text-[12px] text-sg-muted font-medium hidden sm:block">
-          使用中 <span className="font-bold text-sg-ink font-num">{inUsePax}</span> 位 · 待入座 <span className="font-bold text-sg-ink font-num">{pendingPax}</span> 位 · 空位 <span className="font-bold text-sg-ink font-num">{emptySeatCount}</span> 個
-        </div>
       </div>
 
       {/* DatePicker Dropdown / Strip */}
