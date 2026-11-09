@@ -2784,6 +2784,9 @@ export default function SeatLayoutPage() {
                       <span className="text-sg-muted">{fromStr}</span>
                       <span className="mx-1 text-sg-brown font-bold">→</span>
                       <span className="font-bold text-sg-brown font-num">{toStr}</span>
+                      {b.note && (
+                        <span className="ml-1.5 text-[11px] text-sg-muted font-bold">（{b.note}）</span>
+                      )}
                     </div>
                   );
                 })}

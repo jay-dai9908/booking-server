@@ -437,17 +437,17 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
     assert.equal(pubData.capacity_before, 20);
     assert.equal(pubData.capacity_after, 14);
 
-    // Verify movable was reallocated
-    assert.equal(pubData.reallocated?.length, 1);
-    assert.equal(pubData.reallocated[0].booking_ref, bMovable);
+    // Verify bookings on deleted seats (movable and pinned) were reallocated
+    assert.equal(pubData.reallocated?.length, 2);
+    const reallocatedRefs = pubData.reallocated.map(r => r.booking_ref);
+    assert.ok(reallocatedRefs.includes(bMovable));
+    assert.ok(reallocatedRefs.includes(bPinned));
+
     const reallocatedRes = await prisma.reservation.findFirst({ where: { booking_ref: bMovable } });
     assert.notEqual(reallocatedRes.assigned_seats[0], 'B2-4');
 
-    // Verify pinned was preserved and added to needs_manual
-    assert.equal(pubData.needs_manual?.length, 1);
-    assert.equal(pubData.needs_manual[0].booking_ref, bPinned);
     const pinnedRes = await prisma.reservation.findFirst({ where: { booking_ref: bPinned } });
-    assert.deepEqual(pinnedRes.assigned_seats, ['B2-3'], 'Pinned reservation retains its seat');
+    assert.notEqual(pinnedRes.assigned_seats[0], 'B2-3', 'Pinned reservation on deleted seat must not retain B2-3');
 
     // Verify session max_capacity updated to 14
     const updatedFutureSession = await prisma.session.findUnique({ where: { id: futureSession.id } });

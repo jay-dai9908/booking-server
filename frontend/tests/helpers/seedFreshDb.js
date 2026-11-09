@@ -242,7 +242,10 @@ export async function ensureFreshDbSeeded(customPrisma) {
             start_time: startTime
           }
         },
-        update: {},
+        update: {
+          end_time: endTime,
+          max_capacity: 16
+        },
         create: {
           session_date: dbDate,
           start_time: startTime,

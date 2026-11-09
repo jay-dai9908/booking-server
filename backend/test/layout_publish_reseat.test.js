@@ -42,6 +42,7 @@ test('Layout publish reseat tests (Spec 1.5)', async (t) => {
   const createdLayoutIds = [];
   const createdSessionIds = [];
   const createdBookingRefs = [];
+  const mutatedSessions = [];
 
   const cleanup = async () => {
     if (createdBookingRefs.length > 0) {
@@ -54,6 +55,14 @@ test('Layout publish reseat tests (Spec 1.5)', async (t) => {
     if (createdSessionIds.length > 0) {
       await prisma.reservation.deleteMany({ where: { session_id: { in: createdSessionIds } } });
       await prisma.session.deleteMany({ where: { id: { in: createdSessionIds } } });
+    }
+    if (mutatedSessions.length > 0) {
+      for (const m of mutatedSessions) {
+        await prisma.session.update({
+          where: { id: m.id },
+          data: { end_time: m.originalEndTime }
+        }).catch(() => {});
+      }
     }
     if (createdLayoutIds.length > 0) {
       await prisma.seat.deleteMany({ where: { layout_id: { in: createdLayoutIds } } });
@@ -147,6 +156,7 @@ test('Layout publish reseat tests (Spec 1.5)', async (t) => {
       });
       createdSessionIds.push(session.id);
     } else if (session.end_time !== end_time) {
+      mutatedSessions.push({ id: session.id, originalEndTime: session.end_time });
       session = await prisma.session.update({
         where: { id: session.id },
         data: { end_time }
@@ -510,5 +520,110 @@ test('Layout publish reseat tests (Spec 1.5)', async (t) => {
     assert.ok(!rAfter.assigned_seats.includes('B1-1'), 'Seats should be updated');
     const p1After = await prisma.bookingPerson.findFirst({ where: { booking_ref: bRef, person_no: 1 } });
     assert.equal(p1After.timer_started_at.getTime(), timerStart.getTime(), 'Timer must be untouched');
+  });
+
+  await t.test('8. Item 4: 發布座位版面：店員鎖定座位的訂單', async () => {
+    const tomorrowStr = toTaipeiDateString(new Date(Date.now() + 86400000));
+    const tomorrowDate = dateOnly(tomorrowStr);
+
+    const sTomorrow = await getOrCreateTestSession('14:00', '16:00', tomorrowDate);
+
+    const bRefPinnedA = 'BK-PINNED-A';
+    const bRefPinnedB = 'BK-PINNED-B';
+    createdBookingRefs.push(bRefPinnedA, bRefPinnedB);
+
+    // Order 1: Pinned on A1-1
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bRefPinnedA,
+        user_id: user.id,
+        session_id: sTomorrow.id,
+        pax: 1,
+        status: 'confirmed',
+        seat_source: 'staff',
+        is_seat_locked: true,
+        assigned_seats: ['A1-1'],
+        total_amount: 300
+      }
+    });
+    await prisma.bookingPerson.create({
+      data: {
+        booking_ref: bRefPinnedA,
+        person_no: 1,
+        seat_code: 'A1-1',
+        status: 'active'
+      }
+    });
+
+    // Order 2: Pinned on B1-1
+    await prisma.reservation.create({
+      data: {
+        booking_ref: bRefPinnedB,
+        user_id: user.id,
+        session_id: sTomorrow.id,
+        pax: 1,
+        status: 'confirmed',
+        seat_source: 'staff',
+        is_seat_locked: true,
+        assigned_seats: ['B1-1'],
+        total_amount: 300
+      }
+    });
+    await prisma.bookingPerson.create({
+      data: {
+        booking_ref: bRefPinnedB,
+        person_no: 1,
+        seat_code: 'B1-1',
+        status: 'active'
+      }
+    });
+
+    // Create a draft that keeps A1-1, deletes B1-1, and adds C1-1
+    const draft = await createTestLayout('刪除B1-1草稿', ['A1-1', 'C1-1'], 'draft');
+
+    // 1. Preview publish
+    const { req: pReq, res: pRes } = createMockReqRes({
+      params: { id: draft.id },
+      body: { effective_from: tomorrowStr }
+    });
+    await previewPublish(pReq, pRes);
+    assert.equal(pRes.getStatusCode(), 200);
+    const pData = pRes.getResponseData();
+
+    // Order 1 (pinned on A1-1 which was not deleted): NOT in preview, NOT in category_b, NOT in needs_manual
+    assert.ok(!pData.category_b?.some(b => b.booking_ref === bRefPinnedA), '鎖定在 A1-1 的訂單不出現在 category_b');
+    assert.ok(!pData.needs_manual?.some(m => m.booking_ref === bRefPinnedA), '鎖定在 A1-1 的訂單不出現在 needs_manual');
+
+    // Order 2 (pinned on B1-1 which was deleted): appears in category_b with note "原本是店員指定的座位"
+    const bOrder = pData.category_b?.find(b => b.booking_ref === bRefPinnedB);
+    assert.ok(bOrder, '鎖定在被刪除座位 B1-1 的訂單應出現在 category_b 改排清單');
+    assert.equal(bOrder.note, '原本是店員指定的座位');
+    assert.deepEqual(bOrder.to, ['C1-1'], '應自動改排至新可用座位 C1-1');
+
+    // 2. Publish
+    const { req, res } = createMockReqRes({
+      params: { id: draft.id },
+      body: { effective_from: tomorrowStr, confirm: true }
+    });
+    await publishLayout(req, res);
+    assert.equal(res.getStatusCode(), 200);
+
+    // Verify DB seats
+    const resA = await prisma.reservation.findFirst({ where: { booking_ref: bRefPinnedA } });
+    assert.deepEqual(resA.assigned_seats, ['A1-1'], 'A1-1 訂單座位應保持不變');
+
+    const resB = await prisma.reservation.findFirst({ where: { booking_ref: bRefPinnedB } });
+    assert.deepEqual(resB.assigned_seats, ['C1-1'], 'B1-1 訂單應改排到 C1-1，不可留在已刪除的 B1-1');
+
+    const personB = await prisma.bookingPerson.findFirst({ where: { booking_ref: bRefPinnedB, person_no: 1 } });
+    assert.equal(personB.seat_code, 'C1-1', 'B1-1 顧客 seat_code 應更新為 C1-1');
+
+    // Verify audit log wait count
+    const latestLog = await prisma.accountingEvent.findFirst({
+      where: { event_type: 'layout_published' },
+      orderBy: { created_at: 'desc' }
+    });
+    assert.ok(latestLog);
+    assert.match(latestLog.summary, /等待區 0 筆/, '異動紀錄的等待區筆數應等於真的放進等待區的筆數 (0)');
   });
 });

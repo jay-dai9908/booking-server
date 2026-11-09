@@ -550,7 +550,6 @@ async function evaluateLayoutImpact(client, draft, effDate) {
 
   const categoryA = [];
   const categoryB = [];
-  const pinnedCategoryB = [];
   const categoryC = [];
 
   for (const [bRef, bResvs] of bookingsMap.entries()) {
@@ -607,11 +606,11 @@ async function evaluateLayoutImpact(client, draft, effDate) {
     } else {
       // Category B: 還沒到
       const isPinned = Boolean(firstRes.is_seat_locked) || firstRes.seat_source === 'staff';
-      if (isPinned) {
-        pinnedCategoryB.push({ booking_ref: bRef, bResvs, firstRes, lastRes, bPersons, missingSeats });
-      } else {
-        categoryB.push({ booking_ref: bRef, bResvs, firstRes, lastRes, bPersons, missingSeats });
+      if (isPinned && missingSeats.length === 0) {
+        // 座位沒有被刪或停用的鎖定訂單，完全不列出、不處理。
+        continue;
       }
+      categoryB.push({ booking_ref: bRef, bResvs, firstRes, lastRes, bPersons, missingSeats, isPinned });
     }
   }
 
@@ -741,33 +740,20 @@ async function evaluateLayoutImpact(client, draft, effDate) {
       date: sessionDateStr,
       from: b.firstRes.assigned_seats || [],
       to: res.to,
-      is_wait: res.is_wait
+      is_wait: res.is_wait,
+      bPersons: b.bPersons,
+      persons: b.bPersons,
+      ...(b.isPinned ? { pinned: true, note: '原本是店員指定的座位' } : {})
     };
 
     if (res.is_wait) {
-      needsManual.push({ ...item, reason: '座位不足，放進等待區' });
+      needsManual.push({
+        ...item,
+        reason: b.isPinned ? '座位不足，放進等待區（原本是店員指定的座位）' : '座位不足，放進等待區'
+      });
     } else {
       processedCategoryB.push(item);
     }
-  }
-
-  // 3. Process pinned Category B (staff-locked seats preserved, manual intervention needed)
-  for (const p of pinnedCategoryB) {
-    const sessionDateStr = toTaipeiDateString(p.firstRes.session.session_date);
-    const timeStr = `${p.bResvs[0].session.start_time}-${p.bResvs[p.bResvs.length - 1].session.end_time}`;
-    needsManual.push({
-      booking_ref: p.booking_ref,
-      name: p.firstRes.user?.name || '客人',
-      pax: p.firstRes.pax,
-      time: timeStr,
-      date: sessionDateStr,
-      missing_seats: p.missingSeats,
-      pinned: true,
-      reason: '手動鎖定座位，需人工確認',
-      from: p.firstRes.assigned_seats || [],
-      to: p.firstRes.assigned_seats || [],
-      persons: p.bPersons
-    });
   }
 
   // Construct affected_bookings for legacy/backward compatibility
@@ -933,10 +919,15 @@ export async function publishLayout(req, res) {
           where: { booking_ref: b.booking_ref, status: { not: 'cancelled' } },
           data: { assigned_seats: targetSeats }
         });
-        if (b.bPersons && b.bPersons.length > 0) {
-          for (let i = 0; i < b.bPersons.length; i++) {
+        const bPersons = (b.bPersons && b.bPersons.length > 0)
+          ? b.bPersons
+          : ((b.persons && b.persons.length > 0)
+            ? b.persons
+            : await tx.bookingPerson.findMany({ where: { booking_ref: b.booking_ref } }));
+        if (bPersons && bPersons.length > 0) {
+          for (let i = 0; i < bPersons.length; i++) {
             await tx.bookingPerson.update({
-              where: { id: b.bPersons[i].id },
+              where: { id: bPersons[i].id },
               data: { seat_code: targetSeats[i] || null }
             });
           }
@@ -945,8 +936,8 @@ export async function publishLayout(req, res) {
 
       // 8. Apply reseat for needs_manual (wait area or staff overrides)
       for (const m of evaluation.needs_manual) {
-        const targetSeats = manual_overrides[m.booking_ref] || (m.pinned ? null : m.to);
-        if (targetSeats) {
+        const targetSeats = manual_overrides[m.booking_ref] || m.to;
+        if (targetSeats && targetSeats.length > 0) {
           await tx.reservation.updateMany({
             where: { booking_ref: m.booking_ref, status: { not: 'cancelled' } },
             data: { assigned_seats: targetSeats }
@@ -965,7 +956,10 @@ export async function publishLayout(req, res) {
       // 9. Write audit log
       const countB = evaluation.category_b.length;
       const countC = evaluation.category_c.length;
-      const countWait = evaluation.needs_manual.length;
+      const countWait = evaluation.needs_manual.filter(m => {
+        const targetSeats = manual_overrides[m.booking_ref] || m.to;
+        return Array.isArray(targetSeats) && targetSeats.some(sc => sc.startsWith('WAIT-'));
+      }).length;
       await auditLog(tx, {
         event_type: 'layout_published',
         category: 'status',

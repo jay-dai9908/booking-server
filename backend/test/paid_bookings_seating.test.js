@@ -49,6 +49,7 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
   const createdSessionIds = [];
   const createdBookingRefs = [];
   const createdLayoutIds = [];
+  const mutatedSessions = [];
 
   const cleanup = async () => {
     if (createdBookingRefs.length > 0) {
@@ -61,6 +62,14 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     if (createdSessionIds.length > 0) {
       await prisma.reservation.deleteMany({ where: { session_id: { in: createdSessionIds } } });
       await prisma.session.deleteMany({ where: { id: { in: createdSessionIds } } });
+    }
+    if (mutatedSessions.length > 0) {
+      for (const m of mutatedSessions) {
+        await prisma.session.update({
+          where: { id: m.id },
+          data: { end_time: m.originalEndTime }
+        }).catch(() => {});
+      }
     }
     if (createdLayoutIds.length > 0) {
       await prisma.seat.deleteMany({ where: { layout_id: { in: createdLayoutIds } } });
@@ -135,6 +144,7 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     });
     if (sess) {
       if (endTime && sess.end_time !== endTime) {
+        mutatedSessions.push({ id: sess.id, originalEndTime: sess.end_time });
         sess = await prisma.session.update({
           where: { id: sess.id },
           data: { end_time: endTime }

@@ -96,7 +96,7 @@ export async function runSeatingTests() {
             start_time: st
           }
         },
-        update: { max_capacity: 20 },
+        update: { max_capacity: 20, end_time: et },
         create: {
           session_date: todayUtc,
           start_time: st,
