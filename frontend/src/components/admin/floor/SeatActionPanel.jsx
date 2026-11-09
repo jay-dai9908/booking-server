@@ -29,6 +29,42 @@ function formatTimeHHMM(val) {
   }
 }
 
+// Round 13b Item 4: 還沒按離場、已付款的人寫「已付款」；真的離場的人才寫「已離場 18:06」
+function getPersonStatusText(p, booking) {
+  const isPaused = Boolean(p.timer?.paused_at && !p.timer?.timer_ended_at);
+  if (isPaused) return '已暫停';
+
+  const isPaid = Boolean(
+    p.paid ||
+    booking?.is_paid ||
+    booking?.billing?.status === 'paid' ||
+    booking?.billing_status === 'paid' ||
+    booking?.status === 'paid'
+  );
+
+  const isDeparted = Boolean(
+    booking?.attendance === 'completed' ||
+    isBookingCompleted(booking) ||
+    (!isPaid && p.timer?.timer_ended_at)
+  );
+
+  if (isDeparted) {
+    const tStr = formatTimeHHMM(p.timer?.timer_ended_at);
+    return tStr ? `已離場 ${tStr}` : '已離場';
+  }
+
+  if (isPaid) {
+    return '已付款';
+  }
+
+  if (p.timer?.timer_ended_at) {
+    const tStr = formatTimeHHMM(p.timer?.timer_ended_at);
+    return tStr ? `已離場 ${tStr}` : '已離場';
+  }
+
+  return '計時中';
+}
+
 export default function SeatActionPanel({
   isOpen = false,
   onClose,
@@ -405,8 +441,8 @@ export default function SeatActionPanel({
                 <div className="text-[12px] font-bold text-sg-ink">同組</div>
                 <div className="space-y-1.5">
                   {otherPersons.map(p => {
-                    const isPaused = p.timer?.paused_at && !p.timer?.timer_ended_at;
-                    const pStatusText = isPaused ? '已暫停' : (p.timer?.timer_ended_at ? '已離場' : '計時中');
+                    const isPaused = Boolean(p.timer?.paused_at && !p.timer?.timer_ended_at);
+                    const pStatusText = getPersonStatusText(p, booking);
                     const pReason = p.timer?.pause_reason;
                     const seatCodeStr = p.seat_code || (booking?.assigned_seats && booking.assigned_seats[p.person_no - 1]) || '未排座';
 
@@ -503,8 +539,8 @@ export default function SeatActionPanel({
                 <div className="text-[12px] font-bold text-sg-ink">同組</div>
                 <div className="space-y-1.5">
                   {otherPersons.map(p => {
-                    const isPaused = p.timer?.paused_at && !p.timer?.timer_ended_at;
-                    const pStatusText = isPaused ? '已暫停' : (p.timer?.timer_ended_at ? '已離場' : '計時中');
+                    const isPaused = Boolean(p.timer?.paused_at && !p.timer?.timer_ended_at);
+                    const pStatusText = getPersonStatusText(p, booking);
                     const pReason = p.timer?.pause_reason;
                     const seatCodeStr = p.seat_code || (booking?.assigned_seats && booking.assigned_seats[p.person_no - 1]) || '未排座';
 
