@@ -1252,6 +1252,9 @@ export default function SeatingPage() {
                   seatStates={seatStatesMap}
                   onSeatClick={handleSeatClick}
                   fitContainer={true}
+                  filterMode={filterMode}
+                  alerts={alerts}
+                  size="full"
                 />
               </div>
 

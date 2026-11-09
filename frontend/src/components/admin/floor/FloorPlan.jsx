@@ -1,21 +1,35 @@
-import React from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import SeatTile from './SeatTile';
 
 export default function FloorPlan({
   layout = {},
-  seatStates = {}, // { [seatCode]: { state, isPaid, timerText, paxName, boards } }
+  seatStates = {}, // { [seatCode]: { state, isPaid, timerText, paxName, boards, bookingRef } }
   selectedSeats = [],
   suggestedSeats = [],
   onSeatClick = null,
   interactive = true,
   scale = 1,
   fitContainer = false,
-  className = ''
+  className = '',
+  filterMode = 'all', // 'all' | 'alert' | 'pending' | 'empty'
+  alerts = [],
+  size = 'full' // 'full' (58×46) | 'mini' (24×16)
 }) {
-  const containerRef = React.useRef(null);
-  const [containerWidth, setContainerWidth] = React.useState(0);
+  const containerRef = useRef(null);
+  const [containerWidth, setContainerWidth] = useState(0);
 
-  React.useEffect(() => {
+  // Zoom & Pan state (Spec 6.4.1: 0.6 ~ 2.5x)
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  const activePointersRef = useRef(new Map());
+  const initialPinchDistRef = useRef(null);
+  const initialZoomRef = useRef(1);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const isDraggingRef = useRef(false);
+  const dragDistanceRef = useRef(0);
+
+  useEffect(() => {
     if (!fitContainer || !containerRef.current) return;
     const updateW = () => {
       if (containerRef.current) {
@@ -37,170 +51,290 @@ export default function FloorPlan({
   const bgOpacity = (layout.background_opacity ?? layout.bg_opacity ?? 30) / 100;
   const bgRect = layout.background_rect || { x: 0, y: 0, w: canvasW, h: canvasH };
 
-  const effectiveScale = (fitContainer && containerWidth > 0)
-    ? Math.min(1, containerWidth / canvasW)
-    : scale;
+  // Base ratio k = container width / canvas_w
+  const baseK = (fitContainer && containerWidth > 0)
+    ? (containerWidth / canvasW)
+    : (scale || 1);
+
+  // Total coordinate scale k: baseK * zoom
+  const k = baseK * zoom;
+
+  // Pointer event handlers for pinch zoom & drag pan
+  const handlePointerDown = (e) => {
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    dragDistanceRef.current = 0;
+
+    if (activePointersRef.current.size === 1) {
+      isDraggingRef.current = true;
+      dragStartRef.current = {
+        x: e.clientX - pan.x,
+        y: e.clientY - pan.y
+      };
+    } else if (activePointersRef.current.size === 2) {
+      isDraggingRef.current = false;
+      const pts = Array.from(activePointersRef.current.values());
+      initialPinchDistRef.current = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      initialZoomRef.current = zoom;
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    if (!activePointersRef.current.has(e.pointerId)) return;
+    const prevPt = activePointersRef.current.get(e.pointerId);
+    if (prevPt) {
+      dragDistanceRef.current += Math.hypot(e.clientX - prevPt.x, e.clientY - prevPt.y);
+    }
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointersRef.current.size === 2 && initialPinchDistRef.current) {
+      const pts = Array.from(activePointersRef.current.values());
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const ratio = dist / initialPinchDistRef.current;
+      const newZoom = Math.min(2.5, Math.max(0.6, initialZoomRef.current * ratio));
+      setZoom(newZoom);
+    } else if (activePointersRef.current.size === 1 && isDraggingRef.current) {
+      setPan({
+        x: e.clientX - dragStartRef.current.x,
+        y: e.clientY - dragStartRef.current.y
+      });
+    }
+  };
+
+  const handlePointerUp = (e) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) {
+      initialPinchDistRef.current = null;
+    }
+    if (activePointersRef.current.size === 1) {
+      const [remaining] = Array.from(activePointersRef.current.values());
+      dragStartRef.current = {
+        x: remaining.x - pan.x,
+        y: remaining.y - pan.y
+      };
+      isDraggingRef.current = true;
+    } else {
+      isDraggingRef.current = false;
+    }
+  };
+
+  const handleWheel = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.08 : 0.92;
+      setZoom(prev => Math.min(2.5, Math.max(0.6, prev * factor)));
+    }
+  };
+
+  // Center / Reset zoom and pan
+  const handleResetCenter = (e) => {
+    e.stopPropagation();
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  // Filter alert bookings
+  const alertBookingRefs = new Set((alerts || []).map(a => a.booking_ref));
 
   return (
     <div
       ref={containerRef}
+      data-testid="floor-plan-container"
+      data-zoom={zoom}
       className={`relative overflow-hidden bg-[#FAF7F2] border border-sg-line rounded-2xl select-none ${className}`}
       style={{
-        width: fitContainer ? '100%' : canvasW * scale,
-        height: canvasH * effectiveScale,
-        maxWidth: canvasW,
-        minHeight: canvasH * effectiveScale
+        width: fitContainer ? '100%' : canvasW * baseK,
+        height: canvasH * baseK,
+        minHeight: canvasH * baseK,
+        touchAction: 'none'
       }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onWheel={handleWheel}
     >
-      <div
-        className="absolute inset-0 origin-top-left"
-        style={{
-          width: canvasW,
-          height: canvasH,
-          transform: `scale(${effectiveScale})`
-        }}
+      {/* Reset Center Button (Spec 6.4.1) */}
+      <button
+        type="button"
+        data-testid="floor-plan-center-btn"
+        onClick={handleResetCenter}
+        className="absolute bottom-3 right-3 z-30 px-3 py-1.5 rounded-xl bg-white/95 border border-sg-line shadow-xs text-[12px] font-bold text-sg-ink hover:bg-white active:scale-95 transition cursor-pointer"
       >
-        {/* Background photo if any */}
-        {bgImg && (
-          <img
-            src={bgImg}
-            alt="底圖"
-            className="absolute pointer-events-none object-cover"
-            style={{
-              left: bgRect.x ?? 0,
-              top: bgRect.y ?? 0,
-              width: bgRect.w ?? canvasW,
-              height: bgRect.h ?? canvasH,
-              opacity: bgOpacity
-            }}
-          />
-        )}
+        置中
+      </button>
 
-        {/* SVG architectural elements (walls, doors, counters, windows, pillars) */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${canvasW} ${canvasH}`}>
-          {elements.map((el, idx) => {
-            if (el.type === 'wall') {
-              if (el.points && el.points.length > 1) {
-                return (
-                  <polyline
-                    key={el.id || idx}
-                    points={el.points.map(p => p.join(',')).join(' ')}
-                    stroke="#796E65"
-                    strokeWidth={el.thickness || 4}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    fill="none"
-                  />
-                );
-              }
+      {/* Layer 1: Background photo if any */}
+      {bgImg && (
+        <img
+          src={bgImg}
+          alt="底圖"
+          className="absolute pointer-events-none object-cover"
+          style={{
+            left: bgRect.x * k + pan.x,
+            top: bgRect.y * k + pan.y,
+            width: (bgRect.w ?? canvasW) * k,
+            height: (bgRect.h ?? canvasH) * k,
+            opacity: bgOpacity
+          }}
+        />
+      )}
+
+      {/* Layer 2: Bottom SVG Layer (scales with k, viewBox 0 0 canvasW canvasH) */}
+      <svg
+        className="absolute pointer-events-none"
+        style={{
+          left: pan.x,
+          top: pan.y,
+          width: canvasW * k,
+          height: canvasH * k
+        }}
+        viewBox={`0 0 ${canvasW} ${canvasH}`}
+      >
+        {/* Architectural elements (walls, windows, doors, counters, pillars) */}
+        {elements.map((el, idx) => {
+          if (el.type === 'wall') {
+            if (el.points && el.points.length > 1) {
               return (
-                <line
+                <polyline
                   key={el.id || idx}
-                  x1={el.x1}
-                  y1={el.y1}
-                  x2={el.x2}
-                  y2={el.y2}
+                  points={el.points.map(p => p.join(',')).join(' ')}
                   stroke="#796E65"
                   strokeWidth={el.thickness || 4}
                   strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
                 />
               );
             }
-            if (el.type === 'window') {
-              if (el.points && el.points.length > 1) {
-                return (
-                  <polyline
-                    key={el.id || idx}
-                    points={el.points.map(p => p.join(',')).join(' ')}
-                    stroke="#78B5C5"
-                    strokeWidth={el.thickness || 3}
-                    strokeDasharray="6,3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    fill="none"
-                  />
-                );
-              }
-            }
-            if (el.type === 'door') {
+            return (
+              <line
+                key={el.id || idx}
+                x1={el.x1}
+                y1={el.y1}
+                x2={el.x2}
+                y2={el.y2}
+                stroke="#796E65"
+                strokeWidth={el.thickness || 4}
+                strokeLinecap="round"
+              />
+            );
+          }
+          if (el.type === 'window') {
+            if (el.points && el.points.length > 1) {
               return (
-                <rect
+                <polyline
                   key={el.id || idx}
-                  x={el.x}
-                  y={el.y}
-                  width={el.w}
-                  height={el.h}
-                  fill="#FBF6EE"
-                  stroke="#A78B71"
-                  strokeWidth="2"
-                  strokeDasharray="4,2"
-                  rx="2"
-                  transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
+                  points={el.points.map(p => p.join(',')).join(' ')}
+                  stroke="#78B5C5"
+                  strokeWidth={el.thickness || 3}
+                  strokeDasharray="6,3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
                 />
               );
             }
-            if (el.type === 'counter') {
-              return (
-                <rect
-                  key={el.id || idx}
-                  x={el.x}
-                  y={el.y}
-                  width={el.w}
-                  height={el.h}
-                  fill="#E5DDD0"
+          }
+          if (el.type === 'door') {
+            return (
+              <rect
+                key={el.id || idx}
+                x={el.x}
+                y={el.y}
+                width={el.w}
+                height={el.h}
+                fill="#FBF6EE"
+                stroke="#A78B71"
+                strokeWidth="2"
+                strokeDasharray="4,2"
+                rx="2"
+                transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
+              />
+            );
+          }
+          if (el.type === 'counter') {
+            return (
+              <rect
+                key={el.id || idx}
+                x={el.x}
+                y={el.y}
+                width={el.w}
+                height={el.h}
+                fill="#E5DDD0"
+                stroke="#C8BEB2"
+                strokeWidth="2"
+                rx="6"
+                transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
+              />
+            );
+          }
+          if (el.type === 'pillar') {
+            return (
+              <rect
+                key={el.id || idx}
+                x={el.x}
+                y={el.y}
+                width={el.w}
+                height={el.h}
+                fill="#796E65"
+                rx="4"
+                transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
+              />
+            );
+          }
+          return null;
+        })}
+
+        {/* Tables drawn in SVG (Spec 6.4.1) */}
+        {tables.map((t) => {
+          const isCircle = t.shape === 'circle' || t.shape === 'round';
+          const rotCenter = `${t.cx} ${t.cy}`;
+          return (
+            <g key={t.id} transform={t.rotation ? `rotate(${t.rotation} ${rotCenter})` : undefined}>
+              {isCircle ? (
+                <circle
+                  cx={t.cx}
+                  cy={t.cy}
+                  r={Math.min(t.w, t.h) / 2}
+                  fill="#EADDCF"
                   stroke="#C8BEB2"
-                  strokeWidth="2"
-                  rx="6"
-                  transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
+                  strokeWidth="1.5"
                 />
-              );
-            }
-            if (el.type === 'pillar') {
-              return (
+              ) : (
                 <rect
-                  key={el.id || idx}
-                  x={el.x}
-                  y={el.y}
-                  width={el.w}
-                  height={el.h}
-                  fill="#796E65"
-                  rx="4"
-                  transform={el.rotation ? `rotate(${el.rotation} ${el.x + el.w / 2} ${el.y + el.h / 2})` : undefined}
+                  x={t.cx - t.w / 2}
+                  y={t.cy - t.h / 2}
+                  width={t.w}
+                  height={t.h}
+                  rx={t.rx ?? 12}
+                  fill="#EADDCF"
+                  stroke="#C8BEB2"
+                  strokeWidth="1.5"
                 />
-              );
-            }
-            return null;
-          })}
-        </svg>
+              )}
+              <text
+                x={t.cx}
+                y={t.cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#796E65"
+                fontSize="12"
+                fontWeight="bold"
+                style={{ userSelect: 'none' }}
+              >
+                {t.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
 
-        {/* Tables */}
-        {tables.map((t) => (
-          <div
-            key={t.id}
-            className="absolute border border-[#C8BEB2] rounded-xl flex items-center justify-center pointer-events-none"
-            style={{
-              left: t.cx - t.w / 2,
-              top: t.cy - t.h / 2,
-              width: t.w,
-              height: t.h,
-              backgroundColor: '#EADDCF',
-              transform: `rotate(${t.rotation || 0}deg)`,
-              transformOrigin: 'center center'
-            }}
-          >
-            <span className="text-[12px] font-bold text-sg-brown/80 tracking-wide select-none">
-              {t.label}
-            </span>
-          </div>
-        ))}
-
-        {/* Seats */}
+      {/* Layer 3: Absolute HTML Seats Layer (fixed size, position = coord * k + pan) */}
+      <div className="absolute inset-0 pointer-events-none">
         {seats.map((seat) => {
           const table = tables.find(t => t.id === seat.table_id);
           const tRot = (table?.rotation || 0) * (Math.PI / 180);
-          const rad = (table?.rotation || 0);
 
-          // Absolute position: table.cx + rotated lx, table.cy + rotated ly
           const lx = seat.lx || 0;
           const ly = seat.ly || 0;
           const cos = Math.cos(tRot);
@@ -208,10 +342,14 @@ export default function FloorPlan({
           const rotLx = lx * cos - ly * sin;
           const rotLy = lx * sin + ly * cos;
 
-          const cx = (table?.cx || 0) + rotLx;
-          const cy = (table?.cy || 0) + rotLy;
+          const rawCx = (table?.cx || 0) + rotLx;
+          const rawCy = (table?.cy || 0) + rotLy;
 
-          // State determination
+          // Seat position in pixels
+          const seatX = rawCx * k + pan.x;
+          const seatY = rawCy * k + pan.y;
+
+          // Seat state
           const seatInfo = seatStates[seat.code] || {};
           let state = seatInfo.state || (seat.is_active ? 'empty' : 'off');
           if (selectedSeats.includes(seat.code)) {
@@ -222,26 +360,46 @@ export default function FloorPlan({
 
           const isVent = seat.priority === 'last';
 
+          // Filter opacity check (Spec: 篩選 chip 選了「需要注意」「待入座」「空位」時，不符合的座位加 opacity: .35)
+          let isDimmed = false;
+          if (filterMode === 'alert') {
+            isDimmed = !alertBookingRefs.has(seatInfo.bookingRef);
+          } else if (filterMode === 'pending') {
+            isDimmed = state !== 'reserved' && state !== 'resv';
+          } else if (filterMode === 'empty') {
+            isDimmed = state !== 'empty' || seat.is_active === false;
+          }
+
           return (
             <div
               key={seat.id || seat.code}
-              className="absolute -translate-x-1/2 -translate-y-1/2"
+              className="absolute pointer-events-auto transition-opacity duration-150"
               style={{
-                left: cx,
-                top: cy,
-                transform: `translate(-50%, -50%) rotate(${rad}deg)`,
-                transformOrigin: 'center center'
+                left: seatX,
+                top: seatY,
+                transform: 'translate(-50%, -50%)',
+                opacity: isDimmed ? 0.35 : 1
               }}
             >
               <SeatTile
                 code={seat.code}
                 state={state}
+                size={size}
                 isVent={isVent}
                 isPaid={Boolean(seatInfo.isPaid)}
                 boards={seatInfo.boards || []}
                 timerText={seatInfo.timerText}
                 paxName={seatInfo.paxName}
-                onClick={interactive && onSeatClick ? () => onSeatClick(seat) : null}
+                onClick={
+                  interactive && onSeatClick
+                    ? () => {
+                        // Prevent click firing if user was actively dragging/panning
+                        if (dragDistanceRef.current < 6) {
+                          onSeatClick(seat);
+                        }
+                      }
+                    : null
+                }
               />
             </div>
           );
