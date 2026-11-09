@@ -32,6 +32,8 @@ import SplitCollectView from './SplitCollectView';
 import PaymentCompleteView from './PaymentCompleteView';
 import PassTenderSheet from './PassTenderSheet';
 import SharedItemsSplitPanel from './SharedItemsSplitPanel';
+import AddonItemsManageModal from './AddonItemsManageModal';
+import QuickPromoModal from './QuickPromoModal';
 import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
@@ -65,6 +67,9 @@ export default function CheckoutWorkbench({
   const [showCollectModal, setShowCollectModal] = useState(false);
   const [showSplitCollect, setShowSplitCollect] = useState(false);
   const [showSharedSplitPanel, setShowSharedSplitPanel] = useState(false);
+  const [showAddonManager, setShowAddonManager] = useState(false);
+  const [showQuickPromoModal, setShowQuickPromoModal] = useState(false);
+  const [isPrintingSplit, setIsPrintingSplit] = useState(false);
   const [supplementPerson, setSupplementPerson] = useState(null);
   const [showWaiveModal, setShowWaiveModal] = useState(false);
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
@@ -1016,6 +1021,65 @@ export default function CheckoutWorkbench({
     }
   };
 
+  // Print split slips (Section 8.2 & Round 14 Item 4)
+  const handlePrintSplitSlips = async () => {
+    const computedBill = clientComputedBill || billData?.bill;
+    const allPersons = computedBill?.persons || [];
+    if (allPersons.length === 0) {
+      setToastMsg('無任何顧客資料可列印分單');
+      return;
+    }
+
+    try {
+      setIsPrintingSplit(true);
+      let successCount = 0;
+      for (const p of allPersons) {
+        const personPayment = {
+          booking_ref: bookingRef,
+          created_at: new Date().toISOString(),
+          method: p.paid_method || 'cash',
+          amount: p.total || 0,
+          person_nos: [p.person_no],
+          breakdown_json: {
+            persons: [p],
+            order: {
+              persons_total: allPersons.length,
+              persons_paid_after: allPersons.filter(x => x.paid || x.is_paid || x.is_frozen).length
+            }
+          }
+        };
+
+        const commands = buildReceipt(personPayment, billData?.booking || {}, {
+          isFullOrder: false,
+          staffName: '櫃檯'
+        });
+
+        const res = await api.post('/print/jobs', {
+          type: 'receipt',
+          booking_ref: bookingRef,
+          title: `結帳分單 ${billData?.booking?.ref_display || bookingRef} 第 ${p.person_no} 位`,
+          commands
+        });
+
+        if (res.data?.job) {
+          try {
+            await printJobOnThisDevice(res.data.job);
+          } catch (printErr) {
+            console.warn('[PrintSplit] Local print error:', printErr);
+          }
+        }
+        successCount++;
+      }
+
+      setToastMsg(`已送出 ${successCount} 張分單至列印佇列`);
+    } catch (err) {
+      console.error('[handlePrintSplitSlips] Error:', err);
+      setToastMsg('列印分單失敗');
+    } finally {
+      setIsPrintingSplit(false);
+    }
+  };
+
   const netDue = unpaidPersons.reduce((s, p) => s + (p.total || 0), 0);
 
   return (
@@ -1516,9 +1580,19 @@ export default function CheckoutWorkbench({
             {/* 3. Addon Items Section */}
             <div className="space-y-3 p-4 rounded-2xl border border-sg-line bg-white shadow-sm">
               <div className="flex items-center justify-between">
-                <h3 className="text-[14px] font-bold text-sg-ink">
-                  吊飾、周邊與代燙加購
-                </h3>
+                <div className="flex items-center gap-2.5">
+                  <h3 className="text-[14px] font-bold text-sg-ink">
+                    吊飾、周邊與代燙加購
+                  </h3>
+                  <button
+                    type="button"
+                    data-testid="manage-addon-items-link"
+                    onClick={() => setShowAddonManager(true)}
+                    className="text-[12px] font-bold text-sg-brown hover:text-sg-brown-dark hover:underline cursor-pointer"
+                  >
+                    管理品項
+                  </button>
+                </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-[12px] text-sg-muted">加購對象：</span>
                   <button
@@ -1672,7 +1746,18 @@ export default function CheckoutWorkbench({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Promo code & POS chips */}
               <div className="p-4 rounded-2xl border border-sg-line bg-white shadow-sm space-y-3">
-                <h3 className="text-[14px] font-bold text-sg-ink">優惠券與折扣碼</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[14px] font-bold text-sg-ink">優惠券與折扣碼</h3>
+                  <button
+                    type="button"
+                    data-testid="add-quick-pos-promo-btn"
+                    onClick={() => setShowQuickPromoModal(true)}
+                    className="text-[12px] font-bold text-sg-brown hover:text-sg-brown-dark hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    新增櫃檯優惠
+                  </button>
+                </div>
 
                 {/* Quick Promos */}
                 <div className="flex flex-wrap gap-2">
@@ -1903,6 +1988,17 @@ export default function CheckoutWorkbench({
                     </button>
                     <button
                       type="button"
+                      data-testid="mobile-print-split-slips-btn"
+                      onClick={() => {
+                        setShowMobileMoreMenu(false);
+                        handlePrintSplitSlips();
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper rounded-xl"
+                    >
+                      印分單
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => { setShowMobileMoreMenu(false); setShowWaiveModal(true); }}
                       disabled={unpaidPersons.length === 0}
                       className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl disabled:opacity-40"
@@ -1959,6 +2055,17 @@ export default function CheckoutWorkbench({
               <Button variant="secondary" size="sm" onClick={handleOpenPreview} className="whitespace-nowrap">
                 <Printer className="w-4 h-4 mr-1 text-sg-muted" />
                 預覽總單
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="print-split-slips-btn"
+                onClick={handlePrintSplitSlips}
+                loading={isPrintingSplit}
+                className="whitespace-nowrap"
+              >
+                <Printer className="w-4 h-4 mr-1 text-sg-muted" />
+                印分單
               </Button>
               <Button
                 variant="secondary"
@@ -2278,6 +2385,23 @@ export default function CheckoutWorkbench({
         draftState={draftState}
         billData={billData}
         onUpdateDraft={updateDraft}
+      />
+
+      {/* Addon Items Manager Modal */}
+      <AddonItemsManageModal
+        isOpen={showAddonManager}
+        onClose={() => setShowAddonManager(false)}
+        onUpdated={loadBill}
+      />
+
+      {/* Quick Promo Code Modal */}
+      <QuickPromoModal
+        isOpen={showQuickPromoModal}
+        onClose={() => setShowQuickPromoModal(false)}
+        onSuccess={(promo) => {
+          setToastMsg(`已新增櫃檯優惠「${promo?.name || promo?.code}」`);
+          loadBill();
+        }}
       />
 
       {/* Member Pass Center Modal */}

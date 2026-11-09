@@ -27,6 +27,8 @@ export async function queuePrintJob({
   reprint_of_id = null,
   user = {},
   device = {},
+  commands: passedCommands = null,
+  title: passedTitle = null,
   opts: passedOpts = {}
 }, clientTx = null) {
   const staffName = user?.name || '系統';
@@ -60,7 +62,10 @@ export async function queuePrintJob({
 
   const formattedRef = formatBookingRef(booking_ref);
 
-  if (type === 'receipt' && payment_id) {
+  if (passedCommands && passedCommands.length > 0) {
+    commands = passedCommands;
+    title = passedTitle || `列印單 ${formattedRef || ''}`;
+  } else if (type === 'receipt' && payment_id) {
     const payment = await client.payment.findUnique({ where: { id: Number(payment_id) } });
     const bookingReservations = booking_ref ? await client.reservation.findMany({
       where: { booking_ref, status: { not: 'cancelled' } },
