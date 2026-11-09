@@ -53,6 +53,7 @@ export default function Preview() {
   const [equipmentsLoaded, setEquipmentsLoaded] = useState(false);
 
   const dateSectionRef = useRef(null);
+  const monthBarRef = useRef(null);
 
   const {
     settings: globalSettings,
@@ -119,13 +120,14 @@ export default function Preview() {
   }, [hasPricing, discountTexts, minBoardRate, equipmentsLoaded]);
 
   const handleScrollToDateSection = () => {
-    if (dateSectionRef.current) {
+    const targetEl = monthBarRef.current || dateSectionRef.current;
+    if (targetEl) {
       const headerEl = document.querySelector('header');
-      const headerHeight = headerEl ? headerEl.offsetHeight : 60;
-      const elementTop = dateSectionRef.current.getBoundingClientRect().top;
-      const targetScrollY = elementTop + window.pageYOffset - headerHeight - 8;
+      const headerHeight = headerEl ? headerEl.offsetHeight : 53;
+      const elementTop = targetEl.getBoundingClientRect().top;
+      const targetScrollY = elementTop + window.pageYOffset - headerHeight;
       window.scrollTo({
-        top: Math.max(0, targetScrollY),
+        top: Math.max(0, Math.round(targetScrollY)),
         behavior: 'smooth',
       });
     }
@@ -221,16 +223,18 @@ export default function Preview() {
               {/* 日期列和時段格（放在下方） */}
               <div
                 ref={dateSectionRef}
-                className="pt-2 grid gap-3 scroll-mt-16"
+                className="pt-2 flex flex-col gap-3 min-h-[calc(100dvh-53px)] scroll-mt-16"
                 data-testid="preview-date-section"
               >
-                <MonthBar
-                  selectedDate={date}
-                  isExpanded={isMonthExpanded}
-                  onToggleExpand={() => setIsMonthExpanded((prev) => !prev)}
-                  calendarMonth={calendarMonth}
-                  onChangeCalendarMonth={setCalendarMonth}
-                />
+                <div ref={monthBarRef}>
+                  <MonthBar
+                    selectedDate={date}
+                    isExpanded={isMonthExpanded}
+                    onToggleExpand={() => setIsMonthExpanded((prev) => !prev)}
+                    calendarMonth={calendarMonth}
+                    onChangeCalendarMonth={setCalendarMonth}
+                  />
+                </div>
 
                 {isMonthExpanded ? (
                   <MonthCalendar
@@ -250,17 +254,19 @@ export default function Preview() {
                   />
                 )}
 
-                {/* Compact PriceCard */}
-                {globalError && !hasPricing ? null : !hasPricing || !selectedDayPricing ? (
-                  <Skeleton className="h-[96px] w-full rounded-[18px]" />
-                ) : (
-                  <PriceCard
-                    variant="compact"
-                    selectedDate={date}
-                    dayPricing={selectedDayPricing}
-                    globalSettings={globalSettings}
-                    onOpenPriceInfo={() => setIsPriceInfoOpen(true)}
-                  />
+                {/* Compact PriceCard: only show when selected date is not today */}
+                {date !== todayStr && (
+                  globalError && !hasPricing ? null : !hasPricing || !selectedDayPricing ? (
+                    <Skeleton className="h-[96px] w-full rounded-[18px]" />
+                  ) : (
+                    <PriceCard
+                      variant="compact"
+                      selectedDate={date}
+                      dayPricing={selectedDayPricing}
+                      globalSettings={globalSettings}
+                      onOpenPriceInfo={() => setIsPriceInfoOpen(true)}
+                    />
+                  )
                 )}
 
                 {/* SlotGrid (readOnly) */}

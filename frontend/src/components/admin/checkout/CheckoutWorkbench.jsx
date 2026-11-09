@@ -1562,6 +1562,7 @@ export default function CheckoutWorkbench({
                   return (
                     <div
                       key={p.person_no}
+                      data-testid={`mobile-person-row-${p.person_no}`}
                       onClick={() => !isFrozen && setMobileAdjustPersonNo(p.person_no)}
                       className={`relative p-3.5 rounded-2xl border transition flex items-center justify-between shadow-xs ${
                         isFrozen
@@ -1609,6 +1610,7 @@ export default function CheckoutWorkbench({
 
               {/* Mobile Addons & Discounts Summary Row */}
               <div
+                data-testid="mobile-addons-discounts-row"
                 onClick={() => setShowMobileAddonDiscountSheet(true)}
                 className="md:hidden flex items-center justify-between p-3.5 rounded-2xl border border-sg-line bg-white hover:border-sg-brown transition cursor-pointer shadow-xs"
               >
