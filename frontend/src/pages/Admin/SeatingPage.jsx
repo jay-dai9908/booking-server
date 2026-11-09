@@ -276,6 +276,14 @@ export default function SeatingPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  useEffect(() => {
+    const handleSyncError = (e) => {
+      showToast(e.detail?.message || '結帳修改沒有存到，請重新打開確認');
+    };
+    window.addEventListener('sg-sync-error', handleSyncError);
+    return () => window.removeEventListener('sg-sync-error', handleSyncError);
+  }, []);
+
   // Collapsed state for completed bookings
   const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
 
@@ -2545,6 +2553,7 @@ export default function SeatingPage() {
           isOpen={Boolean(checkoutBookingRef)}
           onClose={() => setCheckoutBookingRef(null)}
           bookingRef={checkoutBookingRef}
+          onSyncError={(msg) => showToast(msg || '結帳修改沒有存到，請重新打開確認')}
           onPaymentSuccess={(data) => {
             const bRef = data?.booking_ref || checkoutBookingRef;
             const statusCode = data?.status?.code || data?.status?.status || (typeof data?.status === 'string' ? data.status : 'paid');

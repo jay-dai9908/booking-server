@@ -41,8 +41,10 @@ export default function CheckoutWorkbench({
   isOpen = false,
   onClose,
   bookingRef,
-  onPaymentSuccess
+  onPaymentSuccess,
+  onSyncError
 }) {
+  const isMountedRef = useRef(true);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [billData, setBillData] = useState(null);
@@ -136,17 +138,14 @@ export default function CheckoutWorkbench({
     }
   };
 
-  useEffect(() => {
-    if (isOpen && bookingRef) {
-      loadBill();
-    } else {
-      setBillData(null);
-      setDraftState(null);
+  const notifySyncError = (msg = '結帳修改沒有存到，請重新打開確認') => {
+    if (onSyncError) {
+      try { onSyncError(msg); } catch {}
     }
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
-  }, [isOpen, bookingRef]);
+    try {
+      window.dispatchEvent(new CustomEvent('sg-sync-error', { detail: { message: msg } }));
+    } catch {}
+  };
 
   // Debounced draft save and queue logic (Section 4.2)
   const flushDraft = async () => {
@@ -165,10 +164,13 @@ export default function CheckoutWorkbench({
     }
 
     const draftToSend = pendingDraftRef.current;
+    pendingDraftRef.current = null;
     isSavingRef.current = true;
-    setIsSavingDraft(true);
-    setSyncStatus('syncing');
-    setDraftConflictMsg(null);
+    if (isMountedRef.current) {
+      setIsSavingDraft(true);
+      setSyncStatus('syncing');
+      setDraftConflictMsg(null);
+    }
 
     const promise = (async () => {
       try {
@@ -180,17 +182,15 @@ export default function CheckoutWorkbench({
         if (res.data) {
           const nextRev = res.data.rev ?? res.data.draft?.rev ?? (currentRev + 1);
           currentRevRef.current = nextRev;
-          setBillData(prev => ({
-            ...prev,
-            bill: res.data.bill || prev?.bill,
-            billInput: res.data.billInput || prev?.billInput,
-            draft: { ...draftToSend, rev: nextRev }
-          }));
-          setDraftState(prev => ({ ...prev, rev: nextRev }));
-        }
-
-        if (pendingDraftRef.current === draftToSend) {
-          pendingDraftRef.current = null;
+          if (isMountedRef.current) {
+            setBillData(prev => ({
+              ...prev,
+              bill: res.data.bill || prev?.bill,
+              billInput: res.data.billInput || prev?.billInput,
+              draft: { ...draftToSend, rev: nextRev }
+            }));
+            setDraftState(prev => ({ ...prev, rev: nextRev }));
+          }
         }
 
         if (hasModifiedWhileSavingRef.current || pendingDraftRef.current) {
@@ -199,13 +199,17 @@ export default function CheckoutWorkbench({
           return await flushDraft();
         } else {
           isSavingRef.current = false;
-          setIsSavingDraft(false);
-          setSyncStatus('synced');
+          if (isMountedRef.current) {
+            setIsSavingDraft(false);
+            setSyncStatus('synced');
+          }
         }
       } catch (err) {
         console.error('[CheckoutWorkbench] Draft save error:', err);
         if (err.response?.status === 409) {
-          setDraftConflictMsg('另一台裝置剛改過這筆帳，已重新載入');
+          if (isMountedRef.current) {
+            setDraftConflictMsg('另一台裝置剛改過這筆帳，已重新載入');
+          }
           try {
             const freshRes = await api.get(`/billing/${bookingRef}`);
             const freshBillData = freshRes.data;
@@ -222,8 +226,10 @@ export default function CheckoutWorkbench({
               note: draftToSend.note !== undefined ? draftToSend.note : freshDraft.note,
               rev: freshRev
             };
-            setBillData(freshBillData);
-            setDraftState(mergedDraft);
+            if (isMountedRef.current) {
+              setBillData(freshBillData);
+              setDraftState(mergedDraft);
+            }
             const retryRes = await api.put(`/billing/${bookingRef}/draft`, {
               base_rev: freshRev,
               draft: mergedDraft
@@ -231,16 +237,15 @@ export default function CheckoutWorkbench({
             if (retryRes.data) {
               const retryRev = retryRes.data.rev ?? retryRes.data.draft?.rev ?? (freshRev + 1);
               currentRevRef.current = retryRev;
-              setBillData(prev => ({
-                ...prev,
-                bill: retryRes.data.bill || prev?.bill,
-                billInput: retryRes.data.billInput || prev?.billInput,
-                draft: { ...mergedDraft, rev: retryRev }
-              }));
-              setDraftState(prev => ({ ...prev, rev: retryRev }));
-            }
-            if (pendingDraftRef.current === draftToSend) {
-              pendingDraftRef.current = null;
+              if (isMountedRef.current) {
+                setBillData(prev => ({
+                  ...prev,
+                  bill: retryRes.data.bill || prev?.bill,
+                  billInput: retryRes.data.billInput || prev?.billInput,
+                  draft: { ...mergedDraft, rev: retryRev }
+                }));
+                setDraftState(prev => ({ ...prev, rev: retryRev }));
+              }
             }
             if (hasModifiedWhileSavingRef.current || pendingDraftRef.current) {
               hasModifiedWhileSavingRef.current = false;
@@ -248,19 +253,27 @@ export default function CheckoutWorkbench({
               return await flushDraft();
             } else {
               isSavingRef.current = false;
-              setIsSavingDraft(false);
-              setSyncStatus('synced');
+              if (isMountedRef.current) {
+                setIsSavingDraft(false);
+                setSyncStatus('synced');
+              }
             }
           } catch (retryErr) {
             console.error('[CheckoutWorkbench] 409 re-apply failed:', retryErr);
             isSavingRef.current = false;
-            setIsSavingDraft(false);
-            setSyncStatus('error');
+            if (isMountedRef.current) {
+              setIsSavingDraft(false);
+              setSyncStatus('error');
+            }
+            notifySyncError();
           }
         } else {
           isSavingRef.current = false;
-          setIsSavingDraft(false);
-          setSyncStatus('error');
+          if (isMountedRef.current) {
+            setIsSavingDraft(false);
+            setSyncStatus('error');
+          }
+          notifySyncError();
         }
       }
     })();
@@ -268,6 +281,83 @@ export default function CheckoutWorkbench({
     inFlightPromiseRef.current = promise;
     return promise;
   };
+
+  const handleClose = () => {
+    if (pendingDraftRef.current || saveTimeoutRef.current) {
+      flushDraft().catch(err => {
+        console.error('[CheckoutWorkbench] Close flush error:', err);
+        notifySyncError();
+      });
+    }
+    onClose();
+  };
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    if (isOpen && bookingRef) {
+      loadBill();
+    } else {
+      setBillData(null);
+      setDraftState(null);
+    }
+    return () => {
+      isMountedRef.current = false;
+      if (pendingDraftRef.current || saveTimeoutRef.current) {
+        flushDraft().catch(err => {
+          console.error('[CheckoutWorkbench] Cleanup flush error:', err);
+          notifySyncError();
+        });
+      }
+    };
+  }, [isOpen, bookingRef]);
+
+  // Keepalive flush on tab switch or page close (Section 2)
+  useEffect(() => {
+    const handleVisibilityOrPageHide = (e) => {
+      if (e.type === 'visibilitychange' && document.visibilityState !== 'hidden') {
+        return;
+      }
+      if (pendingDraftRef.current || saveTimeoutRef.current) {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+          saveTimeoutRef.current = null;
+        }
+        const draftToSend = pendingDraftRef.current;
+        pendingDraftRef.current = null;
+        if (!draftToSend) return;
+
+        const currentRev = currentRevRef.current ?? billData?.draft?.rev ?? 0;
+        const base = import.meta.env.PROD ? '/api' : 'http://localhost:3001/api';
+        const headers = { 'Content-Type': 'application/json' };
+        try {
+          const token = sessionStorage.getItem('shiguang_auth_token');
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+          const deviceId = localStorage.getItem('sg-device-id');
+          if (deviceId) headers['X-Device-Id'] = deviceId;
+          const deviceLabel = localStorage.getItem('sg-device-label');
+          if (deviceLabel) headers['X-Device-Label'] = encodeURIComponent(deviceLabel);
+        } catch {}
+
+        fetch(`${base}/billing/${bookingRef}/draft`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ base_rev: currentRev, draft: draftToSend }),
+          keepalive: true,
+          credentials: 'include'
+        }).catch(err => {
+          console.error('[CheckoutWorkbench] keepalive flush error:', err);
+          notifySyncError();
+        });
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityOrPageHide);
+    window.addEventListener('pagehide', handleVisibilityOrPageHide);
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityOrPageHide);
+      window.removeEventListener('pagehide', handleVisibilityOrPageHide);
+    };
+  }, [bookingRef, billData]);
 
   const scheduleDraftSave = (nextDraft) => {
     pendingDraftRef.current = nextDraft;
@@ -912,7 +1002,7 @@ export default function CheckoutWorkbench({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               data-testid="workbench-close-btn"
               aria-label="關閉結帳"
               className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-sg-paper text-sg-muted hover:text-sg-ink"
