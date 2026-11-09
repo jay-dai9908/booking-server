@@ -36,7 +36,11 @@ import {
   DoorOpen,
   Store,
   Columns,
-  AlertTriangle
+  AlertTriangle,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
+  Smartphone
 } from 'lucide-react';
 import api from '../../api/axios';
 import SegmentedTabs from '../../components/admin/SegmentedTabs';
@@ -44,12 +48,35 @@ import ResponsivePanel from '../../components/admin/ResponsivePanel';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import Button from '../../components/customer/Button';
 
+const DEFAULT_WEIGHTS = {
+  zone: 1,
+  zone_fill_first: 50,
+  opposite: 3,
+  beside: 6,
+  second: 20,
+  last: 100,
+  split: 4
+};
+
 export default function SeatLayoutPage() {
   const [activeTab, setActiveTab] = useState('editor'); // 'editor' | 'rules' | 'mobile_list'
   const [layout, setLayout] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
+
+  // Rules state
+  const [layoutRules, setLayoutRules] = useState({
+    spread_tables: true,
+    avoid_opposite: true,
+    avoid_beside: true,
+    zone_mode: 'spread_across_zones',
+    weights: { ...DEFAULT_WEIGHTS }
+  });
+  const [zoneOrderList, setZoneOrderList] = useState([]);
+  const [showAdvancedWeights, setShowAdvancedWeights] = useState(false);
+  const [draggedZoneIdx, setDraggedZoneIdx] = useState(null);
+  const [savingRules, setSavingRules] = useState(false);
 
   // History for Undo / Redo (up to 50 steps)
   const [history, setHistory] = useState([]);
@@ -129,6 +156,22 @@ export default function SeatLayoutPage() {
         setLayout(loadedLayout);
         setHistory([JSON.parse(JSON.stringify(loadedLayout))]);
         setHistoryIndex(0);
+        if (loadedLayout.rules_json) {
+          setLayoutRules({
+            spread_tables: loadedLayout.rules_json.spread_tables !== false,
+            avoid_opposite: loadedLayout.rules_json.avoid_opposite !== false,
+            avoid_beside: loadedLayout.rules_json.avoid_beside !== false,
+            zone_mode: loadedLayout.rules_json.zone_mode || 'spread_across_zones',
+            weights: {
+              ...DEFAULT_WEIGHTS,
+              ...(loadedLayout.rules_json.weights || {})
+            }
+          });
+        }
+        if (Array.isArray(loadedLayout.zones)) {
+          const sorted = [...loadedLayout.zones].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+          setZoneOrderList(sorted);
+        }
         if (loadedLayout.zones?.length > 0) {
           setCurrentZoneId(loadedLayout.zones[0].id);
         }
@@ -274,15 +317,36 @@ export default function SeatLayoutPage() {
     }
   };
 
+  const getZoneTableSummary = (zoneId) => {
+    const zTables = (layout?.tables || []).filter(t => t.zone_id === zoneId);
+    if (zTables.length === 0) return '0 張桌子';
+    const capCounts = {};
+    for (const t of zTables) {
+      const tSeats = (layout?.seats || []).filter(s => s.table_id === t.id);
+      const cap = tSeats.length || t.seat_count || 4;
+      capCounts[cap] = (capCounts[cap] || 0) + 1;
+    }
+    return Object.entries(capCounts)
+      .map(([cap, count]) => `${count} 張 ${cap} 人桌`)
+      .join('、');
+  };
+
   // Allocation test handler
-  const handleTestAllocation = async (paxToTest = testPax) => {
+  const handleTestAllocation = async (paxToTest = testPax, rulesToTest = layoutRules, zonesToTest = zoneOrderList) => {
     if (!layout) return;
     try {
       setTesting(true);
+      const resolvedZones = (zonesToTest || []).map((z, idx) => ({ ...z, sort_order: idx }));
+      const previewLayout = {
+        ...layout,
+        zones: resolvedZones
+      };
       const res = await api.post('/seat-layouts/allocate-preview', {
         layout_id: layout.id,
-        draft: layout,
+        draft: previewLayout,
+        rules: rulesToTest,
         pax: paxToTest,
+        demo: true,
         date: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
       });
       setTestResult(res.data);
@@ -292,6 +356,42 @@ export default function SeatLayoutPage() {
       setMessage({ type: 'error', text: '排位試算失敗' });
     } finally {
       setTesting(false);
+    }
+  };
+
+  const moveZone = (fromIdx, toIdx) => {
+    if (toIdx < 0 || toIdx >= zoneOrderList.length) return;
+    const nextList = [...zoneOrderList];
+    const [removed] = nextList.splice(fromIdx, 1);
+    nextList.splice(toIdx, 0, removed);
+    setZoneOrderList(nextList);
+    handleTestAllocation(testPax, layoutRules, nextList);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'rules' && layout && !testResult && !testing) {
+      handleTestAllocation(testPax, layoutRules, zoneOrderList);
+    }
+  }, [activeTab, layout]);
+
+  const handleSaveRules = async () => {
+    if (!layout?.id) return;
+    try {
+      setSavingRules(true);
+      await api.put(`/seat-layouts/${layout.id}/rules`, {
+        rules_json: layoutRules,
+        zone_order: zoneOrderList.map(z => z.id)
+      });
+      setMessage({ type: 'success', text: '排位規則已儲存並生效！' });
+      setLayout(prev => ({
+        ...prev,
+        rules_json: layoutRules,
+        zones: zoneOrderList.map((z, idx) => ({ ...z, sort_order: idx }))
+      }));
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.error || '儲存排位規則失敗' });
+    } finally {
+      setSavingRules(false);
     }
   };
 
@@ -1241,6 +1341,7 @@ export default function SeatLayoutPage() {
         </div>
       )}
 
+      {/* Mobile list mode hint banner (Round 17 Item 2) */}
       {/* Mode Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-2 max-w-full">
         <div className="overflow-x-auto max-w-full no-scrollbar">
@@ -2536,80 +2637,435 @@ export default function SeatLayoutPage() {
             <div>
               <h2 className="text-[17px] font-bold text-sg-ink">排位規則與試算預覽</h2>
               <p className="text-[12px] text-sg-muted mt-0.5">
-                測試當前版面草稿在不同人數時的自動排位結果，驗證相鄰座位與排位優先度。
+                設定區域排位順序、同區分散規則與跨區策略，並可即時試算下一組排位。
               </p>
             </div>
           </div>
 
-          {/* Allocation Preview Tester */}
-          <div className="bg-sg-paper rounded-2xl p-5 border border-sg-line space-y-4">
-            <h3 className="text-[14px] font-bold text-sg-ink flex items-center gap-2">
-              <Eye className="w-4 h-4 text-sg-brown" /> 排位即時試算預覽
+          {/* 1. 區域順序（拖曳調整） */}
+          <div className="space-y-3">
+            <h3 className="text-[14px] font-bold text-sg-ink flex items-center gap-1.5">
+              <span>區域順序（拖曳調整）</span>
             </h3>
+            <div className="space-y-2">
+              {zoneOrderList.map((z, idx) => (
+                <div
+                  key={z.id}
+                  draggable
+                  onDragStart={() => setDraggedZoneIdx(idx)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => {
+                    if (draggedZoneIdx != null && draggedZoneIdx !== idx) {
+                      moveZone(draggedZoneIdx, idx);
+                      setDraggedZoneIdx(null);
+                    }
+                  }}
+                  className="flex items-center justify-between p-3 bg-sg-paper rounded-2xl border border-sg-line hover:border-sg-brown/50 transition cursor-move"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <GripVertical className="w-4 h-4 text-sg-muted" />
+                    <span className="font-bold text-[14px] text-sg-ink font-num">{idx + 1}</span>
+                    <span className="font-bold text-[14px] text-sg-ink">{z.name}</span>
+                    <span className="text-[12px] text-sg-muted">· {getZoneTableSummary(z.id)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => moveZone(idx, idx - 1)}
+                      className="p-1.5 rounded-lg hover:bg-white text-sg-muted disabled:opacity-30"
+                      title="上移"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === zoneOrderList.length - 1}
+                      onClick={() => moveZone(idx, idx + 1)}
+                      className="p-1.5 rounded-lg hover:bg-white text-sg-muted disabled:opacity-30"
+                      title="下移"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <label className="text-[13px] font-bold text-sg-ink">預約人數 (pax)：</label>
+          {/* 2. 同一區裡怎麼排 */}
+          <div className="space-y-3 pt-2 border-t border-sg-line">
+            <h3 className="text-[14px] font-bold text-sg-ink">同一區裡怎麼排</h3>
+            <div className="space-y-2.5">
+              <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
                 <input
-                  type="number"
-                  min="1"
-                  max="12"
-                  data-testid="preview-pax-input"
-                  value={testPax}
-                  onChange={(e) => setTestPax(Math.max(1, Number(e.target.value) || 1))}
-                  className="w-20 px-3 py-1.5 rounded-xl border border-sg-line font-bold bg-white text-center"
+                  type="checkbox"
+                  data-testid="rule-spread-tables"
+                  checked={layoutRules.spread_tables}
+                  onChange={(e) => {
+                    const next = { ...layoutRules, spread_tables: e.target.checked };
+                    setLayoutRules(next);
+                    handleTestAllocation(testPax, next, zoneOrderList);
+                  }}
+                  className="w-4 h-4 accent-sg-brown rounded"
                 />
-              </div>
+                <span className="font-medium">分散各桌（有空桌先排空桌）</span>
+              </label>
 
-              <button
-                type="button"
-                data-testid="run-preview-alloc-btn"
-                onClick={() => handleTestAllocation(testPax)}
-                disabled={testing}
-                className="px-4 py-1.5 rounded-xl bg-sg-brown text-white font-bold text-[13px] hover:bg-sg-brown/90 transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
-              >
-                {testing ? '試算中...' : '執行排位試算'}
-              </button>
+              <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
+                <input
+                  type="checkbox"
+                  data-testid="rule-avoid-opposite"
+                  checked={layoutRules.avoid_opposite}
+                  onChange={(e) => {
+                    const next = { ...layoutRules, avoid_opposite: e.target.checked };
+                    setLayoutRules(next);
+                    handleTestAllocation(testPax, next, zoneOrderList);
+                  }}
+                  className="w-4 h-4 accent-sg-brown rounded"
+                />
+                <span className="font-medium">避免面對面（同桌先坐同一側，除非同組）</span>
+              </label>
+
+              <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
+                <input
+                  type="checkbox"
+                  data-testid="rule-avoid-beside"
+                  checked={layoutRules.avoid_beside}
+                  onChange={(e) => {
+                    const next = { ...layoutRules, avoid_beside: e.target.checked };
+                    setLayoutRules(next);
+                    handleTestAllocation(testPax, next, zoneOrderList);
+                  }}
+                  className="w-4 h-4 accent-sg-brown rounded"
+                />
+                <span className="font-medium">避免並排（隔一個位子坐）</span>
+              </label>
+            </div>
+          </div>
+
+          {/* 3. {第一區名稱}每桌都有人之後 */}
+          <div className="space-y-3 pt-2 border-t border-sg-line">
+            <h3 className="text-[14px] font-bold text-sg-ink">
+              {zoneOrderList[0]?.name || layout?.zones?.[0]?.name || '前區'}每桌都有人之後
+            </h3>
+            <div className="space-y-2.5">
+              <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
+                <input
+                  type="radio"
+                  name="zone_mode"
+                  value="spread_across_zones"
+                  checked={layoutRules.zone_mode === 'spread_across_zones'}
+                  onChange={(e) => {
+                    const next = { ...layoutRules, zone_mode: e.target.value };
+                    setLayoutRules(next);
+                    handleTestAllocation(testPax, next, zoneOrderList);
+                  }}
+                  className="w-4 h-4 accent-sg-brown"
+                />
+                <span className="font-medium">換排下一區（分散各區）</span>
+              </label>
+
+              <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
+                <input
+                  type="radio"
+                  name="zone_mode"
+                  value="fill_zone_first"
+                  checked={layoutRules.zone_mode === 'fill_zone_first'}
+                  onChange={(e) => {
+                    const next = { ...layoutRules, zone_mode: e.target.value };
+                    setLayoutRules(next);
+                    handleTestAllocation(testPax, next, zoneOrderList);
+                  }}
+                  className="w-4 h-4 accent-sg-brown"
+                />
+                <span className="font-medium">繼續把這區坐滿才換區</span>
+              </label>
+            </div>
+          </div>
+
+          {/* 4. 人數說明（逐字） */}
+          <div className="p-3.5 bg-sg-paper rounded-2xl border border-sg-line text-[13px] text-sg-ink leading-relaxed">
+            4 位坐整張空桌 · 3 位坐一側加對面一位 · 5 位以上坐同區相鄰兩桌。冷氣出風口等「最後才排」的座位，其他座位都滿了才會用。
+          </div>
+
+          {/* 5. 進階：分數 */}
+          <div className="pt-2 border-t border-sg-line">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedWeights(v => !v)}
+              className="flex items-center gap-1.5 text-[13px] font-bold text-sg-muted hover:text-sg-ink transition"
+            >
+              {showAdvancedWeights ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              <span>進階：分數</span>
+            </button>
+
+            {showAdvancedWeights && (
+              <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 p-4 bg-sg-paper rounded-2xl border border-sg-line text-[12px]">
+                <div>
+                  <label className="font-bold text-sg-muted block mb-1">換區 (zone)</label>
+                  <input
+                    type="number"
+                    value={layoutRules.weights?.zone ?? DEFAULT_WEIGHTS.zone}
+                    onChange={(e) => {
+                      const w = { ...layoutRules.weights, zone: Number(e.target.value) || 0 };
+                      const next = { ...layoutRules, weights: w };
+                      setLayoutRules(next);
+                      handleTestAllocation(testPax, next, zoneOrderList);
+                    }}
+                    className="w-full px-2.5 py-1 rounded-xl border border-sg-line bg-white font-num font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-sg-muted block mb-1">坐滿前區 (zone_fill_first)</label>
+                  <input
+                    type="number"
+                    value={layoutRules.weights?.zone_fill_first ?? DEFAULT_WEIGHTS.zone_fill_first}
+                    onChange={(e) => {
+                      const w = { ...layoutRules.weights, zone_fill_first: Number(e.target.value) || 0 };
+                      const next = { ...layoutRules, weights: w };
+                      setLayoutRules(next);
+                      handleTestAllocation(testPax, next, zoneOrderList);
+                    }}
+                    className="w-full px-2.5 py-1 rounded-xl border border-sg-line bg-white font-num font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-sg-muted block mb-1">對面有人 (opposite)</label>
+                  <input
+                    type="number"
+                    value={layoutRules.weights?.opposite ?? DEFAULT_WEIGHTS.opposite}
+                    onChange={(e) => {
+                      const w = { ...layoutRules.weights, opposite: Number(e.target.value) || 0 };
+                      const next = { ...layoutRules, weights: w };
+                      setLayoutRules(next);
+                      handleTestAllocation(testPax, next, zoneOrderList);
+                    }}
+                    className="w-full px-2.5 py-1 rounded-xl border border-sg-line bg-white font-num font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-sg-muted block mb-1">緊鄰有人 (beside)</label>
+                  <input
+                    type="number"
+                    value={layoutRules.weights?.beside ?? DEFAULT_WEIGHTS.beside}
+                    onChange={(e) => {
+                      const w = { ...layoutRules.weights, beside: Number(e.target.value) || 0 };
+                      const next = { ...layoutRules, weights: w };
+                      setLayoutRules(next);
+                      handleTestAllocation(testPax, next, zoneOrderList);
+                    }}
+                    className="w-full px-2.5 py-1 rounded-xl border border-sg-line bg-white font-num font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-sg-muted block mb-1">次選 (second)</label>
+                  <input
+                    type="number"
+                    value={layoutRules.weights?.second ?? DEFAULT_WEIGHTS.second}
+                    onChange={(e) => {
+                      const w = { ...layoutRules.weights, second: Number(e.target.value) || 0 };
+                      const next = { ...layoutRules, weights: w };
+                      setLayoutRules(next);
+                      handleTestAllocation(testPax, next, zoneOrderList);
+                    }}
+                    className="w-full px-2.5 py-1 rounded-xl border border-sg-line bg-white font-num font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-sg-muted block mb-1">避開 (last)</label>
+                  <input
+                    type="number"
+                    value={layoutRules.weights?.last ?? DEFAULT_WEIGHTS.last}
+                    onChange={(e) => {
+                      const w = { ...layoutRules.weights, last: Number(e.target.value) || 0 };
+                      const next = { ...layoutRules, weights: w };
+                      setLayoutRules(next);
+                      handleTestAllocation(testPax, next, zoneOrderList);
+                    }}
+                    className="w-full px-2.5 py-1 rounded-xl border border-sg-line bg-white font-num font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-sg-muted block mb-1">拆桌 (split)</label>
+                  <input
+                    type="number"
+                    value={layoutRules.weights?.split ?? DEFAULT_WEIGHTS.split}
+                    onChange={(e) => {
+                      const w = { ...layoutRules.weights, split: Number(e.target.value) || 0 };
+                      const next = { ...layoutRules, weights: w };
+                      setLayoutRules(next);
+                      handleTestAllocation(testPax, next, zoneOrderList);
+                    }}
+                    className="w-full px-2.5 py-1 rounded-xl border border-sg-line bg-white font-num font-bold"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 6. 預覽：下一組 [{testPax}] 位會排到哪 */}
+          <div className="space-y-4 pt-2 border-t border-sg-line">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-[15px] font-bold text-sg-ink flex items-center gap-2">
+                <span>預覽：下一組 [{testPax}] 位會排到哪</span>
+              </h3>
+
+              {/* Stepper */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="pax-minus-btn"
+                  disabled={testPax <= 1}
+                  onClick={() => {
+                    const p = Math.max(1, testPax - 1);
+                    setTestPax(p);
+                    handleTestAllocation(p, layoutRules, zoneOrderList);
+                  }}
+                  className="w-8 h-8 rounded-xl border border-sg-line bg-white font-bold flex items-center justify-center hover:bg-sg-paper disabled:opacity-40 text-sg-ink transition"
+                >
+                  -
+                </button>
+                <span className="w-7 text-center font-bold text-[15px] font-num text-sg-ink">{testPax}</span>
+                <button
+                  type="button"
+                  data-testid="pax-plus-btn"
+                  disabled={testPax >= 12}
+                  onClick={() => {
+                    const p = Math.min(12, testPax + 1);
+                    setTestPax(p);
+                    handleTestAllocation(p, layoutRules, zoneOrderList);
+                  }}
+                  className="w-8 h-8 rounded-xl border border-sg-line bg-white font-bold flex items-center justify-center hover:bg-sg-paper disabled:opacity-40 text-sg-ink transition"
+                >
+                  +
+                </button>
+                <span className="text-[13px] text-sg-muted">位</span>
+              </div>
             </div>
 
-            {/* Test Result Display */}
-            <div data-testid="preview-alloc-result" className="p-4 rounded-xl bg-white border border-sg-line min-h-[60px] flex flex-col justify-center">
-              {testResult ? (
-                (testResult.seats || testResult.allocatedSeats || []).length > 0 ? (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-bold text-sg-muted">試算分配座位：</span>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {(testResult.seats || testResult.allocatedSeats || []).map(item => {
-                          const code = typeof item === 'string' ? item : item.code;
-                          return (
-                            <span
-                              key={code}
-                              data-testid={`alloc-seat-tag-${code}`}
-                              className="px-2.5 py-1 rounded-lg bg-sg-sage-soft text-sg-sage-ink font-bold text-[13px] border border-sg-sage-ink/20"
-                            >
-                              {code}
-                            </span>
-                          );
-                        })}
+            {/* Layout demo mode preview */}
+            <div data-testid="preview-alloc-result" className="p-4 rounded-2xl bg-sg-paper border border-sg-line space-y-4">
+              {testing ? (
+                <div className="py-8 text-center text-sg-muted text-[13px]">試算中...</div>
+              ) : (
+                <div className="space-y-4">
+                  {zoneOrderList.map(zone => {
+                    const zTables = (layout.tables || []).filter(t => t.zone_id === zone.id);
+                    const zStandaloneSeats = (layout.seats || []).filter(s => s.zone_id === zone.id && s.table_id == null);
+                    if (zTables.length === 0 && zStandaloneSeats.length === 0) return null;
+
+                    return (
+                      <div key={zone.id} className="space-y-2">
+                        <div className="text-[12px] font-bold text-sg-muted">
+                          {zone.name}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          {zTables.map(t => {
+                            const tSeats = (layout.seats || []).filter(s => s.table_id === t.id);
+                            return (
+                              <div key={t.id} className="p-3 bg-white rounded-xl border border-sg-line shadow-2xs space-y-2">
+                                <div className="text-[13px] font-bold text-sg-ink flex items-center justify-between">
+                                  <span>{t.label}</span>
+                                  <span className="text-[11px] text-sg-muted font-normal">{tSeats.length} 人桌</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  {tSeats.map(s => {
+                                    const isAllocated = (testResult?.seats || testResult?.allocatedSeats || []).includes(s.code);
+                                    const isOccupied = !isAllocated && (testResult?.occupancy?.[s.code] || false);
+
+                                    return (
+                                      <div
+                                        key={s.code}
+                                        data-testid={`preview-seat-${s.code}`}
+                                        className={`px-2 py-1 rounded-lg text-center text-[12px] font-bold transition flex items-center justify-center gap-1 ${
+                                          isAllocated
+                                            ? 'bg-sg-sage text-white ring-2 ring-sg-sage/40 shadow-xs'
+                                            : isOccupied
+                                            ? 'bg-sg-paper text-sg-muted border border-sg-line line-through'
+                                            : 'bg-white text-sg-ink border border-sg-line'
+                                        }`}
+                                      >
+                                        {isAllocated ? `★ 建議 ${s.code}` : isOccupied ? `已佔用 ${s.code}` : s.code}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {zStandaloneSeats.length > 0 && (
+                            <div className="p-3 bg-white rounded-xl border border-sg-line shadow-2xs space-y-2">
+                              <div className="text-[13px] font-bold text-sg-ink">單獨座位</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {zStandaloneSeats.map(s => {
+                                  const isAllocated = (testResult?.seats || testResult?.allocatedSeats || []).includes(s.code);
+                                  const isOccupied = !isAllocated && (testResult?.occupancy?.[s.code] || false);
+
+                                  return (
+                                    <div
+                                      key={s.code}
+                                      className={`px-2 py-1 rounded-lg text-center text-[12px] font-bold transition ${
+                                        isAllocated
+                                          ? 'bg-sg-sage text-white ring-2 ring-sg-sage/40 shadow-xs'
+                                          : isOccupied
+                                          ? 'bg-sg-paper text-sg-muted border border-sg-line line-through'
+                                          : 'bg-white text-sg-ink border border-sg-line'
+                                      }`}
+                                    >
+                                      {isAllocated ? `★ 建議 ${s.code}` : isOccupied ? `已佔用 ${s.code}` : s.code}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Reason & allocation info */}
+                  {testResult && (
+                    <div className="pt-2 border-t border-sg-line space-y-1">
+                      {testResult.reason ? (
+                        <div className="text-[13px] font-bold text-sg-ink flex items-center gap-1.5">
+                          <Check className="w-4 h-4 text-sg-sage" />
+                          <span>建議原因：{testResult.reason}</span>
+                        </div>
+                      ) : (testResult.seats || testResult.allocatedSeats || []).length === 0 ? (
+                        <div className="text-[13px] font-bold text-sg-danger flex items-center gap-1.5">
+                          <AlertCircle className="w-4 h-4" /> 無法排位（無符合人數之連續或相鄰空位）
+                        </div>
+                      ) : null}
+                      <div className="text-[12px] text-sg-muted">
+                        排位得分：<span className="font-bold text-sg-ink font-num">{testResult.score ?? 0}</span>
                       </div>
                     </div>
-                    <div className="text-[12px] text-sg-muted">
-                      排位得分：<span className="font-bold text-sg-ink font-num">{testResult.score ?? 0}</span>
-                      {testResult.reason && ` · ${testResult.reason}`}
-                    </div>
+                  )}
+
+                  {/* Verbatim disclaimer */}
+                  <div className="text-[12px] text-sg-muted">
+                    試算的是「現在」這個時段，實際排位時會檢查整段預約時間都有空。
                   </div>
-                ) : (
-                  <div className="text-[13px] font-bold text-sg-danger flex items-center gap-1.5">
-                    <AlertCircle className="w-4 h-4" /> 無法排位（無符合人數之連續或相鄰空位）
-                  </div>
-                )
-              ) : (
-                <div className="text-[12px] text-sg-muted italic">
-                  請輸入人數並點擊「執行排位試算」以檢驗相鄰或包桌排位效果。
                 </div>
               )}
             </div>
+          </div>
+
+          {/* 7. 主按鈕「儲存」，立即生效 */}
+          <div className="pt-2 border-t border-sg-line">
+            <button
+              type="button"
+              data-testid="save-rules-btn"
+              onClick={handleSaveRules}
+              disabled={savingRules}
+              className="w-full py-3 rounded-2xl bg-sg-brown text-white font-bold text-[15px] hover:bg-sg-brown/90 transition shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              <span>{savingRules ? '儲存中...' : '儲存'}</span>
+            </button>
           </div>
         </div>
       )}

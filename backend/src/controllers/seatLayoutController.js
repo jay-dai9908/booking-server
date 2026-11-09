@@ -1003,9 +1003,9 @@ export async function publishLayout(req, res) {
 export async function updateLayoutRules(req, res) {
   try {
     const id = parseInt(req.params.id, 10);
-    const { rules_json } = req.body;
-    if (!rules_json) {
-      return res.status(400).json({ error: '缺少規則設定', code: 'MISSING_RULES' });
+    const { rules_json, zone_order } = req.body;
+    if (!rules_json && !zone_order) {
+      return res.status(400).json({ error: '缺少規則設定或區域順序', code: 'MISSING_RULES' });
     }
 
     const layout = await prisma.seatLayout.findUnique({
@@ -1015,12 +1015,29 @@ export async function updateLayoutRules(req, res) {
       return res.status(404).json({ error: '找不到該版面', code: 'LAYOUT_NOT_FOUND' });
     }
 
-    await prisma.seatLayout.update({
-      where: { id },
-      data: { rules_json }
+    await prisma.$transaction(async (tx) => {
+      if (rules_json) {
+        await tx.seatLayout.update({
+          where: { id },
+          data: { rules_json }
+        });
+      }
+
+      if (Array.isArray(zone_order) && zone_order.length > 0) {
+        for (let i = 0; i < zone_order.length; i++) {
+          const zoneId = parseInt(zone_order[i], 10);
+          if (!isNaN(zoneId)) {
+            await tx.seatZone.updateMany({
+              where: { id: zoneId, layout_id: id },
+              data: { sort_order: i }
+            });
+          }
+        }
+      }
     });
 
     return res.json({
+      success: true,
       server_now: new Date().toISOString(),
       message: '排位規則更新成功'
     });
@@ -1051,13 +1068,17 @@ export async function deleteLayout(req, res) {
 
 export async function allocatePreview(req, res) {
   try {
-    const { layout_id, draft, date, session_id, pax } = req.body;
+    const { layout_id, draft, date, session_id, pax, rules, demo, occupancy: customOccupancy } = req.body;
     let layoutObj = draft;
 
     if (!layoutObj && layout_id) {
       const dbLayout = await prisma.seatLayout.findUnique({
         where: { id: parseInt(layout_id, 10) },
-        include: { zones: true, tables: true, seats: true }
+        include: {
+          zones: { orderBy: { sort_order: 'asc' } },
+          tables: { orderBy: { sort_order: 'asc' } },
+          seats: { orderBy: { sort_order: 'asc' } }
+        }
       });
       if (dbLayout) layoutObj = dbLayout;
     }
@@ -1069,31 +1090,43 @@ export async function allocatePreview(req, res) {
     const resolved = resolveLayoutGeometry(layoutObj);
 
     // Fetch existing reservations for session_id to populate occupancy
-    const occupancy = {};
-    if (session_id) {
-      occupancy[session_id] = {};
+    let occupancyMap = {};
+    if (customOccupancy && typeof customOccupancy === 'object') {
+      occupancyMap = customOccupancy;
+    } else if (session_id) {
       const reservations = await prisma.reservation.findMany({
         where: { session_id: parseInt(session_id, 10), status: 'confirmed' }
       });
       for (const r of reservations) {
         for (const s of (r.assigned_seats || [])) {
-          occupancy[session_id][s] = r.booking_ref;
+          occupancyMap[s] = r.booking_ref;
         }
       }
+    } else if (demo) {
+      // Demo occupancy: groups 1, 2, 3 occupying standard demo seats
+      occupancyMap = {
+        '1-1': 'demo-1',
+        '1-2': 'demo-1',
+        '2-3': 'demo-2',
+        '3-1': 'demo-3',
+        '3-2': 'demo-3'
+      };
     }
 
     const sessionIds = session_id ? [session_id] : [1];
+    const previewRules = rules || layoutObj?.rules_json || {};
     const allocResult = allocate({
       layout: resolved,
-      rules: layoutObj.rules_json || {},
+      rules: previewRules,
       pax: parseInt(pax, 10) || 1,
       sessionIds,
-      occupancy: Object.keys(occupancy).length > 0 ? occupancy : { [sessionIds[0]]: {} },
+      occupancy: { [sessionIds[0]]: occupancyMap },
       allowSplit: false
     });
 
     return res.json({
       server_now: new Date().toISOString(),
+      occupancy: occupancyMap,
       ...allocResult
     });
   } catch (err) {
