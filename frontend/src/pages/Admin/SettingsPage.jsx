@@ -98,6 +98,12 @@ export default function SettingsPage() {
   const [boardSwapGraceMinutes, setBoardSwapGraceMinutes] = useState(10);
   const [defaultSplitMode, setDefaultSplitMode] = useState('proportional');
   const [cashFloatAmount, setCashFloatAmount] = useState(2000);
+  const [paymentMethods, setPaymentMethods] = useState([
+    { key: 'cash', label: '現金', enabled: true },
+    { key: 'linepay', label: 'LINE Pay', enabled: true },
+    { key: 'transfer', label: '銀行轉帳', enabled: true }
+  ]);
+  const [draggedMethodIdx, setDraggedMethodIdx] = useState(null);
 
   // 7. Printing & Station Settings (Spec 6.25)
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true);
@@ -188,6 +194,15 @@ export default function SettingsPage() {
       setBoardSwapGraceMinutes(d.board_swap_grace_minutes ?? 10);
       setDefaultSplitMode(d.default_split_mode || 'proportional');
       setCashFloatAmount(d.cash_float_amount ?? 2000);
+      if (Array.isArray(d.payment_methods_json) && d.payment_methods_json.length > 0) {
+        setPaymentMethods(d.payment_methods_json);
+      } else {
+        setPaymentMethods([
+          { key: 'cash', label: '現金', enabled: true },
+          { key: 'linepay', label: 'LINE Pay', enabled: true },
+          { key: 'transfer', label: '銀行轉帳', enabled: true }
+        ]);
+      }
 
       setAutoPrintReceipt(d.auto_print_receipt !== false);
       setAutoPrintSummary(d.auto_print_summary !== false);
@@ -242,6 +257,7 @@ export default function SettingsPage() {
         board_swap_grace_minutes: parseInt(boardSwapGraceMinutes, 10) || 10,
         default_split_mode: defaultSplitMode,
         cash_float_amount: parseInt(cashFloatAmount, 10) || 2000,
+        payment_methods_json: paymentMethods,
         auto_print_receipt: autoPrintReceipt,
         auto_print_summary: autoPrintSummary,
         receipt_footer_text: receiptFooterText,
@@ -1362,9 +1378,109 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Payment Methods Config (Round 16 Item 2) */}
+          <div className="space-y-3 pt-4 border-t border-gray-200">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-0.5">現場付款方式清單</label>
+              <span className="text-[11px] text-gray-400 block">
+                設定現場結帳時可使用的付款方式與顯示順序。每項一列，支援拖曳或上下箭頭排序。「現金」為必要付款方式無法停用。
+              </span>
+            </div>
+
+            <div className="space-y-2 max-w-xl" data-testid="payment-methods-list">
+              {paymentMethods.map((pm, idx) => {
+                const isCash = pm.key === 'cash';
+                return (
+                  <div
+                    key={pm.key}
+                    draggable
+                    onDragStart={() => setDraggedMethodIdx(idx)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (draggedMethodIdx === null || draggedMethodIdx === idx) return;
+                      const items = [...paymentMethods];
+                      const [moved] = items.splice(draggedMethodIdx, 1);
+                      items.splice(idx, 0, moved);
+                      setPaymentMethods(items);
+                      setDraggedMethodIdx(null);
+                    }}
+                    data-testid={`payment-method-row-${pm.key}`}
+                    className="flex items-center justify-between p-3 bg-[#FAF7F2] rounded-xl border border-[#E8DEC8] hover:border-[#8B5B43] transition gap-3"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="cursor-grab text-gray-400 hover:text-gray-600" title="拖曳排序">
+                        <GripVertical className="w-4 h-4" />
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={() => {
+                            if (idx > 0) {
+                              const items = [...paymentMethods];
+                              const tmp = items[idx - 1];
+                              items[idx - 1] = items[idx];
+                              items[idx] = tmp;
+                              setPaymentMethods(items);
+                            }
+                          }}
+                          className="p-1 text-gray-400 hover:text-[#8B5B43] disabled:opacity-30 disabled:hover:text-gray-400 transition"
+                          title="往上移"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === paymentMethods.length - 1}
+                          onClick={() => {
+                            if (idx < paymentMethods.length - 1) {
+                              const items = [...paymentMethods];
+                              const tmp = items[idx + 1];
+                              items[idx + 1] = items[idx];
+                              items[idx] = tmp;
+                              setPaymentMethods(items);
+                            }
+                          }}
+                          className="p-1 text-gray-400 hover:text-[#8B5B43] disabled:opacity-30 disabled:hover:text-gray-400 transition"
+                          title="往下移"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <span className="text-sm font-bold text-[#3E332B]">{pm.label}</span>
+                      {isCash && (
+                        <span className="text-[10px] bg-[#E8DEC8]/60 text-[#8B5B43] font-bold px-1.5 py-0.5 rounded">
+                          固定開啟
+                        </span>
+                      )}
+                    </div>
+
+                    <label className={`relative inline-flex items-center ${isCash ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} shrink-0`}>
+                      <input
+                        type="checkbox"
+                        checked={isCash ? true : Boolean(pm.enabled)}
+                        disabled={isCash}
+                        data-testid={`payment-method-toggle-${pm.key}`}
+                        onChange={(e) => {
+                          if (isCash) return;
+                          const updated = [...paymentMethods];
+                          updated[idx] = { ...updated[idx], enabled: e.target.checked };
+                          setPaymentMethods(updated);
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="flex justify-end pt-2">
             <button
               type="button"
+              data-testid="save-billing-settings-btn"
               onClick={() => handleSaveAll()}
               disabled={saving}
               className="px-6 py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-all disabled:opacity-50"

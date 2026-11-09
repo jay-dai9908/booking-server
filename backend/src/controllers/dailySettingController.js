@@ -7,6 +7,12 @@ const DEFAULT_BUSINESS_HOURS = {
   sunday: { start: '09:00', end: '21:00' }
 };
 
+export const DEFAULT_PAYMENT_METHODS = [
+  { key: 'cash', label: '現金', enabled: true },
+  { key: 'linepay', label: 'LINE Pay', enabled: true },
+  { key: 'transfer', label: '銀行轉帳', enabled: true }
+];
+
 export const getDailySetting = async (req, res) => {
   const { date } = req.query;
   
@@ -142,6 +148,9 @@ export const getGlobalSetting = async (req, res) => {
 
     const safeSetting = {
       ...setting,
+      payment_methods_json: Array.isArray(setting.payment_methods_json) && setting.payment_methods_json.length > 0
+        ? setting.payment_methods_json
+        : DEFAULT_PAYMENT_METHODS,
       business_hours_json: setting.business_hours_json || DEFAULT_BUSINESS_HOURS,
       has_line_messaging_token,
       line_messaging_token_masked,
@@ -193,11 +202,30 @@ export const updateGlobalSetting = async (req, res) => {
     business_hours_json,
     booking_note_chips,
     guest_line_hint_text,
-    default_session_capacity
+    default_session_capacity,
+    payment_methods_json
   } = req.body;
 
   try {
     const dataToUpdate = {};
+    if (payment_methods_json !== undefined) {
+      if (Array.isArray(payment_methods_json)) {
+        let methods = payment_methods_json.map(pm => {
+          const key = String(pm.key || pm.code || '').trim();
+          const isCash = key.toLowerCase() === 'cash';
+          return {
+            key,
+            label: pm.label || (isCash ? '現金' : key),
+            enabled: isCash ? true : Boolean(pm.enabled)
+          };
+        });
+        const hasCash = methods.some(m => m.key.toLowerCase() === 'cash');
+        if (!hasCash) {
+          methods.unshift({ key: 'cash', label: '現金', enabled: true });
+        }
+        dataToUpdate.payment_methods_json = methods;
+      }
+    }
     if (default_session_capacity !== undefined && default_session_capacity !== null && default_session_capacity !== '') {
       const parsed = parseInt(default_session_capacity, 10);
       if (!isNaN(parsed) && parsed > 0) {

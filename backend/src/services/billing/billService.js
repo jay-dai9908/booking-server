@@ -452,6 +452,31 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       }
     }
 
+    // Validate payment method against GlobalSetting.payment_methods_json
+    const gs = await tx.globalSetting.findUnique({ where: { id: 1 } });
+    const rawMethods = Array.isArray(gs?.payment_methods_json) && gs.payment_methods_json.length > 0
+      ? gs.payment_methods_json
+      : [
+          { key: 'cash', label: '現金', enabled: true },
+          { key: 'linepay', label: 'LINE Pay', enabled: true },
+          { key: 'transfer', label: '銀行轉帳', enabled: true }
+        ];
+
+    const enabledMethods = rawMethods.filter(m => {
+      const k = String(m.key || m.code || '').toLowerCase();
+      return k === 'cash' ? true : Boolean(m.enabled);
+    });
+
+    const reqMethodNorm = String(method || 'cash').toLowerCase().replace(/[-_]/g, '');
+    const isMethodAllowed = enabledMethods.some(m => {
+      const k = String(m.key || m.code || '').toLowerCase().replace(/[-_]/g, '');
+      return k === reqMethodNorm;
+    });
+
+    if (!isMethodAllowed) {
+      throw { status: 422, message: `付款方式「${method}」未啟用或不支援` };
+    }
+
     const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
     const calculatedTotal = targetPersons.reduce((sum, p) => sum + (p.total || 0), 0);
     if (expected_amount !== undefined && expected_amount !== null && calculatedTotal !== Number(expected_amount)) {
