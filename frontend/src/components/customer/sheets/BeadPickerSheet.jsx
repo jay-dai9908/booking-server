@@ -101,6 +101,9 @@ export default function BeadPickerSheet({
     const updated = { ...selectedColors };
     if (qty <= 0) {
       delete updated[code];
+      if (activeColorCode === code) {
+        setActiveColorCode(null);
+      }
     } else {
       updated[code] = qty;
     }
@@ -112,13 +115,26 @@ export default function BeadPickerSheet({
     setActiveColorCode(null);
   };
 
-  // Find object for active adjusting color
-  const activeColorObj = useMemo(() => {
-    if (!activeColorCode) return null;
-    return allColors.find((c) => c.code === activeColorCode) || { code: activeColorCode };
-  }, [activeColorCode, allColors]);
+  const handleClose = () => {
+    setActiveColorCode(null);
+    onClose?.();
+  };
 
-  const activeColorQty = activeColorCode ? selectedColors[activeColorCode] || 0 : 0;
+  React.useEffect(() => {
+    if (!isOpen) {
+      setActiveColorCode(null);
+    }
+  }, [isOpen]);
+
+  // Selected colors list entries
+  const selectedColorEntries = useMemo(() => {
+    return Object.entries(selectedColors)
+      .filter(([_, q]) => Number(q) > 0)
+      .map(([code, qty]) => {
+        const color = allColors.find((c) => c.code === code) || { code, hex: '#CCCCCC' };
+        return { color, code, qty: Number(qty) };
+      });
+  }, [selectedColors, allColors]);
 
   // Header subtitle
   const subtitle = product?.description
@@ -128,7 +144,7 @@ export default function BeadPickerSheet({
   return (
     <BottomSheet
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       size="tall"
       title="選擇融合豆色號"
       headerRight={
@@ -241,32 +257,61 @@ export default function BeadPickerSheet({
           )}
         </div>
 
-        {/* Active adjusting bar */}
-        {activeColorObj && activeColorQty > 0 && (
-          <div className="flex items-center justify-between rounded-[12px] bg-sg-bg px-3 py-2 mt-2 shrink-0">
-            <div className="flex items-center gap-2">
-              <div
-                className="w-[18px] h-[18px] rounded-full grid place-items-center border border-sg-line shrink-0"
-                style={getBeadSwatchStyle(activeColorObj)}
-              >
-                <div className="w-[6px] h-[6px] rounded-full bg-sg-paper" />
-              </div>
-              <span className="font-bold text-[14px] text-sg-ink">
-                {activeColorObj.code}
-              </span>
-              <span className="sg-small">
-                {activeColorQty} 包
-              </span>
-            </div>
+        {/* Selected colors list / active adjustment area */}
+        {selectedColorEntries.length > 0 && (
+          <div className="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto mt-2 shrink-0 pr-1">
+            {selectedColorEntries.map(({ color, code, qty }) => {
+              const isAdjusting = activeColorCode === code;
+              return (
+                <div
+                  key={code}
+                  data-testid={`bead-row-${code}`}
+                  onClick={() => setActiveColorCode(code)}
+                  className={`flex items-center justify-between rounded-[12px] px-3 py-2 cursor-pointer transition ${
+                    isAdjusting
+                      ? 'bg-sg-brown-soft/40 border border-sg-brown/30'
+                      : 'bg-sg-bg border border-transparent hover:bg-sg-bg/80'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div
+                      className="w-[18px] h-[18px] rounded-full grid place-items-center border border-sg-line shrink-0"
+                      style={getBeadSwatchStyle(color)}
+                    >
+                      <div className="w-[6px] h-[6px] rounded-full bg-sg-paper" />
+                    </div>
+                    <span className="font-bold text-[14px] text-sg-ink font-num">
+                      {code}
+                    </span>
+                    <span className="sg-small">
+                      {qty} 包
+                    </span>
+                    {isAdjusting && (
+                      <span className="text-[11px] text-sg-brown font-bold bg-sg-brown-soft px-1.5 py-0.5 rounded shrink-0">
+                        目前調整中
+                      </span>
+                    )}
+                  </div>
 
-            <Stepper
-              value={activeColorQty}
-              min={0}
-              max={999}
-              onMinus={() => handleQtyChange(activeColorObj.code, activeColorQty - 1)}
-              onPlus={() => handleQtyChange(activeColorObj.code, activeColorQty + 1)}
-              label={`調整 ${activeColorObj.code} 數量`}
-            />
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <Stepper
+                      value={qty}
+                      min={0}
+                      max={999}
+                      onMinus={() => {
+                        setActiveColorCode(code);
+                        handleQtyChange(code, qty - 1);
+                      }}
+                      onPlus={() => {
+                        setActiveColorCode(code);
+                        handleQtyChange(code, qty + 1);
+                      }}
+                      label={`調整 ${code} 數量`}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -291,7 +336,7 @@ export default function BeadPickerSheet({
           <Button
             variant="primary"
             size="sm"
-            onClick={onClose}
+            onClick={handleClose}
             className="min-h-[44px] px-[22px]"
           >
             完成
