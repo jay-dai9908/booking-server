@@ -149,6 +149,26 @@ test('Item 3: addBoardRental stock verification scoped to date', async (t) => {
     assert.equal(res.getResponseData()?.success, true);
   }
 
+  // 4. BookingTomorrow1 has rental with null covered_sessions but start_at/end_at set -> BookingTomorrow2 still gets 409
+  {
+    await prisma.bookingEquipment.updateMany({
+      where: { booking_ref: bookingTomorrow1 },
+      data: { covered_sessions: [] }
+    });
+    const { req, res } = createMockReqRes({
+      params: { booking_ref: bookingTomorrow2 },
+      body: {
+        person_no: 1,
+        equipment_id: testEqId,
+        from_at: '13:00',
+        to_at: '15:00'
+      }
+    });
+    await addBoardRental(req, res);
+    assert.equal(res.getStatusCode(), 409, '無 covered_sessions 但時間重疊時仍應回 409');
+    assert.equal(res.getResponseData()?.code, 'BOARD_OUT_OF_STOCK');
+  }
+
   // Cleanup
   await prisma.bookingEquipment.deleteMany({
     where: { booking_ref: { in: [bookingTomorrow1, bookingTomorrow2, bookingDayAfter] } }

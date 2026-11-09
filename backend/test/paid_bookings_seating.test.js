@@ -6,7 +6,7 @@ import path from 'node:path';
 import prisma from '../src/prismaClient.js';
 import { checkIn, handleTimer } from '../src/controllers/floorController.js';
 import { getLiveFloorData } from '../src/services/floor/liveService.js';
-import { occupancyForSessions } from '../src/services/seating/layoutService.js';
+import { occupancyForSessions, getActiveLayoutForDate } from '../src/services/seating/layoutService.js';
 import { isBookingCompleted } from '../../shared/floorSelectors.js';
 import { toTaipeiDateString, dateOnly } from '../../shared/time.js';
 
@@ -81,11 +81,8 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
 
   // Helper to ensure a layout exists with B1 seats
   const ensureLayoutWithB1 = async () => {
-    const published = await prisma.seatLayout.findFirst({
-      where: { status: 'published' },
-      include: { seats: true }
-    });
-    if (published && published.seats.some(s => s.code === 'B1-1')) {
+    const activeLayout = await getActiveLayoutForDate(prisma, todayDate);
+    if (activeLayout && activeLayout.seats && activeLayout.seats.some(s => s.code === 'B1-1' && s.is_active)) {
       return;
     }
     const layout = await prisma.seatLayout.create({
@@ -132,7 +129,7 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     }
   };
 
-  await ensureLayoutWithB1();
+  
 
   const getOrCreateTestSession = async (startTime, endTime = null, capacity = 20) => {
     const defaultEnd = `${parseInt(startTime, 10) + 1}:00`;
@@ -165,6 +162,7 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
   };
 
   await cleanup();
+  await ensureLayoutWithB1();
 
   // Test 1: 先結帳、再帶位
   await t.test('1. 先結帳、再帶位：待入座 -> 帶位後在使用中、不計時、座位被佔用、同時段排位不會用到；時段結束自動離場；按全組離場釋出座位', async () => {
@@ -592,6 +590,86 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
 
     const resvAfterBoth = await prisma.reservation.findFirst({ where: { booking_ref: ref } });
     assert.equal(resvAfterBoth.attendance, 'completed', '每一位都按了離場後整筆預約標記 completed');
+  });
+
+  // Test 7: occupancyForSessions: 已離場釋出座位，已結清但在使用中不提前釋出
+  await t.test('7. occupancyForSessions: 已離場 (completed) 釋出當前時段座位；已結清但使用中 (checked_in) 不提前釋出後續時段座位', async () => {
+    const s1 = await getOrCreateTestSession('10:00', '11:00');
+    const s2 = await getOrCreateTestSession('11:00', '12:00');
+    const refCompleted = 'BK-TEST-OCC-COMPLETED';
+    const refPaidInUse = 'BK-TEST-OCC-PAID-INUSE';
+    createdBookingRefs.push(refCompleted, refPaidInUse);
+
+    // Case A: Departed during current session (attendance === 'completed')
+    await prisma.reservation.create({
+      data: {
+        booking_ref: refCompleted,
+        user_id: testUser.id,
+        session_id: s1.id,
+        pax: 1,
+        status: 'confirmed',
+        attendance: 'completed',
+        is_paid: true,
+        assigned_seats: ['B1-1']
+      }
+    });
+    await prisma.bookingPerson.create({
+      data: {
+        booking_ref: refCompleted,
+        person_no: 1,
+        seat_code: 'B1-1',
+        status: 'active',
+        timer_started_at: new Date(`${todayStr}T10:05:00+08:00`),
+        timer_ended_at: new Date(`${todayStr}T10:30:00+08:00`)
+      }
+    });
+
+    // Case B: Paid mid-session, still checked_in, booked across s1 and s2
+    await prisma.reservation.create({
+      data: {
+        booking_ref: refPaidInUse,
+        user_id: testUser.id,
+        session_id: s1.id,
+        pax: 1,
+        status: 'confirmed',
+        attendance: 'checked_in',
+        is_paid: true,
+        billing_status: 'paid',
+        assigned_seats: ['B1-2']
+      }
+    });
+    await prisma.reservation.create({
+      data: {
+        booking_ref: refPaidInUse,
+        user_id: testUser.id,
+        session_id: s2.id,
+        pax: 1,
+        status: 'confirmed',
+        attendance: 'checked_in',
+        is_paid: true,
+        billing_status: 'paid',
+        assigned_seats: ['B1-2']
+      }
+    });
+    // Payment ended person's timer at 10:30 for billing, but person did NOT depart!
+    await prisma.bookingPerson.create({
+      data: {
+        booking_ref: refPaidInUse,
+        person_no: 1,
+        seat_code: 'B1-2',
+        status: 'active',
+        timer_started_at: new Date(`${todayStr}T10:00:00+08:00`),
+        timer_ended_at: new Date(`${todayStr}T10:30:00+08:00`)
+      }
+    });
+
+    const occ = await occupancyForSessions(prisma, [s1.id, s2.id]);
+
+    // refCompleted must NOT occupy B1-1 in s1 (departed!)
+    assert.equal(occ[s1.id]?.['B1-1'], undefined, '已離場的訂單在當前時段不佔用座位');
+
+    // refPaidInUse MUST still occupy B1-2 in s2 (in use until 12:00!)
+    assert.equal(occ[s2.id]?.['B1-2'], refPaidInUse, '已結清但使用中的訂單不可提前釋出後續時段座位');
   });
 
   await cleanup();

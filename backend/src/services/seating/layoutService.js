@@ -3,6 +3,7 @@ import prisma from '../../prismaClient.js';
 import { resolveLayoutGeometry } from '../../../../shared/allocator/geometry.js';
 import { allocate } from '../../../../shared/allocator/score.js';
 import { dateOnly } from '../../../../shared/time.js';
+import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
 
 export function getLegacyFallbackLayout() {
   const zones = [
@@ -174,11 +175,17 @@ export async function occupancyForSessions(client = prisma, sessionIds = [], exc
       sessionStartDt = new Date(`${dStr}T${session.start_time}:00+08:00`);
     }
 
+    // Departed or completed bookings do not occupy seats
+    if (r.attendance === 'completed' || isBookingCompleted(r, sessionStartDt || new Date())) {
+      continue;
+    }
+
     const bPersons = personsByBooking.get(r.booking_ref) || [];
 
     for (const seatCode of r.assigned_seats) {
       const p = bPersons.find(bp => bp.seat_code === seatCode);
-      if (p && p.timer_ended_at && sessionStartDt) {
+      const isPaid = r.is_paid || r.billing_status === 'paid' || Boolean(p?.paid);
+      if (!isPaid && p && p.timer_ended_at && sessionStartDt) {
         if (new Date(p.timer_ended_at) <= sessionStartDt) {
           // Already ended before this session starts -> released
           continue;

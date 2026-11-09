@@ -309,6 +309,7 @@ export default function SplitCollectView({
           <PaymentCompleteView
             data={successPaymentData}
             bookingRef={bookingRef}
+            booking={billData?.booking}
             onNextPerson={(nextPNo) => {
               setSuccessPaymentData(null);
               setSelectedPersonNos([nextPNo]);

@@ -74,4 +74,18 @@ test('isBookingCompleted shared selector tests', async (t) => {
     };
     assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T16:00:00Z')), false);
   });
+
+  await t.test('8. Paid booking with session object whose slot ended returns true, not ended returns false', () => {
+    const booking = {
+      attendance: 'checked_in',
+      billing_status: 'paid',
+      session: {
+        session_date: '2026-11-08',
+        end_time: '18:00'
+      }
+    };
+    assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T17:30:00+08:00')), false);
+    assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T18:05:00+08:00')), true);
+  });
 });
+

@@ -1263,6 +1263,13 @@ export async function addBoardRental(req, res) {
                 }
                 return cs === sess.start_time || cs === sessTimeStr || String(cs).startsWith(sess.start_time);
               });
+            } else if (be.start_at && (be.end_at || be.planned_end_at)) {
+              let sStart = new Date(`${dStr}T${sess.start_time}:00+08:00`).getTime();
+              let sEnd = new Date(`${dStr}T${sess.end_time}:00+08:00`).getTime();
+              if (sEnd <= sStart) sEnd += 24 * 60 * 60 * 1000;
+              const bStart = new Date(be.start_at).getTime();
+              const bEnd = new Date(be.end_at || be.planned_end_at).getTime();
+              isCovered = Math.max(bStart, sStart) < Math.min(bEnd, sEnd);
             } else {
               const bRes = dateReservations.filter(r => r.booking_ref === be.booking_ref);
               isCovered = bRes.some(r => r.session?.start_time === sess.start_time);

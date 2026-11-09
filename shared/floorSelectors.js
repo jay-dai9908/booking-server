@@ -46,6 +46,13 @@ export function isBookingCompleted(booking, now = new Date()) {
           return true;
         }
       }
+    } else if (booking.session?.end_time && (booking.session?.session_date || booking.session_date || booking.date)) {
+      const d = booking.session.session_date || booking.session_date || booking.date;
+      const dStr = typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10);
+      const endMs = new Date(`${dStr}T${booking.session.end_time}:00+08:00`).getTime();
+      if (!isNaN(endMs) && endMs <= nowMs) {
+        return true;
+      }
     } else if (booking.end_time && (booking.date || booking.session_date)) {
       const d = (booking.date || booking.session_date);
       const dStr = typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10);
