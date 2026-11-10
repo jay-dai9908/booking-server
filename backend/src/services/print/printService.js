@@ -39,6 +39,9 @@ export async function queuePrintJob({
 
   const client = clientTx || prisma;
   const globalSetting = await client.globalSetting.findFirst() || {};
+  if (globalSetting.print_enabled === false) {
+    return null;
+  }
   const footerText = globalSetting.receipt_footer_text || '謝謝光臨，作品記得帶回家';
   const opts = {
     footerText,
@@ -224,6 +227,11 @@ export async function queuePrintJob({
  * Atomically claim next job for a print station (spec 5.7)
  */
 export async function claimNextJob(stationId, waitSeconds = 20) {
+  const globalSetting = await prisma.globalSetting.findFirst() || {};
+  if (globalSetting.print_enabled === false) {
+    return null;
+  }
+
   const station = await prisma.printStation.findUnique({ where: { id: stationId } });
   if (!station || !station.accepting) {
     return null;

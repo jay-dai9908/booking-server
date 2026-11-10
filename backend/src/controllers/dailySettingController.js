@@ -162,7 +162,8 @@ export const getGlobalSetting = async (req, res) => {
       line_auto_notify_cancel: setting.line_auto_notify_cancel ?? false,
       shop_enabled: setting.shop_enabled ?? true,
       show_shop_button: setting.show_shop_button ?? setting.shop_enabled ?? true,
-      default_session_capacity: setting.default_session_capacity ?? 16
+      default_session_capacity: setting.default_session_capacity ?? 16,
+      print_enabled: setting.print_enabled ?? true
     };
     delete safeSetting.line_messaging_token;
 
@@ -207,11 +208,35 @@ export const updateGlobalSetting = async (req, res) => {
     booking_note_chips,
     guest_line_hint_text,
     default_session_capacity,
-    payment_methods_json
+    payment_methods_json,
+    print_enabled,
+    cancel_pending_jobs,
+    cancel_unprinted_jobs
   } = req.body;
 
   try {
     const dataToUpdate = {};
+    if (print_enabled !== undefined) {
+      dataToUpdate.print_enabled = Boolean(print_enabled);
+      if (dataToUpdate.print_enabled === false && (cancel_pending_jobs || cancel_unprinted_jobs)) {
+        const unprintedJobs = await prisma.printJob.findMany({
+          where: { status: { in: ['queued', 'claimed'] } }
+        });
+        if (unprintedJobs.length > 0) {
+          await prisma.printJob.updateMany({
+            where: { id: { in: unprintedJobs.map(j => j.id) } },
+            data: { status: 'cancelled' }
+          });
+          await auditService.log(prisma, {
+            event_type: 'print_jobs_cancelled',
+            category: 'print',
+            summary: `關閉列印，已取消 ${unprintedJobs.length} 張未印單據`,
+            staff_name: req.user?.name || '管理員',
+            device_label: '後台'
+          }).catch(err => console.error('Failed to log audit event for print_jobs_cancelled:', err));
+        }
+      }
+    }
     if (payment_methods_json !== undefined) {
       if (Array.isArray(payment_methods_json)) {
         let methods = payment_methods_json

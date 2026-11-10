@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axios';
 import AdminShell from './admin/AdminShell';
+import { setPrintGloballyEnabled } from '../utils/sunmiPrinter';
 
 export default function AdminLayout({ initialAdminInfo = null }) {
   const [adminInfo, setAdminInfo] = useState(initialAdminInfo);
@@ -13,6 +14,12 @@ export default function AdminLayout({ initialAdminInfo = null }) {
     if (!initialAdminInfo) {
       fetchAdminInfo();
     }
+    // Sync print enabled master switch
+    api.get('/daily-settings/global').then(res => {
+      if (res.data) {
+        setPrintGloballyEnabled(res.data.print_enabled !== false);
+      }
+    }).catch(err => console.warn('Failed to fetch print global setting in AdminLayout:', err));
   }, []);
 
   const fetchAdminInfo = async () => {

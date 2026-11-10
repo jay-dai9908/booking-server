@@ -156,6 +156,7 @@ model GlobalSetting {
   default_split_mode            String   @default("proportional") // proportional | even | first
   cash_float_amount             Int      @default(2000)  // 零用金
   // 列印
+  print_enabled                 Boolean  @default(true)  // 啟用列印總開關
   auto_print_receipt            Boolean  @default(true)  // 完成結帳就列印
   auto_print_summary            Boolean  @default(true)  // 整組結清時自動印整單總表
   receipt_footer_text           String?  @default("謝謝光臨，作品記得帶回家")

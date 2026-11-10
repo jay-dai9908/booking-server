@@ -10,6 +10,7 @@ export async function stationHeartbeat(req, res) {
   const { printer_state, printer_message, app_version, device_model } = req.body;
 
   try {
+    const setting = await prisma.globalSetting.findFirst();
     const updated = await prisma.printStation.update({
       where: { id: station.id },
       data: {
@@ -23,6 +24,7 @@ export async function stationHeartbeat(req, res) {
 
     return res.json({
       accepting: updated.accepting,
+      print_enabled: setting?.print_enabled ?? true,
       server_now: new Date().toISOString(),
       poll: { wait_seconds: 20 }
     });
@@ -37,6 +39,14 @@ export async function stationClaim(req, res) {
   const waitSeconds = Math.min(30, Math.max(0, parseInt(req.query.wait || '20', 10)));
 
   try {
+    const setting = await prisma.globalSetting.findFirst();
+    if (setting?.print_enabled === false) {
+      return res.json({
+        server_now: new Date().toISOString(),
+        job: null
+      });
+    }
+
     const job = await claimNextJob(station.id, waitSeconds);
     return res.json({
       server_now: new Date().toISOString(),
@@ -103,6 +113,11 @@ export async function createJob(req, res) {
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
+    const setting = await prisma.globalSetting.findFirst();
+    if (setting?.print_enabled === false) {
+      return res.status(409).json({ error: '列印已關閉，請到系統設定開啟' });
+    }
+
     const job = await queuePrintJob({
       ...req.body,
       user: staffUser,
@@ -155,6 +170,11 @@ export async function listJobs(req, res) {
 export async function retryJob(req, res) {
   const { id } = req.params;
   try {
+    const setting = await prisma.globalSetting.findFirst();
+    if (setting?.print_enabled === false) {
+      return res.status(409).json({ error: '列印已關閉，請到系統設定開啟' });
+    }
+
     const job = await prisma.printJob.findUnique({ where: { id: Number(id) } });
     if (!job) return res.status(404).json({ error: '找不到該列印單' });
 
@@ -251,6 +271,11 @@ export async function reportLocalJob(req, res) {
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
+    const setting = await prisma.globalSetting.findFirst();
+    if (setting?.print_enabled === false) {
+      return res.status(409).json({ error: '列印已關閉，請到系統設定開啟' });
+    }
+
     const updated = await reportJobResult(
       id,
       {
@@ -350,6 +375,11 @@ export async function testStation(req, res) {
   const { id } = req.params;
   const deviceInfo = getAdminDeviceInfo(req);
   try {
+    const setting = await prisma.globalSetting.findFirst();
+    if (setting?.print_enabled === false) {
+      return res.status(409).json({ error: '列印已關閉，請到系統設定開啟' });
+    }
+
     const station = await prisma.printStation.findUnique({ where: { id: Number(id) } });
     if (!station) return res.status(404).json({ error: '找不到列印站' });
 

@@ -12,7 +12,7 @@ import PrinterStatusLine from '../PrinterStatusLine';
 import Button from '../../customer/Button';
 import PassTenderSheet from './PassTenderSheet';
 import PaymentCompleteView from './PaymentCompleteView';
-import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
+import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 
 export default function SplitCollectView({
   isOpen = false,
@@ -300,21 +300,23 @@ export default function SplitCollectView({
                 </div>
               )}
               {/* Single line print toggle with PrinterStatusLine (D1) */}
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-[13px] text-sg-ink cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={autoPrint}
-                    onChange={(e) => setAutoPrint(e.target.checked)}
-                    className="w-4 h-4 rounded text-sg-brown focus:ring-sg-brown cursor-pointer"
-                  />
-                  <span>收款後列印收據</span>
-                </label>
+              {isPrintGloballyEnabled() && (
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 text-[13px] text-sg-ink cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={autoPrint}
+                      onChange={(e) => setAutoPrint(e.target.checked)}
+                      className="w-4 h-4 rounded text-sg-brown focus:ring-sg-brown cursor-pointer"
+                    />
+                    <span>收款後列印收據</span>
+                  </label>
 
-                <PrinterStatusLine
-                  printer={billData?.printer || { online: true, state: 'ok', label: '在線 · 正常' }}
-                />
-              </div>
+                  <PrinterStatusLine
+                    printer={billData?.printer || { online: true, state: 'ok', label: '在線 · 正常' }}
+                  />
+                </div>
+              )}
 
               {/* Bottom buttons:免收 moved to ⋯ menu, text never wraps */}
               <div className="flex items-center justify-between gap-2 pt-1 border-t border-sg-line/50">

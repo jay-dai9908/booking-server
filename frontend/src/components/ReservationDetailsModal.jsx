@@ -21,7 +21,7 @@ import StatusPill from './admin/StatusPill';
 import ErrorBoundary from './common/ErrorBoundary';
 import { formatBookingRef } from '../utils/admin/floorSelectors';
 import { safeFormatDate } from '../utils/format';
-import { printJobOnThisDevice } from '../utils/sunmiPrinter';
+import { printJobOnThisDevice, isPrintGloballyEnabled } from '../utils/sunmiPrinter';
 
 const ExtendTimeModal = lazy(() => import('./ExtendTimeModal'));
 const EquipmentAddonModal = lazy(() => import('./EquipmentAddonModal'));
@@ -827,16 +827,18 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                               className="absolute right-0 top-full mt-1 w-28 bg-white border border-gray-200 rounded-xl shadow-lg z-30 py-1 text-xs"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActivePaymentMenuId(null);
-                                  handleReprintPayment(p);
-                                }}
-                                className="w-full text-left px-3 py-1.5 hover:bg-gray-50 text-gray-700 font-medium"
-                              >
-                                補印
-                              </button>
+                              {isPrintGloballyEnabled() && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActivePaymentMenuId(null);
+                                    handleReprintPayment(p);
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 hover:bg-gray-50 text-gray-700 font-medium"
+                                >
+                                  補印
+                                </button>
+                              )}
                               {!isVoided && (
                                 <button
                                   type="button"
@@ -923,7 +925,9 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                         }`}
                       >
                         <CreditCard className="w-4 h-4" />
-                        {reservation.is_paid ? '結帳明細 / 補印收據' : '前往結帳 (拆帳 / POS印單)'}
+                        {reservation.is_paid 
+                          ? (isPrintGloballyEnabled() ? '結帳明細 / 補印收據' : '結帳明細') 
+                          : (isPrintGloballyEnabled() ? '前往結帳 (拆帳 / POS印單)' : '前往結帳 (拆帳)')}
                       </button>
                       {reservation.is_paid && (
                         <button 

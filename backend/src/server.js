@@ -203,6 +203,7 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_shipping_fee" INTEGER NOT NULL DEFAULT 60`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "official_line_url" TEXT DEFAULT 'https://lin.ee/vsZhRW5'`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "bead_colors_json" JSONB`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "print_enabled" BOOLEAN NOT NULL DEFAULT true`,
 
     `CREATE TABLE IF NOT EXISTS "PaymentMethodConfig" (
       "id" SERIAL NOT NULL,

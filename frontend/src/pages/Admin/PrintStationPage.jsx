@@ -16,7 +16,7 @@ import api from '../../api/axios';
 import { usePrinterStatus } from '../../hooks/admin/usePrinterStatus';
 import StatusPill from '../../components/admin/StatusPill';
 import Button from '../../components/customer/Button';
-import { printJobOnThisDevice } from '../../utils/sunmiPrinter';
+import { printJobOnThisDevice, isPrintGloballyEnabled, setPrintGloballyEnabled } from '../../utils/sunmiPrinter';
 
 export default function PrintStationPage() {
   const { station, refresh: refreshPrinterStatus } = usePrinterStatus(5000);
@@ -26,6 +26,15 @@ export default function PrintStationPage() {
   const [isPairing, setIsPairing] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
   const [isTogglingAccept, setIsTogglingAccept] = useState(false);
+  const [printGloballyEnabled, setPrintGloballyEnabledState] = useState(isPrintGloballyEnabled());
+
+  useEffect(() => {
+    api.get('/daily-settings/global').then(res => {
+      const enabled = res.data?.print_enabled !== false;
+      setPrintGloballyEnabled(enabled);
+      setPrintGloballyEnabledState(enabled);
+    }).catch(err => console.warn('Failed to fetch print global setting:', err));
+  }, []);
 
   // Check if running inside Sunmi Android App WebView
   const isSunmiApp = typeof window !== 'undefined' && Boolean(window.AndroidPrinter?.getStationStatus);
@@ -188,6 +197,14 @@ export default function PrintStationPage() {
 
   return (
     <div className="space-y-4 max-w-2xl mx-auto pb-16">
+      {/* Disabled Banner */}
+      {!printGloballyEnabled && (
+        <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-[13px] text-amber-800 font-bold flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <span>列印已在系統設定關閉</span>
+        </div>
+      )}
+
       {/* Toast */}
       {actionMsg && (
         <div className="fixed top-4 right-4 z-50 bg-sg-ink text-white px-4 py-2.5 rounded-2xl shadow-lg text-[13px] font-bold animate-fade-in">
@@ -321,7 +338,11 @@ export default function PrintStationPage() {
                   </div>
 
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {isFailed ? (
+                    {!printGloballyEnabled ? (
+                      <span className="text-[12px] text-sg-muted">
+                        {isSuccess ? `已印 ${printedTime}` : '-'}
+                      </span>
+                    ) : isFailed ? (
                       <>
                         <Button
                           variant="primary"
@@ -365,14 +386,16 @@ export default function PrintStationPage() {
       {/* Bottom Actions */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="md"
-            onClick={handleTestPrint}
-            className="w-full sm:w-auto whitespace-nowrap"
-          >
-            測試列印
-          </Button>
+          {printGloballyEnabled && (
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={handleTestPrint}
+              className="w-full sm:w-auto whitespace-nowrap"
+            >
+              測試列印
+            </Button>
+          )}
 
           <Button
             variant={isAccepting ? "secondary" : "primary"}

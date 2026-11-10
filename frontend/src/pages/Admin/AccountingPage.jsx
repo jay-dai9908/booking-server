@@ -31,7 +31,7 @@ import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import Button from '../../components/customer/Button';
 import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
 import ReservationDetailsModal from '../../components/ReservationDetailsModal';
-import { printJobOnThisDevice } from '../../utils/sunmiPrinter';
+import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../utils/sunmiPrinter';
 import { buildClosingSlip, commandsToPreviewHtml } from '@shared/receipts.js';
 import { toTaipeiDateString } from '@shared/time.js';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
@@ -453,7 +453,7 @@ export default function AccountingPage() {
             onChange={setActiveTab}
           />
 
-          {activeTab === 'closing' && (
+          {activeTab === 'closing' && isPrintGloballyEnabled() && (
             <Button variant="secondary" size="sm" onClick={handlePreviewClosingSlip}>
               <Printer className="w-4 h-4 mr-1 text-sg-muted" />
               列印日結單
@@ -910,13 +910,15 @@ export default function AccountingPage() {
                           )}
                         </td>
                         <td className="py-3 px-3 text-right space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => handleReprintPayment(p)}
-                            className="text-sg-brown font-bold text-[12px] hover:underline"
-                          >
-                            補印
-                          </button>
+                          {isPrintGloballyEnabled() && (
+                            <button
+                              type="button"
+                              onClick={() => handleReprintPayment(p)}
+                              className="text-sg-brown font-bold text-[12px] hover:underline"
+                            >
+                              補印
+                            </button>
+                          )}
                           {!isVoided && (
                             <button
                               type="button"
@@ -999,13 +1001,15 @@ export default function AccountingPage() {
                         {p.device_label && <span> ({p.device_label})</span>}
                       </div>
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleReprintPayment(p)}
-                          className="text-sg-brown font-bold text-[12px] hover:underline"
-                        >
-                          補印
-                        </button>
+                        {isPrintGloballyEnabled() && (
+                          <button
+                            type="button"
+                            onClick={() => handleReprintPayment(p)}
+                            className="text-sg-brown font-bold text-[12px] hover:underline"
+                          >
+                            補印
+                          </button>
+                        )}
                         {!isVoided && (
                           <button
                             type="button"
@@ -1200,34 +1204,38 @@ export default function AccountingPage() {
                         </td>
                         <td className="py-3 px-3 font-mono text-[12px] text-sg-muted">{timeStr}</td>
                         <td className="py-3 px-3 text-right">
-                          {isExpiredClaimed ? (
-                            <div className="flex items-center justify-end gap-2">
+                          {isPrintGloballyEnabled() ? (
+                            isExpiredClaimed ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleMarkPrinted(job)}
+                                  className="text-sg-brown font-bold text-[12px] hover:underline"
+                                >
+                                  標記已印
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRetryPrintJob(job)}
+                                  className="text-sg-muted font-bold text-[12px] hover:underline"
+                                >
+                                  重印
+                                </button>
+                              </div>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() => handleMarkPrinted(job)}
+                                onClick={async () => {
+                                  await printJobOnThisDevice(job);
+                                  showToast('已觸發本機列印');
+                                }}
                                 className="text-sg-brown font-bold text-[12px] hover:underline"
                               >
-                                標記已印
+                                本機印
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => handleRetryPrintJob(job)}
-                                className="text-sg-muted font-bold text-[12px] hover:underline"
-                              >
-                                重印
-                              </button>
-                            </div>
+                            )
                           ) : (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await printJobOnThisDevice(job);
-                                showToast('已觸發本機列印');
-                              }}
-                              className="text-sg-brown font-bold text-[12px] hover:underline"
-                            >
-                              本機印
-                            </button>
+                            <span className="text-xs text-sg-muted">-</span>
                           )}
                         </td>
                       </tr>
@@ -1501,7 +1509,9 @@ export default function AccountingPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" size="sm" onClick={() => setShowClosingPreviewModal(false)}>關閉</Button>
-            <Button variant="primary" size="sm" onClick={() => window.print()}>列印</Button>
+            {isPrintGloballyEnabled() && (
+              <Button variant="primary" size="sm" onClick={() => window.print()}>列印</Button>
+            )}
           </div>
         }
       >

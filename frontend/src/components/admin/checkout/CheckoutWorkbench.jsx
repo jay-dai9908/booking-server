@@ -34,7 +34,7 @@ import PassTenderSheet from './PassTenderSheet';
 import SharedItemsSplitPanel from './SharedItemsSplitPanel';
 import AddonItemsManageModal from './AddonItemsManageModal';
 import QuickPromoModal from './QuickPromoModal';
-import { printJobOnThisDevice } from '../../../utils/sunmiPrinter';
+import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
 import { displayBoardName, computeBill, computeEntry } from '@shared/billing.js';
@@ -1952,17 +1952,19 @@ export default function CheckoutWorkbench({
                     >
                       預覽總單
                     </button>
-                    <button
-                      type="button"
-                      data-testid="mobile-print-split-slips-btn"
-                      onClick={() => {
-                        setShowMobileMoreMenu(false);
-                        handlePrintSplitSlips();
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper rounded-xl"
-                    >
-                      印分單
-                    </button>
+                    {isPrintGloballyEnabled() && (
+                      <button
+                        type="button"
+                        data-testid="mobile-print-split-slips-btn"
+                        onClick={() => {
+                          setShowMobileMoreMenu(false);
+                          handlePrintSplitSlips();
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper rounded-xl"
+                      >
+                        印分單
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => { setShowMobileMoreMenu(false); setShowWaiveModal(true); }}
@@ -2022,17 +2024,19 @@ export default function CheckoutWorkbench({
                 <Printer className="w-4 h-4 mr-1 text-sg-muted" />
                 預覽總單
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                data-testid="print-split-slips-btn"
-                onClick={handlePrintSplitSlips}
-                loading={isPrintingSplit}
-                className="whitespace-nowrap"
-              >
-                <Printer className="w-4 h-4 mr-1 text-sg-muted" />
-                印分單
-              </Button>
+              {isPrintGloballyEnabled() && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  data-testid="print-split-slips-btn"
+                  onClick={handlePrintSplitSlips}
+                  loading={isPrintingSplit}
+                  className="whitespace-nowrap"
+                >
+                  <Printer className="w-4 h-4 mr-1 text-sg-muted" />
+                  印分單
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
@@ -2260,15 +2264,17 @@ export default function CheckoutWorkbench({
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" size="sm" onClick={() => setShowPreviewModal(false)}>關閉</Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                window.print();
-              }}
-            >
-              瀏覽器列印
-            </Button>
+            {isPrintGloballyEnabled() && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  window.print();
+                }}
+              >
+                瀏覽器列印
+              </Button>
+            )}
           </div>
         }
       >
@@ -2292,16 +2298,18 @@ export default function CheckoutWorkbench({
               </div>
             )}
             <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-[13px] text-sg-ink cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={collectAutoPrint}
-                  onChange={(e) => setCollectAutoPrint(e.target.checked)}
-                  className="w-4 h-4 rounded text-sg-brown focus:ring-sg-brown"
-                />
-                <Printer className="w-4 h-4 text-sg-muted" />
-                <span>結帳完成自動列印收據</span>
-              </label>
+              {isPrintGloballyEnabled() ? (
+                <label className="flex items-center gap-2 text-[13px] text-sg-ink cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={collectAutoPrint}
+                    onChange={(e) => setCollectAutoPrint(e.target.checked)}
+                    className="w-4 h-4 rounded text-sg-brown focus:ring-sg-brown"
+                  />
+                  <Printer className="w-4 h-4 text-sg-muted" />
+                  <span>結帳完成自動列印收據</span>
+                </label>
+              ) : <div />}
               <Button
                 variant="primary"
                 size="md"
@@ -2339,7 +2347,7 @@ export default function CheckoutWorkbench({
             />
           </div>
 
-          <PrinterStatusLine />
+          {isPrintGloballyEnabled() && <PrinterStatusLine />}
         </div>
       </ResponsivePanel>
 

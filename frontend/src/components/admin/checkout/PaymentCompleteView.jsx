@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Printer, RotateCcw, Check } from 'lucide-react';
 import Button from '../../customer/Button';
-import { PAYMENT_METHOD_LABELS, printJobOnThisDevice } from '../../../utils/sunmiPrinter';
+import { PAYMENT_METHOD_LABELS, printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 import api from '../../../api/axios';
 
 export default function PaymentCompleteView({
@@ -125,47 +125,53 @@ export default function PaymentCompleteView({
       </div>
 
       {/* 2. Print Status & Actions Card (Spec 6.15) */}
-      <div className="p-4 rounded-2xl border border-sg-line bg-sg-paper/50 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Printer className="w-4 h-4 text-sg-muted" />
-            <span className="text-[13px] font-bold text-sg-ink">
-              收據列印進度
+      {!isPrintGloballyEnabled() ? (
+        <div className="text-center py-2 text-xs text-sg-muted font-medium">
+          列印已關閉
+        </div>
+      ) : (
+        <div className="p-4 rounded-2xl border border-sg-line bg-sg-paper/50 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Printer className="w-4 h-4 text-sg-muted" />
+              <span className="text-[13px] font-bold text-sg-ink">
+                收據列印進度
+              </span>
+            </div>
+            <span className="text-[12px] font-bold text-sg-sage-ink flex items-center gap-1">
+              <Check className="w-3.5 h-3.5" />
+              已送出
             </span>
           </div>
-          <span className="text-[12px] font-bold text-sg-sage-ink flex items-center gap-1">
-            <Check className="w-3.5 h-3.5" />
-            已送出
-          </span>
-        </div>
 
-        {printLocalMsg && (
-          <div className="text-[12px] text-sg-sage font-bold">
-            {printLocalMsg}
+          {printLocalMsg && (
+            <div className="text-[12px] text-sg-sage font-bold">
+              {printLocalMsg}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleReprint}
+              loading={reprinting}
+              className="flex-1"
+            >
+              再印一張
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handlePrintOnThisDevice}
+              loading={reprinting}
+              className="flex-1"
+            >
+              用這台印
+            </Button>
           </div>
-        )}
-
-        <div className="flex items-center gap-2 pt-1">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleReprint}
-            loading={reprinting}
-            className="flex-1"
-          >
-            再印一張
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handlePrintOnThisDevice}
-            loading={reprinting}
-            className="flex-1"
-          >
-            用這台印
-          </Button>
         </div>
-      </div>
+      )}
 
       {/* 3. Payment Records Summary */}
       <div className="space-y-2">

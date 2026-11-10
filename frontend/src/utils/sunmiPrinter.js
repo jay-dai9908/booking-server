@@ -337,10 +337,33 @@ export const buildPersonSplitReceiptCommands = (person, index, data) => {
   return commands;
 };
 
+export const isPrintGloballyEnabled = () => {
+  if (typeof window === 'undefined') return true;
+  if (window.__SHIGUANG_PRINT_ENABLED__ !== undefined) {
+    return Boolean(window.__SHIGUANG_PRINT_ENABLED__);
+  }
+  const cached = localStorage.getItem('shiguang_print_enabled');
+  if (cached !== null) {
+    return cached !== 'false';
+  }
+  return true;
+};
+
+export const setPrintGloballyEnabled = (enabled) => {
+  if (typeof window !== 'undefined') {
+    window.__SHIGUANG_PRINT_ENABLED__ = Boolean(enabled);
+    localStorage.setItem('shiguang_print_enabled', String(Boolean(enabled)));
+  }
+};
+
 /**
  * 發送列印任務至商米 V2s POS 機；若非商米環境則回傳 false 由前端彈出 58mm 預覽視窗
  */
 export const sendCommandsToSunmiPrinter = (commands) => {
+  if (!isPrintGloballyEnabled()) {
+    return Promise.resolve({ printedOnDevice: false, success: false, message: '列印已關閉' });
+  }
+
   return new Promise((resolve) => {
     if (typeof window === 'undefined' || !window.AndroidPrinter) {
       resolve({ printedOnDevice: false, message: '非商米 POS 環境，已開啟收據預覽' });
@@ -397,6 +420,14 @@ export const sendCommandsToSunmiPrinter = (commands) => {
  * Print a job on this device (Sunmi native POS or browser print iframe) (spec 7.6)
  */
 export const printJobOnThisDevice = async (job) => {
+  if (!isPrintGloballyEnabled()) {
+    return {
+      success: false,
+      via: 'disabled',
+      message: '列印已關閉'
+    };
+  }
+
   if (!job || !job.commands_json) {
     throw new Error('無效的列印單資料');
   }

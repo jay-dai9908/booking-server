@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import api from '../../api/axios';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
+import { setPrintGloballyEnabled } from '../../utils/sunmiPrinter';
 
 const DEFAULT_PREVIEW_DISABLED_TEXT = '系統維護中，請點擊下方按鈕使用 LINE 進行預約';
 const DEFAULT_ANNOUNCEMENT_TEXT = '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
@@ -109,6 +110,8 @@ export default function SettingsPage() {
   const [draggedMethodIdx, setDraggedMethodIdx] = useState(null);
 
   // 7. Printing & Station Settings (Spec 6.25)
+  const [printEnabled, setPrintEnabled] = useState(true);
+  const [confirmDisablePrint, setConfirmDisablePrint] = useState(null);
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true);
   const [autoPrintSummary, setAutoPrintSummary] = useState(true);
   const [receiptFooterText, setReceiptFooterText] = useState('謝謝光臨，作品記得帶回家');
@@ -121,6 +124,28 @@ export default function SettingsPage() {
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3000);
+  };
+
+  const handleTogglePrintEnabled = async (checked) => {
+    if (!checked) {
+      try {
+        const res = await api.get('/print/jobs');
+        const unprinted = (res.data?.jobs || []).filter(j => j.status === 'queued' || j.status === 'claimed');
+        if (unprinted.length > 0) {
+          setConfirmDisablePrint({ count: unprinted.length });
+          return;
+        }
+      } catch (e) {
+        console.warn('Failed to check unprinted jobs:', e);
+      }
+      setPrintEnabled(false);
+      setPrintGloballyEnabled(false);
+      await handleSaveAll({ print_enabled: false });
+    } else {
+      setPrintEnabled(true);
+      setPrintGloballyEnabled(true);
+      await handleSaveAll({ print_enabled: true });
+    }
   };
 
   const fetchGlobalSettings = async () => {
@@ -207,6 +232,9 @@ export default function SettingsPage() {
         ]);
       }
 
+      const pe = d.print_enabled !== false;
+      setPrintEnabled(pe);
+      setPrintGloballyEnabled(pe);
       setAutoPrintReceipt(d.auto_print_receipt !== false);
       setAutoPrintSummary(d.auto_print_summary !== false);
       setReceiptFooterText(d.receipt_footer_text ?? '謝謝光臨，作品記得帶回家');
@@ -261,6 +289,7 @@ export default function SettingsPage() {
         default_split_mode: defaultSplitMode,
         cash_float_amount: parseInt(cashFloatAmount, 10) || 2000,
         payment_methods_json: paymentMethods,
+        print_enabled: printEnabled,
         auto_print_receipt: autoPrintReceipt,
         auto_print_summary: autoPrintSummary,
         receipt_footer_text: receiptFooterText,
@@ -1558,44 +1587,63 @@ export default function SettingsPage() {
         </div>
 
         <div className="p-5 sm:p-6 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-center justify-between">
-              <div>
-                <span className="text-sm font-bold text-[#3E332B] block">完成結帳就列印</span>
-                <span className="text-xs text-[#6D5D52]">門市收款完成後自動派送收據列印工作</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={autoPrintReceipt}
-                onChange={(e) => setAutoPrintReceipt(e.target.checked)}
-                className="w-5 h-5 rounded text-[#8B5B43] focus:ring-[#8B5B43]"
-              />
+          {/* 啟用列印總開關 */}
+          <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-center justify-between">
+            <div>
+              <span className="text-sm font-bold text-[#3E332B] block">啟用列印</span>
+              <span className="text-xs text-[#6D5D52]">關閉後，結帳不會出單，商米和這台裝置都不會列印</span>
             </div>
-
-            <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-center justify-between">
-              <div>
-                <span className="text-sm font-bold text-[#3E332B] block">整組結清時自動印整單總表</span>
-                <span className="text-xs text-[#6D5D52]">若分多人付款，結清時自動多印一張總表</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={autoPrintSummary}
-                onChange={(e) => setAutoPrintSummary(e.target.checked)}
-                className="w-5 h-5 rounded text-[#8B5B43] focus:ring-[#8B5B43]"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">收據底部文字</label>
             <input
-              type="text"
-              value={receiptFooterText}
-              onChange={(e) => setReceiptFooterText(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
-              placeholder="預設：謝謝光臨，作品記得帶回家"
+              type="checkbox"
+              data-testid="toggle-print-enabled"
+              checked={printEnabled}
+              onChange={(e) => handleTogglePrintEnabled(e.target.checked)}
+              className="w-5 h-5 rounded text-[#8B5B43] focus:ring-[#8B5B43] cursor-pointer"
             />
           </div>
+
+          <div className={`space-y-6 transition-opacity ${!printEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-bold text-[#3E332B] block">完成結帳就列印</span>
+                  <span className="text-xs text-[#6D5D52]">門市收款完成後自動派送收據列印工作</span>
+                </div>
+                <input
+                  type="checkbox"
+                  disabled={!printEnabled}
+                  checked={autoPrintReceipt}
+                  onChange={(e) => setAutoPrintReceipt(e.target.checked)}
+                  className="w-5 h-5 rounded text-[#8B5B43] focus:ring-[#8B5B43]"
+                />
+              </div>
+
+              <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DEC8] flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-bold text-[#3E332B] block">整組結清時自動印整單總表</span>
+                  <span className="text-xs text-[#6D5D52]">若分多人付款，結清時自動多印一張總表</span>
+                </div>
+                <input
+                  type="checkbox"
+                  disabled={!printEnabled}
+                  checked={autoPrintSummary}
+                  onChange={(e) => setAutoPrintSummary(e.target.checked)}
+                  className="w-5 h-5 rounded text-[#8B5B43] focus:ring-[#8B5B43]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">收據底部文字</label>
+              <input
+                type="text"
+                disabled={!printEnabled}
+                value={receiptFooterText}
+                onChange={(e) => setReceiptFooterText(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm disabled:bg-gray-100"
+                placeholder="預設：謝謝光臨，作品記得帶回家"
+              />
+            </div>
 
           {/* Station list */}
           <div className="space-y-3 pt-2 border-t border-gray-200">
@@ -1652,6 +1700,7 @@ export default function SettingsPage() {
                         </button>
                         <button
                           type="button"
+                          disabled={!printEnabled}
                           onClick={() => handleToggleStationAccepting(st)}
                           className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition ${
                             isAccepting
@@ -1661,15 +1710,18 @@ export default function SettingsPage() {
                         >
                           {isAccepting ? '暫停接單' : '恢復接單'}
                         </button>
+                        {printEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => handleTestStationPrint(st)}
+                            className="px-2.5 py-1 text-xs font-bold text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg transition"
+                          >
+                            測試列印
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => handleTestStationPrint(st)}
-                          className="px-2.5 py-1 text-xs font-bold text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg transition"
-                        >
-                          測試列印
-                        </button>
-                        <button
-                          type="button"
+                          disabled={!printEnabled}
                           onClick={() => setUnpairingStation(st)}
                           className="px-2.5 py-1 text-xs font-bold text-red-600 hover:text-red-700 hover:underline transition"
                         >
@@ -1697,8 +1749,27 @@ export default function SettingsPage() {
               {saving ? '儲存中...' : '儲存列印設定'}
             </button>
           </div>
+          </div>
         </div>
       </div>
+
+      {confirmDisablePrint && (
+        <ConfirmPanel
+          isOpen={Boolean(confirmDisablePrint)}
+          title="關閉啟用列印"
+          message={`目前有 ${confirmDisablePrint.count} 張單還沒印，要一起取消嗎？`}
+          confirmText="確認"
+          cancelText="先不要"
+          danger={true}
+          onClose={() => setConfirmDisablePrint(null)}
+          onConfirm={async () => {
+            setConfirmDisablePrint(null);
+            setPrintEnabled(false);
+            setPrintGloballyEnabled(false);
+            await handleSaveAll({ print_enabled: false, cancel_pending_jobs: true });
+          }}
+        />
+      )}
 
       {unpairingStation && (
         <ConfirmPanel

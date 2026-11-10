@@ -452,8 +452,10 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       }
     }
 
+    const hasPassTenders = Array.isArray(pass_tenders) && pass_tenders.length > 0;
+
     // pass is tender-only, not a direct payment method (Spec round 18b)
-    if (String(method || '').trim().toLowerCase() === 'pass') {
+    if (!hasPassTenders && String(method || '').trim().toLowerCase() === 'pass') {
       throw { status: 422, message: '卡券請用卡券折抵' };
     }
 
@@ -474,14 +476,19 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       return k === 'cash' ? true : Boolean(m.enabled);
     });
 
-    const reqMethodNorm = String(method || 'cash').toLowerCase().replace(/[-_]/g, '');
-    const isMethodAllowed = enabledMethods.some(m => {
-      const k = String(m.key || m.code || '').toLowerCase().replace(/[-_]/g, '');
-      return k === reqMethodNorm;
-    });
+    const validateMethod = (mToValidate) => {
+      const reqMethodNorm = String(mToValidate || 'cash').toLowerCase().replace(/[-_]/g, '');
+      const isMethodAllowed = enabledMethods.some(m => {
+        const k = String(m.key || m.code || '').toLowerCase().replace(/[-_]/g, '');
+        return k === reqMethodNorm;
+      });
+      if (!isMethodAllowed) {
+        throw { status: 422, message: `付款方式「${mToValidate}」未啟用或不支援` };
+      }
+    };
 
-    if (!isMethodAllowed) {
-      throw { status: 422, message: `付款方式「${method}」未啟用或不支援` };
+    if (!hasPassTenders) {
+      validateMethod(method);
     }
 
     const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
@@ -621,6 +628,12 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
 
     // Collect remaining amount with chosen method
     if (remainingAmount > 0 || (calculatedTotal === 0 && createdPayments.length === 0)) {
+      if (hasPassTenders) {
+        if (String(method || '').trim().toLowerCase() === 'pass') {
+          throw { status: 422, message: '卡券請用卡券折抵' };
+        }
+        validateMethod(method);
+      }
       const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
 
       let change = 0;
@@ -715,7 +728,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
     const print_jobs = [];
     const globalSetting = await tx.globalSetting.findFirst() || {};
 
-    if (print !== false && globalSetting.auto_print_receipt !== false) {
+    if (print !== false && globalSetting.print_enabled !== false && globalSetting.auto_print_receipt !== false) {
       for (const pay of createdPayments) {
         const job = await queuePrintJob({
           type: 'receipt',
@@ -725,13 +738,14 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           device: deviceInfo,
           now: payload?.now || payload?.payment_date
         }, tx);
-        print_jobs.push(job);
+        if (job) print_jobs.push(job);
       }
     }
 
     // Auto print summary if fully settled after multiple payments
     if (
       print !== false &&
+      globalSetting.print_enabled !== false &&
       globalSetting.auto_print_summary !== false &&
       (finalStatus.code === 'paid' || finalStatus.code === 'waived')
     ) {
@@ -747,7 +761,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           device: deviceInfo,
           now: payload?.now || payload?.payment_date
         }, tx);
-        print_jobs.push(sumJob);
+        if (sumJob) print_jobs.push(sumJob);
       }
     }
 
@@ -872,7 +886,7 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
     // Automatic print receipt (Section 3.8)
     const print_jobs = [];
     const globalSetting = await tx.globalSetting.findFirst() || {};
-    if (payload.print !== false && globalSetting.auto_print_receipt !== false) {
+    if (payload.print !== false && globalSetting.print_enabled !== false && globalSetting.auto_print_receipt !== false) {
       const job = await queuePrintJob({
         type: 'supplement',
         booking_ref,
@@ -881,7 +895,7 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
         device: deviceInfo,
         now: payload?.now || payload?.payment_date
       }, tx);
-      print_jobs.push(job);
+      if (job) print_jobs.push(job);
     }
 
     const { bill, status } = await refreshBillingCache(tx, booking_ref);
@@ -1004,7 +1018,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
     // Automatic print receipt (Section 3.8)
     const print_jobs = [];
     const globalSetting = await tx.globalSetting.findFirst() || {};
-    if (payload.print !== false && globalSetting.auto_print_receipt !== false) {
+    if (payload.print !== false && globalSetting.print_enabled !== false && globalSetting.auto_print_receipt !== false) {
       const job = await queuePrintJob({
         type: 'refund',
         booking_ref,
@@ -1013,7 +1027,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
         device: deviceInfo,
         now: payload?.now || payload?.payment_date
       }, tx);
-      print_jobs.push(job);
+      if (job) print_jobs.push(job);
     }
 
     const { bill, status } = await refreshBillingCache(tx, booking_ref);
