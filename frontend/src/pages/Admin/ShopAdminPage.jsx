@@ -17,7 +17,14 @@ import {
   Palette,
   Image as ImageIcon,
   Upload,
-  AlertCircle
+  AlertCircle,
+  ClipboardList,
+  Landmark,
+  BarChart3,
+  Bell,
+  MessageSquare,
+  Calendar,
+  Pencil
 } from 'lucide-react';
 import api from '../../api/axios';
 import { format } from 'date-fns';
@@ -800,38 +807,42 @@ export default function ShopAdminPage() {
           <button
             type="button"
             onClick={() => setActiveTab('orders')}
-            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap ${
+            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap inline-flex items-center gap-1.5 ${
               activeTab === 'orders' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
-            📋 預購訂單與對帳
+            <ClipboardList className="w-4 h-4" />
+            <span>預購訂單與對帳</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('payments')}
-            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap ${
+            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap inline-flex items-center gap-1.5 ${
               activeTab === 'payments' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
-            🏦 中信帳號池與金流
+            <Landmark className="w-4 h-4" />
+            <span>中信帳號池與金流</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('products')}
-            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap ${
+            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap inline-flex items-center gap-1.5 ${
               activeTab === 'products' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
-            📦 商品與圖片設定
+            <Package className="w-4 h-4" />
+            <span>商品與圖片設定</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('bead_colors')}
-            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap ${
+            className={`shrink-0 px-3.5 py-2 rounded-lg transition whitespace-nowrap inline-flex items-center gap-1.5 ${
               activeTab === 'bead_colors' ? 'bg-[#8B5B43] text-white shadow-xs' : 'hover:text-[#3E332B]'
             }`}
           >
-            🎨 拼豆色號管理 ({allMergedBeadColors.length}色)
+            <Palette className="w-4 h-4" />
+            <span>拼豆色號管理 ({allMergedBeadColors.length}色)</span>
           </button>
         </div>
       </div>
@@ -902,9 +913,9 @@ export default function ShopAdminPage() {
                 onClick={() => setShowPickingModal(true)}
                 className="px-3.5 py-2 bg-[#2C241E] hover:bg-[#3E332B] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition"
               >
-                <Package className="w-3.5 h-3.5 text-amber-300" />
+                <BarChart3 className="w-3.5 h-3.5 text-amber-300" />
                 <span>
-                  📊 備貨揀貨統計單 ({selectedOrderIds.length > 0 ? `已勾選 ${selectedOrderIds.length} 筆` : `待備貨 ${pickingSummary.targetOrders.length} 筆`})
+                  備貨揀貨統計單 ({selectedOrderIds.length > 0 ? `已勾選 ${selectedOrderIds.length} 筆` : `待備貨 ${pickingSummary.targetOrders.length} 筆`})
                 </span>
               </button>
 
@@ -915,7 +926,7 @@ export default function ShopAdminPage() {
                   className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>📢 批次推播 LINE 到貨通知 ({selectedOrderIds.length})</span>
+                  <span>批次推播 LINE 到貨通知 ({selectedOrderIds.length})</span>
                 </button>
               )}
             </div>
@@ -1036,9 +1047,10 @@ export default function ShopAdminPage() {
                                   setWishReplyOrder(order);
                                   setWishReplyText(order.wish_reply || '');
                                 }}
-                                className="text-[11px] text-[#8B5B43] hover:underline font-bold"
+                                className="text-[12px] text-[#8B5B43] hover:underline font-bold inline-flex items-center gap-1"
                               >
-                                ✏️ 填寫店家許願回覆
+                                <Pencil className="w-3 h-3" />
+                                <span>填寫店家許願回覆</span>
                               </button>
                             )}
                           </td>
@@ -1133,9 +1145,10 @@ export default function ShopAdminPage() {
                                   setVerifyIsFullPayment(false);
                                   setVerifySendLine(true);
                                 }}
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-2xs inline-flex items-center gap-1"
                               >
-                                ✅ 對帳確認
+                                <Check className="w-3.5 h-3.5" />
+                                <span>對帳確認</span>
                               </button>
                             )}
 
@@ -1147,10 +1160,11 @@ export default function ShopAdminPage() {
                                     setWishReplyOrder(order);
                                     setWishReplyText(order.wish_reply || '');
                                   }}
-                                  className="px-2 py-1 bg-[#FAF7F2] hover:bg-[#F0EBE5] text-[#8B5B43] border border-[#E8DEC8] rounded-lg text-xs font-bold transition"
+                                  className="px-2 py-1 bg-[#FAF7F2] hover:bg-[#F0EBE5] text-[#8B5B43] border border-[#E8DEC8] rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
                                   title="回覆許願"
                                 >
-                                  💬 許願
+                                  <MessageSquare className="w-3 h-3" />
+                                  <span>許願</span>
                                 </button>
 
                                 <button
@@ -1159,10 +1173,11 @@ export default function ShopAdminPage() {
                                     setArrivalDateOrder(order);
                                     setArrivalDateText(order.estimated_arrival || '');
                                   }}
-                                  className="px-2 py-1 bg-[#FAF7F2] hover:bg-[#F0EBE5] text-[#3E332B] border border-[#E8DEC8] rounded-lg text-xs font-bold transition"
+                                  className="px-2 py-1 bg-[#FAF7F2] hover:bg-[#F0EBE5] text-[#3E332B] border border-[#E8DEC8] rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
                                   title="修改預計到貨日"
                                 >
-                                  📅 到貨日
+                                  <Calendar className="w-3 h-3" />
+                                  <span>到貨日</span>
                                 </button>
                               </>
                             )}
@@ -1171,10 +1186,11 @@ export default function ShopAdminPage() {
                               <button
                                 type="button"
                                 onClick={() => handleNotifyArrival([order.id])}
-                                className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition"
+                                className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
                                 title="發送 LINE 到貨通知"
                               >
-                                📢 通知到貨
+                                <Bell className="w-3 h-3" />
+                                <span>通知到貨</span>
                               </button>
                             )}
 
@@ -1182,9 +1198,10 @@ export default function ShopAdminPage() {
                               <button
                                 type="button"
                                 onClick={() => handleMarkPickedUp(order.id)}
-                                className="px-2.5 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition"
+                                className="px-2.5 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
                               >
-                                📦 取貨完成
+                                <Package className="w-3.5 h-3.5" />
+                                <span>取貨完成</span>
                               </button>
                             )}
 
@@ -1192,10 +1209,11 @@ export default function ShopAdminPage() {
                               <button
                                 type="button"
                                 onClick={() => handleCancelOrder(order)}
-                                className="px-2 py-1 bg-gray-50 hover:bg-rose-50 text-gray-500 hover:text-rose-700 border border-gray-200 hover:border-rose-200 rounded-lg text-xs font-bold transition"
+                                className="px-2 py-1 bg-gray-50 hover:bg-rose-50 text-gray-500 hover:text-rose-700 border border-gray-200 hover:border-rose-200 rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
                                 title="取消此預購訂單並釋放中信帳號"
                               >
-                                ❌ 取消
+                                <X className="w-3.5 h-3.5" />
+                                <span>取消</span>
                               </button>
                             )}
                           </td>
@@ -1668,7 +1686,7 @@ export default function ShopAdminPage() {
             <div className="space-y-1">
               <h3 className="font-black text-base text-[#3E332B] flex items-center gap-2">
                 <Palette className="w-5 h-5 text-[#8B5B43]" />
-                <span>🎨 拼豆色號表與階梯優惠規則設定（目前已建檔 {allMergedBeadColors.length} 色）</span>
+                <span>拼豆色號表與階梯優惠規則設定（目前已建檔 {allMergedBeadColors.length} 色）</span>
               </h3>
               <p className="text-xs text-[#8C8279]">
                 已完整歸類 MARD 標準色 (A~M) 與特殊色系：💧L高透(1~7)、✨P珠光(1~23)、🌡️Q溫變(1~5 漸層)、🍬R半透(1~28)、💎T亮片、🌙Y夜光(1~5)、☀️Z光變(1~8 漸層)。
@@ -1687,7 +1705,7 @@ export default function ShopAdminPage() {
                         : 'text-[#6D5D52] hover:text-[#3E332B]'
                     }`}
                   >
-                    🎉 混色合計包數享優惠
+                    混色合計包數享優惠
                   </button>
                   <button
                     type="button"
@@ -1698,7 +1716,7 @@ export default function ShopAdminPage() {
                         : 'text-[#6D5D52] hover:text-[#3E332B]'
                     }`}
                   >
-                    📌 單一色號滿包才享優惠
+                    單一色號滿包才享優惠
                   </button>
                 </div>
               )}
@@ -1719,7 +1737,7 @@ export default function ShopAdminPage() {
                 className="px-4 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition"
               >
                 <Plus className="w-4 h-4" />
-                <span>➕ 新增擴充色號</span>
+                <span>新增擴充色號</span>
               </button>
             </div>
           </div>
@@ -1742,17 +1760,19 @@ export default function ShopAdminPage() {
                   type="button"
                   disabled={savingColor}
                   onClick={() => handleBatchToggleFilteredColors(true)}
-                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition"
+                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5"
                 >
-                  🟢 篩選結果全設供貨中
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>篩選結果全設供貨中</span>
                 </button>
                 <button
                   type="button"
                   disabled={savingColor}
                   onClick={() => handleBatchToggleFilteredColors(false)}
-                  className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition"
+                  className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5"
                 >
-                  🔴 篩選結果全設補貨中
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  <span>篩選結果全設補貨中</span>
                 </button>
               </div>
             </div>
@@ -2073,8 +2093,18 @@ export default function ShopAdminPage() {
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-xl space-y-4 max-h-[92vh] overflow-y-auto animate-zoom-in">
             <div className="flex justify-between items-center border-b border-[#E8DEC8] pb-3">
-              <h3 className="font-black text-base text-[#3E332B]">
-                {editProductModal.id ? '✏️ 編輯商品資訊與展示圖片' : '➕ 新增商品品項'}
+              <h3 className="font-black text-base text-[#3E332B] flex items-center gap-1.5">
+                {editProductModal.id ? (
+                  <>
+                    <Pencil className="w-4 h-4 text-[#8B5B43]" />
+                    <span>編輯商品資訊與展示圖片</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 text-[#8B5B43]" />
+                    <span>新增商品品項</span>
+                  </>
+                )}
               </h3>
               <button onClick={() => setEditProductModal(null)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
@@ -2111,11 +2141,11 @@ export default function ShopAdminPage() {
                     onChange={e => setEditProductModal(prev => ({ ...prev, category: e.target.value }))}
                     className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-bold outline-none"
                   >
-                    <option value="bundle">📦 套裝預購</option>
-                    <option value="beads">🌈 融合豆</option>
-                    <option value="tools">🖊️ 3D工具</option>
-                    <option value="boards">📏 豆板</option>
-                    <option value="cloth">🧻 烘焙布</option>
+                    <option value="bundle">套裝預購</option>
+                    <option value="beads">融合豆</option>
+                    <option value="tools">3D工具</option>
+                    <option value="boards">豆板</option>
+                    <option value="cloth">烘焙布</option>
                   </select>
                 </div>
               </div>
@@ -2340,8 +2370,18 @@ export default function ShopAdminPage() {
             className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-md space-y-4 animate-zoom-in"
           >
             <div className="flex justify-between items-center border-b border-[#E8DEC8] pb-3">
-              <h3 className="font-black text-base text-[#3E332B]">
-                {editingColorModal.isNew ? '➕ 新增擴充拼豆色號' : `✏️ 編輯色號 ${editingColorModal.code}`}
+              <h3 className="font-black text-base text-[#3E332B] flex items-center gap-1.5">
+                {editingColorModal.isNew ? (
+                  <>
+                    <Plus className="w-4 h-4 text-[#8B5B43]" />
+                    <span>新增擴充拼豆色號</span>
+                  </>
+                ) : (
+                  <>
+                    <Pencil className="w-4 h-4 text-[#8B5B43]" />
+                    <span>編輯色號 {editingColorModal.code}</span>
+                  </>
+                )}
               </h3>
               <button
                 type="button"
@@ -2549,9 +2589,9 @@ export default function ShopAdminPage() {
             <div className="flex justify-between items-center border-b border-[#E8DEC8] pb-3">
               <div>
                 <h3 className="font-black text-base sm:text-lg text-[#3E332B] flex items-center gap-2">
-                  <Package className="w-5 h-5 text-[#8B5B43]" />
+                  <BarChart3 className="w-5 h-5 text-[#8B5B43]" />
                   <span>
-                    📊 預購商品與拼豆色號揀貨總表（共匯總 {pickingSummary.targetOrders.length} 筆訂單）
+                    預購商品與拼豆色號揀貨總表（共匯總 {pickingSummary.targetOrders.length} 筆訂單）
                   </span>
                 </h3>
                 <p className="text-xs text-[#8C8279] mt-0.5">
@@ -2578,7 +2618,7 @@ export default function ShopAdminPage() {
                 {/* 1. Product Totals */}
                 <div className="space-y-2">
                   <h4 className="font-black text-sm text-[#3E332B]">
-                    📦 各項商品需求總數：
+                    各項商品需求總數：
                   </h4>
                   <div className="bg-[#FAF7F2] rounded-2xl border border-[#E8DEC8] divide-y divide-[#E8DEC8]/70">
                     {pickingSummary.products.map((prod, idx) => (
@@ -2602,7 +2642,7 @@ export default function ShopAdminPage() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="font-black text-sm text-[#3E332B]">
-                        🌈 10g 融合豆 — 各色號揀貨總包數（共 {pickingSummary.beadColors.length} 種色號、合計 {pickingSummary.totalBeadBags} 包）：
+                        10g 融合豆 — 各色號揀貨總包數（共 {pickingSummary.beadColors.length} 種色號、合計 {pickingSummary.totalBeadBags} 包）：
                       </h4>
                     </div>
                     <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 gap-2 bg-[#FAF7F2] p-3.5 rounded-2xl border border-[#E8DEC8]">
@@ -2634,7 +2674,7 @@ export default function ShopAdminPage() {
                 {pickingSummary.unparsedNotes.length > 0 && (
                   <div className="space-y-2">
                     <h4 className="font-black text-sm text-amber-800">
-                      📝 手動備註（未指定標準色號格式，需人工確認）：
+                      手動備註（未指定標準色號格式，需人工確認）：
                     </h4>
                     <div className="bg-amber-50 rounded-2xl border border-amber-200 p-3 space-y-1.5">
                       {pickingSummary.unparsedNotes.map((u, i) => (
@@ -2656,22 +2696,23 @@ export default function ShopAdminPage() {
                   const lines = [
                     `【拾光製所 預購揀貨統計單】（共 ${pickingSummary.targetOrders.length} 筆訂單）`,
                     '',
-                    '📦 商品總數：',
+                    '商品總數：',
                     ...pickingSummary.products.map(p => `- ${p.name}：共 ${p.qty}`),
                     ''
                   ];
                   if (pickingSummary.beadColors.length > 0) {
                     lines.push(
-                      `🌈 融合豆色號總計（共 ${pickingSummary.totalBeadBags} 包）：`,
+                      `融合豆色號總計（共 ${pickingSummary.totalBeadBags} 包）：`,
                       pickingSummary.beadColors.map(([c, q]) => `${c}×${q}包`).join('、')
                     );
                   }
                   navigator.clipboard?.writeText(lines.join('\n'));
                   showToast('已複製揀貨統計清單文字！可直接貼至 LINE 或備忘錄', 'success');
                 }}
-                className="px-4 py-2 bg-[#FAF7F2] hover:bg-[#EBE5DF] text-[#8B5B43] border border-[#E8DEC8] rounded-xl text-xs font-bold transition"
+                className="px-4 py-2 bg-[#FAF7F2] hover:bg-[#EBE5DF] text-[#8B5B43] border border-[#E8DEC8] rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5"
               >
-                📋 一鍵複製揀貨單文字
+                <ClipboardList className="w-4 h-4" />
+                <span>一鍵複製揀貨單文字</span>
               </button>
 
               <button
