@@ -12,7 +12,7 @@ import {
 } from '../utils/lineMessaging.js';
 import { markUnpaid, collectPayment, saveDraft, getBookingBill } from '../services/billing/billService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
-import { dateOnly } from '../../../shared/time.js';
+import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 
 function mergeCustomerEquipments(rawList = []) {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
@@ -438,10 +438,11 @@ export const createReservation = async (req, res) => {
       const sessionDate = requestedSessions[0].session_date;
 
       // Lock ALL sessions for the same date to prevent race conditions across the day
+      const dateStr = toTaipeiDateString(sessionDate);
       const allSessionsOfDay = await tx.$queryRaw`
         SELECT id
         FROM "Session"
-        WHERE session_date = ${sessionDate}
+        WHERE session_date = ${dateStr}::date
         FOR UPDATE
       `;
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
@@ -1621,10 +1622,11 @@ export const adminCreateReservation = async (req, res) => {
       const sessionDate = requestedSessions[0].session_date;
 
       // Lock ALL sessions for the same date to prevent race conditions across the day
+      const dateStr = toTaipeiDateString(sessionDate);
       const allSessionsOfDay = await tx.$queryRaw`
         SELECT id
         FROM "Session"
-        WHERE session_date = ${sessionDate}
+        WHERE session_date = ${dateStr}::date
         FOR UPDATE
       `;
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);

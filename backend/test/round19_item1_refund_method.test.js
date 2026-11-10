@@ -41,24 +41,30 @@ test('Round 19 Item 1: Refund payment method preserves cash closing expected_cas
   const todayStr = toTaipeiDateString(new Date());
   const sessionDate = dateOnly(todayStr);
 
-  // Ensure GlobalSetting has default float_amount 2000
+  // Ensure GlobalSetting has default float_amount 2000 and valid pricing
   await prisma.globalSetting.upsert({
     where: { id: 1 },
     update: {
       cash_float_amount: 2000,
+      weekday_hourly_price: 150,
+      weekday_unlimited_price: 750,
       payment_methods_json: [
         { key: 'cash', label: '現金', enabled: true },
         { key: 'linepay', label: 'LINE Pay', enabled: true },
-        { key: 'transfer', label: '銀行轉帳', enabled: true }
+        { key: 'transfer', label: '銀行轉帳', enabled: true },
+        { key: 'card', label: '信用卡', enabled: true }
       ]
     },
     create: {
       id: 1,
       cash_float_amount: 2000,
+      weekday_hourly_price: 150,
+      weekday_unlimited_price: 750,
       payment_methods_json: [
         { key: 'cash', label: '現金', enabled: true },
         { key: 'linepay', label: 'LINE Pay', enabled: true },
-        { key: 'transfer', label: '銀行轉帳', enabled: true }
+        { key: 'transfer', label: '銀行轉帳', enabled: true },
+        { key: 'card', label: '信用卡', enabled: true }
       ]
     }
   });
@@ -80,7 +86,10 @@ test('Round 19 Item 1: Refund payment method preserves cash closing expected_cas
         start_time: '13:00'
       }
     },
-    update: {},
+    update: {
+      end_time: '17:00',
+      max_capacity: 20
+    },
     create: {
       session_date: sessionDate,
       start_time: '13:00',

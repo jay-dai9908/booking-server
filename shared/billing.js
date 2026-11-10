@@ -227,6 +227,11 @@ export function computeBill({
       );
       computedPersons.push({
         ...frozenSnap,
+        entry: frozenSnap.entry || { mode: 'hourly', hours: 0, amount: 0 },
+        board: frozenSnap.board || { amount: 0, units: [] },
+        addons: frozenSnap.addons || [],
+        shares: frozenSnap.shares || [],
+        promos: frozenSnap.promos || [],
         base_amount: baseAmt,
         is_paid: true,
         is_frozen: true
@@ -534,8 +539,8 @@ export function computeBill({
   let unlimitedPaxTotal = 0;
 
   for (const p of computedPersons) {
-    totalEntry += p.entry.amount;
-    totalBoard += p.board.amount;
+    totalEntry += Number(p.entry?.amount) || 0;
+    totalBoard += Number(p.board?.amount) || 0;
     totalAddons += (p.addons || []).reduce((s, a) => s + a.subtotal, 0);
     totalDiscounts += (p.promos || []).reduce((s, pr) => s + Math.abs(pr.amount), 0);
     for (const sh of p.shares || []) {

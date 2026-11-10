@@ -649,7 +649,7 @@ async function run() {
     await aPage.waitForTimeout(300);
 
     // Uncheck Person 2 so that we only collect for Person 1 first
-    const p2Option = aPage.locator('[data-testid="split-person-card-2"]').or(splitDialog.locator('text=第 2 位').first());
+    const p2Option = aPage.locator('[data-testid="split-person-card-2"]').first();
     await p2Option.click();
     await aPage.waitForTimeout(400);
 

@@ -9,6 +9,23 @@ test('Round 19 Item 3: Supplement unlimited_diff uses target person entry amount
   const weekdayDate = dateOnly('2026-11-18'); // Wednesday (weekday)
   const weekendDate = dateOnly('2026-11-22'); // Sunday (weekend)
 
+  await prisma.globalSetting.upsert({
+    where: { id: 1 },
+    update: {
+      weekday_hourly_price: 150,
+      weekday_unlimited_price: 750,
+      weekend_hourly_price: 180,
+      weekend_unlimited_price: 900
+    },
+    create: {
+      id: 1,
+      weekday_hourly_price: 150,
+      weekday_unlimited_price: 750,
+      weekend_hourly_price: 180,
+      weekend_unlimited_price: 900
+    }
+  });
+
   const testUser = await prisma.user.upsert({
     where: { line_user_id: `user_r19_supp_${runId}` },
     update: {},

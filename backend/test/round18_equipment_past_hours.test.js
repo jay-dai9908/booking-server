@@ -55,7 +55,7 @@ test('Round 18 Item 3: Cannot add equipment for past hours during in-progress bo
   // We set up sessions covering past hour and future hours
   // Let start hour be (curH - 1) and end be (curH + 3)
   const startH = Math.max(0, curH - 1);
-  const endH = Math.min(23, curH + 3);
+  const endH = Math.min(24, curH + 3);
 
   const sessionIds = [];
   for (let h = startH; h < endH; h++) {

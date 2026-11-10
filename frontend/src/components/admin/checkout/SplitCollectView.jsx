@@ -640,6 +640,7 @@ export default function SplitCollectView({
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
+                              data-testid="split-person-supplement-btn"
                               onClick={() => {
                                 setSupplementTarget(p);
                                 setSupplementMethod('cash');
@@ -656,6 +657,7 @@ export default function SplitCollectView({
                             </button>
                             <button
                               type="button"
+                              data-testid="split-person-refund-btn"
                               onClick={() => handleOpenRefund(p)}
                               className="px-2.5 py-1 rounded-xl text-[12px] font-bold border border-sg-line bg-white hover:bg-sg-paper text-sg-danger"
                             >
