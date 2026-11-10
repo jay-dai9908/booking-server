@@ -971,11 +971,13 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       }
     });
 
+    const refundMethodName = method === 'cash' ? '現金退回' : (method === 'linepay' || method === 'line_pay' ? 'LINE Pay 退回' : (method === 'transfer' ? '銀行轉帳退回' : (method === 'pass' ? '卡券退回' : `${method}退回`)));
+
     await auditLog(tx, {
       booking_ref,
       event_type: 'refund_created',
       category: 'refund',
-      summary: `退款 第 ${pNo} 位 NT$${refundAmt} · ${method === 'cash' ? '現金退回' : method}。原因「${reason}」`,
+      summary: `退款 第 ${pNo} 位 NT$${refundAmt} · ${refundMethodName}。原因「${reason}」`,
       amount: refundAmt,
       payment_id: payment.id,
       reason,

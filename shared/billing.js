@@ -7,6 +7,7 @@ import { calculateBoardTotal } from './boardPricing.js';
 export const PAYMENT_METHOD_LABELS = {
   cash: '現金',
   line_pay: 'LINE Pay',
+  linepay: 'LINE Pay',
   jkopay: '街口支付',
   card: '刷卡',
   transfer: '銀行轉帳',
