@@ -75,7 +75,7 @@ export default function SeatLayoutPage() {
     spread_tables: true,
     avoid_opposite: true,
     avoid_beside: true,
-    zone_mode: 'spread_across_zones',
+    zone_mode: 'empty_tables_first',
     weights: { ...DEFAULT_WEIGHTS }
   });
   const [zoneOrderList, setZoneOrderList] = useState([]);
@@ -166,7 +166,9 @@ export default function SeatLayoutPage() {
             spread_tables: loadedLayout.rules_json.spread_tables !== false,
             avoid_opposite: loadedLayout.rules_json.avoid_opposite !== false,
             avoid_beside: loadedLayout.rules_json.avoid_beside !== false,
-            zone_mode: loadedLayout.rules_json.zone_mode || 'spread_across_zones',
+            zone_mode: (loadedLayout.rules_json.zone_mode === 'spread_across_zones' || !loadedLayout.rules_json.zone_mode)
+              ? 'empty_tables_first'
+              : loadedLayout.rules_json.zone_mode,
             weights: {
               ...DEFAULT_WEIGHTS,
               ...(loadedLayout.rules_json.weights || {})
@@ -2719,7 +2721,7 @@ export default function SeatLayoutPage() {
                   }}
                   className="w-4 h-4 accent-sg-brown rounded"
                 />
-                <span className="font-medium">分散各桌（有空桌先排空桌）</span>
+                <span className="font-medium">小組先坐空桌的一側，桌子之間左右交錯（桌 1 左、桌 2 右、桌 3 左）</span>
               </label>
 
               <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
@@ -2734,7 +2736,7 @@ export default function SeatLayoutPage() {
                   }}
                   className="w-4 h-4 accent-sg-brown rounded"
                 />
-                <span className="font-medium">避免面對面（同桌先坐同一側，除非同組）</span>
+                <span className="font-medium">每張桌都有人之後，才排對面有人的位置</span>
               </label>
 
               <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
@@ -2749,7 +2751,7 @@ export default function SeatLayoutPage() {
                   }}
                   className="w-4 h-4 accent-sg-brown rounded"
                 />
-                <span className="font-medium">避免並排（隔一個位子坐）</span>
+                <span className="font-medium">盡量不讓陌生人並排坐</span>
               </label>
             </div>
           </div>
@@ -2764,8 +2766,8 @@ export default function SeatLayoutPage() {
                 <input
                   type="radio"
                   name="zone_mode"
-                  value="spread_across_zones"
-                  checked={layoutRules.zone_mode === 'spread_across_zones'}
+                  value="empty_tables_first"
+                  checked={layoutRules.zone_mode === 'empty_tables_first' || layoutRules.zone_mode === 'spread_across_zones'}
                   onChange={(e) => {
                     const next = { ...layoutRules, zone_mode: e.target.value };
                     setLayoutRules(next);
@@ -2773,7 +2775,9 @@ export default function SeatLayoutPage() {
                   }}
                   className="w-4 h-4 accent-sg-brown"
                 />
-                <span className="font-medium">換排下一區（分散各區）</span>
+                <span className="font-medium">
+                  先用{zoneOrderList[1]?.name || layout?.zones?.[1]?.name || '後區'}的空桌，最後才排對面（已採用）
+                </span>
               </label>
 
               <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
@@ -2789,7 +2793,9 @@ export default function SeatLayoutPage() {
                   }}
                   className="w-4 h-4 accent-sg-brown"
                 />
-                <span className="font-medium">繼續把這區坐滿才換區</span>
+                <span className="font-medium">
+                  {zoneOrderList[0]?.name || layout?.zones?.[0]?.name || '前區'}全部坐滿才排{zoneOrderList[1]?.name || layout?.zones?.[1]?.name || '後區'}
+                </span>
               </label>
             </div>
           </div>
