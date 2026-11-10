@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Ticket, 
   Plus, 
@@ -737,18 +737,18 @@ export default function CouponsPage() {
                           <span className="font-mono font-black text-xs px-2.5 py-1 rounded-lg bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8]">
                             {promo.code}
                           </span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${channelCfg.color}`}>
+                          <span className={`text-[12px] font-bold px-2 py-0.5 rounded-md border ${channelCfg.color}`}>
                             {channelCfg.short}
                           </span>
                           {promo.is_pos_quick_select && (
-                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 flex items-center gap-0.5">
+                            <span className="text-[12px] font-black px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 flex items-center gap-0.5">
                               <Zap className="w-2.5 h-2.5" /> POS 快捷
                             </span>
                           )}
                         </div>
 
                         <span
-                          className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                          className={`text-[12px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
                             promo.is_active
                               ? isExpired
                                 ? 'bg-rose-50 text-rose-700 border border-rose-200'
@@ -769,12 +769,12 @@ export default function CouponsPage() {
                       {/* Main Discount Display */}
                       <div className="mt-3 p-2.5 rounded-xl bg-[#FAF0ED] border border-[#F2D6CD] flex items-center justify-between">
                         <div>
-                          <div className="text-[11px] font-bold text-[#8C8279]">折扣優惠</div>
+                          <div className="text-[12px] font-bold text-[#8C8279]">折扣優惠</div>
                           <div className="text-sm font-black text-[#C25E3E]">{valueDisplay}</div>
                         </div>
                         {promo.max_discount_amount && promo.max_discount_amount > 0 && (
                           <div className="text-right">
-                            <div className="text-[10px] font-bold text-[#8C8279]">單筆上限</div>
+                            <div className="text-[12px] font-bold text-[#8C8279]">單筆上限</div>
                             <div className="text-xs font-extrabold text-[#3E332B]">NT$ {promo.max_discount_amount}</div>
                           </div>
                         )}
@@ -783,44 +783,44 @@ export default function CouponsPage() {
                       {/* Condition Badges */}
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {promo.min_pax > 1 && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
+                          <span className="text-[12px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
                             滿 {promo.min_pax} 人
                           </span>
                         )}
                         {promo.min_hours > 1 && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
+                          <span className="text-[12px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
                             滿 {promo.min_hours} 小時
                           </span>
                         )}
                         {promo.min_amount > 0 && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
+                          <span className="text-[12px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#6D5D52] border border-[#E8DEC8]">
                             低消 NT${promo.min_amount}
                           </span>
                         )}
                         {(promo.day_type_limit === 'weekday' || promo.applicable_days === 'weekday') && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-sg-brown-soft text-sg-brown border border-sg-line">
+                          <span className="text-[12px] font-bold px-2 py-0.5 rounded-md bg-sg-brown-soft text-sg-brown border border-sg-line">
                             僅限平日
                           </span>
                         )}
                         {(promo.day_type_limit === 'weekend' || promo.applicable_days === 'weekend') && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-sg-selected text-sg-ink border border-sg-line">
+                          <span className="text-[12px] font-bold px-2 py-0.5 rounded-md bg-sg-selected text-sg-ink border border-sg-line">
                             僅限假日
                           </span>
                         )}
                         {(promo.mode_limit === 'unlimited' || promo.applicable_mode === 'unlimited') && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
+                          <span className="text-[12px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
                             僅限不限時(封頂)
                           </span>
                         )}
                         {(promo.mode_limit === 'hourly' || promo.applicable_mode === 'hourly') && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
+                          <span className="text-[12px] font-bold px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
                             僅限計時方案
                           </span>
                         )}
                       </div>
 
                       {/* Validity & Usage Counts */}
-                      <div className="mt-3 pt-2.5 border-t border-[#E8DEC8]/60 text-[11px] text-[#8C8279] space-y-1">
+                      <div className="mt-3 pt-2.5 border-t border-[#E8DEC8]/60 text-[12px] text-[#8C8279] space-y-1">
                         <div className="flex items-center justify-between">
                           <span>有效期限</span>
                           <span className="font-bold text-[#3E332B]">
@@ -941,11 +941,11 @@ export default function CouponsPage() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-sm text-[#3E332B]">{item.name}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${catCfg.color}`}>
+                            <span className={`text-[12px] font-bold px-2 py-0.5 rounded-md border ${catCfg.color}`}>
                               {catCfg.label}
                             </span>
                             {!item.is_active && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">
+                              <span className="text-[12px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">
                                 已下架
                               </span>
                             )}
@@ -1048,11 +1048,11 @@ export default function CouponsPage() {
                     >
                       <div>
                         <div className="flex items-start justify-between gap-2 mb-2">
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8]">
+                          <span className="text-[12px] font-bold px-2 py-0.5 rounded-md bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8]">
                             {passTypeLabels[plan.pass_type] || plan.pass_type}
                           </span>
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            className={`text-[12px] font-bold px-2 py-0.5 rounded-full border ${
                               plan.is_active
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                 : 'bg-stone-100 text-stone-600 border-stone-200'
@@ -1165,7 +1165,7 @@ export default function CouponsPage() {
                     placeholder="例如: CHECKIN50, VIP10OFF"
                     className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-mono font-bold uppercase text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
                   />
-                  <p className="text-[10px] text-[#8C8279] mt-1">顧客線上輸入或櫃檯輸入之代號，英數字自動轉大寫</p>
+                  <p className="text-[12px] text-[#8C8279] mt-1">顧客線上輸入或櫃檯輸入之代號，英數字自動轉大寫</p>
                 </div>
 
                 <div>
@@ -1180,7 +1180,7 @@ export default function CouponsPage() {
                     placeholder="例如: IG拍照打卡折50元、雙人同行9折"
                     className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
                   />
-                  <p className="text-[10px] text-[#8C8279] mt-1">顯示於預約單明細、結帳單與 POS 快捷按鈕</p>
+                  <p className="text-[12px] text-[#8C8279] mt-1">顯示於預約單明細、結帳單與 POS 快捷按鈕</p>
                 </div>
               </div>
 
@@ -1234,7 +1234,7 @@ export default function CouponsPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">折扣類型</label>
+                    <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">折扣類型</label>
                     <select
                       value={promoForm.discount_type}
                       onChange={e => setPromoForm({ ...promoForm, discount_type: e.target.value })}
@@ -1248,7 +1248,7 @@ export default function CouponsPage() {
                   </div>
 
                   <div>
-                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">
+                    <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">
                       折抵數值 ({DISCOUNT_TYPE_CONFIG[promoForm.discount_type]?.unit})
                     </label>
                     <input
@@ -1262,7 +1262,7 @@ export default function CouponsPage() {
                   </div>
 
                   <div>
-                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">
+                    <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">
                       單筆最高折抵上限 ($，選填)
                     </label>
                     <input
@@ -1276,7 +1276,7 @@ export default function CouponsPage() {
                   </div>
                 </div>
 
-                <div className="text-[11px] text-[#8C8279] italic">
+                <div className="text-[12px] text-[#8C8279] italic">
                   百分比折抵說明：填寫 10 代表 9 折（折抵 10%）；填寫 90 亦自動轉換為 9 折。
                 </div>
               </div>
@@ -1284,7 +1284,7 @@ export default function CouponsPage() {
               {/* Thresholds & Mode limits */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">最低人數門檻</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">最低人數門檻</label>
                   <input
                     type="number"
                     min="1"
@@ -1295,7 +1295,7 @@ export default function CouponsPage() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">最低預約時數</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">最低預約時數</label>
                   <input
                     type="number"
                     min="1"
@@ -1306,7 +1306,7 @@ export default function CouponsPage() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">最低消費門檻 ($)</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">最低消費門檻 ($)</label>
                   <input
                     type="number"
                     min="0"
@@ -1317,7 +1317,7 @@ export default function CouponsPage() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">方案限制</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">方案限制</label>
                   <select
                     value={promoForm.mode_limit}
                     onChange={e => setPromoForm({ ...promoForm, mode_limit: e.target.value })}
@@ -1333,7 +1333,7 @@ export default function CouponsPage() {
               {/* Usage & Date Limits */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">總使用次數上限</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">總使用次數上限</label>
                   <input
                     type="number"
                     min="1"
@@ -1345,7 +1345,7 @@ export default function CouponsPage() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">每位會員限用次數</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">每位會員限用次數</label>
                   <input
                     type="number"
                     min="1"
@@ -1357,7 +1357,7 @@ export default function CouponsPage() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">開始生效日期</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">開始生效日期</label>
                   <input
                     type="date"
                     value={promoForm.start_date}
@@ -1367,7 +1367,7 @@ export default function CouponsPage() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">截止日期</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">截止日期</label>
                   <input
                     type="date"
                     value={promoForm.end_date}
@@ -1581,7 +1581,7 @@ export default function CouponsPage() {
               {/* Price & Quota */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">售價 ($) *</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">售價 ($) *</label>
                   <input
                     type="number"
                     min="0"
@@ -1592,7 +1592,7 @@ export default function CouponsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">參考原價 ($)</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">參考原價 ($)</label>
                   <input
                     type="number"
                     min="0"
@@ -1603,7 +1603,7 @@ export default function CouponsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">額度 *</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">額度 *</label>
                   <input
                     type="number"
                     min="1"
@@ -1614,7 +1614,7 @@ export default function CouponsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">單位名稱 *</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">單位名稱 *</label>
                   <input
                     type="text"
                     required
@@ -1661,7 +1661,7 @@ export default function CouponsPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">折抵方式</label>
+                    <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">折抵方式</label>
                     <select
                       value={planForm.checkout_effect}
                       onChange={e => setPlanForm({ ...planForm, checkout_effect: e.target.value })}
@@ -1675,7 +1675,7 @@ export default function CouponsPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">折抵範圍</label>
+                    <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">折抵範圍</label>
                     <select
                       value={planForm.checkout_scope}
                       onChange={e => setPlanForm({ ...planForm, checkout_scope: e.target.value })}
@@ -1689,7 +1689,7 @@ export default function CouponsPage() {
 
                 {planForm.checkout_effect === 'fixed_amount' && (
                   <div>
-                    <label className="text-[11px] font-bold text-[#6D5D52] block mb-1">每次折固定金額 ($) *</label>
+                    <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">每次折固定金額 ($) *</label>
                     <input
                       type="number"
                       min="1"

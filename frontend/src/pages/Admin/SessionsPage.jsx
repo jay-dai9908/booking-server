@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   format,
   addDays,
@@ -507,28 +507,28 @@ export default function SessionsPage() {
                   <button
                     type="button"
                     onClick={handleSelectWeekdays}
-                    className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
+                    className="px-2 py-0.5 text-[12px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
                     平日 (二~五)
                   </button>
                   <button
                     type="button"
                     onClick={handleSelectMonToFri}
-                    className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
+                    className="px-2 py-0.5 text-[12px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
                     週一~五
                   </button>
                   <button
                     type="button"
                     onClick={handleSelectWeekends}
-                    className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
+                    className="px-2 py-0.5 text-[12px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
                     週末 (六~日)
                   </button>
                   <button
                     type="button"
                     onClick={handleSelectUnscheduledDays}
-                    className="px-2 py-0.5 text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-600 hover:text-white rounded-full transition-all"
+                    className="px-2 py-0.5 text-[12px] font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-600 hover:text-white rounded-full transition-all"
                     title="一鍵選取本月尚未排班的未來日期"
                   >
                     選取未排班日
@@ -536,14 +536,14 @@ export default function SessionsPage() {
                   <button
                     type="button"
                     onClick={handleSelectAllMonth}
-                    className="px-2 py-0.5 text-[11px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
+                    className="px-2 py-0.5 text-[12px] font-medium bg-[#FAF7F2] text-[#6E5D4F] border border-[#E8DEC8] hover:bg-[#8B5B43] hover:text-white rounded-full transition-all"
                   >
                     全選本月
                   </button>
                   <button
                     type="button"
                     onClick={handleClearSelected}
-                    className="px-2 py-0.5 text-[11px] font-medium bg-gray-50 text-gray-500 border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 rounded-full transition-all flex items-center gap-0.5"
+                    className="px-2 py-0.5 text-[12px] font-medium bg-gray-50 text-gray-500 border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 rounded-full transition-all flex items-center gap-0.5"
                   >
                     <RotateCcw className="w-3 h-3" /> 清空
                   </button>
@@ -555,7 +555,7 @@ export default function SessionsPage() {
                     {['日', '一', '二', '三', '四', '五', '六'].map((dayName, idx) => (
                       <div 
                         key={dayName} 
-                        className={`text-[11px] font-bold py-0.5 ${idx === 0 || idx === 6 ? 'text-[#8B5B43]' : 'text-gray-400'}`}
+                        className={`text-[12px] font-bold py-0.5 ${idx === 0 || idx === 6 ? 'text-[#8B5B43]' : 'text-gray-400'}`}
                       >
                         {dayName}
                       </div>
@@ -605,7 +605,7 @@ export default function SessionsPage() {
                 </div>
 
                 {/* Calendar Legend Note */}
-                <div className="flex items-center justify-between text-[11px] text-gray-500 px-1">
+                <div className="flex items-center justify-between text-[12px] text-gray-500 px-1">
                   <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
@@ -632,7 +632,7 @@ export default function SessionsPage() {
                       type="button"
                       data-testid="preset-weekday-btn"
                       onClick={() => { setStartTime(businessHours.weekday.start); setEndTime(businessHours.weekday.end); }}
-                      className={`px-2.5 py-1 text-[11px] font-bold rounded-xl border transition-all ${
+                      className={`px-2.5 py-1 text-[12px] font-bold rounded-xl border transition-all ${
                         startTime === businessHours.weekday.start && endTime === businessHours.weekday.end
                           ? 'bg-sg-brown text-white border-sg-brown'
                           : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
@@ -644,7 +644,7 @@ export default function SessionsPage() {
                       type="button"
                       data-testid="preset-saturday-btn"
                       onClick={() => { setStartTime(businessHours.saturday.start); setEndTime(businessHours.saturday.end); }}
-                      className={`px-2.5 py-1 text-[11px] font-bold rounded-xl border transition-all ${
+                      className={`px-2.5 py-1 text-[12px] font-bold rounded-xl border transition-all ${
                         startTime === businessHours.saturday.start && endTime === businessHours.saturday.end
                           ? 'bg-sg-brown text-white border-sg-brown'
                           : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
@@ -656,7 +656,7 @@ export default function SessionsPage() {
                       type="button"
                       data-testid="preset-sunday-btn"
                       onClick={() => { setStartTime(businessHours.sunday.start); setEndTime(businessHours.sunday.end); }}
-                      className={`px-2.5 py-1 text-[11px] font-bold rounded-xl border transition-all ${
+                      className={`px-2.5 py-1 text-[12px] font-bold rounded-xl border transition-all ${
                         startTime === businessHours.sunday.start && endTime === businessHours.sunday.end
                           ? 'bg-sg-brown text-white border-sg-brown'
                           : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
@@ -970,7 +970,7 @@ export default function SessionsPage() {
                 {selectedDates.length > 0 ? (
                   <div className="mt-1.5 flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                     {selectedDates.map(d => (
-                      <span key={d} className="bg-white border border-amber-200/90 px-1.5 py-0.5 rounded text-[11px] font-mono font-medium shadow-2xs">
+                      <span key={d} className="bg-white border border-amber-200/90 px-1.5 py-0.5 rounded text-[12px] font-mono font-medium shadow-2xs">
                         {d}
                       </span>
                     ))}

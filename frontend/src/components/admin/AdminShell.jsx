@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+﻿import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   Grid,
@@ -167,7 +167,7 @@ export default function AdminShell({ children, title = '拾光製所', subtitle 
           {Object.entries(groupedLinks).map(([groupName, items]) => (
             <div key={groupName} className="space-y-1">
               {!isCollapsed && (
-                <div className="px-2.5 py-1 text-[11px] font-bold text-sg-muted uppercase tracking-wider">
+                <div className="px-2.5 py-1 text-[12px] font-bold text-sg-muted uppercase tracking-wider">
                   {groupName}
                 </div>
               )}
@@ -188,7 +188,7 @@ export default function AdminShell({ children, title = '拾光製所', subtitle 
                     <Icon className="w-4 h-4 flex-shrink-0" />
                     {!isCollapsed && <span className="truncate flex-1">{item.label}</span>}
                     {!isCollapsed && item.badge ? (
-                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-sg-peach text-white leading-none">
+                      <span className="px-1.5 py-0.2 rounded-full text-[12px] font-bold bg-sg-peach text-white leading-none">
                         {item.badge}
                       </span>
                     ) : null}

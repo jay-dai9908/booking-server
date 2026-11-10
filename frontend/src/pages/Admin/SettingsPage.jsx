@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   Settings,
   ShieldCheck,
@@ -492,7 +492,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setPreviewDisabledText(DEFAULT_PREVIEW_DISABLED_TEXT)}
-                  className="text-[11px] font-bold text-[#8B5B43] hover:underline flex items-center gap-1"
+                  className="text-[12px] font-bold text-[#8B5B43] hover:underline flex items-center gap-1"
                 >
                   <RotateCcw className="w-3 h-3" />
                   恢復預設文字
@@ -506,7 +506,7 @@ export default function SettingsPage() {
                 className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl text-[#3E332B] focus:border-[#8B5B43] focus:outline-none leading-relaxed"
               />
               <div className="flex items-center justify-between gap-2 pt-1">
-                <span className={`text-[11px] font-semibold ${enablePreviewPage ? 'text-emerald-700' : 'text-amber-800'}`}>
+                <span className={`text-[12px] font-semibold ${enablePreviewPage ? 'text-emerald-700' : 'text-amber-800'}`}>
                   {enablePreviewPage
                     ? '目前狀態：公開空位預覽功能【開放中】'
                     : '目前狀態：公開空位預覽【已關閉】，僅顯示上方提示並引導點擊下方按鈕登入 LINE'}
@@ -582,7 +582,7 @@ export default function SettingsPage() {
                 />
               </div>
             )}
-            <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
+            <div className="text-[12px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showAnnouncement ? '目前狀態：顧客端顯示頂部系統公告欄' : '目前狀態：顧客端隱藏公告欄'}
             </div>
           </div>
@@ -621,7 +621,7 @@ export default function SettingsPage() {
                 />
               </div>
             )}
-            <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
+            <div className="text-[12px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showPriceCards ? '目前狀態：顧客端顯示平假日價格說明卡' : '目前狀態：顧客端隱藏價格說明卡'}
             </div>
           </div>
@@ -670,7 +670,7 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
-            <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
+            <div className="text-[12px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showLineButton ? '目前狀態：顧客端頂部顯示官方 LINE 按鈕' : '目前狀態：顧客端頂部隱藏官方 LINE 按鈕'}
             </div>
           </div>
@@ -697,7 +697,7 @@ export default function SettingsPage() {
                 <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#8B5B43]"></div>
               </label>
             </div>
-            <div className="text-[11px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
+            <div className="text-[12px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showShopButton ? '目前狀態：顧客預約頁頂部顯示「商品預購」按鈕' : '目前狀態：顧客預約頁頂部隱藏此按鈕'}
             </div>
           </div>
@@ -784,7 +784,7 @@ export default function SettingsPage() {
                       placeholder={`選項 ${idx + 1}`}
                       className="w-full px-3 py-1.5 pr-12 text-xs bg-white border border-[#E8DEC8] rounded-lg focus:border-[#8B5B43] focus:outline-none"
                     />
-                    <span className="absolute right-2 top-2 text-[10px] text-gray-400">
+                    <span className="absolute right-2 top-2 text-[12px] text-gray-400">
                       {chip.length}/12
                     </span>
                   </div>
@@ -942,7 +942,7 @@ export default function SettingsPage() {
             <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8] flex items-center justify-between gap-3">
               <div>
                 <div className="text-xs font-bold text-[#3E332B]">允許單筆訂單設備總數超過預約人數</div>
-                <div className="text-[11px] text-[#6D5D52]">
+                <div className="text-[12px] text-[#6D5D52]">
                   {allowEquipmentExceedPax ? '目前允許自由加購超過人數' : '目前限制總台數不可超過預約人數'}
                 </div>
               </div>
@@ -959,7 +959,7 @@ export default function SettingsPage() {
             <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8] flex items-center justify-between gap-3">
               <div>
                 <div className="text-xs font-bold text-[#3E332B]">於顧客預約頁顯示「即時庫存狀況卡片」</div>
-                <div className="text-[11px] text-[#6D5D52]">
+                <div className="text-[12px] text-[#6D5D52]">
                   {showEquipmentLiveStock ? '顯示各規格剩餘庫存' : '隱藏即時庫存卡片'}
                 </div>
               </div>
@@ -1277,7 +1277,7 @@ export default function SettingsPage() {
                 className="w-full px-4 py-2.5 bg-white border border-[#E8DEC8] rounded-xl text-sm font-mono text-[#3E332B] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5B43]/30"
               />
             </div>
-            <p className="text-[11px] text-[#6D5D52] leading-relaxed">
+            <p className="text-[12px] text-[#6D5D52] leading-relaxed">
               <strong>如何取得 Token？</strong> 請前往{' '}
               <a
                 href="https://developers.line.biz/console/"
@@ -1377,7 +1377,7 @@ export default function SettingsPage() {
                 onChange={(e) => setBillingGraceMinutes(parseInt(e.target.value, 10) || 0)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
               />
-              <span className="text-[11px] text-gray-400 mt-0.5 block">超過預約在此分鐘內不加收，預設 10 分</span>
+              <span className="text-[12px] text-gray-400 mt-0.5 block">超過預約在此分鐘內不加收，預設 10 分</span>
             </div>
 
             {/* Block minutes */}
@@ -1392,7 +1392,7 @@ export default function SettingsPage() {
                 <option value={30}>30 分鐘（預設）</option>
                 <option value={60}>60 分鐘</option>
               </select>
-              <span className="text-[11px] text-gray-400 mt-0.5 block">每達到此區間加收 0.5 小時</span>
+              <span className="text-[12px] text-gray-400 mt-0.5 block">每達到此區間加收 0.5 小時</span>
             </div>
 
             {/* Board swap grace */}
@@ -1404,7 +1404,7 @@ export default function SettingsPage() {
                 onChange={(e) => setBoardSwapGraceMinutes(parseInt(e.target.value, 10) || 0)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
               />
-              <span className="text-[11px] text-gray-400 mt-0.5 block">10/30 換板時間取整寬限，預設 10 分</span>
+              <span className="text-[12px] text-gray-400 mt-0.5 block">10/30 換板時間取整寬限，預設 10 分</span>
             </div>
 
             {/* Early leave mode */}
@@ -1457,7 +1457,7 @@ export default function SettingsPage() {
                 onChange={(e) => setCashFloatAmount(parseInt(e.target.value, 10) || 0)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
               />
-              <span className="text-[11px] text-gray-400 mt-0.5 block">每日交班基準零用金額，預設 NT$2,000</span>
+              <span className="text-[12px] text-gray-400 mt-0.5 block">每日交班基準零用金額，預設 NT$2,000</span>
             </div>
           </div>
 
@@ -1465,7 +1465,7 @@ export default function SettingsPage() {
           <div className="space-y-3 pt-4 border-t border-gray-200">
             <div>
               <label className="block text-xs font-bold text-gray-700 mb-0.5">現場付款方式清單</label>
-              <span className="text-[11px] text-gray-400 block">
+              <span className="text-[12px] text-gray-400 block">
                 設定現場結帳時可使用的付款方式與顯示順序。每項一列，支援拖曳或上下箭頭排序。「現金」為必要付款方式無法停用。
               </span>
             </div>
@@ -1532,7 +1532,7 @@ export default function SettingsPage() {
                       </div>
                       <span className="text-sm font-bold text-[#3E332B]">{pm.label}</span>
                       {isCash && (
-                        <span className="text-[10px] bg-[#E8DEC8]/60 text-[#8B5B43] font-bold px-1.5 py-0.5 rounded">
+                        <span className="text-[12px] bg-[#E8DEC8]/60 text-[#8B5B43] font-bold px-1.5 py-0.5 rounded">
                           固定開啟
                         </span>
                       )}
@@ -1678,12 +1678,12 @@ export default function SettingsPage() {
                           <Printer className="w-4 h-4 text-[#8B5B43]" />
                           <span>{st.name} · {isOnline ? '在線' : '離線'} · 最後回報 {lastSeen}</span>
                           {st.is_default && (
-                            <span className="text-[10px] bg-[#FAF7F2] text-[#8B5B43] font-bold px-1.5 py-0.5 rounded border border-[#E8DEC8]">
+                            <span className="text-[12px] bg-[#FAF7F2] text-[#8B5B43] font-bold px-1.5 py-0.5 rounded border border-[#E8DEC8]">
                               預設
                             </span>
                           )}
                           {!isAccepting && (
-                            <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-1.5 py-0.5 rounded border border-amber-200">
+                            <span className="text-[12px] bg-amber-50 text-amber-700 font-bold px-1.5 py-0.5 rounded border border-amber-200">
                               暫停接單中
                             </span>
                           )}

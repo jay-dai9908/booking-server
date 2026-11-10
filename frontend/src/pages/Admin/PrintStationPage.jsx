@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   Printer,
   CheckCircle2,
@@ -223,7 +223,7 @@ export default function PrintStationPage() {
               {station?.name || '商米 POS 櫃檯收據與票券印表機'}
             </p>
             {lastSeenFull && (
-              <p className="text-[11px] text-sg-muted">最後回報 {lastSeenFull}</p>
+              <p className="text-[12px] text-sg-muted">最後回報 {lastSeenFull}</p>
             )}
           </div>
         </div>
@@ -253,14 +253,14 @@ export default function PrintStationPage() {
       <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-3">
         <div className="grid grid-cols-2 gap-3 text-[13px]">
           <div className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line">
-            <span className="text-sg-muted text-[11px] block">印表機狀態</span>
+            <span className="text-sg-muted text-[12px] block">印表機狀態</span>
             <span className="font-bold text-sg-ink">
               {getPrinterStateLabel()}
             </span>
           </div>
 
           <div className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line">
-            <span className="text-sg-muted text-[11px] block">背景接單服務</span>
+            <span className="text-sg-muted text-[12px] block">背景接單服務</span>
             <span className="font-bold text-sg-ink">
               {!isAccepting
                 ? '已暫停接單'
@@ -319,7 +319,7 @@ export default function PrintStationPage() {
                       <span className="font-bold text-[13px] text-sg-ink">
                         {job.title || `收據單 #${job.id}`}
                       </span>
-                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                      <span className={`px-2 py-0.5 rounded-lg text-[12px] font-bold ${
                         isSuccess ? 'bg-sg-sage-soft text-sg-sage-ink' :
                         isFailed ? 'bg-sg-danger-soft text-sg-danger' :
                         job.status === 'claimed' ? 'bg-sg-honey-soft text-sg-honey-ink' :
@@ -329,7 +329,7 @@ export default function PrintStationPage() {
                       </span>
                     </div>
 
-                    <div className="text-[11px] text-sg-muted mt-0.5">
+                    <div className="text-[12px] text-sg-muted mt-0.5">
                       #P-{String(job.id).padStart(4, '0')} · {job.source_device || '門市端'} · {timeStr}
                       {job.error_message && (
                         <span className="text-sg-danger block mt-0.5 font-bold">原因：{job.error_message}</span>

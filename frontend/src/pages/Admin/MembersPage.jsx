@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { 
@@ -218,7 +218,7 @@ export default function MembersPage() {
                                       </span>
                                     )}
                                     {isManualOnly && (
-                                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
+                                      <span className="text-[12px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
                                         現場建檔
                                       </span>
                                     )}
@@ -269,7 +269,7 @@ export default function MembersPage() {
                                 <div className="flex items-center gap-2 mt-0.5">
                                   <span className="text-xs text-gray-500">完訪 {stats.completed_visits_count} 次</span>
                                   {stats.no_show_count > 0 && (
-                                    <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                                    <span className="inline-flex items-center gap-0.5 text-[12px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
                                       <AlertTriangle className="w-3 h-3" /> 爽約 {stats.no_show_count}
                                     </span>
                                   )}
@@ -319,7 +319,7 @@ export default function MembersPage() {
                                   發訊
                                 </button>
                               ) : (
-                                <span className="text-[11px] text-gray-400 font-medium">未綁定LINE</span>
+                                <span className="text-[12px] text-gray-400 font-medium">未綁定LINE</span>
                               )}
                             </td>
                           </tr>
@@ -370,9 +370,9 @@ export default function MembersPage() {
                                   {u.name || '未設定'}
                                 </span>
                                 {u.is_blacklisted ? (
-                                  <span className="text-[10px] text-red-700 bg-red-50 px-1.5 py-0.5 rounded font-bold">黑名單</span>
+                                  <span className="text-[12px] text-red-700 bg-red-50 px-1.5 py-0.5 rounded font-bold">黑名單</span>
                                 ) : (
-                                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">正常</span>
+                                  <span className="text-[12px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">正常</span>
                                 )}
                               </div>
                               <div className="text-xs text-gray-500 font-mono mt-0.5">{u.phone || '未提供電話'}</div>
@@ -390,27 +390,27 @@ export default function MembersPage() {
                                 發訊
                               </button>
                             ) : (
-                              <span className="text-[11px] text-gray-400 font-medium">未綁LINE</span>
+                              <span className="text-[12px] text-gray-400 font-medium">未綁LINE</span>
                             )}
                           </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-2 text-xs bg-[#FAF7F2]/60 p-2.5 rounded-xl border border-[#E8DEC8]/60">
                           <div>
-                            <span className="text-gray-400 block text-[11px]">累計消費</span>
+                            <span className="text-gray-400 block text-[12px]">累計消費</span>
                             <span className="font-bold text-gray-800">NT$ {(stats.total_spent || 0).toLocaleString()}</span>
-                            <span className="text-gray-500 text-[11px] block">完訪 {stats.completed_visits_count} 次</span>
+                            <span className="text-gray-500 text-[12px] block">完訪 {stats.completed_visits_count} 次</span>
                           </div>
                           <div>
-                            <span className="text-gray-400 block text-[11px]">時段累計</span>
+                            <span className="text-gray-400 block text-[12px]">時段累計</span>
                             {stats.unlimited_pax_count > 0 && (
-                              <span className="font-bold text-amber-700 block text-[11px]">不限時 {stats.unlimited_pax_count} 人次</span>
+                              <span className="font-bold text-amber-700 block text-[12px]">不限時 {stats.unlimited_pax_count} 人次</span>
                             )}
                             {stats.regular_person_hours > 0 && (
-                              <span className="font-bold text-[#8B5B43] block text-[11px]">計時 {stats.regular_person_hours} 小時</span>
+                              <span className="font-bold text-[#8B5B43] block text-[12px]">計時 {stats.regular_person_hours} 小時</span>
                             )}
                             {stats.unlimited_pax_count === 0 && stats.regular_person_hours === 0 && (
-                              <span className="text-gray-400 text-[11px]">—</span>
+                              <span className="text-gray-400 text-[12px]">—</span>
                             )}
                           </div>
                         </div>
@@ -504,7 +504,7 @@ export default function MembersPage() {
                   placeholder="點此使用掃描槍刷條碼，或手動輸入"
                   className="w-full px-4 py-3 bg-[#FAF7F2] border-2 border-[#E8DEC8] rounded-xl text-base font-mono font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none shadow-inner"
                 />
-                <p className="text-[11px] text-gray-400 mt-1">
+                <p className="text-[12px] text-gray-400 mt-1">
                   支援門市 USB/藍牙條碼掃描槍，刷碼後會自動帶入並可按 Enter 送出
                 </p>
               </div>
