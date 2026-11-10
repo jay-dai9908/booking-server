@@ -57,6 +57,21 @@ export default function SplitCollectView({
 
   // Sub-modal form states
   const [supplementMethod, setSupplementMethod] = useState('cash');
+  const [supplementType, setSupplementType] = useState(() => {
+    if (initialSupplementPerson?.pending_supplement > 0) return 'pending';
+    return 'addon';
+  });
+  const [extraHours, setExtraHours] = useState(0.5);
+  const addonPresets = (billData?.addon_presets && billData.addon_presets.length > 0)
+    ? billData.addon_presets
+    : [
+        { id: 'keychain', name: '鑰匙圈', price: 60 },
+        { id: 'drink', name: '飲料', price: 40 },
+        { id: 'socks', name: '防滑襪', price: 50 }
+      ];
+  const [selectedAddons, setSelectedAddons] = useState(() => ({
+    [addonPresets[0]?.name || '鑰匙圈']: 1
+  }));
   const [refundMethod, setRefundMethod] = useState('cash');
   const [actionReason, setActionReason] = useState('');
   const [actionAmount, setActionAmount] = useState(() => {
@@ -67,6 +82,85 @@ export default function SplitCollectView({
     if (initialSupplementPerson?.pending_supplement > 0) return '整單共同項目補收';
     return '加時 0.5 小時';
   });
+
+  // Supplement calculations (Spec 6.18)
+  const supplementOptions = [];
+  if (supplementTarget?.pending_supplement > 0) {
+    supplementOptions.push({
+      key: 'pending',
+      label: `待補收 NT$${supplementTarget.pending_supplement}`
+    });
+  }
+  supplementOptions.push(
+    { key: 'addon', label: '加購' },
+    { key: 'hours', label: '加時' },
+    { key: 'unlimited_diff', label: '改成不限時的差額' },
+    { key: 'other', label: '其他' }
+  );
+
+  const targetPersonPayment = (billData?.payments || [])
+    .filter(pay => pay.status === 'valid' && (pay.person_nos || []).includes(supplementTarget?.person_no))
+    .find(pay => pay.kind === 'charge');
+  const targetPersonInPay = (targetPersonPayment?.breakdown_json?.persons || []).find(
+    p => Number(p.person_no) === supplementTarget?.person_no
+  );
+  const personPaidEntry = targetPersonInPay?.entry?.amount ?? supplementTarget?.entry?.amount ?? 600;
+  const unlimitedPrice = pricing.unlimited || 750;
+  const diffAmount = Math.max(0, unlimitedPrice - personPaidEntry);
+
+  const hourlyRate = pricing.hourly || 150;
+  const hoursAmount = Math.round(extraHours * hourlyRate);
+
+  const addonTotal = addonPresets.reduce(
+    (sum, a) => sum + (selectedAddons[a.name] || 0) * (a.price || 0),
+    0
+  );
+
+  let currentSupplementAmount = 0;
+  let supplementDetailDesc = '';
+
+  if (supplementType === 'pending') {
+    currentSupplementAmount = supplementTarget?.pending_supplement || 0;
+    supplementDetailDesc = `待補收 NT$${currentSupplementAmount}`;
+  } else if (supplementType === 'addon') {
+    currentSupplementAmount = addonTotal;
+    const activeAddons = addonPresets.filter(a => (selectedAddons[a.name] || 0) > 0);
+    if (activeAddons.length > 0) {
+      supplementDetailDesc = activeAddons
+        .map(a => `${a.name} ×${selectedAddons[a.name]} NT$${selectedAddons[a.name] * a.price}`)
+        .join('、');
+    } else {
+      supplementDetailDesc = '加購品項 NT$0';
+    }
+  } else if (supplementType === 'hours') {
+    currentSupplementAmount = hoursAmount;
+    supplementDetailDesc = `時數 +${extraHours} 小時 NT$${hoursAmount}`;
+  } else if (supplementType === 'unlimited_diff') {
+    currentSupplementAmount = diffAmount;
+    supplementDetailDesc = `升級不限時差額 NT$${diffAmount}`;
+  } else if (supplementType === 'other') {
+    currentSupplementAmount = actionAmount;
+    supplementDetailDesc = `${actionItemLabel || '其他'} NT$${actionAmount}`;
+  }
+
+  const supplementPersonPaid = (() => {
+    if (!supplementTarget) return 0;
+    const pPayments = (billData?.payments || []).filter(
+      pay => pay.status === 'valid' && (pay.person_nos || []).includes(supplementTarget.person_no)
+    );
+    if (pPayments.length > 0) {
+      const paid = pPayments
+        .filter(p => p.kind === 'charge' || p.kind === 'supplement')
+        .reduce((s, p) => s + p.amount, 0);
+      const refunded = pPayments
+        .filter(p => p.kind === 'refund')
+        .reduce((s, p) => s + p.amount, 0);
+      return Math.max(0, paid - refunded);
+    }
+    return supplementTarget.total || 0;
+  })();
+
+  const combinedPersonTotal = supplementPersonPaid + currentSupplementAmount;
 
   const handleOpenRefund = (p) => {
     setRefundTarget(p);
@@ -206,11 +300,49 @@ export default function SplitCollectView({
     if (!supplementTarget) return;
     try {
       setLoading(true);
+      let items = [];
+      if (supplementType === 'pending') {
+        items = [{ type: 'pending', amount: currentSupplementAmount, label: '結清待補收' }];
+      } else if (supplementType === 'addon') {
+        items = Object.entries(selectedAddons)
+          .filter(([_, qty]) => qty > 0)
+          .map(([name, qty]) => {
+            const preset = addonPresets.find(a => a.name === name);
+            return {
+              type: 'addon',
+              name,
+              price: preset?.price || 0,
+              qty
+            };
+          });
+        if (items.length === 0) {
+          setErrorMessage('請至少選擇一項加購品');
+          setLoading(false);
+          return;
+        }
+      } else if (supplementType === 'hours') {
+        items = [{
+          type: 'hours',
+          hours: extraHours
+        }];
+      } else if (supplementType === 'unlimited_diff') {
+        items = [{
+          type: 'unlimited_diff',
+          unlimited_price: unlimitedPrice
+        }];
+      } else if (supplementType === 'other') {
+        items = [{
+          type: 'other',
+          label: actionItemLabel || '其他',
+          amount: actionAmount
+        }];
+      }
+
       await api.post(`/billing/${bookingRef}/supplement`, {
         person_no: supplementTarget.person_no,
-        items: [{ type: 'other', label: actionItemLabel, amount: actionAmount }],
+        items,
         method: supplementMethod,
-        cash_received: supplementMethod === 'cash' ? actionAmount : null,
+        cash_received: supplementMethod === 'cash' ? currentSupplementAmount : null,
         print: autoPrint
       });
       setSupplementTarget(null);
@@ -511,6 +643,11 @@ export default function SplitCollectView({
                               onClick={() => {
                                 setSupplementTarget(p);
                                 setSupplementMethod('cash');
+                                if (p.pending_supplement > 0) {
+                                  setSupplementType('pending');
+                                } else {
+                                  setSupplementType('addon');
+                                }
                                 setActionAmount(p.pending_supplement || 60);
                               }}
                               className="px-2.5 py-1 rounded-xl text-[12px] font-bold border border-sg-line bg-white hover:bg-sg-paper"
@@ -690,13 +827,20 @@ export default function SplitCollectView({
               <Button variant="secondary" size="sm" onClick={() => setSupplementTarget(null)}>
                 取消
               </Button>
-              <Button variant="primary" size="sm" onClick={handleSupplement} loading={loading}>
-                確認補收 NT${actionAmount}
+              <Button
+                variant="primary"
+                size="sm"
+                data-testid="confirm-supplement-btn"
+                onClick={handleSupplement}
+                loading={loading}
+              >
+                補收 NT${currentSupplementAmount}
               </Button>
             </div>
           }
         >
-          <div className="space-y-3 py-2">
+          <div className="space-y-4 py-2">
+            {/* Payment Method */}
             <div>
               <label className="block text-[12px] font-bold text-sg-ink mb-1.5">付款方式</label>
               <PayMethodGrid
@@ -705,16 +849,190 @@ export default function SplitCollectView({
                 hidePass={true}
               />
             </div>
-            <div>
-              <label className="block text-[12px] font-bold text-sg-ink mb-1">補收項目說明</label>
-              <input
-                type="text"
-                value={actionItemLabel}
-                onChange={(e) => setActionItemLabel(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-sg-line text-[13px]"
-              />
+
+            {/* Supplement Type Chips */}
+            <div className="space-y-1.5">
+              <label className="block text-[12px] font-bold text-sg-ink">補收什麼</label>
+              <div className="flex flex-wrap gap-1.5">
+                {supplementOptions.map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    data-testid={`supplement-chip-${opt.key}`}
+                    onClick={() => setSupplementType(opt.key)}
+                    className={`px-3 py-1.5 rounded-xl text-[12px] font-bold border transition active:scale-[0.98] ${
+                      supplementType === opt.key
+                        ? 'bg-sg-brown text-white border-sg-brown shadow-sm'
+                        : 'bg-white text-sg-ink border-sg-line hover:border-sg-muted hover:bg-sg-paper'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <MoneyInput label="補收金額" value={actionAmount} onChange={setActionAmount} />
+
+            {/* Type-Specific Content */}
+            {supplementType === 'pending' && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[13px] text-amber-900 font-bold flex items-center justify-between">
+                <span>結清待補收項目</span>
+                <span className="font-num text-[15px]">NT${supplementTarget.pending_supplement}</span>
+              </div>
+            )}
+
+            {supplementType === 'addon' && (
+              <div className="space-y-2">
+                <label className="block text-[12px] font-bold text-sg-ink">選擇加購品項與數量</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {addonPresets.map((preset) => {
+                    const qty = selectedAddons[preset.name] || 0;
+                    const isSelected = qty > 0;
+                    return (
+                      <div
+                        key={preset.id || preset.name}
+                        data-testid={`addon-item-${preset.name}`}
+                        className={`p-2.5 rounded-xl border flex items-center justify-between transition ${
+                          isSelected
+                            ? 'bg-sg-brown-soft border-sg-brown'
+                            : 'bg-white border-sg-line hover:border-sg-muted'
+                        }`}
+                      >
+                        <div
+                          className="flex-1 cursor-pointer select-none"
+                          onClick={() => {
+                            setSelectedAddons(prev => ({
+                              ...prev,
+                              [preset.name]: (prev[preset.name] || 0) + 1
+                            }));
+                          }}
+                        >
+                          <div className="text-[13px] font-bold text-sg-ink">{preset.name}</div>
+                          <div className="text-[12px] text-sg-muted font-num">NT${preset.price}</div>
+                        </div>
+                        {isSelected ? (
+                          <div className="flex items-center gap-1.5 ml-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedAddons(prev => {
+                                  const currentQty = prev[preset.name] || 0;
+                                  if (currentQty <= 1) {
+                                    const copy = { ...prev };
+                                    delete copy[preset.name];
+                                    return copy;
+                                  }
+                                  return { ...prev, [preset.name]: currentQty - 1 };
+                                });
+                              }}
+                              className="w-6 h-6 rounded-lg bg-white border border-sg-line flex items-center justify-center font-bold text-sg-ink hover:bg-sg-paper text-[12px]"
+                            >
+                              −
+                            </button>
+                            <span className="w-5 text-center font-bold text-[13px] font-num">{qty}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedAddons(prev => ({
+                                  ...prev,
+                                  [preset.name]: (prev[preset.name] || 0) + 1
+                                }));
+                              }}
+                              className="w-6 h-6 rounded-lg bg-white border border-sg-line flex items-center justify-center font-bold text-sg-ink hover:bg-sg-paper text-[12px]"
+                            >
+                              +
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedAddons(prev => ({
+                                ...prev,
+                                [preset.name]: 1
+                              }));
+                            }}
+                            className="px-2 py-1 rounded-lg border border-sg-line bg-white hover:bg-sg-paper text-[11px] font-bold text-sg-ink"
+                          >
+                            +1
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {supplementType === 'hours' && (
+              <div className="space-y-2">
+                <label className="block text-[12px] font-bold text-sg-ink">加時時數（每 0.5 小時）</label>
+                <div className="flex items-center justify-between p-3 bg-white border border-sg-line rounded-xl">
+                  <div className="flex items-center border border-sg-line rounded-xl bg-sg-paper/40 overflow-hidden">
+                    <button
+                      type="button"
+                      data-testid="hours-decrement-btn"
+                      onClick={() => setExtraHours(prev => Math.max(0.5, prev - 0.5))}
+                      className="w-10 h-10 flex items-center justify-center font-bold text-sg-ink hover:bg-sg-paper active:scale-95 transition"
+                    >
+                      −
+                    </button>
+                    <span className="w-20 text-center font-bold text-[14px] text-sg-ink font-num">
+                      +{extraHours} 小時
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="hours-increment-btn"
+                      onClick={() => setExtraHours(prev => prev + 0.5)}
+                      className="w-10 h-10 flex items-center justify-center font-bold text-sg-ink hover:bg-sg-paper active:scale-95 transition"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[11px] text-sg-muted block">單價 NT${hourlyRate}/h</span>
+                    <span className="text-[17px] font-bold text-sg-ink font-num">NT${hoursAmount}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {supplementType === 'unlimited_diff' && (
+              <div className="space-y-2">
+                <label className="block text-[12px] font-bold text-sg-ink">改成不限時差額計算</label>
+                <div className="p-3.5 bg-white border border-sg-line rounded-xl text-[13px] font-bold text-sg-ink text-center">
+                  不限時 NT${unlimitedPrice} − 已付入場 NT${personPaidEntry} = NT${diffAmount}
+                </div>
+              </div>
+            )}
+
+            {supplementType === 'other' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[12px] font-bold text-sg-ink mb-1">補收項目說明</label>
+                  <input
+                    type="text"
+                    value={actionItemLabel}
+                    onChange={(e) => setActionItemLabel(e.target.value)}
+                    placeholder="請輸入項目名稱..."
+                    className="w-full px-3 py-2 rounded-xl border border-sg-line text-[13px]"
+                  />
+                </div>
+                <MoneyInput label="補收金額" value={actionAmount} onChange={setActionAmount} />
+              </div>
+            )}
+
+            {/* Amount Summary Box (規格 6.18) */}
+            <div className="p-3 bg-sg-paper/60 border border-sg-line rounded-xl space-y-1.5 text-[13px]">
+              <div className="flex justify-between text-sg-muted">
+                <span>已付 NT${supplementPersonPaid}</span>
+              </div>
+              <div className="flex justify-between text-sg-ink font-medium">
+                <span>補收 {supplementDetailDesc}</span>
+              </div>
+              <div className="pt-1.5 border-t border-sg-line flex justify-between font-bold text-sg-ink">
+                <span>第 {supplementTarget.person_no} 位合計 NT${combinedPersonTotal}</span>
+              </div>
+            </div>
           </div>
         </ResponsivePanel>
       )}

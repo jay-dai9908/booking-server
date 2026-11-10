@@ -808,6 +808,18 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
       throw { status: 422, message: '卡券請用卡券折抵' };
     }
 
+    const reservations = await tx.reservation.findMany({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true }
+    });
+    const sessionDate = reservations[0]?.session?.session_date;
+    const { hourly_price, unlimited_price } = sessionDate
+      ? await getEffectiveDailyRates(tx, sessionDate)
+      : {
+          hourly_price: priorPayment.breakdown_json?.pricing?.hourly || 150,
+          unlimited_price: priorPayment.breakdown_json?.pricing?.unlimited || 750
+        };
+
     let supplementAmount = 0;
     const itemSummaries = [];
 
@@ -817,12 +829,17 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
         supplementAmount += cost;
         itemSummaries.push(`${it.name} ×${it.qty || 1}`);
       } else if (it.type === 'hours') {
-        const hourlyRate = priorPayment.breakdown_json?.pricing?.hourly || 150;
+        const hourlyRate = hourly_price || priorPayment.breakdown_json?.pricing?.hourly || 150;
         const cost = Math.round((it.hours || 0) * hourlyRate);
         supplementAmount += cost;
         itemSummaries.push(`時數 +${it.hours} 小時`);
       } else if (it.type === 'unlimited_diff') {
-        const diff = (it.unlimited_price || 750) - (priorPayment.breakdown_json?.persons?.[0]?.entry?.amount || 0);
+        const targetPerson = (priorPayment.breakdown_json?.persons || []).find(
+          p => Number(p.person_no) === pNo
+        ) || priorPayment.breakdown_json?.persons?.[0];
+        const targetEntryPaid = targetPerson?.entry?.amount || 0;
+        const targetUnlimitedPrice = it.unlimited_price || unlimited_price || 750;
+        const diff = targetUnlimitedPrice - targetEntryPaid;
         if (diff > 0) {
           supplementAmount += diff;
           itemSummaries.push('升級不限時差額');
