@@ -9,7 +9,7 @@ import {
   buildTestPage,
   formatBookingRef
 } from '../../../../shared/receipts.js';
-import { getNextDailySeq, nextSerialNo } from '../billing/billService.js';
+import { getNextDailySeq, nextSerialNo, getBookingBill } from '../billing/billService.js';
 import { log as auditLog } from '../audit/auditService.js';
 
 const printEvents = new EventEmitter();
@@ -19,11 +19,12 @@ printEvents.setMaxListeners(100);
  * Queue a print job (spec 5.6 & 7.2)
  */
 export async function queuePrintJob({
-  type, // receipt | supplement | refund | summary | closing | test
+  type, // receipt | supplement | refund | summary | closing | test | person_slip
   booking_ref = null,
   payment_id = null,
   batch_no = null,
   closing_id = null,
+  person_no = null,
   reprint_of_id = null,
   user = {},
   device = {},
@@ -167,6 +168,48 @@ export async function queuePrintJob({
       : await client.printStation.findFirst({ where: { is_default: true } });
     commands = buildTestPage(station);
     title = '測試頁';
+  } else if (type === 'person_slip') {
+    if (!booking_ref) {
+      throw new Error('缺少預約代號');
+    }
+    const { bill, booking, payments } = await getBookingBill(booking_ref, client);
+    const pNo = person_no != null ? Number(person_no) : 1;
+    const targetPerson = (bill?.persons || []).find(p => p.person_no === pNo) || (bill?.persons || [])[0];
+    if (!targetPerson) {
+      throw new Error(`找不到第 ${pNo} 位顧客明細`);
+    }
+
+    const coveringPayment = (payments || []).find(pay =>
+      pay.status === 'valid' &&
+      (pay.kind === 'charge' || pay.kind === 'waive' || pay.kind === 'pass') &&
+      (!pay.person_nos || pay.person_nos.length === 0 || pay.person_nos.includes(pNo))
+    );
+
+    const personPayment = {
+      booking_ref,
+      created_at: coveringPayment?.created_at || new Date().toISOString(),
+      method: coveringPayment?.method || targetPerson.paid_method || 'cash',
+      amount: targetPerson.total || 0,
+      person_nos: [targetPerson.person_no],
+      staff_name: staffName,
+      breakdown_json: {
+        persons: [{
+          ...targetPerson,
+          label: targetPerson.label || `第 ${targetPerson.person_no} 位`
+        }],
+        order: {
+          persons_total: bill?.persons?.length || booking.pax || 1,
+          persons_paid_after: (bill?.persons || []).filter(x => x.paid || x.is_paid || x.is_frozen).length
+        }
+      }
+    };
+
+    commands = buildReceipt(personPayment, booking, {
+      ...opts,
+      isFullOrder: false,
+      staffName
+    });
+    title = `結帳分單 ${formattedRef || ''} 第 ${targetPerson.person_no} 位`;
   }
 
   // Create PrintJob with daily sequence

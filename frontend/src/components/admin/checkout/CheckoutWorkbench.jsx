@@ -35,7 +35,7 @@ import SharedItemsSplitPanel from './SharedItemsSplitPanel';
 import AddonItemsManageModal from './AddonItemsManageModal';
 import QuickPromoModal from './QuickPromoModal';
 import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
-import { buildOrderSummary, buildReceipt, commandsToPreviewHtml } from '@shared/receipts.js';
+import { buildOrderSummary, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
 import { displayBoardName, computeBill, computeEntry } from '@shared/billing.js';
 import { personElapsedMinutes, formatElapsedText, extractTimeHHMM, bookingDurationText, formatBookingRef } from '../../../utils/admin/floorSelectors';
@@ -1040,31 +1040,10 @@ export default function CheckoutWorkbench({
       setIsPrintingSplit(true);
       let successCount = 0;
       for (const p of allPersons) {
-        const personPayment = {
-          booking_ref: bookingRef,
-          created_at: new Date().toISOString(),
-          method: p.paid_method || 'cash',
-          amount: p.total || 0,
-          person_nos: [p.person_no],
-          breakdown_json: {
-            persons: [p],
-            order: {
-              persons_total: allPersons.length,
-              persons_paid_after: allPersons.filter(x => x.paid || x.is_paid || x.is_frozen).length
-            }
-          }
-        };
-
-        const commands = buildReceipt(personPayment, { ...(billData?.booking || {}), booking_ref: bookingRef }, {
-          isFullOrder: false,
-          staffName: '櫃檯'
-        });
-
         const res = await api.post('/print/jobs', {
-          type: 'receipt',
+          type: 'person_slip',
           booking_ref: bookingRef,
-          title: `結帳分單 ${billData?.booking?.ref_display || bookingRef} 第 ${p.person_no} 位`,
-          commands
+          person_no: p.person_no
         });
 
         if (res.data?.job) {

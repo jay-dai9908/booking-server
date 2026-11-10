@@ -118,8 +118,14 @@ export async function createJob(req, res) {
       return res.status(409).json({ error: '列印已關閉，請到系統設定開啟' });
     }
 
+    const { type, booking_ref, payment_id, person_no, reprint_of_id } = req.body || {};
+
     const job = await queuePrintJob({
-      ...req.body,
+      type,
+      booking_ref,
+      payment_id,
+      person_no,
+      reprint_of_id,
       user: staffUser,
       device: deviceInfo
     });
