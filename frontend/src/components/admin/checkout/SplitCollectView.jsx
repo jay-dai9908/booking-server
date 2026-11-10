@@ -86,14 +86,15 @@ export default function SplitCollectView({
   };
 
   const handleMethodChange = (m) => {
-    setMethod(m);
     if (m === 'pass') {
       if (selectedPersonNos.length === 0) {
         setErrorMessage('請先選擇一位顧客再折抵卡券');
         return;
       }
       setPassSheetPersonNo(selectedPersonNos[0]);
+      return;
     }
+    setMethod(m);
   };
 
   const handleCollect = async () => {
@@ -115,7 +116,7 @@ export default function SplitCollectView({
         client_batch_id: clientBatchId,
         person_nos: selectedPersonNos,
         expected_amount: rawDueAmount,
-        method: netCashDue > 0 ? method : 'pass',
+        method: method === 'pass' ? 'cash' : method,
         cash_received: method === 'cash' ? (cashReceived || netCashDue) : null,
         pass_tenders: passTenders,
         note,

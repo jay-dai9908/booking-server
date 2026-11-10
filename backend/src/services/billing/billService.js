@@ -452,17 +452,22 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       }
     }
 
+    // pass is tender-only, not a direct payment method (Spec round 18b)
+    if (String(method || '').trim().toLowerCase() === 'pass') {
+      throw { status: 422, message: '卡券請用卡券折抵' };
+    }
+
     // Validate payment method against GlobalSetting.payment_methods_json
     const gs = await tx.globalSetting.findUnique({ where: { id: 1 } });
-    const rawMethods = Array.isArray(gs?.payment_methods_json) && gs.payment_methods_json.length > 0
+    const rawMethods = (Array.isArray(gs?.payment_methods_json) && gs.payment_methods_json.length > 0
       ? gs.payment_methods_json
       : [
           { key: 'cash', label: '現金', enabled: true },
           { key: 'linepay', label: 'LINE Pay', enabled: true },
           { key: 'transfer', label: '銀行轉帳', enabled: true },
-          { key: 'card', label: '信用卡', enabled: true },
-          { key: 'pass', label: '體驗券 / 票券', enabled: true }
-        ];
+          { key: 'card', label: '信用卡', enabled: true }
+        ]
+    ).filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass');
 
     const enabledMethods = rawMethods.filter(m => {
       const k = String(m.key || m.code || '').toLowerCase();
@@ -782,6 +787,11 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
 
     if (!priorPayment) {
       throw { status: 400, message: `第 ${pNo} 位尚未付款，請直接在帳單結帳` };
+    }
+
+    // pass is tender-only, not a direct payment method (Spec round 18b)
+    if (String(method || '').trim().toLowerCase() === 'pass') {
+      throw { status: 422, message: '卡券請用卡券折抵' };
     }
 
     let supplementAmount = 0;

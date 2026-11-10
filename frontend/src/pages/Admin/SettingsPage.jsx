@@ -198,7 +198,7 @@ export default function SettingsPage() {
       setDefaultSplitMode(d.default_split_mode || 'proportional');
       setCashFloatAmount(d.cash_float_amount ?? 2000);
       if (Array.isArray(d.payment_methods_json) && d.payment_methods_json.length > 0) {
-        setPaymentMethods(d.payment_methods_json);
+        setPaymentMethods(d.payment_methods_json.filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass'));
       } else {
         setPaymentMethods([
           { key: 'cash', label: '現金', enabled: true },

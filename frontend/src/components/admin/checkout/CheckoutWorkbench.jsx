@@ -2317,7 +2317,7 @@ export default function CheckoutWorkbench({
         <div className="space-y-4 py-2">
           <div>
             <span className="text-[13px] font-bold text-sg-ink block mb-2">付款方式</span>
-            <PayMethodGrid value={collectMethod} onChange={setCollectMethod} />
+            <PayMethodGrid value={collectMethod} onChange={setCollectMethod} hidePass />
           </div>
 
           {collectMethod === 'cash' && (

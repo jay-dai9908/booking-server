@@ -11,8 +11,7 @@ export const DEFAULT_PAYMENT_METHODS = [
   { key: 'cash', label: '現金', enabled: true },
   { key: 'linepay', label: 'LINE Pay', enabled: true },
   { key: 'transfer', label: '銀行轉帳', enabled: true },
-  { key: 'card', label: '信用卡', enabled: true },
-  { key: 'pass', label: '體驗券 / 票券', enabled: true }
+  { key: 'card', label: '信用卡', enabled: true }
 ];
 
 export const getDailySetting = async (req, res) => {
@@ -148,11 +147,14 @@ export const getGlobalSetting = async (req, res) => {
       line_messaging_token_masked = `••••••••${rawToken.slice(-4)}`;
     }
 
+    const rawMethods = Array.isArray(setting.payment_methods_json) && setting.payment_methods_json.length > 0
+      ? setting.payment_methods_json
+      : DEFAULT_PAYMENT_METHODS;
+    const payment_methods_json = rawMethods.filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass');
+
     const safeSetting = {
       ...setting,
-      payment_methods_json: Array.isArray(setting.payment_methods_json) && setting.payment_methods_json.length > 0
-        ? setting.payment_methods_json
-        : DEFAULT_PAYMENT_METHODS,
+      payment_methods_json,
       business_hours_json: setting.business_hours_json || DEFAULT_BUSINESS_HOURS,
       has_line_messaging_token,
       line_messaging_token_masked,
@@ -212,15 +214,17 @@ export const updateGlobalSetting = async (req, res) => {
     const dataToUpdate = {};
     if (payment_methods_json !== undefined) {
       if (Array.isArray(payment_methods_json)) {
-        let methods = payment_methods_json.map(pm => {
-          const key = String(pm.key || pm.code || '').trim();
-          const isCash = key.toLowerCase() === 'cash';
-          return {
-            key,
-            label: pm.label || (isCash ? '現金' : key),
-            enabled: isCash ? true : Boolean(pm.enabled)
-          };
-        });
+        let methods = payment_methods_json
+          .filter(pm => String(pm.key || pm.code || '').trim().toLowerCase() !== 'pass')
+          .map(pm => {
+            const key = String(pm.key || pm.code || '').trim();
+            const isCash = key.toLowerCase() === 'cash';
+            return {
+              key,
+              label: pm.label || (isCash ? '現金' : key),
+              enabled: isCash ? true : Boolean(pm.enabled)
+            };
+          });
         const hasCash = methods.some(m => m.key.toLowerCase() === 'cash');
         if (!hasCash) {
           methods.unshift({ key: 'cash', label: '現金', enabled: true });
