@@ -5,6 +5,16 @@ const ToastContext = createContext({
   show: () => {},
 });
 
+let globalCustomerToastHandler = null;
+
+export function showCustomerToast(message, options = {}) {
+  if (globalCustomerToastHandler) {
+    globalCustomerToastHandler(message, options);
+  } else if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sg-toast', { detail: { message, options } }));
+  }
+}
+
 export const useToast = () => useContext(ToastContext);
 
 export function ToastProvider({ children }) {
@@ -54,10 +64,19 @@ export function ToastProvider({ children }) {
   };
 
   useEffect(() => {
+    globalCustomerToastHandler = show;
+    const handleEvent = (e) => {
+      if (e.detail?.message) {
+        show(e.detail.message, e.detail.options);
+      }
+    };
+    window.addEventListener('sg-toast', handleEvent);
     return () => {
+      globalCustomerToastHandler = null;
+      window.removeEventListener('sg-toast', handleEvent);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, []);
+  }, [show]);
 
   return (
     <ToastContext.Provider value={{ show }}>

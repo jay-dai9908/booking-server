@@ -316,7 +316,7 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error('Failed to save global settings:', err);
-      alert(err.response?.data?.error || '儲存系統設定失敗');
+      showToast(err.response?.data?.error || '儲存系統設定失敗');
     } finally {
       setSaving(false);
     }
@@ -336,7 +336,7 @@ export default function SettingsPage() {
     if (!renamingStation) return;
     const newName = renameInput.trim();
     if (!newName) {
-      alert('請輸入列印站名稱');
+      showToast('請輸入列印站名稱');
       return;
     }
     try {
@@ -345,7 +345,7 @@ export default function SettingsPage() {
       showToast('已修改列印站名稱');
       setRenamingStation(null);
     } catch (err) {
-      alert(err.response?.data?.error || '修改名稱失敗');
+      showToast(err.response?.data?.error || '修改名稱失敗');
     }
   };
 
@@ -356,7 +356,7 @@ export default function SettingsPage() {
       setPrintStations(prev => prev.map(s => s.id === st.id ? { ...s, accepting: nextAccepting } : s));
       showToast(nextAccepting ? '已恢復接單' : '已暫停接單');
     } catch (err) {
-      alert(err.response?.data?.error || '操作失敗');
+      showToast(err.response?.data?.error || '操作失敗');
     }
   };
 
@@ -365,7 +365,7 @@ export default function SettingsPage() {
       await api.post(`/print/stations/${st.id}/test`);
       showToast(`已對「${st.name}」送出測試列印工作！`);
     } catch (err) {
-      alert(err.response?.data?.error || '測試列印失敗');
+      showToast(err.response?.data?.error || '測試列印失敗');
     }
   };
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ShoppingBag,
   Package,
@@ -16,7 +16,8 @@ import {
   X,
   Palette,
   Image as ImageIcon,
-  Upload
+  Upload,
+  AlertCircle
 } from 'lucide-react';
 import api from '../../api/axios';
 import { format } from 'date-fns';
@@ -26,9 +27,20 @@ import {
   getContrastTextColor,
   getBeadSwatchStyle
 } from '../../utils/mardBeadColors';
+import ConfirmPanel from '../../components/admin/ConfirmPanel';
 
 export default function ShopAdminPage() {
   const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'payments' | 'products' | 'bead_colors'
+
+  // Toast & Confirm State
+  const [toast, setToast] = useState(null); // { message, type }
+  const toastTimerRef = useRef(null);
+  const showToast = (message, type = 'info') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
+  };
+  const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, confirmText, danger, onConfirm }
 
   // Tab 1: Orders
   const [orders, setOrders] = useState([]);
@@ -142,7 +154,7 @@ export default function ShopAdminPage() {
       fetchAdminOrders();
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
-      alert('對帳確認失敗：' + (err.response?.data?.error || err.message));
+      showToast('對帳確認失敗：' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -155,7 +167,7 @@ export default function ShopAdminPage() {
       setWishReplyOrder(null);
       fetchAdminOrders();
     } catch (err) {
-      alert('儲存許願回覆失敗：' + (err.response?.data?.error || err.message));
+      showToast('儲存許願回覆失敗：' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -168,52 +180,70 @@ export default function ShopAdminPage() {
       setArrivalDateOrder(null);
       fetchAdminOrders();
     } catch (err) {
-      alert('更新預計到貨日失敗：' + (err.response?.data?.error || err.message));
+      showToast('更新預計到貨日失敗：' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
-  const handleNotifyArrival = async (orderIds) => {
+  const handleNotifyArrival = (orderIds) => {
     if (!orderIds || orderIds.length === 0) return;
-    if (!window.confirm(`確定要向選取的 ${orderIds.length} 筆訂單發送「商品到貨 LINE 取件通知」嗎？`)) return;
-
-    try {
-      const res = await api.post('/shop/admin/orders/notify-arrival', { order_ids: orderIds });
-      alert(res.data?.message || '到貨通知已成功推播！');
-      fetchAdminOrders();
-      window.dispatchEvent(new CustomEvent('admin-data-updated'));
-    } catch (err) {
-      alert('發送到貨通知失敗：' + (err.response?.data?.error || err.message));
-    }
+    setConfirmDialog({
+      title: '發送到貨通知',
+      message: `確定要向選取的 ${orderIds.length} 筆訂單發送「商品到貨 LINE 取件通知」嗎？`,
+      confirmText: '發送通知',
+      danger: false,
+      onConfirm: async () => {
+        try {
+          const res = await api.post('/shop/admin/orders/notify-arrival', { order_ids: orderIds });
+          showToast(res.data?.message || '到貨通知已成功推播！', 'success');
+          fetchAdminOrders();
+          window.dispatchEvent(new CustomEvent('admin-data-updated'));
+        } catch (err) {
+          showToast('發送到貨通知失敗：' + (err.response?.data?.error || err.message), 'error');
+        }
+      }
+    });
   };
 
-  const handleMarkPickedUp = async (orderId) => {
-    if (!window.confirm('確定顧客已完成現場取貨嗎？取貨完成後若含有贈品卡將自動發放至會員帳號！')) return;
-    try {
-      await api.patch(`/shop/admin/orders/${orderId}`, {
-        order_status: 'picked_up'
-      });
-      fetchAdminOrders();
-      window.dispatchEvent(new CustomEvent('admin-data-updated'));
-    } catch (err) {
-      alert('更新取貨狀態失敗：' + (err.response?.data?.error || err.message));
-    }
+  const handleMarkPickedUp = (orderId) => {
+    setConfirmDialog({
+      title: '確認現場取貨',
+      message: '確定顧客已完成現場取貨嗎？取貨完成後若含有贈品卡將自動發放至會員帳號！',
+      confirmText: '確認取貨',
+      danger: false,
+      onConfirm: async () => {
+        try {
+          await api.patch(`/shop/admin/orders/${orderId}`, {
+            order_status: 'picked_up'
+          });
+          fetchAdminOrders();
+          window.dispatchEvent(new CustomEvent('admin-data-updated'));
+        } catch (err) {
+          showToast('更新取貨狀態失敗：' + (err.response?.data?.error || err.message), 'error');
+        }
+      }
+    });
   };
 
-  const handleCancelOrder = async (order) => {
-    if (!window.confirm(`確定要取消訂單 #${order.order_ref} 嗎？\n若該訂單佔用中信專屬一次性帳號，系統將會立即釋放回帳號池供其他客人使用。`)) {
-      return;
-    }
-    try {
-      await api.patch(`/shop/admin/orders/${order.id}`, {
-        order_status: 'cancelled'
-      });
-      alert('訂單已取消，相關資源已釋放');
-      fetchAdminOrders();
-      fetchAccountPool();
-      window.dispatchEvent(new CustomEvent('admin-data-updated'));
-    } catch (err) {
-      alert('取消訂單失敗：' + (err.response?.data?.error || err.message));
-    }
+  const handleCancelOrder = (order) => {
+    setConfirmDialog({
+      title: '取消訂單',
+      message: `確定要取消訂單 #${order.order_ref} 嗎？\n若該訂單佔用中信專屬一次性帳號，系統將會立即釋放回帳號池供其他客人使用。`,
+      confirmText: '確定取消',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await api.patch(`/shop/admin/orders/${order.id}`, {
+            order_status: 'cancelled'
+          });
+          showToast('訂單已取消，相關資源已釋放', 'success');
+          fetchAdminOrders();
+          fetchAccountPool();
+          window.dispatchEvent(new CustomEvent('admin-data-updated'));
+        } catch (err) {
+          showToast('取消訂單失敗：' + (err.response?.data?.error || err.message), 'error');
+        }
+      }
+    });
   };
 
   // Payments & Account Pool handlers
@@ -247,11 +277,11 @@ export default function ShopAdminPage() {
       const res = await api.post('/shop/admin/account-pool/batch', {
         text_lines: batchImportText
       });
-      alert(res.data?.message || '匯入成功！');
+      showToast(res.data?.message || '匯入成功！', 'success');
       setBatchImportText('');
       fetchAccountPool();
     } catch (err) {
-      alert('批次匯入失敗：' + (err.response?.data?.error || err.message));
+      showToast('批次匯入失敗：' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setImportingPool(false);
     }
@@ -262,10 +292,10 @@ export default function ShopAdminPage() {
     setSavingSettings(true);
     try {
       await api.post('/shop/admin/settings', shopSettings);
-      alert('預購商城設定已成功儲存！');
+      showToast('預購商城設定已成功儲存！', 'success');
       fetchPaymentSettings();
     } catch (err) {
-      alert('儲存設定失敗：' + (err.response?.data?.error || err.message));
+      showToast('儲存設定失敗：' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -278,7 +308,7 @@ export default function ShopAdminPage() {
       });
       fetchPaymentSettings();
     } catch (err) {
-      alert('切換付款方式失敗');
+      showToast('切換付款方式失敗', 'error');
     }
   };
 
@@ -337,10 +367,10 @@ export default function ShopAdminPage() {
         display_instructions: displayInstructions,
         bank_accounts_json: bankAccounts
       });
-      alert(`「${method.name}」設定已成功儲存！`);
+      showToast(`「${method.name}」設定已成功儲存！`, 'success');
       fetchPaymentSettings();
     } catch (err) {
-      alert('儲存付款方式失敗：' + (err.response?.data?.error || err.message));
+      showToast('儲存付款方式失敗：' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setSavingPaymentId(null);
     }
@@ -418,7 +448,7 @@ export default function ShopAdminPage() {
         };
       });
     } catch (err) {
-      alert('處理圖片失敗，請重試');
+      showToast('處理圖片失敗，請重試', 'error');
     } finally {
       setUploadingImage(false);
       e.target.value = '';
@@ -489,7 +519,7 @@ export default function ShopAdminPage() {
       setEditProductModal(null);
       fetchAdminProducts();
     } catch (err) {
-      alert('儲存商品失敗：' + (err.response?.data?.error || err.message));
+      showToast('儲存商品失敗：' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -502,7 +532,7 @@ export default function ShopAdminPage() {
       });
       fetchAdminProducts();
     } catch (err) {
-      alert('切換階梯優惠計算模式失敗');
+      showToast('切換階梯優惠計算模式失敗', 'error');
     }
   };
 
@@ -557,7 +587,7 @@ export default function ShopAdminPage() {
       await api.post('/shop/admin/settings', updatedSettings);
       setShopSettings(updatedSettings);
     } catch (err) {
-      alert('儲存色號設定失敗：' + (err.response?.data?.error || err.message));
+      showToast('儲存色號設定失敗：' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setSavingColor(false);
     }
@@ -586,40 +616,41 @@ export default function ShopAdminPage() {
     await saveCustomBeadColorsArray(currentCustom);
   };
 
-  const handleBatchToggleFilteredColors = async (makeAvailable) => {
+  const handleBatchToggleFilteredColors = (makeAvailable) => {
     if (filteredAdminBeadColors.length === 0) return;
     const actionLabel = makeAvailable ? '🟢 供貨中' : '🔴 補貨中';
-    if (
-      !window.confirm(
-        `確定要將目前篩選出的 ${filteredAdminBeadColors.length} 個色號全部設為「${actionLabel}」嗎？`
-      )
-    ) {
-      return;
-    }
+    setConfirmDialog({
+      title: '批次變更供貨狀態',
+      message: `確定要將目前篩選出的 ${filteredAdminBeadColors.length} 個色號全部設為「${actionLabel}」嗎？`,
+      confirmText: '確定變更',
+      danger: !makeAvailable,
+      onConfirm: async () => {
+        const currentCustom = Array.isArray(shopSettings.bead_colors_json)
+          ? [...shopSettings.bead_colors_json]
+          : [];
+        const customMap = new Map(currentCustom.map(c => [String(c.code).toUpperCase(), { ...c }]));
 
-    const currentCustom = Array.isArray(shopSettings.bead_colors_json)
-      ? [...shopSettings.bead_colors_json]
-      : [];
-    const customMap = new Map(currentCustom.map(c => [String(c.code).toUpperCase(), { ...c }]));
+        for (const color of filteredAdminBeadColors) {
+          const code = color.code.toUpperCase();
+          const existing = customMap.get(code);
+          if (existing) {
+            existing.is_available = makeAvailable;
+          } else {
+            customMap.set(code, {
+              code,
+              series: color.series,
+              hex: color.hex,
+              name: color.name,
+              effect: color.effect,
+              is_available: makeAvailable
+            });
+          }
+        }
 
-    for (const color of filteredAdminBeadColors) {
-      const code = color.code.toUpperCase();
-      const existing = customMap.get(code);
-      if (existing) {
-        existing.is_available = makeAvailable;
-      } else {
-        customMap.set(code, {
-          code,
-          series: color.series,
-          hex: color.hex,
-          name: color.name,
-          effect: color.effect,
-          is_available: makeAvailable
-        });
+        await saveCustomBeadColorsArray(Array.from(customMap.values()));
+        showToast(`已將 ${filteredAdminBeadColors.length} 個色號批次設為「${actionLabel}」`, 'success');
       }
-    }
-
-    await saveCustomBeadColorsArray(Array.from(customMap.values()));
+    });
   };
 
   // Picking / Packing Summary Computation across selected orders (or active unpicked orders)
@@ -696,7 +727,7 @@ export default function ShopAdminPage() {
   const handleSaveEditingColor = async (e) => {
     e.preventDefault();
     if (!editingColorModal?.code?.trim()) {
-      alert('請輸入色號代碼（例如：Z9、H24）');
+      showToast('請輸入色號代碼（例如：Z9、H24）', 'error');
       return;
     }
     const cleanCode = editingColorModal.code.trim().toUpperCase().replace(/^ZG(\d+)$/, 'Z$1');
@@ -2636,7 +2667,7 @@ export default function ShopAdminPage() {
                     );
                   }
                   navigator.clipboard?.writeText(lines.join('\n'));
-                  alert('已複製揀貨統計清單文字！可直接貼至 LINE 或備忘錄');
+                  showToast('已複製揀貨統計清單文字！可直接貼至 LINE 或備忘錄', 'success');
                 }}
                 className="px-4 py-2 bg-[#FAF7F2] hover:bg-[#EBE5DF] text-[#8B5B43] border border-[#E8DEC8] rounded-xl text-xs font-bold transition"
               >
@@ -2654,6 +2685,41 @@ export default function ShopAdminPage() {
           </div>
         </div>
       )}
+
+      {toast && (
+        <div
+          role="status"
+          className={`fixed top-6 right-6 z-[250] px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-sm font-bold animate-in fade-in slide-in-from-top-4 duration-200 ${
+            toast.type === 'error'
+              ? 'bg-rose-700 text-white'
+              : toast.type === 'success'
+              ? 'bg-emerald-700 text-white'
+              : 'bg-sg-ink text-white'
+          }`}
+        >
+          {toast.type === 'error' ? (
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          ) : (
+            <Check className="w-4 h-4 flex-shrink-0" />
+          )}
+          <span>{toast.message}</span>
+        </div>
+      )}
+
+      <ConfirmPanel
+        isOpen={Boolean(confirmDialog)}
+        onClose={() => setConfirmDialog(null)}
+        onConfirm={async () => {
+          const fn = confirmDialog?.onConfirm;
+          setConfirmDialog(null);
+          if (fn) await fn();
+        }}
+        title={confirmDialog?.title || '確認操作'}
+        message={confirmDialog?.message || ''}
+        confirmText={confirmDialog?.confirmText || '確認'}
+        cancelText="取消"
+        danger={confirmDialog?.danger || false}
+      />
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { showCustomerToast } from '../components/customer/Toast';
+
 /**
  * LINE OAuth 登入前端共用輔助工具
  * 使用 window.crypto.getRandomValues 產生高強度加密亂數 state，並存於 localStorage 中
@@ -60,7 +62,7 @@ export const initiateLineOAuth = ({ prefix = '', returnPath = '/booking' } = {})
   const redirectUri = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_LINE_CALLBACK_URL) || (typeof process !== 'undefined' && process.env?.VITE_LINE_CALLBACK_URL);
 
   if (!channelId || !redirectUri || channelId === 'your_channel_id_here') {
-    alert('系統尚未設定 LINE 登入參數 (VITE_LINE_CHANNEL_ID / VITE_LINE_CALLBACK_URL)');
+    showCustomerToast('系統尚未設定 LINE 登入參數 (VITE_LINE_CHANNEL_ID / VITE_LINE_CALLBACK_URL)', { type: 'error' });
     return;
   }
 

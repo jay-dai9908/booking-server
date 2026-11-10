@@ -3,6 +3,7 @@ import { Plus, Trash2, ArrowUp, ArrowDown, Check, X } from 'lucide-react';
 import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
 import api from '../../../api/axios';
+import ConfirmPanel from '../ConfirmPanel';
 
 export default function AddonItemsManageModal({
   isOpen = false,
@@ -12,6 +13,7 @@ export default function AddonItemsManageModal({
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
 
   // New item form state
   const [newName, setNewName] = useState('');
@@ -115,8 +117,14 @@ export default function AddonItemsManageModal({
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('確定要刪除此加購品項？')) return;
+  const handleDelete = (id) => {
+    setDeleteTargetId(id);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTargetId) return;
+    const id = deleteTargetId;
+    setDeleteTargetId(null);
     try {
       await api.delete(`/checkout/addons/${id}`);
       await fetchItems();
@@ -315,6 +323,17 @@ export default function AddonItemsManageModal({
           )}
         </div>
       </div>
+
+      <ConfirmPanel
+        isOpen={deleteTargetId !== null}
+        onClose={() => setDeleteTargetId(null)}
+        onConfirm={handleConfirmDelete}
+        title="刪除加購品項"
+        message="確定要刪除此加購品項？"
+        confirmText="確認刪除"
+        cancelText="取消"
+        danger={true}
+      />
     </ResponsivePanel>
   );
 }

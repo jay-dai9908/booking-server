@@ -18,9 +18,11 @@ import {
   X
 } from 'lucide-react';
 import api from '../../api/axios';
+import ConfirmPanel from '../../components/admin/ConfirmPanel';
 
 export default function EquipmentPage() {
   const [configs, setConfigs] = useState([]);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState(null);
   const [globalSettings, setGlobalSettings] = useState({ 
     allow_equipment_exceed_pax: false,
     show_equipment_live_stock: true,
@@ -154,7 +156,7 @@ export default function EquipmentPage() {
       fetchOccupancy(occupancyDate);
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.error || '儲存設定失敗');
+      showToast(err.response?.data?.error || '儲存設定失敗');
     } finally {
       setSavingId(null);
     }
@@ -170,7 +172,7 @@ export default function EquipmentPage() {
       showToast('已更新全域設備設定');
     } catch (err) {
       console.error(err);
-      alert('更新設定失敗');
+      showToast('更新設定失敗');
     } finally {
       setSavingGlobal(false);
     }
@@ -212,7 +214,7 @@ export default function EquipmentPage() {
       showToast('已更新智能板時數優惠方案');
     } catch (err) {
       console.error(err);
-      alert('更新優惠設定失敗');
+      showToast('更新優惠設定失敗');
     } finally {
       setSavingGlobal(false);
     }
@@ -221,7 +223,7 @@ export default function EquipmentPage() {
   const handleCreateConfig = async (e) => {
     e.preventDefault();
     if (!newConfig.id || !newConfig.name) {
-      alert('請填寫規格ID與名稱');
+      showToast('請填寫規格ID與名稱');
       return;
     }
     try {
@@ -236,23 +238,28 @@ export default function EquipmentPage() {
       showToast(`已新增規格「${newConfig.name}」`);
       fetchData();
     } catch (err) {
-      alert(err.response?.data?.error || '新增規格失敗');
+      showToast(err.response?.data?.error || '新增規格失敗');
     }
   };
 
-  const handleDeleteConfig = async (id, name) => {
+  const handleDeleteConfig = (id, name) => {
     if (['pegboard_s', 'pegboard_m', 'pegboard_l', 'bring_own'].includes(id)) {
-      alert('系統核心預設規格不可刪除，若不想開放請切換為「前台隱藏」');
+      showToast('系統核心預設規格不可刪除，若不想開放請切換為「前台隱藏」');
       return;
     }
-    if (window.confirm(`確定要刪除規格「${name}」嗎？此操作不可復原。`)) {
-      try {
-        await api.delete(`/equipment/admin/${id}`);
-        showToast(`已刪除規格「${name}」`);
-        fetchData();
-      } catch (err) {
-        alert(err.response?.data?.error || '刪除失敗');
-      }
+    setDeleteConfirmTarget({ id, name });
+  };
+
+  const handleConfirmDeleteConfig = async () => {
+    if (!deleteConfirmTarget) return;
+    const { id, name } = deleteConfirmTarget;
+    setDeleteConfirmTarget(null);
+    try {
+      await api.delete(`/equipment/admin/${id}`);
+      showToast(`已刪除規格「${name}」`);
+      fetchData();
+    } catch (err) {
+      showToast(err.response?.data?.error || '刪除失敗');
     }
   };
 
@@ -972,6 +979,16 @@ export default function EquipmentPage() {
           </div>
         </div>
       )}
+      <ConfirmPanel
+        isOpen={Boolean(deleteConfirmTarget)}
+        onClose={() => setDeleteConfirmTarget(null)}
+        onConfirm={handleConfirmDeleteConfig}
+        title="刪除設備規格"
+        message={`確定要刪除規格「${deleteConfirmTarget?.name}」嗎？此操作不可復原。`}
+        confirmText="確認刪除"
+        cancelText="取消"
+        danger={true}
+      />
     </div>
   );
 }
