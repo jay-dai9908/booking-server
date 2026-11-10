@@ -6,4 +6,5 @@ dev.db
 *.csv
 test-results/
 frontend/test-results/
+screenshot_*.png
 
