@@ -129,7 +129,11 @@ async function run() {
   if (testCustRef) createdTestBookingRefs.push(testCustRef);
   console.log(`Seeded test customer booking for ${targetDateYmd}:`, testCustRef);
 
-  const browser = await chromium.launch({ headless: HEADLESS });
+  const launchOptions = { headless: HEADLESS };
+  if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+    launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  }
+  const browser = await chromium.launch(launchOptions);
 
   const pageErrors = [];
   const apiErrors = [];
@@ -645,7 +649,7 @@ async function run() {
     await aPage.waitForTimeout(300);
 
     // Uncheck Person 2 so that we only collect for Person 1 first
-    const p2Option = splitDialog.locator('text=第 2 位').first();
+    const p2Option = aPage.locator('[data-testid="split-person-card-2"]').or(splitDialog.locator('text=第 2 位').first());
     await p2Option.click();
     await aPage.waitForTimeout(400);
 

@@ -12,7 +12,11 @@ if (!fs.existsSync(SCREENSHOT_DIR)) {
 
 async function run() {
   console.log('--- Starting Emergency Hotfix Playwright Test ---');
-  const browser = await chromium.launch({ headless: true });
+  const launchOptions = { headless: true };
+  if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+    launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  }
+  const browser = await chromium.launch(launchOptions);
 
   const lineUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 Line/13.4.1';
   const igUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 270.0.0.0';

@@ -211,18 +211,18 @@ export async function ensureFreshDbSeeded(customPrisma) {
       });
     }
 
-  // 4. Seed User (Customer id: 1)
-  const existingUser = await prisma.user.findFirst({ where: { id: 1 } });
+  // 4. Seed User (Customer)
+  const existingUser = await prisma.user.findFirst({ where: { line_user_id: 'test_user_line_1' } });
   if (!existingUser) {
     await prisma.user.create({
       data: {
-        id: 1,
         line_user_id: 'test_user_line_1',
         name: '測試顧客',
         phone: '0912345678'
       }
     });
   }
+  await prisma.$executeRawUnsafe(`SELECT setval(pg_get_serial_sequence('"User"', 'id'), (SELECT COALESCE(MAX(id), 1) FROM "User"))`);
 
   // 5. Seed Sessions for today and next 7 days (10:00 to 21:00)
   const now = new Date();

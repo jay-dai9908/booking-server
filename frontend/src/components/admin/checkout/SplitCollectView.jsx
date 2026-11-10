@@ -673,6 +673,7 @@ export default function SplitCollectView({
                   return (
                     <div
                       key={p.person_no}
+                      data-testid={`split-person-card-${p.person_no}`}
                       onClick={() => togglePerson(p.person_no)}
                       className={`p-3 rounded-2xl border flex items-center justify-between cursor-pointer transition select-none ${
                         isSelected

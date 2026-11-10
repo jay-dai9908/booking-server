@@ -75,7 +75,11 @@ async function takeScreenshots() {
     });
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const launchOptions = { headless: true };
+  if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+    launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  }
+  const browser = await chromium.launch(launchOptions);
 
   try {
     // 1. Tablet context (820x1180) for Screenshot 1 & 3
