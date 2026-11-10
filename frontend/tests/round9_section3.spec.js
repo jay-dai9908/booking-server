@@ -141,11 +141,30 @@ async function run() {
         },
       });
     }
-    const customerToken = jwt.sign(
-      { id: customer.id, role: 'customer', name: customer.name || 'Test' },
-      process.env.JWT_SECRET || 'super_secret_jwt_key_for_booking_system',
-      { expiresIn: '1h' }
-    );
+    let customerToken = null;
+    try {
+      const loginRes = await fetch(`${process.env.API_BASE_URL || 'http://localhost:3001'}/api/auth/test-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: customer.id, role: 'customer' })
+      });
+      if (loginRes.ok) {
+        const data = await loginRes.json();
+        customerToken = data.token;
+      }
+    } catch (e) {}
+
+    if (!customerToken) {
+      if (!process.env.JWT_SECRET?.trim()) {
+        console.error('請設定 JWT_SECRET 環境變數');
+        process.exit(1);
+      }
+      customerToken = jwt.sign(
+        { id: customer.id, role: 'customer', name: customer.name || 'Test' },
+        process.env.JWT_SECRET.trim(),
+        { expiresIn: '1h' }
+      );
+    }
 
     await prisma.globalSetting.update({
       where: { id: 1 },

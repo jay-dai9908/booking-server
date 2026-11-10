@@ -7,6 +7,12 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const testDbUrl = process.env.TEST_DATABASE_URL || 'postgresql://user:password@localhost:5432/booking_db_test?schema=public';
 const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
+
 async function takeScreenshots() {
   console.log('--- Capturing Round 15 Screenshots (390x844) ---');
   await ensureFreshDbSeeded(prisma);
@@ -153,7 +159,7 @@ async function takeScreenshots() {
   await page.waitForLoadState('networkidle');
   const pwdInput = page.locator('input[type="password"]');
   if (await pwdInput.isVisible()) {
-    await pwdInput.fill('gathering.light2609');
+    await pwdInput.fill(ADMIN_PASSWORD);
     await page.locator('button[type="submit"]').click();
     await page.waitForURL('**/admin/sessions');
     await page.waitForLoadState('networkidle');

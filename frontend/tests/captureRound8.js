@@ -10,7 +10,11 @@ const prisma = new PrismaClient({
 });
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'gathering.light2609';
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
 const OUT_DIR = path.resolve(process.cwd(), 'test-results/round8-screenshots');
 
 async function main() {

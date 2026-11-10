@@ -30,7 +30,7 @@ if (!dbName || !dbName.endsWith('_test')) {
 const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
 async function run() {
-  if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+  if (!process.env.ADMIN_PASSWORD?.trim()) {
     console.error('請設定 ADMIN_PASSWORD 環境變數');
     process.exit(1);
   }
@@ -53,7 +53,7 @@ async function run() {
   } catch (e) {}
 
   if (!customerToken) {
-    if (!process.env.JWT_SECRET || !process.env.JWT_SECRET.trim()) {
+    if (!process.env.JWT_SECRET?.trim()) {
       console.error('請設定 JWT_SECRET 環境變數');
       process.exit(1);
     }

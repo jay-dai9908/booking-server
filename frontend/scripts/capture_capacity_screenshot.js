@@ -3,6 +3,12 @@ import path from 'path';
 import fs from 'fs';
 
 async function main() {
+  if (!process.env.ADMIN_PASSWORD?.trim()) {
+    console.error('請設定 ADMIN_PASSWORD 環境變數');
+    process.exit(1);
+  }
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
+
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -13,7 +19,7 @@ async function main() {
   // 1. Login
   await page.goto('http://localhost:5173/admin/login', { waitUntil: 'networkidle' });
   const passInput = page.locator('input[type="password"]');
-  await passInput.fill('gathering.light2609');
+  await passInput.fill(ADMIN_PASSWORD);
   await page.locator('button[type="submit"]').click();
   await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
   await page.waitForTimeout(1000);

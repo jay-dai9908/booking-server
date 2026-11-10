@@ -17,7 +17,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
 
 async function run() {
-  if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+  if (!process.env.ADMIN_PASSWORD?.trim()) {
     console.error('請設定 ADMIN_PASSWORD 環境變數');
     process.exit(1);
   }

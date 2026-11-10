@@ -24,11 +24,30 @@ async function run() {
   await ensureFreshDbSeeded(prisma);
 
   // Generate customer token
-  const customerToken = jwt.sign(
-    { id: 1, role: 'customer', name: '測試客', phone: '0912345678' },
-    process.env.JWT_SECRET || 'super_secret_jwt_key_for_booking_system',
-    { expiresIn: '1d' }
-  );
+  let customerToken = null;
+  try {
+    const loginRes = await fetch(`${process.env.API_BASE_URL || 'http://localhost:3001'}/api/auth/test-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 1, role: 'customer' })
+    });
+    if (loginRes.ok) {
+      const data = await loginRes.json();
+      customerToken = data.token;
+    }
+  } catch (e) {}
+
+  if (!customerToken) {
+    if (!process.env.JWT_SECRET?.trim()) {
+      console.error('請設定 JWT_SECRET 環境變數');
+      process.exit(1);
+    }
+    customerToken = jwt.sign(
+      { id: 1, role: 'customer', name: '測試客', phone: '0912345678' },
+      process.env.JWT_SECRET.trim(),
+      { expiresIn: '1d' }
+    );
+  }
 
   const launchOptions = { headless: HEADLESS };
   if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {

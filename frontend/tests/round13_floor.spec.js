@@ -18,7 +18,11 @@ const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } }
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const HEADLESS = process.env.HEADLESS !== 'false';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'gathering.light2609';
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
 
 const SCREENSHOT_DIR = path.resolve(process.cwd(), 'test-results', 'round13-screenshots');
 if (!fs.existsSync(SCREENSHOT_DIR)) {

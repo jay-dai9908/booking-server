@@ -12,6 +12,12 @@ const HEADLESS = process.env.HEADLESS !== 'false';
 const testDbUrl = process.env.TEST_DATABASE_URL || 'postgresql://user:password@localhost:5432/booking_db_test?schema=public';
 const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
+
 async function main() {
   console.log('Seeding data for Round 14 screenshots...');
   const todayStr = toTaipeiDateString(new Date());
@@ -148,7 +154,7 @@ async function main() {
   await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
   const passInput = page.locator('input[type="password"]');
   await passInput.waitFor({ state: 'visible', timeout: 15000 });
-  await passInput.fill(process.env.ADMIN_PASSWORD || 'gathering.light2609');
+  await passInput.fill(ADMIN_PASSWORD);
   await page.locator('button[type="submit"]').click();
   await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 15000 });
   await page.waitForTimeout(500);

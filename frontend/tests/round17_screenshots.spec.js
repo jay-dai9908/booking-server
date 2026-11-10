@@ -6,6 +6,12 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const testDbUrl = process.env.TEST_DATABASE_URL || 'postgresql://user:password@localhost:5432/booking_db_test?schema=public';
 const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
+
 async function takeScreenshots() {
   console.log('--- Capturing Round 17 Screenshots ---');
   await ensureFreshDbSeeded(prisma);
@@ -84,7 +90,7 @@ async function takeScreenshots() {
     await tabletPage.waitForLoadState('networkidle');
     const pwdInput = tabletPage.locator('input[type="password"]');
     if (await pwdInput.isVisible()) {
-      await pwdInput.fill('gathering.light2609');
+      await pwdInput.fill(ADMIN_PASSWORD);
       await tabletPage.locator('button[type="submit"]').click();
       await tabletPage.waitForURL('**/admin/sessions');
       await tabletPage.waitForLoadState('networkidle');
@@ -141,7 +147,7 @@ async function takeScreenshots() {
     await mobilePage.waitForLoadState('networkidle');
     const mPwdInput = mobilePage.locator('input[type="password"]');
     if (await mPwdInput.isVisible()) {
-      await mPwdInput.fill('gathering.light2609');
+      await mPwdInput.fill(ADMIN_PASSWORD);
       await mobilePage.locator('button[type="submit"]').click();
       await mobilePage.waitForURL('**/admin/sessions');
       await mobilePage.waitForLoadState('networkidle');

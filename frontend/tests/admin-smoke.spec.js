@@ -35,7 +35,7 @@ const ADMIN_ROUTES = [
 ];
 
 export async function runAdminSmoke() {
-  if (!process.env.ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD.trim()) {
+  if (!process.env.ADMIN_PASSWORD?.trim()) {
     console.error('請設定 ADMIN_PASSWORD 環境變數');
     process.exit(1);
   }

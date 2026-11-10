@@ -9,6 +9,12 @@ const HEADLESS = process.env.HEADLESS !== 'false';
 const testDbUrl = process.env.TEST_DATABASE_URL || 'postgresql://user:password@localhost:5432/booking_db_test?schema=public';
 const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
+
 async function capture() {
   console.log('--- Capturing Round 18 Screenshots (Mobile 390x844) ---');
   await ensureFreshDbSeeded(prisma);
@@ -120,7 +126,7 @@ async function capture() {
     await page1.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
     const passInput = page1.locator('input[type="password"]');
     await passInput.waitFor({ state: 'visible', timeout: 15000 });
-    await passInput.fill(process.env.ADMIN_PASSWORD || 'gathering.light2609');
+    await passInput.fill(ADMIN_PASSWORD);
     await page1.locator('button[type="submit"]').click();
     await page1.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 15000 });
     await page1.waitForTimeout(800);

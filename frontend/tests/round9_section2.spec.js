@@ -18,6 +18,12 @@ if (!fs.existsSync(SCREENSHOT_DIR)) {
 const testDbUrl = process.env.TEST_DATABASE_URL || 'postgresql://user:password@localhost:5432/booking_db_test?schema=public';
 const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
 
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
+
 async function run() {
   console.log('--- Starting Round 9 Section 2 Playwright Tests ---');
   await ensureFreshDbSeeded(prisma);
@@ -73,7 +79,7 @@ async function run() {
     await adminPage.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
     const passInput = adminPage.locator('input[type="password"]');
     await passInput.waitFor({ state: 'visible', timeout: 15000 });
-    await passInput.fill(process.env.ADMIN_PASSWORD || 'gathering.light2609');
+    await passInput.fill(ADMIN_PASSWORD);
     await adminPage.locator('button[type="submit"]').click();
     await adminPage.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
     await adminPage.waitForTimeout(500);
@@ -134,11 +140,30 @@ async function run() {
 
     // 2. Customer view verifies updated chips
     console.log('Opening customer booking step 3 confirmation page...');
-    const customerToken = jwt.sign(
-      { id: 1, role: 'customer', name: '測試客', phone: '0912345678' },
-      process.env.JWT_SECRET || 'super_secret_jwt_key_for_booking_system',
-      { expiresIn: '1d' }
-    );
+    let customerToken = null;
+    try {
+      const loginRes = await fetch(`${process.env.API_BASE_URL || 'http://localhost:3001'}/api/auth/test-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 1, role: 'customer' })
+      });
+      if (loginRes.ok) {
+        const data = await loginRes.json();
+        customerToken = data.token;
+      }
+    } catch (e) {}
+
+    if (!customerToken) {
+      if (!process.env.JWT_SECRET?.trim()) {
+        console.error('請設定 JWT_SECRET 環境變數');
+        process.exit(1);
+      }
+      customerToken = jwt.sign(
+        { id: 1, role: 'customer', name: '測試客', phone: '0912345678' },
+        process.env.JWT_SECRET.trim(),
+        { expiresIn: '1d' }
+      );
+    }
 
     const custContext = await browser.newContext({
       viewport: { width: 375, height: 812 }
