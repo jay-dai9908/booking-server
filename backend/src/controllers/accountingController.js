@@ -370,6 +370,11 @@ export const postClosing = async (req, res) => {
 
     const counted = Number(counted_cash);
     const difference = counted - previewData.expCash;
+    const trimmedNote = note ? String(note).trim() : '';
+
+    if (difference !== 0 && !trimmedNote) {
+      return res.status(422).json({ error: '有差額，請先填寫備註' });
+    }
 
     const closing = await prisma.$transaction(async (tx) => {
       const created = await tx.cashClosing.create({
@@ -384,7 +389,7 @@ export const postClosing = async (req, res) => {
             difference,
             snapshot_at: new Date().toISOString()
           },
-          note: note ? String(note).trim() : null,
+          note: trimmedNote || null,
           staff_name: staffName,
           device_label: deviceInfo.device_label
         }

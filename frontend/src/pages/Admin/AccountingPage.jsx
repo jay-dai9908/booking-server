@@ -294,6 +294,13 @@ export default function AccountingPage() {
 
   // Submit daily closing
   const handleSubmitClosing = async () => {
+    const hasCounted = countedCash !== '' && countedCash !== null && !isNaN(Number(countedCash));
+    if (!hasCounted) return;
+    const diff = closingPreview ? Number(countedCash) - closingPreview.expected_cash : 0;
+    if (diff !== 0 && (!closingNote || !closingNote.trim())) {
+      showToast('有差額，請先填寫備註', true);
+      return;
+    }
     try {
       setClosingSubmitting(true);
       const res = await api.post('/accounting/closing', {
@@ -1373,12 +1380,33 @@ export default function AccountingPage() {
                   />
                 </div>
 
+                {(() => {
+                  const hasCounted = countedCash !== '' && countedCash !== null && !isNaN(Number(countedCash));
+                  const diff = hasCounted && closingPreview ? Number(countedCash) - closingPreview.expected_cash : 0;
+                  const hasDiff = hasCounted && diff !== 0;
+                  const isNoteEmpty = !closingNote || !closingNote.trim();
+                  if (hasDiff && isNoteEmpty) {
+                    return (
+                      <div className="text-[12px] text-sg-danger text-center font-medium">
+                        有差額，請先填寫備註
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
                 <Button
                   variant="primary"
                   size="md"
                   onClick={handleSubmitClosing}
                   loading={closingSubmitting}
-                  disabled={countedCash === '' || countedCash === null || isNaN(Number(countedCash))}
+                  disabled={(() => {
+                    const hasCounted = countedCash !== '' && countedCash !== null && !isNaN(Number(countedCash));
+                    if (!hasCounted) return true;
+                    const diff = closingPreview ? Number(countedCash) - closingPreview.expected_cash : 0;
+                    const isNoteEmpty = !closingNote || !closingNote.trim();
+                    return diff !== 0 && isNoteEmpty;
+                  })()}
                   className="w-full"
                 >
                   完成交班
