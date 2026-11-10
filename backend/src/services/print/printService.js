@@ -214,7 +214,9 @@ export async function queuePrintJob({
 
   // Create PrintJob with daily sequence
   const executeInTx = async (tx) => {
-    const jobDate = passedNow || passedOpts?.now || passedOpts?.job_date;
+    const jobDate = process.env.NODE_ENV === 'test'
+      ? (passedNow || passedOpts?.now || passedOpts?.job_date || null)
+      : null;
     const jobNo = await nextSerialNo(tx, 'job', jobDate);
 
     const createdJob = await tx.printJob.create({

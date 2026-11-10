@@ -21,6 +21,9 @@ if (isTest) {
   }
   url = testUrl;
   process.env.DATABASE_URL = testUrl;
+  if (!process.env.NODE_ENV) {
+    process.env.NODE_ENV = 'test';
+  }
 }
 
 const prisma = new PrismaClient(url ? { datasources: { db: { url } } } : undefined);

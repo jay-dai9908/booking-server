@@ -30,6 +30,13 @@ export async function getNextDailySeq(tx, key, date = new Date()) {
   return counter.value;
 }
 
+export function resolveBillingDate(payload) {
+  if (process.env.NODE_ENV === 'test') {
+    return payload?.now || payload?.payment_date || null;
+  }
+  return null;
+}
+
 /**
  * Generate unique serial number with Taipei date prefix:
  * - payment: R-YYMMDD-XXXX (e.g. R-261110-0001)
@@ -566,7 +573,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
 
         discountValue = Math.min(discountValue, remainingAmount);
         if (discountValue > 0) {
-          const passPayNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
+          const passPayNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
 
           await deductPass(tx, {
             user_pass_id: pass.id,
@@ -637,7 +644,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
         }
         validateMethod(method);
       }
-      const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
+      const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
 
       let change = 0;
       if (method === 'cash') {
@@ -739,7 +746,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           payment_id: pay.id,
           user: staffUser,
           device: deviceInfo,
-          now: payload?.now || payload?.payment_date
+          now: resolveBillingDate(payload)
         }, tx);
         if (job) print_jobs.push(job);
       }
@@ -762,7 +769,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           booking_ref,
           user: staffUser,
           device: deviceInfo,
-          now: payload?.now || payload?.payment_date
+          now: resolveBillingDate(payload)
         }, tx);
         if (sumJob) print_jobs.push(sumJob);
       }
@@ -856,7 +863,7 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
       }
     }
 
-    const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
+    const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     let change = 0;
@@ -913,7 +920,7 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
         payment_id: payment.id,
         user: staffUser,
         device: deviceInfo,
-        now: payload?.now || payload?.payment_date
+        now: resolveBillingDate(payload)
       }, tx);
       if (job) print_jobs.push(job);
     }
@@ -964,7 +971,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       throw { status: 400, message: `退款金額超過此顧客已付金額上限（最多可退 NT$${maxRefundable}）` };
     }
 
-    const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
+    const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const payment = await tx.payment.create({
@@ -1047,7 +1054,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
         payment_id: payment.id,
         user: staffUser,
         device: deviceInfo,
-        now: payload?.now || payload?.payment_date
+        now: resolveBillingDate(payload)
       }, tx);
       if (job) print_jobs.push(job);
     }
@@ -1331,7 +1338,7 @@ export async function waivePayment(booking_ref, payload, staffUser, deviceInfo) 
 
     const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
     const waiveAmount = targetPersons.reduce((sum, p) => sum + (p.total || 0), 0);
-    const payNo = await nextSerialNo(tx, 'payment', payload?.now || payload?.payment_date);
+    const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const payment = await tx.payment.create({
