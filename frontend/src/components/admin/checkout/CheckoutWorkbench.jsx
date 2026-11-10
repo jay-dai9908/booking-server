@@ -1405,6 +1405,9 @@ export default function CheckoutWorkbench({
               {booking.ref_display || bookingRef}
             </span>
             <StatusPill data-testid="workbench-status-pill" status={currentStatusCode} label={currentStatusLabel} className="inline-flex flex-shrink-0" />
+            {statusInfo.tags?.map((t) => (
+              <StatusPill key={t.code} status={t.code} label={t.label} className="inline-flex flex-shrink-0" />
+            ))}
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">

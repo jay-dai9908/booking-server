@@ -348,9 +348,11 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
     }
 
     // Determine billing status and summary
+    const hasRefund = Boolean(firstRes.has_refund) || bPayments.some(p => p.status === 'valid' && p.kind === 'refund');
     const statusObj = billingStatus({
       persons: bPersons.length ? bPersons : Array.from({ length: firstRes.pax }, (_, i) => ({ person_no: i + 1, status: 'active' })),
-      payments: bPayments
+      payments: bPayments,
+      hasRefund
     });
 
     const activePersons = bPersons.filter(p => p.status === 'active');
@@ -419,7 +421,8 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
         persons_total: personsTotal,
         amount_due: firstRes.amount_due ?? 0,
         amount_received: firstRes.amount_received ?? 0,
-        has_refund: Boolean(firstRes.has_refund),
+        has_refund: hasRefund,
+        tags: statusObj.tags,
         pending_supplement: 0
       },
       persons: bPersons.map(p => {

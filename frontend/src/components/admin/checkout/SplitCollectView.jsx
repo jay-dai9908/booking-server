@@ -469,7 +469,14 @@ export default function SplitCollectView({
           </div>
         }
         subtitle={`預約單號 ${billData?.booking?.ref_display || bookingRef}`}
-        headerRight={<StatusPill data-testid="split-status-pill" status={billData?.status?.code || 'unpaid'} label={billData?.status?.label} />}
+        headerRight={
+          <div className="flex items-center gap-1.5">
+            <StatusPill data-testid="split-status-pill" status={billData?.status?.code || 'unpaid'} label={billData?.status?.label} />
+            {billData?.status?.tags?.map((t) => (
+              <StatusPill key={t.code} status={t.code} label={t.label} />
+            ))}
+          </div>
+        }
         footer={
           successPaymentData ? null : (
             <div className="space-y-2.5">

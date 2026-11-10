@@ -149,9 +149,12 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
 
   const bill = computeBill(billInput);
 
+  const hasRefund = Boolean(firstRes.has_refund) || payments.some(p => p.status === 'valid' && p.kind === 'refund');
+
   const status = billingStatus({
     persons: billInput.persons,
-    payments
+    payments,
+    hasRefund
   });
 
   return {
