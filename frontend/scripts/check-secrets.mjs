@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,9 +16,13 @@ const scanDirs = [
 const FORBIDDEN_PATTERNS = [
   { name: 'ADMIN_PASSWORD ||', regex: /ADMIN_PASSWORD\s*\|\|/ },
   { name: 'JWT_SECRET ||', regex: /JWT_SECRET\s*\|\|/ },
-  { name: 'gathering.light2609', regex: /gathering\.light2609/ },
   { name: 'super_secret', regex: /super_secret/i }
 ];
+
+// SHA-256 hashes of known leaked credentials (never commit plaintext secrets)
+const FORBIDDEN_SECRET_HASHES = new Set([
+  'b19e5bcbd873e1b35f5abc3179a765126bbf71a1c6bbe7251d18a0ea0fe76e35'
+]);
 
 function getAllFiles(dir, files = []) {
   if (!fs.existsSync(dir)) return files;
@@ -47,6 +52,20 @@ for (const dir of scanDirs) {
           console.error(`[check-secrets] FORBIDDEN SECRET PATTERN "${name}" found in ${path.relative(rootDir, file)}:${idx + 1}`);
           console.error(`  Line ${idx + 1}: ${line.trim()}`);
           violations++;
+        }
+      }
+
+      // Check SHA-256 hashes of string literals
+      const stringMatches = line.match(/(['"`])(.*?)\1/g) || [];
+      for (const rawMatch of stringMatches) {
+        const val = rawMatch.slice(1, -1);
+        if (val.length >= 8) {
+          const hash = crypto.createHash('sha256').update(val).digest('hex');
+          if (FORBIDDEN_SECRET_HASHES.has(hash)) {
+            console.error(`[check-secrets] FORBIDDEN SECRET HASH MATCH found in ${path.relative(rootDir, file)}:${idx + 1}`);
+            console.error(`  Line ${idx + 1}: ${line.trim()}`);
+            violations++;
+          }
         }
       }
     });
