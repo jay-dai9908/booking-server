@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import prisma from '../../prismaClient.js';
-import { computeBill, billingStatus } from '../../../../shared/billing.js';
+import { computeBill, billingStatus, calculatePersonRefundInfo } from '../../../../shared/billing.js';
 import { toTaipeiDateString, blocksBy1030, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 import { log as auditLog } from '../audit/auditService.js';
@@ -163,6 +163,14 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
     payments,
     hasRefund
   });
+
+  const validPayments = payments.filter(p => p.status === 'valid');
+  for (const ep of (billInput.effectivePersons || [])) {
+    const rInfo = calculatePersonRefundInfo(validPayments, ep.person_no);
+    ep.paid_amount = rInfo.paid_amount;
+    ep.refunded_amount = rInfo.refunded_amount;
+    ep.max_refundable = rInfo.max_refundable;
+  }
 
   return {
     bill,
@@ -518,6 +526,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
 
     // Handle pass tenders (Section 3.7 & 4.5.7)
     const passRecords = [];
+    const personPassDiscounts = new Map();
     if (Array.isArray(pass_tenders) && pass_tenders.length) {
       const usedPassIds = new Set();
       const firstRes = await tx.reservation.findFirst({
@@ -573,6 +582,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
 
         discountValue = Math.min(discountValue, remainingAmount);
         if (discountValue > 0) {
+          personPassDiscounts.set(pt.person_no, (personPassDiscounts.get(pt.person_no) || 0) + discountValue);
           const passPayNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
 
           await deductPass(tx, {
@@ -596,7 +606,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
               amount: discountValue,
               person_nos: [pt.person_no],
               breakdown_json: {
-                persons: [pBill],
+                persons: [{ ...pBill, amount: discountValue }],
                 pricing,
                 snapshot_at: new Date().toISOString()
               },
@@ -655,6 +665,11 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
         change = cashAmt - remainingAmount;
       }
 
+      const targetPersonsWithNet = targetPersons.map(tp => ({
+        ...tp,
+        amount: Math.max(0, (tp.total || 0) - (personPassDiscounts.get(tp.person_no) || 0))
+      }));
+
       const mainPay = await tx.payment.create({
         data: {
           payment_no: payNo,
@@ -669,7 +684,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           change_given: method === 'cash' ? change : null,
           person_nos: targetPersonNos,
           breakdown_json: {
-            persons: targetPersons,
+            persons: targetPersonsWithNet,
             pricing,
             order: {
               persons_total: bill.status?.total ?? targetPersons.length,
@@ -953,20 +968,12 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
     const priorPayments = await tx.payment.findMany({
       where: {
         booking_ref,
-        status: 'valid',
-        person_nos: { has: pNo }
+        status: 'valid'
       }
     });
 
-    const paidTotal = priorPayments
-      .filter(p => p.kind === 'charge' || p.kind === 'supplement')
-      .reduce((sum, p) => sum + p.amount, 0);
-
-    const refundedTotal = priorPayments
-      .filter(p => p.kind === 'refund')
-      .reduce((sum, p) => sum + p.amount, 0);
-
-    const maxRefundable = paidTotal - refundedTotal;
+    const refundInfo = calculatePersonRefundInfo(priorPayments, pNo);
+    const maxRefundable = refundInfo.max_refundable;
     if (refundAmt > maxRefundable) {
       throw { status: 400, message: `退款金額超過此顧客已付金額上限（最多可退 NT$${maxRefundable}）` };
     }

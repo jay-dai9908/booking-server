@@ -171,9 +171,7 @@ export default function SplitCollectView({
     const origMethod = origPayment?.method || 'cash';
     const initialMethod = (origMethod === 'line_pay') ? 'linepay' : origMethod;
     setRefundMethod(initialMethod);
-    const paid = pPayments.filter(pay => pay.kind === 'charge' || pay.kind === 'supplement').reduce((s, pay) => s + pay.amount, 0);
-    const refunded = pPayments.filter(pay => pay.kind === 'refund').reduce((s, pay) => s + pay.amount, 0);
-    const maxRef = Math.max(0, paid - refunded) || p.total || 0;
+    const maxRef = p.max_refundable ?? 0;
     setActionAmount(maxRef);
     setActionReason('');
   };
@@ -183,15 +181,7 @@ export default function SplitCollectView({
         pay => pay.status === 'valid' && (pay.person_nos || []).includes(refundTarget.person_no)
       )
     : [];
-  const refundTargetPaid = refundTargetPayments
-    .filter(pay => pay.kind === 'charge' || pay.kind === 'supplement')
-    .reduce((s, pay) => s + pay.amount, 0);
-  const refundTargetRefunded = refundTargetPayments
-    .filter(pay => pay.kind === 'refund')
-    .reduce((s, pay) => s + pay.amount, 0);
-  const refundTargetMaxRefundable = refundTargetPayments.length > 0
-    ? Math.max(0, refundTargetPaid - refundTargetRefunded)
-    : (refundTarget?.total || 0);
+  const refundTargetMaxRefundable = refundTarget?.max_refundable ?? 0;
 
   const hasPassPayment = refundTargetPayments.some(
     pay => pay.method === 'pass' || (Array.isArray(pay.pass_json) && pay.pass_json.length > 0)
@@ -1053,7 +1043,7 @@ export default function SplitCollectView({
           isOpen={Boolean(refundTarget)}
           onClose={() => setRefundTarget(null)}
           title={`退款：第 ${refundTarget.person_no} 位`}
-          subtitle={`已付 NT$${refundTargetPaid || refundTarget.total}`}
+          subtitle={`已付 NT$${refundTargetMaxRefundable}`}
           footer={
             <div className="flex items-center justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={() => setRefundTarget(null)}>

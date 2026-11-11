@@ -69,6 +69,70 @@ export function splitAmount(total, items = []) {
 }
 
 /**
+ * 計算單一客人的已付金額、已退金額、最多可退上限 (Round 21 Item 1)
+ * @param {Array} payments - 預約的所有付款紀錄
+ * @param {number} personNo - 客人編號
+ * @returns {{ paid_amount: number, refunded_amount: number, max_refundable: number }}
+ */
+export function calculatePersonRefundInfo(payments = [], personNo) {
+  const pNo = Number(personNo);
+  const validPayments = (payments || []).filter(p => p.status === 'valid');
+
+  let paidTotal = 0;
+  let refundedTotal = 0;
+
+  for (const p of validPayments) {
+    const personNos = Array.isArray(p.person_nos) ? p.person_nos : [];
+    if (!personNos.includes(pNo)) continue;
+
+    if (p.kind === 'refund') {
+      refundedTotal += Number(p.amount) || 0;
+    } else if (p.kind === 'supplement') {
+      paidTotal += Number(p.amount) || 0;
+    } else if (p.kind === 'charge') {
+      if (personNos.length === 1) {
+        paidTotal += Number(p.amount) || 0;
+      } else if (Array.isArray(p.breakdown_json?.persons) && p.breakdown_json.persons.length > 0) {
+        const bpPersons = p.breakdown_json.persons;
+        const bpItems = personNos.map(no => {
+          const bp = bpPersons.find(x => x.person_no === no);
+          const val = Number(bp?.amount != null ? bp.amount : bp?.total) || 0;
+          return { person_no: no, weight: val };
+        });
+        const bpSum = bpItems.reduce((s, it) => s + it.weight, 0);
+
+        if (bpSum === p.amount) {
+          const match = bpItems.find(it => it.person_no === pNo);
+          paidTotal += (match?.weight || 0);
+        } else if (bpSum > 0) {
+          const splits = splitAmount(p.amount, bpItems);
+          const match = splits.find(s => s.person_no === pNo);
+          paidTotal += (match?.amount || 0);
+        } else {
+          const items = personNos.map(no => ({ person_no: no, weight: 1 }));
+          const splits = splitAmount(p.amount, items);
+          const match = splits.find(s => s.person_no === pNo);
+          paidTotal += (match?.amount || 0);
+        }
+      } else {
+        const items = personNos.map(no => ({ person_no: no, weight: 1 }));
+        const splits = splitAmount(p.amount, items);
+        const match = splits.find(s => s.person_no === pNo);
+        paidTotal += (match?.amount || 0);
+      }
+    }
+  }
+
+  const maxRefundable = Math.max(0, paidTotal - refundedTotal);
+
+  return {
+    paid_amount: paidTotal,
+    refunded_amount: refundedTotal,
+    max_refundable: maxRefundable
+  };
+}
+
+/**
  * 計算單一位客人的入場收費時數與入場費（Section 4.3）
  * @param {object} params
  * @param {number} params.bookedMinutes - 預約時數（分鐘）
@@ -524,10 +588,15 @@ export function computeBill({
     }
   }
 
-  // 4b. Pending supplements per person
+  // 4b. Pending supplements per person & Refund info (Round 21 Item 1)
   for (const p of computedPersons) {
     const personSupplements = pendingSupplements.filter(ps => ps.person_no === p.person_no);
     p.pending_supplement = personSupplements.reduce((sum, ps) => sum + ps.amount, 0);
+
+    const refundInfo = calculatePersonRefundInfo(validPayments, p.person_no);
+    p.paid_amount = refundInfo.paid_amount;
+    p.refunded_amount = refundInfo.refunded_amount;
+    p.max_refundable = refundInfo.max_refundable;
   }
 
   // 5. Aggregate order totals

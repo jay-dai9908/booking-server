@@ -1,7 +1,7 @@
 // shared/__tests__/billing.test.js
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeEntry, splitAmount, computeBill, billingStatus } from '../billing.js';
+import { computeEntry, splitAmount, computeBill, billingStatus, calculatePersonRefundInfo } from '../billing.js';
 import { calculateBoardTotal, chargeableHours } from '../boardPricing.js';
 
 test('Section 4.3.5 Entry pricing examples', () => {
@@ -527,4 +527,131 @@ test('Section 4.6 billingStatus transitions', () => {
   const sPending = billingStatus({ persons: pList, payments: [pay1, pay2, pay3], pendingSupplements: [{ amount: 29 }] });
   assert.ok(sPending.tags.some(t => t.code === 'pending' && t.label === '待補收 NT$29'));
 });
+
+test('Round 21 Item 1: calculatePersonRefundInfo per-person paid and max_refundable calculation', () => {
+  // 1. Two persons pay 400 together (each 200 via breakdown_json.persons)
+  const payCharge = {
+    kind: 'charge',
+    status: 'valid',
+    amount: 400,
+    person_nos: [1, 2],
+    breakdown_json: {
+      persons: [
+        { person_no: 1, total: 200 },
+        { person_no: 2, total: 200 }
+      ]
+    }
+  };
+
+  const p1Initial = calculatePersonRefundInfo([payCharge], 1);
+  assert.equal(p1Initial.paid_amount, 200);
+  assert.equal(p1Initial.refunded_amount, 0);
+  assert.equal(p1Initial.max_refundable, 200);
+
+  const p2Initial = calculatePersonRefundInfo([payCharge], 2);
+  assert.equal(p2Initial.paid_amount, 200);
+  assert.equal(p2Initial.refunded_amount, 0);
+  assert.equal(p2Initial.max_refundable, 200);
+
+  // 2. Person 1 refunds 100
+  const payRefund1 = {
+    kind: 'refund',
+    status: 'valid',
+    amount: 100,
+    person_nos: [1]
+  };
+
+  const p1AfterRefund = calculatePersonRefundInfo([payCharge, payRefund1], 1);
+  assert.equal(p1AfterRefund.paid_amount, 200);
+  assert.equal(p1AfterRefund.refunded_amount, 100);
+  assert.equal(p1AfterRefund.max_refundable, 100);
+
+  // Person 2 is unaffected by Person 1's refund
+  const p2AfterP1Refund = calculatePersonRefundInfo([payCharge, payRefund1], 2);
+  assert.equal(p2AfterP1Refund.paid_amount, 200);
+  assert.equal(p2AfterP1Refund.refunded_amount, 0);
+  assert.equal(p2AfterP1Refund.max_refundable, 200);
+
+  // 3. Person 1 and Person 2 each refund remaining
+  const payRefund1b = { kind: 'refund', status: 'valid', amount: 100, person_nos: [1] };
+  const payRefund2 = { kind: 'refund', status: 'valid', amount: 200, person_nos: [2] };
+  const allPayments = [payCharge, payRefund1, payRefund1b, payRefund2];
+
+  const p1Final = calculatePersonRefundInfo(allPayments, 1);
+  assert.equal(p1Final.max_refundable, 0);
+  const p2Final = calculatePersonRefundInfo(allPayments, 2);
+  assert.equal(p2Final.max_refundable, 0);
+
+  const totalRefunded = allPayments.filter(p => p.kind === 'refund').reduce((s, p) => s + p.amount, 0);
+  assert.equal(totalRefunded, 400);
+
+  // 4. Legacy data without breakdown_json.persons uses splitAmount
+  const legacyPay = {
+    kind: 'charge',
+    status: 'valid',
+    amount: 400,
+    person_nos: [1, 2]
+    // no breakdown_json
+  };
+  const leg1 = calculatePersonRefundInfo([legacyPay], 1);
+  const leg2 = calculatePersonRefundInfo([legacyPay], 2);
+  assert.equal(leg1.paid_amount, 200);
+  assert.equal(leg1.max_refundable, 200);
+  assert.equal(leg2.paid_amount, 200);
+  assert.equal(leg2.max_refundable, 200);
+
+  // Odd amount split test (NT$500 between 3 persons without breakdown_json)
+  const legacy500 = {
+    kind: 'charge',
+    status: 'valid',
+    amount: 500,
+    person_nos: [1, 2, 3]
+  };
+  const leg500_1 = calculatePersonRefundInfo([legacy500], 1);
+  const leg500_2 = calculatePersonRefundInfo([legacy500], 2);
+  const leg500_3 = calculatePersonRefundInfo([legacy500], 3);
+  assert.equal(leg500_1.paid_amount + leg500_2.paid_amount + leg500_3.paid_amount, 500);
+  assert.equal(leg500_1.paid_amount, 167);
+  assert.equal(leg500_2.paid_amount, 167);
+  assert.equal(leg500_3.paid_amount, 166);
+
+  // 5. Explicit bp.amount in breakdown_json takes precedence over bp.total
+  const explicitPay = {
+    kind: 'charge',
+    status: 'valid',
+    amount: 400,
+    person_nos: [1, 2],
+    breakdown_json: {
+      persons: [
+        { person_no: 1, amount: 150, total: 300 },
+        { person_no: 2, amount: 250, total: 300 }
+      ]
+    }
+  };
+  const exp1 = calculatePersonRefundInfo([explicitPay], 1);
+  const exp2 = calculatePersonRefundInfo([explicitPay], 2);
+  assert.equal(exp1.paid_amount, 150);
+  assert.equal(exp2.paid_amount, 250);
+  assert.equal(exp1.paid_amount + exp2.paid_amount, 400);
+
+  // 6. When bpSum exceeds p.amount (e.g. partial payment), split proportionally so sum <= p.amount
+  const partialPay = {
+    kind: 'charge',
+    status: 'valid',
+    amount: 300,
+    person_nos: [1, 2],
+    breakdown_json: {
+      persons: [
+        { person_no: 1, total: 400 },
+        { person_no: 2, total: 200 }
+      ]
+    }
+  };
+  const part1 = calculatePersonRefundInfo([partialPay], 1);
+  const part2 = calculatePersonRefundInfo([partialPay], 2);
+  assert.equal(part1.paid_amount + part2.paid_amount, 300);
+  assert.equal(part1.paid_amount, 200);
+  assert.equal(part2.paid_amount, 100);
+});
+
 
