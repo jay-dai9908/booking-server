@@ -1,4 +1,3 @@
-import { showCustomerToast } from '../components/customer/Toast';
 
 /**
  * LINE OAuth 登入前端共用輔助工具
@@ -62,7 +61,14 @@ export const initiateLineOAuth = ({ prefix = '', returnPath = '/booking' } = {})
   const redirectUri = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_LINE_CALLBACK_URL) || (typeof process !== 'undefined' && process.env?.VITE_LINE_CALLBACK_URL);
 
   if (!channelId || !redirectUri || channelId === 'your_channel_id_here') {
-    showCustomerToast('系統尚未設定 LINE 登入參數 (VITE_LINE_CHANNEL_ID / VITE_LINE_CALLBACK_URL)', { type: 'error' });
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('sg-toast', {
+        detail: {
+          message: '系統尚未設定 LINE 登入參數 (VITE_LINE_CHANNEL_ID / VITE_LINE_CALLBACK_URL)',
+          type: 'error'
+        }
+      }));
+    }
     return;
   }
 

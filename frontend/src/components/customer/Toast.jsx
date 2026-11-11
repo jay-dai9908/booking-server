@@ -65,15 +65,8 @@ export function ToastProvider({ children }) {
 
   useEffect(() => {
     globalCustomerToastHandler = show;
-    const handleEvent = (e) => {
-      if (e.detail?.message) {
-        show(e.detail.message, e.detail.options);
-      }
-    };
-    window.addEventListener('sg-toast', handleEvent);
     return () => {
       globalCustomerToastHandler = null;
-      window.removeEventListener('sg-toast', handleEvent);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [show]);

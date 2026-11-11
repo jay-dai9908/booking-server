@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import '../../styles/customer.css';
 import ErrorBoundary from '../common/ErrorBoundary';
+import { useToast } from './Toast';
 
 export default function CustomerLayout({
   header,
@@ -9,6 +10,8 @@ export default function CustomerLayout({
   bare = false,
   mainClassName = '',
 }) {
+  const { show } = useToast();
+
   useEffect(() => {
     const origBg = document.body.style.backgroundColor;
     document.body.style.backgroundColor = '#F6F1EA';
@@ -16,6 +19,18 @@ export default function CustomerLayout({
       document.body.style.backgroundColor = origBg;
     };
   }, []);
+
+  useEffect(() => {
+    const handleSgToast = (e) => {
+      if (e.detail?.message && show) {
+        show(e.detail.message, e.detail.options || { type: e.detail.type || 'error' });
+      }
+    };
+    window.addEventListener('sg-toast', handleSgToast);
+    return () => {
+      window.removeEventListener('sg-toast', handleSgToast);
+    };
+  }, [show]);
 
   return (
     <div className="sg-app min-h-[100dvh] bg-sg-bg font-body text-sg-ink antialiased overflow-x-clip">
