@@ -633,6 +633,12 @@ async function run() {
     const printToggle = aPage.locator('text=收款後列印收據');
     assert.ok(await printToggle.isVisible(), 'Print toggle 收款後列印收據 must exist');
 
+    // Uncheck Person 2 so that we only collect for Person 1 first
+    const p2Option = aPage.locator('[data-testid="split-person-card-2"]').first();
+    assert.ok(await p2Option.isVisible(), 'SplitCollectView must show Person 2 card');
+    await p2Option.click();
+    await aPage.waitForTimeout(400);
+
     // Verify D1: "免收" is inside "⋯" menu, not a standalone button in SplitCollectView
     const splitDialog = aPage.locator('div[role="dialog"]').last();
     const standaloneWaiveBtn = splitDialog.locator('button:has-text("免收")');
@@ -647,11 +653,6 @@ async function run() {
     assert.ok(await waiveItem.isVisible(), '免收此對象 must be inside ⋯ menu');
     await splitMoreMenuBtn.click(); // close menu
     await aPage.waitForTimeout(300);
-
-    // Uncheck Person 2 so that we only collect for Person 1 first
-    const p2Option = aPage.locator('[data-testid="split-person-card-2"]').first();
-    await p2Option.click();
-    await aPage.waitForTimeout(400);
 
     // Collect for Person 1
     console.log('Collecting payment for Person 1...');
