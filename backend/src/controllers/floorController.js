@@ -405,6 +405,126 @@ export async function moveSeat(req, res) {
   }
 }
 
+export async function moveGroup(req, res) {
+  const { booking_ref } = req.params;
+  const { to_table_id } = req.body;
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  try {
+    const targetTableId = parseInt(to_table_id, 10);
+    if (!targetTableId || isNaN(targetTableId)) {
+      return res.status(400).json({ error: '請指定目標桌' });
+    }
+
+    let result = null;
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+      const reservations = await tx.reservation.findMany({
+        where: { booking_ref, status: { not: 'cancelled' } },
+        include: { session: true }
+      });
+      if (!reservations.length) throw { status: 404, message: '找不到此筆預約' };
+
+      const sessionIds = reservations.map(r => r.session_id);
+      const sessionDate = reservations[0].session.session_date;
+
+      const activeLayout = await getActiveLayoutForDate(tx, sessionDate);
+      const targetTable = (activeLayout?.tables || []).find(t => t.id === targetTableId);
+      if (!targetTable) throw { status: 404, message: '目標桌不存在' };
+
+      // Target active seats at this table sorted naturally
+      const targetSeats = (activeLayout?.seats || []).filter(s => s.table_id === targetTableId && s.is_active);
+      targetSeats.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.code.localeCompare(b.code));
+
+      // Find seats occupied across this booking's sessionIds by other active bookings
+      const conflictReservations = await tx.reservation.findMany({
+        where: {
+          session_id: { in: sessionIds },
+          booking_ref: { not: booking_ref },
+          status: { not: 'cancelled' },
+          attendance: { not: 'completed' }
+        },
+        select: { assigned_seats: true }
+      });
+
+      const occupiedSeatCodes = new Set();
+      for (const cr of conflictReservations) {
+        for (const s of cr.assigned_seats || []) {
+          occupiedSeatCodes.add(s);
+        }
+      }
+
+      const availableTargetSeats = targetSeats.filter(s => !occupiedSeatCodes.has(s.code));
+
+      // Determine active persons in this group
+      const persons = await tx.bookingPerson.findMany({
+        where: { booking_ref, status: 'active' },
+        orderBy: { person_no: 'asc' }
+      });
+
+      const currentRes = reservations[0];
+      const countNeeded = persons.length > 0 ? persons.length : ((currentRes.assigned_seats || []).length || currentRes.pax);
+
+      if (availableTargetSeats.length < countNeeded) {
+        throw { status: 422, message: `這桌只剩 ${availableTargetSeats.length} 個空位` };
+      }
+
+      // Assign in order
+      const newSeats = availableTargetSeats.slice(0, countNeeded).map(s => s.code);
+
+      // Update reservation.assigned_seats
+      await tx.reservation.updateMany({
+        where: { booking_ref },
+        data: { assigned_seats: newSeats, seat_source: 'staff' }
+      });
+
+      // Update each person's seat_code while keeping timer intact
+      for (let i = 0; i < persons.length; i++) {
+        const p = persons[i];
+        const newCode = newSeats[i];
+        if (p.seat_code !== newCode) {
+          await tx.bookingPerson.update({
+            where: { id: p.id },
+            data: { seat_code: newCode }
+          });
+        }
+      }
+
+      // Write audit log
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'seats_changed',
+        category: 'seating',
+        summary: `整組換桌至 ${targetTable.label} (${newSeats.join(', ')})`,
+        reason: '整組換桌',
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id || null,
+        device_label: deviceInfo?.device_label || null
+      });
+
+      // Assert no collisions
+      await assertNoSeatCollisions(tx, sessionIds);
+
+      result = {
+        success: true,
+        new_seats: newSeats,
+        table_label: targetTable.label,
+        server_now: new Date().toISOString()
+      };
+    });
+
+    return res.json(result);
+  } catch (error) {
+    console.error('[moveGroup] Error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message, message: error.message });
+    return res.status(500).json({ error: '整組換桌失敗', details: error.message });
+  }
+}
+
 export async function handleTimer(req, res) {
   const { booking_ref } = req.params;
   const { action, person_nos = 'all', reason } = req.body;
@@ -1354,6 +1474,7 @@ export default {
   getLive,
   checkIn,
   moveSeat,
+  moveGroup,
   handleTimer,
   addPerson,
   removePerson,

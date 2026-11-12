@@ -44,6 +44,7 @@ import TimelineGrid from '../../components/admin/floor/TimelineGrid';
 import CheckInPanel from '../../components/admin/floor/CheckInPanel';
 import SeatActionPanel from '../../components/admin/floor/SeatActionPanel';
 import TablePanel from '../../components/admin/floor/TablePanel';
+import MoveGroupModal from '../../components/admin/floor/MoveGroupModal';
 
 // Modals
 import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
@@ -2328,6 +2329,19 @@ export default function SeatingPage() {
         }}
         refresh={refresh}
         serverNow={getServerNow()}
+        showToast={showToast}
+      />
+
+      {/* Move Group Modal (Round 22 Item 4) */}
+      <MoveGroupModal
+        isOpen={Boolean(moveGroupTarget)}
+        onClose={() => setMoveGroupTarget(null)}
+        booking={moveGroupTarget}
+        layout={layout}
+        seatStates={seatStatesMap}
+        onSuccess={() => {
+          refresh();
+        }}
         showToast={showToast}
       />
 
