@@ -604,8 +604,8 @@ async function run() {
       await aPage.waitForTimeout(600);
     }
 
-    // Find the specific card by testGuestName
-    const guestCard = aPage.locator(`div[data-booking-ref="${testRef}"]`).or(aPage.locator(`div:has-text("${testGuestName}")`).locator('..')).first();
+    // Find the specific card by testRef
+    const guestCard = aPage.locator(`div[data-booking-ref="${testRef}"]`).first();
     assert.ok(await guestCard.isVisible(), `Floor card for ${testGuestName} must be visible`);
 
     // Verify initial status pill shows unpaid
@@ -708,14 +708,14 @@ async function run() {
 
     // Verify D2: Immediate optimistic status update on seating floor card
     console.log('Verifying immediate optimistic floor card update to 已結清...');
-    let paidCard = aPage.locator(`div[data-booking-ref="${testRef}"]`).or(aPage.locator(`div:has-text("${testGuestName}")`)).first();
+    let paidCard = aPage.locator(`div[data-booking-ref="${testRef}"]`).first();
     if (!(await paidCard.isVisible().catch(() => false))) {
       const completedToggle = aPage.locator('button:has-text("已離場")').first();
       if (await completedToggle.isVisible().catch(() => false)) {
         await completedToggle.click();
         await aPage.waitForTimeout(600);
       }
-      paidCard = aPage.locator(`div[data-booking-ref="${testRef}"]`).or(aPage.locator(`div:has-text("${testGuestName}")`)).first();
+      paidCard = aPage.locator(`div[data-booking-ref="${testRef}"]`).first();
     }
     assert.ok(await paidCard.isVisible(), 'Card must be visible on floor (in-use or in expanded 已離場)');
     const paidPill = paidCard.locator('text=已結清');
