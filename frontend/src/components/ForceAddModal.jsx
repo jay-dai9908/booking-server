@@ -9,12 +9,14 @@ export default function ForceAddModal({
   isOpen,
   onClose,
   selectedSessionId,
+  preselectedSeats = [],
+  initialPax = null,
   sessions = [],
   onSuccess
 }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [pax, setPax] = useState(1);
+  const [pax, setPax] = useState(() => (initialPax || (preselectedSeats.length > 0 ? preselectedSeats.length : 1)));
   const [isUnlimited, setIsUnlimited] = useState(false);
   const [isForceWait, setIsForceWait] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState([]);
@@ -31,6 +33,11 @@ export default function ForceAddModal({
     if (!isOpen) return;
     setError('');
     setIsSubmitting(false);
+    if (initialPax != null) {
+      setPax(initialPax);
+    } else if (preselectedSeats.length > 0) {
+      setPax(preselectedSeats.length);
+    }
 
     if (selectedSessionId) {
       setSelectedSessionIds([selectedSessionId]);
@@ -48,7 +55,7 @@ export default function ForceAddModal({
     } else {
       setSelectedSessionIds([]);
     }
-  }, [isOpen, selectedSessionId, sortedSessions]);
+  }, [isOpen, selectedSessionId, sortedSessions, initialPax, preselectedSeats]);
 
   if (!isOpen) return null;
 
@@ -122,6 +129,7 @@ export default function ForceAddModal({
         isWalkIn: true,
         attendance: isForceWait ? null : 'checked_in',
         autoCheckIn: !isForceWait,
+        assigned_seats: preselectedSeats.length > 0 ? preselectedSeats.slice(0, paxNum) : undefined,
         equipments: []
       });
 

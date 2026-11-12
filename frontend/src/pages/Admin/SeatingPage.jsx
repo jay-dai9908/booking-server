@@ -43,6 +43,7 @@ import TableCard from '../../components/admin/floor/TableCard';
 import TimelineGrid from '../../components/admin/floor/TimelineGrid';
 import CheckInPanel from '../../components/admin/floor/CheckInPanel';
 import SeatActionPanel from '../../components/admin/floor/SeatActionPanel';
+import TablePanel from '../../components/admin/floor/TablePanel';
 
 // Modals
 import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
@@ -258,7 +259,9 @@ export default function SeatingPage() {
     }
   };
 
-  const [selectedTableDetails, setSelectedTableDetails] = useState(null); // table object
+  const [selectedTableForPanel, setSelectedTableForPanel] = useState(null); // table object for TablePanel
+  const [forceAddPreselectedSeats, setForceAddPreselectedSeats] = useState([]);
+  const [moveGroupTarget, setMoveGroupTarget] = useState(null);
   const [activeMobileTableId, setActiveMobileTableId] = useState(null);
   const [flashingTableId, setFlashingTableId] = useState(null);
   const mobileStickyHeaderRef = useRef(null);
@@ -325,6 +328,14 @@ export default function SeatingPage() {
   const backendAlerts = floorData?.alerts || [];
   const boardUsage = floorData?.board_usage || [];
   const sessions = floorData?.sessions || [];
+
+  // Keep selectedTableForPanel in sync with layout
+  useEffect(() => {
+    if (selectedTableForPanel && layout?.tables) {
+      const updated = layout.tables.find(t => t.id === selectedTableForPanel.id);
+      if (updated) setSelectedTableForPanel(updated);
+    }
+  }, [layout, selectedTableForPanel]);
 
   // Group bookings by attendance
   const completedBookings = bookings.filter(b => isBookingCompleted(b));
@@ -1315,6 +1326,7 @@ export default function SeatingPage() {
                           seats={tableSeats}
                           seatStates={seatStatesMap}
                           onSeatClick={handleSeatClick}
+                          onTableTitleClick={(tbl) => setSelectedTableForPanel(tbl)}
                           className={flashingTableId === t.id ? 'sg-flash-peach' : ''}
                         />
                       );
@@ -1372,42 +1384,10 @@ export default function SeatingPage() {
               <div style={{ minHeight: 'calc(100vh - 280px)' }} />
             </div>
 
-            {/* Right: Sidebar Overview or Table Details (Desktop) */}
+            {/* Right: Sidebar Overview (Desktop) */}
             <div className="hidden lg:block lg:col-span-4 space-y-4">
-              {selectedTableDetails ? (
-                <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-[16px] font-bold text-sg-ink">{selectedTableDetails.label} 明細</h3>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedTableDetails(null)}
-                      className="text-[12px] text-sg-brown hover:underline font-bold"
-                    >
-                      回到總覽
-                    </button>
-                  </div>
-
-                  <div className="space-y-2">
-                    {(layout.seats || [])
-                      .filter(s => s.table_id === selectedTableDetails.id)
-                      .map((s) => {
-                        const st = seatStatesMap[s.code] || {};
-                        return (
-                          <div key={s.code} className="p-3 rounded-2xl bg-sg-paper/40 border border-sg-line flex items-center justify-between text-[13px]">
-                            <div>
-                              <span className="font-bold text-sg-ink mr-2">{s.code}</span>
-                              <span className="text-sg-muted">{st.paxName || '空位'}</span>
-                            </div>
-                            <span className="font-bold text-[12px]">{st.timerText}</span>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {/* Alerts Card */}
-                  {alerts.length > 0 && (
+              {/* Alerts Card */}
+              {alerts.length > 0 && (
                     <div className="bg-sg-honey-soft/50 p-4 rounded-3xl border border-sg-honey/40 space-y-3">
                       <div className="flex items-center gap-2 text-sg-honey font-bold text-[14px]">
                         <AlertTriangle className="w-4 h-4" />
@@ -1491,8 +1471,6 @@ export default function SeatingPage() {
                       ))}
                     </div>
                   </div>
-                </>
-              )}
             </div>
           </div>
         </div>
@@ -2293,6 +2271,66 @@ export default function SeatingPage() {
         }}
       />
 
+      {/* Whole Table Management Panel (Round 22 Item 3) */}
+      <TablePanel
+        isOpen={Boolean(selectedTableForPanel)}
+        onClose={() => setSelectedTableForPanel(null)}
+        table={selectedTableForPanel}
+        seats={(layout.seats || []).filter(s => s.table_id === selectedTableForPanel?.id)}
+        seatStates={seatStatesMap}
+        bookings={floorData?.bookings || []}
+        onCheckout={(bRef) => {
+          setSelectedTableForPanel(null);
+          setCheckoutBookingRef(bRef);
+        }}
+        onDetails={(bRef) => {
+          setSelectedTableForPanel(null);
+          setDetailsBookingRef(bRef);
+        }}
+        onCheckIn={(b) => {
+          setSelectedTableForPanel(null);
+          setCheckInTarget(b);
+        }}
+        onExtendTime={(b) => {
+          setSelectedTableForPanel(null);
+          setExtendReservation(b);
+        }}
+        onMoveGroup={(b) => {
+          setMoveGroupTarget(b);
+        }}
+        onTimerAction={(bRef, personNos, action) => {
+          handleTimerAction(bRef, personNos, action);
+        }}
+        onOpenSeatAction={(seat, seatInfo, booking) => {
+          setSelectedTableForPanel(null);
+          setSeatActionTarget({ seat, seatInfo, booking });
+        }}
+        onMoveSeat={({ booking, fromSeat, personNo }) => {
+          setSelectedTableForPanel(null);
+          setMoveSeatModalTarget({ booking, fromSeat, personNo });
+        }}
+        onSwapBoard={({ booking, personNo }) => {
+          setSelectedTableForPanel(null);
+          setBoardSwapTarget({ booking, personNo });
+          setSelectedSwapSize(null);
+          setSelectedBoundary(null);
+          setSwapError(null);
+        }}
+        onAddBoard={({ booking, personNo }) => {
+          setSelectedTableForPanel(null);
+          setAddBoardModalTarget({ booking, personNo });
+        }}
+        onForceAdd={(initialSessionId, preselectedSeats) => {
+          setSelectedTableForPanel(null);
+          setForceAddInitialSessionId(initialSessionId);
+          setForceAddPreselectedSeats(preselectedSeats || []);
+          setShowForceAdd(true);
+        }}
+        refresh={refresh}
+        serverNow={getServerNow()}
+        showToast={showToast}
+      />
+
       {/* Board Swap Sheet */}
       {boardSwapTarget && (() => {
         const b = boardSwapTarget.booking;
@@ -2549,11 +2587,17 @@ export default function SeatingPage() {
       {showForceAdd && (
         <ForceAddModal
           isOpen={showForceAdd}
-          onClose={() => setShowForceAdd(false)}
+          onClose={() => {
+            setShowForceAdd(false);
+            setForceAddPreselectedSeats([]);
+          }}
           selectedSessionId={forceAddInitialSessionId}
+          preselectedSeats={forceAddPreselectedSeats}
+          initialPax={forceAddPreselectedSeats.length > 0 ? forceAddPreselectedSeats.length : null}
           sessions={sessions}
           onSuccess={(createdBooking, isWait) => {
             setShowForceAdd(false);
+            setForceAddPreselectedSeats([]);
             refresh();
             if (createdBooking) {
               setCheckInTarget(createdBooking);
