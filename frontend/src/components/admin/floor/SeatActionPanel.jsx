@@ -16,6 +16,7 @@ import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
 import { displayBoardName } from '../../../../../shared/billing.js';
 import { getPersonStatusText } from '../../../utils/admin/floorSelectors.js';
+import PersonTimeline from './PersonTimeline';
 
 function formatTimeHHMM(val) {
   if (!val) return '';
@@ -45,7 +46,8 @@ export default function SeatActionPanel({
   onCheckIn,
   onLeave,
   onSupplement,
-  onRefund
+  onRefund,
+  serverNow = null
 }) {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
@@ -153,6 +155,7 @@ export default function SeatActionPanel({
 
   // Group members (同組)
   const allPersons = booking?.persons || [];
+  const currentPerson = allPersons.find(p => Number(p.person_no) === Number(personNo)) || null;
   const otherPersons = allPersons.filter(p => p.person_no !== personNo);
 
   // Board for this person
@@ -309,6 +312,12 @@ export default function SeatActionPanel({
 
         {(mode === 'in_use' || mode === 'paused') && (
           <div className="space-y-4">
+            <PersonTimeline
+              booking={booking}
+              person={currentPerson}
+              personNo={personNo}
+              now={serverNow}
+            />
             <div className="grid grid-cols-2 gap-2 text-[12px]">
               <Button
                 variant="secondary"
@@ -447,6 +456,12 @@ export default function SeatActionPanel({
 
         {mode === 'paid' && (
           <div className="space-y-4">
+            <PersonTimeline
+              booking={booking}
+              person={currentPerson}
+              personNo={personNo}
+              now={serverNow}
+            />
             <div className="grid grid-cols-2 gap-2 text-[12px]">
               <Button
                 variant="secondary"

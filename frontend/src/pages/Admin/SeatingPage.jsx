@@ -2270,6 +2270,7 @@ export default function SeatingPage() {
           setSeatActionTarget(null);
           setCheckoutBookingRef(bRef);
         }}
+        serverNow={getServerNow()}
       />
 
       {/* Whole Table Management Panel (Round 22 Item 3) */}
