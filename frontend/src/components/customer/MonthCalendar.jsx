@@ -17,6 +17,8 @@ export default function MonthCalendar({
   sessionsByDate,
   selectedDate = '',
   onSelectDate,
+  allowPast = false,
+  allowClosed = false,
   className = '',
 }) {
   const parsedCurrent = currentMonth instanceof Date
@@ -65,7 +67,8 @@ export default function MonthCalendar({
         const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const state = dayStateMap[dateStr] || 'closed';
         const isSelected = dateStr === selectedDate;
-        const isPastOrClosed = state === 'past' || state === 'closed';
+        const isDisabled = (!allowPast && state === 'past') || (!allowClosed && state === 'closed');
+        const isMuted = state === 'past' || state === 'closed' || state === 'full';
 
         let numColor = 'text-sg-ink';
         let barClass = STATE_BARS[state] || '';
@@ -75,11 +78,11 @@ export default function MonthCalendar({
           btnBg = 'bg-sg-brown';
           numColor = 'text-white';
           barClass = 'bg-white';
-        } else if (isPastOrClosed || state === 'full') {
+        } else if (isDisabled || state === 'full') {
           numColor = 'text-sg-full';
+        } else if (isMuted) {
+          numColor = 'text-sg-muted';
         }
-
-        const isDisabled = isPastOrClosed;
 
         return (
           <button

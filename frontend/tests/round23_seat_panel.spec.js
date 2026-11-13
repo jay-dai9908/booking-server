@@ -336,6 +336,67 @@ async function run() {
       assert.equal(updatedRes.pax, 1);
       assert.deepEqual(updatedRes.assigned_seats, ['A1-1']);
 
+      // Close open seat dialog, scroll to top, and verify mobile date picker (DateStrip + MonthCalendar + switching)
+      await page.keyboard.press('Escape');
+      await page.locator('[role="dialog"]').waitFor({ state: 'hidden', timeout: 5000 });
+      await page.evaluate(() => window.scrollTo(0, 0));
+
+      const dateToggle = page.locator('[data-testid="seating-date-toggle"]');
+      await dateToggle.waitFor({ state: 'visible', timeout: 5000 });
+      assert.ok((await dateToggle.innerText()).includes(todayStr), 'Toggle should initially show todayStr');
+      await dateToggle.click();
+
+      const datePickerCard = page.locator('[data-testid="seating-date-picker-card"]');
+      await datePickerCard.waitFor({ state: 'visible', timeout: 5000 });
+
+      const stripButtons = datePickerCard.locator('[aria-label="選擇日期"] button');
+      const stripCount = await stripButtons.count();
+      assert.ok(stripCount >= 30, `Expected DateStrip to render multi-month scrollable days (>=30), got ${stripCount}`);
+
+      await page.waitForTimeout(250);
+      await page.screenshot({ path: path.resolve('screenshot_round23_datepicker_strip_mobile.png') });
+
+      // Expand full month calendar
+      await datePickerCard.locator('button:has-text("整月")').click();
+      const monthGridButtons = datePickerCard.locator('.grid-cols-7 button:not([disabled])');
+      await monthGridButtons.first().waitFor({ state: 'visible', timeout: 5000 });
+      const monthBtnCount = await monthGridButtons.count();
+      assert.ok(monthBtnCount >= 28, `Expected MonthCalendar to render >= 28 day buttons, got ${monthBtnCount}`);
+
+      await page.waitForTimeout(200);
+      await page.screenshot({ path: path.resolve('screenshot_round23_datepicker_month_mobile.png') });
+
+      // Pick another day in MonthCalendar and verify /api/floor/live?date= fetch + "回到今天"
+      const todayDayText = String(Number(todayStr.slice(8, 10)));
+      let targetDayBtn = null;
+      for (let i = 0; i < monthBtnCount; i++) {
+        const btn = monthGridButtons.nth(i);
+        const label = (await btn.innerText()).trim();
+        if (/^\d+$/.test(label) && label !== todayDayText) {
+          targetDayBtn = btn;
+          break;
+        }
+      }
+      assert.ok(targetDayBtn, 'Expected to find a clickable non-today day button in MonthCalendar');
+
+      const [switchResp] = await Promise.all([
+        page.waitForResponse(r => r.url().includes('/api/floor/live?date=') && r.request().method() === 'GET'),
+        targetDayBtn.click()
+      ]);
+      assert.equal(switchResp.status(), 200, 'Switching date should fetch /api/floor/live?date=... with 200');
+      const switchedText = (await dateToggle.innerText()).trim();
+      assert.ok(!switchedText.includes(todayStr), `Expected date toggle to update away from ${todayStr}, got ${switchedText}`);
+
+      const backTodayBtn = page.locator('[data-testid="seating-back-today-btn"]');
+      await backTodayBtn.waitFor({ state: 'visible', timeout: 5000 });
+
+      const [resetResp] = await Promise.all([
+        page.waitForResponse(r => r.url().includes(`/api/floor/live?date=${todayStr}`) && r.request().method() === 'GET'),
+        backTodayBtn.click()
+      ]);
+      assert.equal(resetResp.status(), 200, 'Clicking 回到今天 should fetch today live floor with 200');
+      assert.ok((await dateToggle.innerText()).includes(todayStr), 'Toggle should reset back to todayStr');
+
       console.log('--- Round 23 Playwright Test Passed! ---');
     } finally {
       await browser.close();

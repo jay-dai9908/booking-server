@@ -22,9 +22,11 @@ const DateStrip = React.forwardRef(function DateStrip({
   onSelectDate,
   onVisibleMonthChange,
   sessionsByDate,
+  allowClosed = false,
   className = '',
 }, ref) {
   const containerRef = useRef(null);
+  const didMountScrollRef = useRef(false);
   React.useImperativeHandle(ref, () => containerRef.current);
 
   const dates = useMemo(() => {
@@ -57,15 +59,17 @@ const DateStrip = React.forwardRef(function DateStrip({
     return result;
   }, [datesProp, sessionsByDate]);
 
-  // Scroll selected date into view smoothly
+  // Scroll selected date into view
   useEffect(() => {
     if (!containerRef.current || !selectedDate) return;
     const cleanDate = String(selectedDate).split('T')[0];
     const index = dates.findIndex((d) => d.dateStr === cleanDate);
     if (index !== -1) {
-      // 50 = 44px item width + 6px gap
-      const left = Math.max(0, index * 50 - 16);
-      containerRef.current.scrollTo({ left, behavior: 'smooth' });
+      // 50 = 44px item width + 6px gap; leave 1 preceding item visible if available
+      const left = Math.max(0, index * 50 - 50);
+      const behavior = didMountScrollRef.current ? 'smooth' : 'auto';
+      didMountScrollRef.current = true;
+      containerRef.current.scrollTo({ left, behavior });
     }
   }, [selectedDate, dates]);
 
@@ -94,6 +98,7 @@ const DateStrip = React.forwardRef(function DateStrip({
         const dayNum = d;
         const wk = weekdayChar(cleanItemDate);
         const isClosed = item.state === 'closed';
+        const isDisabled = isClosed && !allowClosed;
         const isFull = item.state === 'full';
 
         let btnBg = 'bg-sg-paper border-sg-line';
@@ -106,9 +111,12 @@ const DateStrip = React.forwardRef(function DateStrip({
           wkColor = 'text-white/85';
           dayColor = 'text-white';
           barColor = 'bg-white';
-        } else if (isClosed || isFull) {
+        } else if (isDisabled || isFull) {
           wkColor = 'text-sg-full';
           dayColor = 'text-sg-full';
+        } else if (isClosed) {
+          wkColor = 'text-sg-muted';
+          dayColor = 'text-sg-muted';
         }
 
         const stateName = STATE_NAMES[item.state] || '';
@@ -118,13 +126,13 @@ const DateStrip = React.forwardRef(function DateStrip({
           <button
             key={item.dateStr}
             type="button"
-            disabled={isClosed}
-            aria-disabled={isClosed ? 'true' : undefined}
+            disabled={isDisabled}
+            aria-disabled={isDisabled ? 'true' : undefined}
             aria-pressed={isSelected}
             aria-label={ariaLabel}
-            onClick={() => !isClosed && onSelectDate(item.dateStr)}
+            onClick={() => !isDisabled && onSelectDate(item.dateStr)}
             className={`flex-none w-[44px] min-h-[56px] snap-start rounded-[12px] border ${btnBg} flex flex-col items-center justify-center gap-[2px] pt-[6px] pb-[5px] select-none transition-colors duration-150 ${
-              isClosed ? 'cursor-not-allowed opacity-60' : 'cursor-pointer active:scale-[0.97]'
+              isDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer active:scale-[0.97]'
             }`}
           >
             <span className={`text-[11px] leading-[1.2] ${wkColor}`}>

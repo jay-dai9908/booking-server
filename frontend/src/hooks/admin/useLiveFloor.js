@@ -6,8 +6,10 @@ export function useLiveFloor(date = null, pollInterval = 10000) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const etagRef = useRef(null);
+  const requestSeqRef = useRef(0);
 
   const fetchLive = useCallback(async (isManual = false) => {
+    const seq = ++requestSeqRef.current;
     try {
       const headers = {};
       if (etagRef.current && !isManual) {
@@ -19,6 +21,8 @@ export function useLiveFloor(date = null, pollInterval = 10000) {
         headers,
         validateStatus: (status) => (status >= 200 && status < 300) || status === 304
       });
+
+      if (seq !== requestSeqRef.current) return;
 
       if (res.status === 304) {
         // Data unchanged
@@ -33,10 +37,13 @@ export function useLiveFloor(date = null, pollInterval = 10000) {
       setData(res.data);
       setError(null);
     } catch (err) {
+      if (seq !== requestSeqRef.current) return;
       console.error('[useLiveFloor] Error fetching live floor:', err);
       setError(err.response?.data?.error || err.message);
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [date]);
 

@@ -35,6 +35,11 @@ import ReasonChips from '../../components/admin/ReasonChips';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import Button from '../../components/customer/Button';
 import DateStrip from '../../components/customer/DateStrip';
+import MonthBar from '../../components/customer/MonthBar';
+import MonthCalendar from '../../components/customer/MonthCalendar';
+import { useSessionRange, BOOKING_LOOKAHEAD_DAYS } from '../../hooks/customer/useSessions';
+import { parseYMD } from '../../utils/customer/pricing';
+import { dayState } from '../../utils/customer/availability';
 
 // Floor components
 import FloorPlan from '../../components/admin/floor/FloorPlan';
@@ -110,6 +115,49 @@ export default function SeatingPage() {
   }, []);
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [isMonthExpanded, setIsMonthExpanded] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => parseYMD(todayStr));
+
+  const { rangeStartStr, rangeEndStr } = useMemo(() => {
+    const addDays = (baseStr, delta) => {
+      const dt = parseYMD(baseStr);
+      dt.setDate(dt.getDate() + delta);
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    };
+    const baseStart = addDays(todayStr, -14);
+    const baseEnd = addDays(todayStr, BOOKING_LOOKAHEAD_DAYS - 1);
+    return {
+      rangeStartStr: selectedDate && selectedDate < baseStart ? selectedDate : baseStart,
+      rangeEndStr: selectedDate && selectedDate > baseEnd ? selectedDate : baseEnd
+    };
+  }, [todayStr, selectedDate]);
+
+  const { sessionsByDate } = useSessionRange(rangeStartStr, rangeEndStr);
+
+  const adminDateItems = useMemo(() => {
+    const items = [];
+    const cur = parseYMD(rangeStartStr);
+    const end = parseYMD(rangeEndStr);
+    let guard = 0;
+    while (cur <= end && guard < 180) {
+      const dStr = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
+      const daySessions = sessionsByDate[dStr] || [];
+      items.push({ dateStr: dStr, state: dayState(dStr, daySessions) });
+      cur.setDate(cur.getDate() + 1);
+      guard++;
+    }
+    return items;
+  }, [rangeStartStr, rangeEndStr, sessionsByDate]);
+
+  const handleSelectSeatingDate = (newDate) => {
+    setSelectedDate(newDate);
+    setCalendarMonth(parseYMD(newDate));
+    setSelectedSlot('現在');
+    setSeatActionTarget(null);
+    setSelectedTableForPanel(null);
+    setIsMonthExpanded(false);
+    setShowDatePicker(false);
+  };
 
   // Time slot filter for floor plan: '現在' | '10:00' | '11:00' ...
   const [selectedSlot, setSelectedSlot] = useState('現在');
@@ -694,21 +742,27 @@ export default function SeatingPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setShowDatePicker(!showDatePicker)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-sg-paper/60 border border-sg-line hover:border-sg-brown text-[12px] font-bold text-sg-ink transition"
+            data-testid="seating-date-toggle"
+            onClick={() => {
+              setShowDatePicker(prev => {
+                const next = !prev;
+                if (next) setCalendarMonth(parseYMD(selectedDate));
+                else setIsMonthExpanded(false);
+                return next;
+              });
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-sg-paper/60 border border-sg-line hover:border-sg-brown text-[12px] font-bold text-sg-ink transition cursor-pointer"
           >
             <Calendar className="w-3.5 h-3.5 text-sg-brown" />
-            <span>{selectedDate}</span>
+            <span className="font-num">{selectedDate}</span>
             <ChevronDown className={`w-3.5 h-3.5 text-sg-muted transition-transform ${showDatePicker ? 'rotate-180' : ''}`} />
           </button>
           {selectedDate !== todayStr && (
             <button
               type="button"
-              onClick={() => {
-                setSelectedDate(todayStr);
-                setShowDatePicker(false);
-              }}
-              className="text-[11px] px-2.5 py-1 rounded-xl bg-sg-honey-soft text-sg-honey font-bold hover:underline"
+              data-testid="seating-back-today-btn"
+              onClick={() => handleSelectSeatingDate(todayStr)}
+              className="text-[11px] px-2.5 py-1 rounded-xl bg-sg-honey-soft text-sg-honey font-bold hover:underline cursor-pointer"
             >
               回到今天
             </button>
@@ -716,31 +770,36 @@ export default function SeatingPage() {
         </div>
       </div>
 
-      {/* DatePicker Dropdown / Strip */}
+      {/* DatePicker Dropdown / Strip & MonthCalendar (與顧客預約頁相同之滑動／整月日曆元件) */}
       {showDatePicker && (
-        <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-sm space-y-3 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <span className="text-[13px] font-bold text-sg-ink">選擇帶位日期</span>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => {
-                if (e.target.value) {
-                  setSelectedDate(e.target.value);
-                  setShowDatePicker(false);
-                }
-              }}
-              className="px-3 py-1 text-[12px] border border-sg-line rounded-xl focus:border-sg-brown focus:outline-none"
-            />
-          </div>
-          <DateStrip
+        <div data-testid="seating-date-picker-card" className="bg-white p-4 rounded-3xl border border-sg-line shadow-sm space-y-3 animate-fade-in">
+          <MonthBar
             selectedDate={selectedDate}
-            onSelectDate={(d) => {
-              setSelectedDate(d);
-              setShowDatePicker(false);
+            isExpanded={isMonthExpanded}
+            onToggleExpand={() => setIsMonthExpanded(prev => !prev)}
+            calendarMonth={calendarMonth}
+            onChangeCalendarMonth={(val) => {
+              setCalendarMonth(typeof val === 'string' ? parseYMD(`${val}-01`) : val);
             }}
-            sessionsByDate={{ [selectedDate]: sessions }}
           />
+          {isMonthExpanded ? (
+            <MonthCalendar
+              selectedDate={selectedDate}
+              currentMonth={calendarMonth}
+              sessionsByDate={sessionsByDate}
+              allowPast
+              allowClosed
+              onSelectDate={handleSelectSeatingDate}
+            />
+          ) : (
+            <DateStrip
+              dates={adminDateItems}
+              selectedDate={selectedDate}
+              allowClosed
+              onSelectDate={handleSelectSeatingDate}
+              onVisibleMonthChange={(dStr) => setCalendarMonth(parseYMD(dStr))}
+            />
+          )}
         </div>
       )}
 
