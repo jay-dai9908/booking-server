@@ -1612,7 +1612,7 @@ export async function addBoardRental(req, res) {
           unit_group: newUnitGroup,
           segment_no: 1,
           start_at: fromDt,
-          end_at: toDt,
+          end_at: null,
           planned_end_at: toDt,
           unit_rate: unitRate,
           rental_hours: rentalHours,
