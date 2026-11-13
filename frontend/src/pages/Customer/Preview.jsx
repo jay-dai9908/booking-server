@@ -144,7 +144,7 @@ export default function Preview() {
       }
     >
       <div className="flex flex-col min-h-[calc(100dvh-53px)]">
-        <div className="grid gap-3 flex-1 px-4 pt-3 pb-8">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 flex-1 px-4 pt-3 pb-8">
           {!isPreviewEnabled ? (
             <EmptyState
               title="時段預覽暫停開放"
@@ -223,7 +223,7 @@ export default function Preview() {
               {/* 日期列和時段格（放在下方） */}
               <div
                 ref={dateSectionRef}
-                className="pt-2 flex flex-col gap-3 min-h-[calc(100dvh-53px)] scroll-mt-16"
+                className="pt-2 flex flex-col gap-3 min-w-0 min-h-[calc(100dvh-53px)] scroll-mt-16"
                 data-testid="preview-date-section"
               >
                 <div ref={monthBarRef}>
