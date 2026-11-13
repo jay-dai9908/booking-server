@@ -428,7 +428,7 @@ export default function TablePanel({
                     })}
                   </div>
 
-                  {/* Card bottom: ＋ 為這組加人 */}
+                  {/* Card bottom: 為這組加人 */}
                   <div className="pt-1">
                     <button
                       type="button"
@@ -438,7 +438,7 @@ export default function TablePanel({
                       className="w-full py-2 rounded-xl border border-dashed border-sg-brown/50 bg-sg-brown-soft/40 hover:bg-sg-brown-soft text-sg-brown font-bold text-[12px] flex items-center justify-center gap-1 transition cursor-pointer disabled:opacity-50"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>{addingPersonForRef === group.booking_ref ? '加人中…' : '＋ 為這組加人'}</span>
+                      <span>{addingPersonForRef === group.booking_ref ? '加人中…' : '為這組加人'}</span>
                     </button>
                   </div>
                 </div>
