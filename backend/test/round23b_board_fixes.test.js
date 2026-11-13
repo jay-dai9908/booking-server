@@ -498,4 +498,58 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
     assert.equal(updatedSeg.ended_reason, 'returned');
     assert.deepEqual(updatedSeg.covered_sessions, ['19:00-20:00', '20:00-21:00']);
   });
+
+  await t.test('Item 3: pauseBoard and resumeBoard ignore client at outside NODE_ENV=test', async () => {
+    const { booking_ref } = await createCheckedInBooking({
+      name: '忽略客戶端時間客',
+      phone: '0988777007'
+    });
+
+    const { req: addReq, res: addRes } = createMockReqRes({
+      params: { booking_ref },
+      body: { person_no: 1, equipment_id: 'pegboard_s', from_at: '19:00', to_at: '22:00' }
+    });
+    await addBoardRental(addReq, addRes);
+    assert.equal(addRes.getStatusCode(), 200);
+    const ug = addRes.getResponseData().booking_equipment.unit_group;
+
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    const oneHourAgo = new Date(Date.now() - 1 * 3600 * 1000).toISOString();
+
+    process.env.NODE_ENV = 'production';
+    try {
+      const beforePause = Date.now();
+      const { req: pReq, res: pRes } = createMockReqRes({
+        params: { booking_ref, unit_group: ug },
+        body: { at: twoHoursAgo }
+      });
+      await pauseBoard(pReq, pRes);
+      const afterPause = Date.now();
+      assert.equal(pRes.getStatusCode(), 200);
+
+      const startedMs = new Date(pRes.getResponseData().board_pause.started_at).getTime();
+      assert.ok(
+        startedMs >= beforePause - 5000 && startedMs <= afterPause + 5000,
+        `Expected BoardPause.started_at (${new Date(startedMs).toISOString()}) to be current server time, not 2 hours ago`
+      );
+
+      const beforeResume = Date.now();
+      const { req: rReq, res: rRes } = createMockReqRes({
+        params: { booking_ref, unit_group: ug },
+        body: { at: oneHourAgo }
+      });
+      await resumeBoard(rReq, rRes);
+      const afterResume = Date.now();
+      assert.equal(rRes.getStatusCode(), 200);
+
+      const closedPause = await prisma.boardPause.findFirst({ where: { unit_group: ug } });
+      const endedMs = new Date(closedPause.ended_at).getTime();
+      assert.ok(
+        endedMs >= beforeResume - 5000 && endedMs <= afterResume + 5000,
+        `Expected BoardPause.ended_at (${new Date(endedMs).toISOString()}) to be current server time, not 1 hour ago`
+      );
+    } finally {
+      process.env.NODE_ENV = 'test';
+    }
+  });
 });

@@ -1123,7 +1123,7 @@ export async function swapBoard(req, res) {
         segStartMs = Date.now();
       }
 
-      const nowMs = now ? new Date(now).getTime() : Date.now();
+      const nowMs = (process.env.NODE_ENV === 'test' && now) ? new Date(now).getTime() : Date.now();
       const { options, suggested } = swapBoundaryOptions(segStartMs, nowMs);
 
       // Validate boundary_at
@@ -1696,7 +1696,7 @@ export async function pauseBoard(req, res) {
   const staffId = req.user?.id || null;
 
   try {
-    const pauseDt = at ? new Date(at) : new Date();
+    const pauseDt = (process.env.NODE_ENV === 'test' && at) ? new Date(at) : new Date();
     const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
@@ -1755,7 +1755,7 @@ export async function resumeBoard(req, res) {
   const staffId = req.user?.id || null;
 
   try {
-    const resumeDt = at ? new Date(at) : new Date();
+    const resumeDt = (process.env.NODE_ENV === 'test' && at) ? new Date(at) : new Date();
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
