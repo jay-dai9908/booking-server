@@ -158,12 +158,14 @@ test('Round 22 Item 4: moveGroup unit tests', async (t) => {
 
   const testRef1 = 'BK-R22-TEST-01';
   const testRef2 = 'BK-R22-TEST-02';
+  const testRef3 = 'BK-R22-TEST-03';
+  const testRef4 = 'BK-R22-TEST-04';
   const initialTimerStartedAt = new Date('2026-11-20T06:00:00Z');
 
   // Register cleanup in t.after
   t.after(async () => {
-    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [testRef1, testRef2] } } });
-    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [testRef1, testRef2] } } });
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [testRef1, testRef2, testRef3, testRef4] } } });
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [testRef1, testRef2, testRef3, testRef4] } } });
     await prisma.session.deleteMany({ where: { id: testSession.id } });
     await prisma.seat.deleteMany({ where: { layout_id: testLayout.id } });
     await prisma.seatTable.deleteMany({ where: { layout_id: testLayout.id } });
@@ -341,5 +343,137 @@ test('Round 22 Item 4: moveGroup unit tests', async (t) => {
     // Clean up testRef2
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: testRef2 } });
     await prisma.reservation.deleteMany({ where: { booking_ref: testRef2 } });
+  });
+
+  // 5. 目標桌 4 個座位，其中 2 個被未報到的訂單佔用（attendance: null）：2 人自動換桌時，排到另外 2 個空位
+  await t.test('5. 目標桌有未報到訂單（attendance: null）佔用 2 個座位時，2 人自動換桌排到另外 2 個空位', async () => {
+    // At this point, testRef1 (2 active persons) is at Table C (C1-1, C1-2).
+    // Create an un-checked-in reservation (testRef3, attendance: null) occupying B1-1, B1-2 on Table B (4 seats total).
+    await prisma.reservation.create({
+      data: {
+        booking_ref: testRef3,
+        session_id: testSession.id,
+        user_id: testUser.id,
+        pax: 2,
+        status: 'confirmed',
+        attendance: null,
+        assigned_seats: ['B1-1', 'B1-2'],
+        total_amount: 600,
+        amount_received: 0,
+        billing_status: 'unpaid'
+      }
+    });
+
+    const { req, res } = createMockReqRes({
+      params: { booking_ref: testRef1 },
+      body: { to_table_id: tableB.id }
+    });
+
+    await moveGroup(req, res);
+    assert.equal(res.getStatusCode(), 200);
+    const data = res.getResponseData();
+    assert.equal(data.success, true);
+    assert.deepEqual(data.new_seats, ['B1-3', 'B1-4']);
+
+    const movedRes = await prisma.reservation.findFirst({ where: { booking_ref: testRef1 } });
+    assert.deepEqual(movedRes.assigned_seats, ['B1-3', 'B1-4']);
+
+    const activePersons = await prisma.bookingPerson.findMany({
+      where: { booking_ref: testRef1, status: 'active' },
+      orderBy: { person_no: 'asc' }
+    });
+    assert.deepEqual(activePersons.map(p => p.seat_code), ['B1-3', 'B1-4']);
+  });
+
+  // 6. 3 人自動換到同一桌（其中 2 個被未報到的訂單佔用）：回 422「這桌只剩 2 個空位」
+  await t.test('6. 3 人自動換到有未報到訂單佔用 2 位的 4 人桌：回 422「這桌只剩 2 個空位」', async () => {
+    // Create a 3-person checked-in group (testRef4) on Table A (A1-1, A1-2, A1-3)
+    await prisma.reservation.create({
+      data: {
+        booking_ref: testRef4,
+        session_id: testSession.id,
+        user_id: testUser.id,
+        pax: 3,
+        status: 'confirmed',
+        attendance: 'checked_in',
+        checked_in_at: initialTimerStartedAt,
+        assigned_seats: ['A1-1', 'A1-2', 'A1-3'],
+        total_amount: 900,
+        amount_received: 0,
+        billing_status: 'unpaid'
+      }
+    });
+    await prisma.bookingPerson.createMany({
+      data: [
+        { booking_ref: testRef4, person_no: 1, seat_code: 'A1-1', status: 'active', timer_started_at: initialTimerStartedAt },
+        { booking_ref: testRef4, person_no: 2, seat_code: 'A1-2', status: 'active', timer_started_at: initialTimerStartedAt },
+        { booking_ref: testRef4, person_no: 3, seat_code: 'A1-3', status: 'active', timer_started_at: initialTimerStartedAt }
+      ]
+    });
+
+    // Move testRef1 back to Table C first or keep testRef1 on B? Wait: if testRef1 is on B (B1-3, B1-4), move testRef1 to C so B only has testRef3 (2 seats taken, 2 empty)
+    await prisma.reservation.updateMany({ where: { booking_ref: testRef1 }, data: { assigned_seats: ['C1-1', 'C1-2'] } });
+    await prisma.bookingPerson.updateMany({ where: { booking_ref: testRef1, person_no: 1 }, data: { seat_code: 'C1-1' } });
+    await prisma.bookingPerson.updateMany({ where: { booking_ref: testRef1, person_no: 2 }, data: { seat_code: 'C1-2' } });
+
+    const { req, res } = createMockReqRes({
+      params: { booking_ref: testRef4 },
+      body: { to_table_id: tableB.id }
+    });
+
+    await moveGroup(req, res);
+    assert.equal(res.getStatusCode(), 422);
+    const data = res.getResponseData();
+    assert.equal(data.error, '這桌只剩 2 個空位');
+
+    const res4 = await prisma.reservation.findFirst({ where: { booking_ref: testRef4 } });
+    assert.deepEqual(res4.assigned_seats, ['A1-1', 'A1-2', 'A1-3']);
+  });
+
+  // 7. 帶 to_seats，其中有一個被未報到的訂單佔用：回 422，原本的座位不變
+  await t.test('7. 帶 to_seats，其中一個座位被未報到訂單佔用：回 422 且原本座位不變', async () => {
+    // testRef1 (2 active persons) is at C1-1, C1-2. testRef3 (attendance: null) is at B1-1, B1-2.
+    // Request move to Table B specifying to_seats: ['B1-2', 'B1-3'] (B1-2 is occupied by un-checked-in testRef3)
+    const { req, res } = createMockReqRes({
+      params: { booking_ref: testRef1 },
+      body: { to_table_id: tableB.id, to_seats: ['B1-2', 'B1-3'] }
+    });
+
+    await moveGroup(req, res);
+    assert.equal(res.getStatusCode(), 422);
+    const data = res.getResponseData();
+    assert.ok(data.error.includes('B1-2'), `Expected error message to mention B1-2, got: ${data.error}`);
+
+    // Verify original seats for testRef1 remain untouched (C1-1, C1-2)
+    const res1 = await prisma.reservation.findFirst({ where: { booking_ref: testRef1 } });
+    assert.deepEqual(res1.assigned_seats, ['C1-1', 'C1-2']);
+
+    const persons1 = await prisma.bookingPerson.findMany({
+      where: { booking_ref: testRef1, status: 'active' },
+      orderBy: { person_no: 'asc' }
+    });
+    assert.deepEqual(persons1.map(p => p.seat_code), ['C1-1', 'C1-2']);
+  });
+
+  // 8. 帶合法的 to_seats（如 ['B1-3', 'B1-4']）：依照指定的座位換桌成功
+  await t.test('8. 帶合法的 to_seats 時，照指定座位換桌成功且計時開始時間不變', async () => {
+    const { req, res } = createMockReqRes({
+      params: { booking_ref: testRef1 },
+      body: { to_table_id: tableB.id, to_seats: ['B1-4', 'B1-3'] }
+    });
+
+    await moveGroup(req, res);
+    assert.equal(res.getStatusCode(), 200);
+    const data = res.getResponseData();
+    assert.equal(data.success, true);
+    assert.deepEqual(data.new_seats, ['B1-4', 'B1-3']);
+
+    const persons1 = await prisma.bookingPerson.findMany({
+      where: { booking_ref: testRef1, status: 'active' },
+      orderBy: { person_no: 'asc' }
+    });
+    assert.deepEqual(persons1.map(p => p.seat_code), ['B1-4', 'B1-3']);
+    assert.equal(persons1[0].timer_started_at.getTime(), initialTimerStartedAt.getTime());
+    assert.equal(persons1[1].timer_started_at.getTime(), initialTimerStartedAt.getTime());
   });
 });

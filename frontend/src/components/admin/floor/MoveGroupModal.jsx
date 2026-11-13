@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { X, ArrowRight, ArrowRightLeft, AlertCircle } from 'lucide-react';
 import api from '../../../api/axios';
 
@@ -14,6 +14,13 @@ export default function MoveGroupModal({
   const [selectedTableId, setSelectedTableId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedTableId(null);
+      setError(null);
+    }
+  }, [isOpen, booking?.booking_ref]);
 
   const persons = useMemo(() => booking?.persons || booking?.booking_persons || [], [booking]);
   const currentSeats = useMemo(() => {
@@ -37,29 +44,23 @@ export default function MoveGroupModal({
     const allTables = layout.tables || [];
     const allSeats = layout.seats || [];
 
-    return allTables.filter((t) => {
-      // Exclude current table
-      if (t.id === currentTableId) return false;
+    return allTables.map((t) => {
+      if (t.id === currentTableId) return null;
 
-      // Active seats at this table
-      const tSeats = allSeats.filter(s => s.table_id === t.id && s.is_active);
+      const tSeats = allSeats
+        .filter(s => s.table_id === t.id && s.is_active)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.code.localeCompare(b.code));
       const emptySeats = tSeats.filter(s => {
         const st = seatStates[s.code];
         return !st?.booking && (!st?.state || st?.state === 'empty');
       });
 
-      return emptySeats.length >= groupPax;
-    }).map((t) => {
-      const tSeats = allSeats.filter(s => s.table_id === t.id && s.is_active);
-      const emptySeats = tSeats.filter(s => {
-        const st = seatStates[s.code];
-        return !st?.booking && (!st?.state || st?.state === 'empty');
-      });
+      if (emptySeats.length < groupPax) return null;
       return {
         ...t,
         emptySeats
       };
-    });
+    }).filter(Boolean);
   }, [layout, currentTableId, seatStates, groupPax]);
 
   // Target table object
@@ -67,15 +68,19 @@ export default function MoveGroupModal({
     return availableTables.find(t => t.id === selectedTableId) || null;
   }, [availableTables, selectedTableId]);
 
+  const targetSeats = useMemo(() => {
+    if (!selectedTable) return [];
+    return selectedTable.emptySeats.slice(0, groupPax).map(s => s.code);
+  }, [selectedTable, groupPax]);
+
   // Target seat mappings
   const seatMappings = useMemo(() => {
     if (!selectedTable) return [];
-    const targetSeats = selectedTable.emptySeats.slice(0, groupPax);
     return currentSeats.map((cSeat, i) => ({
       from: cSeat || `第 ${i + 1} 位`,
-      to: targetSeats[i]?.code || `空位 ${i + 1}`
+      to: targetSeats[i] || `空位 ${i + 1}`
     }));
-  }, [selectedTable, currentSeats, groupPax]);
+  }, [selectedTable, currentSeats, targetSeats]);
 
   if (!isOpen || !booking) return null;
 
@@ -85,7 +90,8 @@ export default function MoveGroupModal({
     setError(null);
     try {
       await api.post(`/floor/${booking.booking_ref}/move-group`, {
-        to_table_id: selectedTableId
+        to_table_id: selectedTableId,
+        to_seats: targetSeats
       });
       if (showToast) showToast(`已整組換桌至 ${selectedTable?.label}`);
       if (onSuccess) onSuccess();

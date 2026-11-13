@@ -407,7 +407,7 @@ export async function moveSeat(req, res) {
 
 export async function moveGroup(req, res) {
   const { booking_ref } = req.params;
-  const { to_table_id } = req.body;
+  const { to_table_id, to_seats } = req.body;
   const staffName = req.user?.name || '門市人員';
   const staffId = req.user?.id || null;
   const deviceInfo = getAdminDeviceInfo(req);
@@ -435,17 +435,22 @@ export async function moveGroup(req, res) {
       const targetTable = (activeLayout?.tables || []).find(t => t.id === targetTableId);
       if (!targetTable) throw { status: 404, message: '目標桌不存在' };
 
-      // Target active seats at this table sorted naturally
-      const targetSeats = (activeLayout?.seats || []).filter(s => s.table_id === targetTableId && s.is_active);
+      // All seats at this table and active seats sorted naturally
+      const allTargetSeats = (activeLayout?.seats || []).filter(s => s.table_id === targetTableId);
+      const targetSeatByCode = new Map(allTargetSeats.map(s => [s.code, s]));
+      const targetSeats = allTargetSeats.filter(s => s.is_active);
       targetSeats.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.code.localeCompare(b.code));
 
-      // Find seats occupied across this booking's sessionIds by other active bookings
+      // Find seats occupied across this booking's sessionIds by other active or un-checked-in bookings
       const conflictReservations = await tx.reservation.findMany({
         where: {
           session_id: { in: sessionIds },
           booking_ref: { not: booking_ref },
           status: { not: 'cancelled' },
-          attendance: { not: 'completed' }
+          OR: [
+            { attendance: null },
+            { attendance: { not: 'completed' } }
+          ]
         },
         select: { assigned_seats: true }
       });
@@ -468,12 +473,43 @@ export async function moveGroup(req, res) {
       const currentRes = reservations[0];
       const countNeeded = persons.length > 0 ? persons.length : ((currentRes.assigned_seats || []).length || currentRes.pax);
 
-      if (availableTargetSeats.length < countNeeded) {
-        throw { status: 422, message: `這桌只剩 ${availableTargetSeats.length} 個空位` };
-      }
+      let newSeats;
+      if (to_seats !== undefined && to_seats !== null) {
+        if (!Array.isArray(to_seats)) {
+          throw { status: 422, message: '目標座位格式錯誤' };
+        }
+        const seenSeats = new Set();
+        for (const code of to_seats) {
+          if (typeof code !== 'string' || !code.trim()) {
+            throw { status: 422, message: `無效的座位代碼：${code}` };
+          }
+          if (seenSeats.has(code)) {
+            throw { status: 422, message: `目標座位 ${code} 重複指定` };
+          }
+          seenSeats.add(code);
 
-      // Assign in order
-      const newSeats = availableTargetSeats.slice(0, countNeeded).map(s => s.code);
+          const seatObj = targetSeatByCode.get(code);
+          if (!seatObj) {
+            throw { status: 422, message: `座位 ${code} 不屬於目標桌「${targetTable.label}」` };
+          }
+          if (!seatObj.is_active) {
+            throw { status: 422, message: `座位 ${code} 目前未啟用` };
+          }
+          if (occupiedSeatCodes.has(code)) {
+            throw { status: 422, message: `座位 ${code} 已被其他訂單佔用` };
+          }
+        }
+        if (to_seats.length !== countNeeded) {
+          throw { status: 422, message: `指定座位數量（${to_seats.length}）與這組人數（${countNeeded}）不符` };
+        }
+        newSeats = [...to_seats];
+      } else {
+        if (availableTargetSeats.length < countNeeded) {
+          throw { status: 422, message: `這桌只剩 ${availableTargetSeats.length} 個空位` };
+        }
+        // Assign in order
+        newSeats = availableTargetSeats.slice(0, countNeeded).map(s => s.code);
+      }
 
       // Update reservation.assigned_seats
       await tx.reservation.updateMany({
