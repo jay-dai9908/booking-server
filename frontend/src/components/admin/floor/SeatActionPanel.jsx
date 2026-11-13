@@ -15,8 +15,9 @@ import {
 import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
 import { displayBoardName } from '../../../../../shared/billing.js';
-import { getPersonStatusText } from '../../../utils/admin/floorSelectors.js';
+import { getPersonStatusText, getPersonTimerElapsedForRemove } from '../../../utils/admin/floorSelectors.js';
 import PersonTimeline from './PersonTimeline';
+import RemovePersonConfirmDialog from './RemovePersonConfirmDialog';
 
 function formatTimeHHMM(val) {
   if (!val) return '';
@@ -55,17 +56,20 @@ export default function SeatActionPanel({
   onForceAdd,
   onCheckIn,
   onLeave,
+  onRemovePerson,
   onSupplement,
   onRefund,
   serverNow = null
 }) {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [confirmReturnBoard, setConfirmReturnBoard] = useState(false);
+  const [showRemoveDialog, setShowRemoveDialog] = useState(false);
 
   const resetSeatKey = target?.seat?.code || '';
   const resetBookingRef = target?.booking?.booking_ref || target?.seatInfo?.booking?.booking_ref || '';
   useEffect(() => {
     setConfirmReturnBoard(false);
+    setShowRemoveDialog(false);
   }, [isOpen, resetSeatKey, resetBookingRef]);
 
   if (!target) return null;
@@ -221,39 +225,54 @@ export default function SeatActionPanel({
     </div>
   ) : null;
 
-  const headerRight = (mode === 'in_use' || mode === 'paused' || mode === 'reserved') ? (
-    <div className="relative">
-      <button
-        type="button"
-        data-testid="seat-panel-more-btn"
-        onClick={() => setShowMoreMenu(prev => !prev)}
-        className="w-9 h-9 flex items-center justify-center rounded-full text-sg-muted hover:text-sg-ink hover:bg-sg-paper transition"
-        title="更多選項"
-      >
-        <MoreHorizontal className="w-5 h-5" />
-      </button>
+  const removeInfo = getPersonTimerElapsedForRemove(currentPerson, serverNow || new Date());
+  const canShowRemove = (mode === 'in_use' || mode === 'paused') && removeInfo.canShow;
 
-      {showMoreMenu && (
-        <div
-          data-testid="seat-panel-more-menu"
-          className="absolute right-0 top-full mt-1 z-50 bg-white rounded-2xl shadow-xl border border-sg-line py-1 min-w-[140px] space-y-0.5"
-          onClick={() => setShowMoreMenu(false)}
+  const headerRight = (mode === 'in_use' || mode === 'paused' || mode === 'reserved') ? (
+    <div className="flex items-center gap-1.5">
+      {canShowRemove && (
+        <button
+          type="button"
+          data-testid="seat-panel-remove-person-btn"
+          onClick={() => setShowRemoveDialog(true)}
+          className="px-2 py-1 rounded-lg text-[11px] font-bold text-sg-danger bg-sg-danger-soft/80 hover:bg-sg-danger-soft border border-sg-danger/25 transition whitespace-nowrap cursor-pointer"
         >
-          <button
-            type="button"
-            data-testid="seat-panel-move-wait-btn"
-            onClick={() => {
-              if (onMoveToWait && booking && seat) {
-                onMoveToWait(booking, seat.code);
-              }
-            }}
-            className="w-full text-left px-3 py-2 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
-          >
-            <ArrowRightLeft className="w-3.5 h-3.5 text-sg-muted" />
-            移到等待區
-          </button>
-        </div>
+          這位不玩了
+        </button>
       )}
+      <div className="relative">
+        <button
+          type="button"
+          data-testid="seat-panel-more-btn"
+          onClick={() => setShowMoreMenu(prev => !prev)}
+          className="w-9 h-9 flex items-center justify-center rounded-full text-sg-muted hover:text-sg-ink hover:bg-sg-paper transition"
+          title="更多選項"
+        >
+          <MoreHorizontal className="w-5 h-5" />
+        </button>
+
+        {showMoreMenu && (
+          <div
+            data-testid="seat-panel-more-menu"
+            className="absolute right-0 top-full mt-1 z-50 bg-white rounded-2xl shadow-xl border border-sg-line py-1 min-w-[140px] space-y-0.5"
+            onClick={() => setShowMoreMenu(false)}
+          >
+            <button
+              type="button"
+              data-testid="seat-panel-move-wait-btn"
+              onClick={() => {
+                if (onMoveToWait && booking && seat) {
+                  onMoveToWait(booking, seat.code);
+                }
+              }}
+              className="w-full text-left px-3 py-2 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5 text-sg-muted" />
+              移到等待區
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   ) : null;
 
@@ -616,6 +635,23 @@ export default function SeatActionPanel({
           </div>
         )}
       </div>
+      <RemovePersonConfirmDialog
+        isOpen={showRemoveDialog}
+        onClose={() => setShowRemoveDialog(false)}
+        elapsedMinutes={removeInfo.elapsedMinutes}
+        hasBoard={Boolean(activeBoardSegment)}
+        onConfirmRemove={() => {
+          if (onRemovePerson && booking) {
+            return onRemovePerson(booking.booking_ref, personNo);
+          }
+          return undefined;
+        }}
+        onSwitchToLeave={() => {
+          if (onLeave && booking) {
+            onLeave(booking.booking_ref, personNo);
+          }
+        }}
+      />
     </ResponsivePanel>
   );
 }

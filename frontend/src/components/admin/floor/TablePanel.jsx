@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { X, MoreVertical, Plus, UserCheck, ArrowRightLeft, CreditCard, Clock, LogOut, FileText, Pause, Play, AlertCircle } from 'lucide-react';
 import api from '../../../api/axios';
-import { formatElapsedText } from '../../../utils/admin/floorSelectors';
+import { formatElapsedText, getPersonTimerElapsedForRemove } from '../../../utils/admin/floorSelectors';
+import RemovePersonConfirmDialog from './RemovePersonConfirmDialog';
 
 export default function TablePanel({
   isOpen,
@@ -20,6 +21,7 @@ export default function TablePanel({
   onMoveSeat,
   onSwapBoard,
   onAddBoard,
+  onRemovePerson,
   onForceAdd,
   refresh,
   serverNow,
@@ -27,6 +29,7 @@ export default function TablePanel({
 }) {
   const [addingPersonForRef, setAddingPersonForRef] = useState(null);
   const [menuOpenKey, setMenuOpenKey] = useState(null);
+  const [removeConfirmTarget, setRemoveConfirmTarget] = useState(null);
   const menuRef = useRef(null);
 
   // Close popup menu when clicking outside
@@ -321,6 +324,12 @@ export default function TablePanel({
                       const elapsedText = isEnded ? '已離場' : (!hasStarted ? '待計時' : formatElapsedText(person, serverNow || new Date()));
                       const currentKey = `${group.booking_ref}-${person.person_no}`;
                       const isMenuOpen = menuOpenKey === currentKey;
+                      const isPersonPaid = Boolean(person.paid || group.is_paid || group.billing?.status === 'paid' || group.billing_status === 'paid');
+                      const removeInfo = getPersonTimerElapsedForRemove(person, serverNow || new Date());
+                      const canRemovePerson = isCheckedIn && !isPersonPaid && person.status === 'active' && removeInfo.canShow;
+                      const personHasBoard = (group.boards || []).some(
+                        bd => Number(bd.person_no) === Number(person.person_no) && (bd.segments || []).some(s => !s.end_at)
+                      );
 
                       return (
                         <div
@@ -413,12 +422,30 @@ export default function TablePanel({
                                     type="button"
                                     onClick={() => {
                                       setMenuOpenKey(null);
-                                      onTimerAction?.(group.booking_ref, [person.person_no], 'leave');
+                                      onTimerAction?.(group.booking_ref, [person.person_no], 'end');
                                     }}
                                     className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-medium transition"
                                   >
                                     離場
                                   </button>
+                                  {canRemovePerson && (
+                                    <button
+                                      type="button"
+                                      data-testid={`table-panel-remove-person-btn-${person.person_no}`}
+                                      onClick={() => {
+                                        setMenuOpenKey(null);
+                                        setRemoveConfirmTarget({
+                                          bookingRef: group.booking_ref,
+                                          personNo: person.person_no,
+                                          elapsedMinutes: removeInfo.elapsedMinutes,
+                                          hasBoard: personHasBoard
+                                        });
+                                      }}
+                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-bold transition"
+                                    >
+                                      這位不玩了
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -465,6 +492,24 @@ export default function TablePanel({
           </div>
         )}
       </div>
+
+      <RemovePersonConfirmDialog
+        isOpen={Boolean(removeConfirmTarget)}
+        onClose={() => setRemoveConfirmTarget(null)}
+        elapsedMinutes={removeConfirmTarget?.elapsedMinutes ?? 0}
+        hasBoard={Boolean(removeConfirmTarget?.hasBoard)}
+        onConfirmRemove={() => {
+          if (onRemovePerson && removeConfirmTarget) {
+            return onRemovePerson(removeConfirmTarget.bookingRef, removeConfirmTarget.personNo);
+          }
+          return undefined;
+        }}
+        onSwitchToLeave={() => {
+          if (onTimerAction && removeConfirmTarget) {
+            onTimerAction(removeConfirmTarget.bookingRef, [removeConfirmTarget.personNo], 'end');
+          }
+        }}
+      />
     </div>
   );
 }

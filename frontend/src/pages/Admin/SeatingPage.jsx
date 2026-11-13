@@ -589,6 +589,17 @@ export default function SeatingPage() {
     }
   };
 
+  const handleRemovePerson = async (bookingRef, personNo) => {
+    try {
+      await api.delete(`/floor/${bookingRef}/persons/${personNo}`);
+      await refresh();
+      setSeatActionTarget(null);
+      showToast(`已移除第 ${personNo} 位`);
+    } catch (err) {
+      showToast(err.response?.data?.error || err.response?.data?.message || '移除失敗');
+    }
+  };
+
   // Move seat action
   const handleMoveSeat = async (bookingRef, fromSeat, toSeat, mode = 'move') => {
     try {
@@ -2287,6 +2298,7 @@ export default function SeatingPage() {
           setSeatActionTarget(null);
           handleTimerAction(bRef, [personNo], 'end');
         }}
+        onRemovePerson={handleRemovePerson}
         onSupplement={(bRef) => {
           setSeatActionTarget(null);
           setCheckoutBookingRef(bRef);
@@ -2347,6 +2359,7 @@ export default function SeatingPage() {
           setSelectedTableForPanel(null);
           setAddBoardModalTarget({ booking, personNo });
         }}
+        onRemovePerson={handleRemovePerson}
         onForceAdd={(initialSessionId, preselectedSeats) => {
           setSelectedTableForPanel(null);
           setForceAddInitialSessionId(initialSessionId);

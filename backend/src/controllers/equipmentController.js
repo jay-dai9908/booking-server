@@ -161,7 +161,8 @@ export const getAvailableEquipment = async (req, res) => {
     // Find all BookingEquipment for these active booking_refs
     const bookedEquipments = await prisma.bookingEquipment.findMany({
       where: {
-        booking_ref: { in: activeBookingRefs }
+        booking_ref: { in: activeBookingRefs },
+        OR: [{ ended_reason: null }, { ended_reason: { not: 'person_removed' } }]
       }
     });
 

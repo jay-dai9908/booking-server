@@ -933,20 +933,34 @@ export async function removePerson(req, res) {
   const staffName = req.user?.name || '門市人員';
   const staffId = req.user?.id || null;
   const deviceInfo = getAdminDeviceInfo(req);
+  const now = (process.env.NODE_ENV === 'test' && (req.body?.now || req.query?.now))
+    ? new Date(req.body?.now || req.query?.now)
+    : new Date();
 
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
-      // Check payment status of this person
-      const paid = await tx.payment.findFirst({
+      // Check payment status of this person or whole booking
+      const firstRes = await tx.reservation.findFirst({
+        where: { booking_ref, status: { not: 'cancelled' } }
+      });
+      const isBookingPaid =
+        firstRes?.is_paid === true ||
+        firstRes?.billing_status === 'paid' ||
+        firstRes?.billing_status === 'waived';
+
+      const paid = isBookingPaid || Boolean(await tx.payment.findFirst({
         where: {
           booking_ref,
           status: 'valid',
           kind: { in: ['charge', 'waive'] },
-          person_nos: { has: pNo }
+          OR: [
+            { person_nos: { has: pNo } },
+            { person_nos: { equals: [] } }
+          ]
         }
-      });
+      }));
       if (paid) {
         throw { status: 400, message: `第 ${pNo} 位已付款，無法直接移除` };
       }
@@ -954,18 +968,51 @@ export async function removePerson(req, res) {
       const person = await tx.bookingPerson.findUnique({
         where: { booking_ref_person_no: { booking_ref, person_no: pNo } }
       });
-      if (!person) throw { status: 404, message: '找不到該顧客資料' };
+      if (!person || person.status === 'removed') {
+        throw { status: 404, message: '找不到該顧客資料' };
+      }
+
+      const activeCount = await tx.bookingPerson.count({
+        where: { booking_ref, status: 'active' }
+      });
+      if (activeCount <= 1) {
+        throw { status: 422, message: '這組只剩這一位，要取消整組請到訂單管理' };
+      }
+
+      if (person.timer_started_at) {
+        const refEndMs = person.paused_at
+          ? Math.min(now.getTime(), new Date(person.paused_at).getTime())
+          : now.getTime();
+        const elapsedSec = Math.max(
+          0,
+          Math.floor((refEndMs - new Date(person.timer_started_at).getTime()) / 1000) - (person.paused_seconds || 0)
+        );
+        if (elapsedSec > 15 * 60) {
+          throw { status: 422, message: '已計時超過 15 分鐘，請改用離場' };
+        }
+      }
+
+      // Close any open timer pause
+      await tx.timerPause.updateMany({
+        where: { person_id: person.id, ended_at: null },
+        data: { ended_at: now }
+      });
 
       await tx.bookingPerson.update({
         where: { id: person.id },
-        data: { status: 'removed', seat_code: null }
+        data: {
+          status: 'removed',
+          seat_code: null,
+          paused_at: null,
+          timer_ended_at: now
+        }
       });
 
       // Release seat if any
       if (person.seat_code) {
         const reservations = await tx.reservation.findMany({ where: { booking_ref } });
         for (const r of reservations) {
-          const updatedSeats = (r.assigned_seats || []).filter(s => s !== person.seat_code);
+          const updatedSeats = (r.assigned_seats || []).filter(sc => sc !== person.seat_code);
           await tx.reservation.update({
             where: { id: r.id },
             data: { assigned_seats: updatedSeats }
@@ -973,14 +1020,28 @@ export async function removePerson(req, res) {
         }
       }
 
-      // Reassign boards to person 1
-      const p1 = await tx.bookingPerson.findFirst({
-        where: { booking_ref, person_no: 1 }
+      // Directly end boards under this person, close open BoardPause, release stock & waive fee
+      const personBoards = await tx.bookingEquipment.findMany({
+        where: { booking_ref, person_id: person.id },
+        select: { id: true, unit_group: true }
       });
-      if (p1) {
+      const uGroups = [...new Set(personBoards.map(b => b.unit_group).filter(Boolean))];
+      if (uGroups.length > 0) {
+        await tx.boardPause.updateMany({
+          where: { unit_group: { in: uGroups }, ended_at: null },
+          data: { ended_at: now }
+        });
+      }
+      if (personBoards.length > 0) {
         await tx.bookingEquipment.updateMany({
           where: { booking_ref, person_id: person.id },
-          data: { person_id: p1.id }
+          data: {
+            end_at: now,
+            ended_reason: 'person_removed',
+            subtotal_price: 0,
+            covered_sessions: [],
+            quantity: 0
+          }
         });
       }
 
@@ -994,8 +1055,8 @@ export async function removePerson(req, res) {
         booking_ref,
         event_type: 'amount_adjusted',
         category: 'amount',
-        summary: `移除 第 ${pNo} 位`,
-        reason: '移除未付款顧客',
+        summary: `移除 第 ${pNo} 位（這位不玩了）`,
+        reason: '現場減人（未收費移除）',
         staff_name: staffName,
         staff_id: staffId,
         device_id: deviceInfo.device_id,
@@ -1135,7 +1196,7 @@ export async function swapBoard(req, res) {
           const occupiedCount = uncancelledEquips.filter(be => {
             const cSessions = (be.covered_sessions || []).map(Number);
             return cSessions.includes(sId);
-          }).reduce((sum, be) => sum + (be.quantity || 1), 0);
+          }).reduce((sum, be) => sum + (be.quantity ?? 1), 0);
 
           const available = totalStock - occupiedCount;
           if (available < 1) {

@@ -98,6 +98,7 @@ export function buildBillInput({
     const items = bg.raw_items.sort((a, b) => (a.segment_no || 1) - (b.segment_no || 1));
     const unitPauses = boardPausesByGroup.get(bg.unit_group) || [];
     const allRemoved = items.every(be => be.ended_reason === 'person_removed');
+    if (allRemoved) continue;
     const isSingleUnmodified = items.length === 1 && !items[0].ended_reason && unitPauses.length === 0;
 
     const segments = items.map(be => {

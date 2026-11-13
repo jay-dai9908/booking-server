@@ -117,6 +117,28 @@ export function bookingDurationText(booking, maybeEnd) {
   return hoursText;
 }
 
+export function getPersonTimerElapsedForRemove(person, now = new Date()) {
+  const timer = person?.timer || person;
+  if (!timer || !timer.timer_started_at) {
+    return { canShow: true, elapsedMinutes: 0 };
+  }
+  if (timer.timer_ended_at) {
+    return { canShow: false, elapsedMinutes: 0 };
+  }
+  const startMs = new Date(timer.timer_started_at).getTime();
+  if (!Number.isFinite(startMs)) {
+    return { canShow: true, elapsedMinutes: 0 };
+  }
+  const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  const refEndMs = timer.paused_at ? Math.min(nowMs, new Date(timer.paused_at).getTime()) : nowMs;
+  const pausedSec = Number(timer.paused_seconds) || 0;
+  const elapsedSec = Math.max(0, Math.floor((refEndMs - startMs) / 1000) - pausedSec);
+  return {
+    canShow: elapsedSec <= 15 * 60,
+    elapsedMinutes: Math.floor(elapsedSec / 60)
+  };
+}
+
 export function personElapsedMinutes(person, now = new Date()) {
   const timer = person?.timer || person;
   if (!timer) return 0;

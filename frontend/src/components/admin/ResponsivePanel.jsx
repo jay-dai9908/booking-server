@@ -70,12 +70,12 @@ export default function ResponsivePanel({
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-sg-line flex-shrink-0">
-          <div>
-            <h3 className="text-[17px] font-bold text-sg-ink leading-tight">{title}</h3>
+        <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-b border-sg-line flex-shrink-0">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[17px] font-bold text-sg-ink leading-tight truncate">{title}</h3>
             {subtitle && <p className="text-[12px] text-sg-muted mt-0.5">{subtitle}</p>}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             {headerRight}
             {dismissible && (
               <button

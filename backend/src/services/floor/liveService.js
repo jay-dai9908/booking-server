@@ -327,6 +327,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
     // Boards grouped by unit_group
     const boardGroupMap = new Map();
     for (const eq of bEquipments) {
+      if (eq.ended_reason === 'person_removed') continue;
       const uGroup = eq.unit_group || `single-${eq.id}`;
       if (!boardGroupMap.has(uGroup)) {
         let personNo = eq.person_id ? bPersons.find(p => p.id === eq.person_id)?.person_no || null : null;
