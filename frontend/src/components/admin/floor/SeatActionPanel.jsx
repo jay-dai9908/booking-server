@@ -487,7 +487,7 @@ export default function SeatActionPanel({
                   data-testid="seat-panel-add-board-btn"
                   className={actionTileClass}
                   onClick={() => {
-                    if (onAddBoard && booking) onAddBoard(booking);
+                    if (onAddBoard && booking) onAddBoard(booking, personNo, currentPerson);
                   }}
                 >
                   <Plus className="w-4 h-4 text-sg-brown" />

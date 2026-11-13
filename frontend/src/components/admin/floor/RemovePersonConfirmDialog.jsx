@@ -86,7 +86,7 @@ export default function RemovePersonConfirmDialog({
             改成離場（照計時收）
           </Button>
           <Button
-            variant="ghost"
+            variant="text"
             size="md"
             className="w-full font-bold text-sg-muted"
             disabled={submitting}

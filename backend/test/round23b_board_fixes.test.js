@@ -49,7 +49,11 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
   const prevNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'test';
 
-  const dateStr = '2026-11-28';
+  const prevGlobalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
+  const prevPegboardS = await prisma.equipmentConfig.findUnique({ where: { id: 'pegboard_s' } });
+  const prevPegboardM = await prisma.equipmentConfig.findUnique({ where: { id: 'pegboard_m' } });
+
+  const dateStr = '2026-12-28';
   const dbDate = dateOnly(dateStr);
   const createdBookingRefs = [];
   const createdSessionIds = [];
@@ -235,7 +239,46 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
       await prisma.seatZone.deleteMany({ where: { layout_id: testLayout.id } });
       await prisma.seatLayout.deleteMany({ where: { id: testLayout.id } });
     }
-    await prisma.equipmentConfig.update({ where: { id: 'pegboard_m' }, data: { total_stock: 10, min_contiguous_hours: 2 } }).catch(() => {});
+    if (prevGlobalSetting) {
+      await prisma.globalSetting.update({
+        where: { id: 1 },
+        data: {
+          seat_layout_enabled: prevGlobalSetting.seat_layout_enabled,
+          weekday_hourly_price: prevGlobalSetting.weekday_hourly_price,
+          weekend_hourly_price: prevGlobalSetting.weekend_hourly_price,
+          weekday_unlimited_price: prevGlobalSetting.weekday_unlimited_price,
+          weekend_unlimited_price: prevGlobalSetting.weekend_unlimited_price,
+          equipment_discount_enabled: prevGlobalSetting.equipment_discount_enabled,
+          equipment_discount_buy_hours: prevGlobalSetting.equipment_discount_buy_hours,
+          equipment_discount_free_hours: prevGlobalSetting.equipment_discount_free_hours,
+          equipment_discount_stackable: prevGlobalSetting.equipment_discount_stackable
+        }
+      }).catch(() => {});
+    }
+    if (prevPegboardS) {
+      await prisma.equipmentConfig.update({
+        where: { id: 'pegboard_s' },
+        data: {
+          name: prevPegboardS.name,
+          hourly_rate: prevPegboardS.hourly_rate,
+          total_stock: prevPegboardS.total_stock,
+          visibility_status: prevPegboardS.visibility_status,
+          min_contiguous_hours: prevPegboardS.min_contiguous_hours
+        }
+      }).catch(() => {});
+    }
+    if (prevPegboardM) {
+      await prisma.equipmentConfig.update({
+        where: { id: 'pegboard_m' },
+        data: {
+          name: prevPegboardM.name,
+          hourly_rate: prevPegboardM.hourly_rate,
+          total_stock: prevPegboardM.total_stock,
+          visibility_status: prevPegboardM.visibility_status,
+          min_contiguous_hours: prevPegboardM.min_contiguous_hours
+        }
+      }).catch(() => {});
+    }
   });
 
   await t.test('Item 1: addBoardRental leaves end_at null so person pause & solo board pause work and billing is intact', async () => {

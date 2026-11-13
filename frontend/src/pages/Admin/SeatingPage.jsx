@@ -378,6 +378,43 @@ export default function SeatingPage() {
   const boardUsage = floorData?.board_usage || [];
   const sessions = floorData?.sessions || [];
 
+  const openAddBoardModal = (booking, personNo = 1, person = null) => {
+    if (!booking) return;
+    const bookingSlots = getBookingHourSlots(booking);
+    const nowHHmm = formatTimeHHmm(getServerNow());
+    const nowH = parseInt(nowHHmm.split(':')[0], 10);
+    const nowSlot = `${nowH.toString().padStart(2, '0')}:00`;
+    const startMs = booking.start_at ? new Date(booking.start_at).getTime() : Date.now();
+    const bookedEndMs = booking.end_at ? new Date(booking.end_at).getTime() : (startMs + 2 * 3600000);
+
+    const startSlot = bookingSlots[0] || formatTimeHHmm(startMs);
+    const endSlot = bookingSlots[bookingSlots.length - 1] || formatTimeHHmm(bookedEndMs);
+
+    let defaultFrom = startSlot;
+    if (bookingSlots.slice(0, -1).includes(nowSlot)) {
+      defaultFrom = nowSlot;
+    } else if (nowSlot < startSlot) {
+      defaultFrom = startSlot;
+    }
+
+    let defaultTo = endSlot;
+    if (defaultTo <= defaultFrom) {
+      const laterSlots = bookingSlots.filter(s => s > defaultFrom);
+      defaultTo = laterSlots[laterSlots.length - 1] || laterSlots[0] || endSlot;
+    }
+
+    const firstAvailableEq = (boardUsage || []).find(b => (b.total - b.in_use) > 0);
+    setSelectedAddBoardEqId(firstAvailableEq ? firstAvailableEq.equipment_id : (boardUsage?.[0]?.equipment_id || ''));
+    setAddBoardFromTime(defaultFrom);
+    setAddBoardToTime(defaultTo);
+    setAddBoardError(null);
+    setAddBoardModalTarget({
+      booking,
+      person: person || (booking.persons || []).find(p => Number(p.person_no) === Number(personNo)) || null,
+      personNo: Number(personNo) || 1
+    });
+  };
+
   // Keep selectedTableForPanel in sync with layout
   useEffect(() => {
     if (selectedTableForPanel && layout?.tables) {
@@ -2082,37 +2119,7 @@ export default function SeatingPage() {
                                     data-testid={`person-add-board-btn-${p.person_no}`}
                                     onClick={() => {
                                       setPersonMenuOpen(null);
-                                      const bookingSlots = getBookingHourSlots(timerTarget);
-                                      const nowHHmm = formatTimeHHmm(getServerNow());
-                                      const nowH = parseInt(nowHHmm.split(':')[0], 10);
-                                      const nowSlot = `${nowH.toString().padStart(2, '0')}:00`;
-
-                                      const startSlot = bookingSlots[0] || formatTimeHHmm(startMs);
-                                      const endSlot = bookingSlots[bookingSlots.length - 1] || formatTimeHHmm(bookedEndMs);
-
-                                      let defaultFrom = startSlot;
-                                      if (bookingSlots.slice(0, -1).includes(nowSlot)) {
-                                        defaultFrom = nowSlot;
-                                      } else if (nowSlot < startSlot) {
-                                        defaultFrom = startSlot;
-                                      }
-
-                                      let defaultTo = endSlot;
-                                      if (defaultTo <= defaultFrom) {
-                                        const laterSlots = bookingSlots.filter(s => s > defaultFrom);
-                                        defaultTo = laterSlots[laterSlots.length - 1] || laterSlots[0] || endSlot;
-                                      }
-
-                                      const firstAvailableEq = (boardUsage || []).find(b => (b.total - b.in_use) > 0);
-                                      setSelectedAddBoardEqId(firstAvailableEq ? firstAvailableEq.equipment_id : (boardUsage?.[0]?.equipment_id || ''));
-                                      setAddBoardFromTime(defaultFrom);
-                                      setAddBoardToTime(defaultTo);
-                                      setAddBoardError(null);
-                                      setAddBoardModalTarget({
-                                        booking: timerTarget,
-                                        person: p,
-                                        personNo: p.person_no
-                                      });
+                                      openAddBoardModal(timerTarget, p.person_no, p);
                                     }}
                                     className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
                                   >
@@ -2343,9 +2350,9 @@ export default function SeatingPage() {
           setSelectedBoundary(null);
           setSwapError(null);
         }}
-        onAddBoard={(booking) => {
+        onAddBoard={(booking, personNo, person) => {
           setSeatActionTarget(null);
-          setAddonReservation(booking);
+          openAddBoardModal(booking, personNo, person);
         }}
         onExtendTime={(booking) => {
           setSeatActionTarget(null);
@@ -2422,7 +2429,7 @@ export default function SeatingPage() {
         }}
         onAddBoard={({ booking, personNo }) => {
           setSelectedTableForPanel(null);
-          setAddBoardModalTarget({ booking, personNo });
+          openAddBoardModal(booking, personNo);
         }}
         onRemovePerson={handleRemovePerson}
         onForceAdd={(initialSessionId, preselectedSeats) => {

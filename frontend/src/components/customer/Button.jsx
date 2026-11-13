@@ -38,6 +38,7 @@ export default function Button({
         : 'bg-sg-line-green text-white font-bold hover:brightness-95 active:brightness-90';
       break;
     case 'text':
+    case 'ghost':
       variantClasses = isDisabled
         ? 'bg-transparent text-sg-full cursor-not-allowed min-h-[44px] px-2 -mx-2'
         : 'bg-transparent text-sg-brown font-bold text-[13px] hover:text-sg-brown-hover active:text-sg-brown-hover min-h-[44px] px-2 -mx-2';
@@ -56,7 +57,7 @@ export default function Button({
       variantClasses = 'bg-sg-brown text-white';
   }
 
-  const isTextLike = variant === 'text' || variant === 'dangerText';
+  const isTextLike = variant === 'text' || variant === 'ghost' || variant === 'dangerText';
   const sizeClasses = isTextLike
     ? ''
     : size === 'sm'

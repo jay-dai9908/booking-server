@@ -17,7 +17,9 @@ test('Round 21 Item 1: Per-person refund limits and legacy splitAmount fallback'
     where: { id: 1 },
     update: {
       weekday_hourly_price: 200,
+      weekend_hourly_price: 200,
       weekday_unlimited_price: 750,
+      weekend_unlimited_price: 750,
       payment_methods_json: [
         { key: 'cash', label: '現金', enabled: true },
         { key: 'linepay', label: 'LINE Pay', enabled: true },
@@ -29,7 +31,9 @@ test('Round 21 Item 1: Per-person refund limits and legacy splitAmount fallback'
       id: 1,
       cash_float_amount: 2000,
       weekday_hourly_price: 200,
+      weekend_hourly_price: 200,
       weekday_unlimited_price: 750,
+      weekend_unlimited_price: 750,
       payment_methods_json: [
         { key: 'cash', label: '現金', enabled: true },
         { key: 'linepay', label: 'LINE Pay', enabled: true },
@@ -89,6 +93,9 @@ test('Round 21 Item 1: Per-person refund limits and legacy splitAmount fallback'
     }).catch(() => {});
     await prisma.user.deleteMany({
       where: { id: testUser.id }
+    }).catch(() => {});
+    await prisma.session.deleteMany({
+      where: { id: session.id, reservations: { none: {} } }
     }).catch(() => {});
   };
   t.after(cleanup);

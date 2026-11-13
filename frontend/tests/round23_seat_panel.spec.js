@@ -1,8 +1,8 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import crypto from 'node:crypto';
 import { ensureFreshDbSeeded, cleanOperationalData } from './helpers/seedFreshDb.js';
 import { toTaipeiDateString, dateOnly } from '../../shared/time.js';
 
@@ -49,7 +49,6 @@ async function run() {
 
   const ts = Date.now();
   const bookingRef = `BK-R23-${ts.toString().slice(-6)}`;
-  const unitGroup = crypto.randomUUID();
 
   let testLayout = null;
   let testUser = null;
@@ -132,18 +131,16 @@ async function run() {
 
     await prisma.equipmentConfig.upsert({
       where: { id: 'pegboard_s' },
-      update: { name: '小板 (52×52)', hourly_rate: 90, total_stock: 10 },
-      create: { id: 'pegboard_s', name: '小板 (52×52)', hourly_rate: 90, total_stock: 10 }
+      update: { name: '小板 (52×52)', hourly_rate: 90, total_stock: 10, visibility_status: 'ACTIVE' },
+      create: { id: 'pegboard_s', name: '小板 (52×52)', hourly_rate: 90, total_stock: 10, visibility_status: 'ACTIVE' }
     });
     await prisma.equipmentConfig.upsert({
       where: { id: 'pegboard_m' },
-      update: { name: '中板 (78×78)', hourly_rate: 120, total_stock: 10 },
-      create: { id: 'pegboard_m', name: '中板 (78×78)', hourly_rate: 120, total_stock: 10 }
+      update: { name: '中板 (78×78)', hourly_rate: 120, total_stock: 10, visibility_status: 'ACTIVE' },
+      create: { id: 'pegboard_m', name: '中板 (78×78)', hourly_rate: 120, total_stock: 10, visibility_status: 'ACTIVE' }
     });
 
     const bStart = new Date(`${todayStr}T${sessionHours[0][0]}:00+08:00`);
-    const bEnd = new Date(`${todayStr}T${sessionHours[3][1]}:00+08:00`);
-    const swapAt = new Date(bStart.getTime() + 90 * 60000);
     const p1PauseStart = new Date(bStart.getTime() + 45 * 60000);
     const p1PauseEnd = new Date(bStart.getTime() + 57 * 60000);
     const p2StartedAt = new Date(now.getTime() - 3 * 60000);
@@ -199,44 +196,7 @@ async function run() {
       }
     });
 
-    // Person 1 board swapped Small -> Medium
-    await prisma.bookingEquipment.create({
-      data: {
-        booking_ref: bookingRef,
-        equipment_id: 'pegboard_s',
-        equipment_name_snapshot: '小板 (52×52)',
-        quantity: 1,
-        rental_hours: 4,
-        subtotal_price: 0,
-        covered_sessions: [String(createdSessions[0].id), String(createdSessions[1].id)],
-        person_id: p1.id,
-        unit_group: unitGroup,
-        segment_no: 1,
-        start_at: bStart,
-        end_at: swapAt,
-        ended_reason: 'swapped',
-        planned_end_at: bEnd,
-        unit_rate: 90
-      }
-    });
-    await prisma.bookingEquipment.create({
-      data: {
-        booking_ref: bookingRef,
-        equipment_id: 'pegboard_m',
-        equipment_name_snapshot: '中板 (78×78)',
-        quantity: 1,
-        rental_hours: 4,
-        subtotal_price: 0,
-        covered_sessions: [String(createdSessions[1].id), String(createdSessions[2].id), String(createdSessions[3].id)],
-        person_id: p1.id,
-        unit_group: unitGroup,
-        segment_no: 2,
-        start_at: swapAt,
-        end_at: null,
-        planned_end_at: bEnd,
-        unit_rate: 120
-      }
-    });
+    // Note: Do NOT seed BookingEquipment directly via Prisma; all boards in this test go through UI/API (addBoardRental -> pause -> resume -> swap -> return).
 
     // 4. Launch Playwright in mobile viewport (390x844)
     const launchOptions = { headless: HEADLESS };
@@ -269,31 +229,110 @@ async function run() {
         await floorTabMobile.click();
       }
 
-      // Click seat A1-1 in mobile TableCard (has swapped boards: 小板 + 中板)
+      // 4-step board UI flow on A1-1 (390x844): 加租 -> 單獨暫停 -> 繼續 -> 換板 -> 歸還
       const tableCardA1 = page.locator(`#table-card-${tableA1.id}`);
       await tableCardA1.waitFor({ state: 'visible', timeout: 10000 });
       const seatA11 = tableCardA1.locator('button[data-seat-code="A1-1"]');
       await seatA11.waitFor({ state: 'visible', timeout: 10000 });
       await seatA11.click();
 
-      // Verify timeline renders both board tracks (小板 + 中板) and swap summary + pause/return buttons inside SeatActionPanel
       const panelContent = page.locator('[data-testid="seat-action-panel-content"]');
       await panelContent.waitFor({ state: 'visible', timeout: 5000 });
-      await panelContent.locator('text=小板').first().waitFor({ state: 'visible', timeout: 5000 });
-      await panelContent.locator('text=中板').first().waitFor({ state: 'visible', timeout: 5000 });
-      await panelContent.locator('text=換板').first().waitFor({ state: 'visible', timeout: 5000 });
-      await panelContent.locator('[data-testid="seat-panel-board-pause-btn"]').waitFor({ state: 'visible', timeout: 5000 });
-      await panelContent.locator('[data-testid="seat-panel-board-return-btn"]').waitFor({ state: 'visible', timeout: 5000 });
 
-      const shot1 = path.resolve(process.cwd(), 'screenshot_round23_swapped_panel_mobile.png');
+      // Step 1: Click 加租智能板 -> pick 小板 -> 確認加租
+      const addBoardBtn = panelContent.locator('[data-testid="seat-panel-add-board-btn"]');
+      await addBoardBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await addBoardBtn.click();
+
+      const smallBoardChoice = page.locator('[data-testid="board-choice-pegboard_s"]');
+      await smallBoardChoice.waitFor({ state: 'visible', timeout: 5000 });
+      await smallBoardChoice.click();
+
+      const firstFromChip = page.locator('[data-testid="add-board-from-chips"] button').first();
+      if (await firstFromChip.isVisible()) {
+        await firstFromChip.click();
+      }
+
+      const confirmAddBoardBtn = page.locator('[data-testid="confirm-add-board-btn"]');
+      const [addResp] = await Promise.all([
+        page.waitForResponse(r => r.url().includes(`/floor/${bookingRef}/boards`) && r.request().method() === 'POST'),
+        confirmAddBoardBtn.click()
+      ]);
+      assert.equal(addResp.status(), 200, 'addBoardRental POST should return 200');
+      assert.equal(await page.locator('.text-red-700, .bg-red-50').count(), 0, 'Expected no error banners after add board');
+      await page.waitForTimeout(350);
+
+      // Reopen A1-1 SeatActionPanel -> Step 2: 智能板單獨暫停 -> screenshot -> 繼續使用智能板
+      await seatA11.click();
+      await panelContent.waitFor({ state: 'visible', timeout: 5000 });
+      await panelContent.locator('text=小板').first().waitFor({ state: 'visible', timeout: 5000 });
+
+      const boardPauseBtn = panelContent.locator('[data-testid="seat-panel-board-pause-btn"]');
+      await boardPauseBtn.waitFor({ state: 'visible', timeout: 5000 });
+      const [pauseResp] = await Promise.all([
+        page.waitForResponse(r => r.url().includes(`/floor/${bookingRef}/boards/`) && r.url().endsWith('/pause') && r.request().method() === 'POST'),
+        boardPauseBtn.click()
+      ]);
+      assert.equal(pauseResp.status(), 200, 'pauseBoard POST should return 200');
+      await panelContent.locator('[data-testid="seat-panel-board-pause-btn"]:has-text("繼續使用智能板")').waitFor({ state: 'visible', timeout: 5000 });
+      assert.equal(await page.locator('.text-red-700, .bg-red-50').count(), 0, 'Expected no error banners while paused');
+
+      await page.waitForTimeout(250);
+      const shot1 = path.resolve(process.cwd(), 'seat_panel_add_board_paused_mobile.png');
       await page.screenshot({ path: shot1 });
       console.log(`Saved Screenshot 1: ${shot1}`);
 
-      // Close A1-1 panel
-      await page.locator('[role="dialog"] [aria-label="關閉"]').first().click();
-      await panelContent.waitFor({ state: 'hidden', timeout: 5000 });
+      const [resumeResp] = await Promise.all([
+        page.waitForResponse(r => r.url().includes(`/floor/${bookingRef}/boards/`) && r.url().endsWith('/resume') && r.request().method() === 'POST'),
+        boardPauseBtn.click()
+      ]);
+      assert.equal(resumeResp.status(), 200, 'resumeBoard POST should return 200');
+      await panelContent.locator('[data-testid="seat-panel-board-pause-btn"]:has-text("智能板單獨暫停")').waitFor({ state: 'visible', timeout: 5000 });
+      assert.equal(await page.locator('.text-red-700, .bg-red-50').count(), 0, 'Expected no error banners after resume');
 
-      // Click newly seated guest A1-2 -> click 「這位不玩了」 -> screenshot confirm dialog -> click 「確定移除這位」
+      // Step 3: 換板 (小板 -> 中板 -> 確認換板)
+      const swapBoardBtn = panelContent.locator('[data-testid="seat-panel-swap-board-btn"]');
+      await swapBoardBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await swapBoardBtn.click();
+
+      const swapDialog = page.locator('[role="dialog"]:has-text("換板")');
+      await swapDialog.waitFor({ state: 'visible', timeout: 5000 });
+      await swapDialog.locator('button:has-text("中板")').first().click();
+
+      const [swapResp] = await Promise.all([
+        page.waitForResponse(r => r.url().includes(`/floor/${bookingRef}/boards/`) && r.url().endsWith('/swap') && r.request().method() === 'POST'),
+        swapDialog.locator('button:has-text("確認換板")').click()
+      ]);
+      assert.equal(swapResp.status(), 200, 'swapBoard POST should return 200');
+      assert.equal(await page.locator('.text-red-700, .bg-red-50').count(), 0, 'Expected no error banners after swap board');
+      await page.waitForTimeout(350);
+
+      // Reopen A1-1 SeatActionPanel -> verify 中板 shown -> Step 4: 不用了，歸還 (twice to confirm)
+      await seatA11.click();
+      await panelContent.waitFor({ state: 'visible', timeout: 5000 });
+      await panelContent.locator('text=中板').first().waitFor({ state: 'visible', timeout: 5000 });
+
+      const returnBoardBtn = panelContent.locator('[data-testid="seat-panel-board-return-btn"]');
+      await returnBoardBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await returnBoardBtn.click();
+      await panelContent.locator('[data-testid="seat-panel-board-return-btn"]:has-text("確定歸還")').waitFor({ state: 'visible', timeout: 5000 });
+
+      const [returnResp] = await Promise.all([
+        page.waitForResponse(r => r.url().includes(`/floor/${bookingRef}/boards/`) && r.url().endsWith('/return') && r.request().method() === 'POST'),
+        returnBoardBtn.click()
+      ]);
+      assert.equal(returnResp.status(), 200, 'returnBoard POST should return 200');
+      assert.equal(await page.locator('.text-red-700, .bg-red-50').count(), 0, 'Expected no error banners after return board');
+      await page.waitForTimeout(300);
+
+      // Close A1-1 panel if still open
+      const closeBtn = page.locator('[role="dialog"] [aria-label="關閉"]').first();
+      if (await closeBtn.isVisible()) {
+        await closeBtn.click();
+        await panelContent.waitFor({ state: 'hidden', timeout: 5000 });
+      }
+
+      // Click newly seated guest A1-2 -> click 「這位不玩了」 -> verify button styles & screenshot confirm dialog -> click 「確定移除這位」
       const seatA12 = tableCardA1.locator('button[data-seat-code="A1-2"]');
       await seatA12.waitFor({ state: 'visible', timeout: 10000 });
       await seatA12.click();
@@ -306,14 +345,27 @@ async function run() {
       const dialog = page.locator('[data-testid="remove-person-confirm-dialog"]');
       await dialog.waitFor({ state: 'visible', timeout: 5000 });
       await page.locator('[data-testid="remove-person-confirm-message"]').waitFor({ state: 'visible', timeout: 5000 });
-      await page.locator('[data-testid="remove-person-leave-btn"]').waitFor({ state: 'visible', timeout: 5000 });
-      await page.locator('[data-testid="remove-person-cancel-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+      const confirmBtn = page.locator('[data-testid="remove-person-confirm-btn"]');
+      const leaveBtn = page.locator('[data-testid="remove-person-leave-btn"]');
+      const cancelBtn = page.locator('[data-testid="remove-person-cancel-btn"]');
+      await confirmBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await leaveBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await cancelBtn.waitFor({ state: 'visible', timeout: 5000 });
 
-      const shot2 = path.resolve(process.cwd(), 'screenshot_round23_remove_confirm_mobile.png');
+      // Assert Round 23b Item 4 button visual hierarchy
+      const cancelBg = await cancelBtn.evaluate(el => getComputedStyle(el).backgroundColor);
+      assert.ok(cancelBg === 'rgba(0, 0, 0, 0)' || cancelBg === 'transparent', `Expected 先不要 to have transparent background, got ${cancelBg}`);
+
+      const shot2 = path.resolve(process.cwd(), 'remove_person_confirm_dialog_mobile.png');
       await page.screenshot({ path: shot2 });
       console.log(`Saved Screenshot 2: ${shot2}`);
 
-      const confirmBtn = page.locator('[data-testid="remove-person-confirm-btn"]');
+      // Copy screenshots to artifact dir if writable
+      const artifactDir = process.env.ARTIFACT_DIR || '';
+      if (artifactDir && fs.existsSync(artifactDir)) {
+        fs.copyFileSync(shot1, path.join(artifactDir, 'seat_panel_add_board_paused_mobile.png'));
+        fs.copyFileSync(shot2, path.join(artifactDir, 'remove_person_confirm_dialog_mobile.png'));
+      }
       const [removeResp] = await Promise.all([
         page.waitForResponse(r => r.url().includes(`/floor/${bookingRef}/persons/2`) && r.request().method() === 'DELETE'),
         confirmBtn.click()
@@ -402,7 +454,14 @@ async function run() {
       await browser.close();
     }
   } finally {
-    await prisma.boardPause.deleteMany({ where: { unit_group: unitGroup } }).catch(() => {});
+    const eqRows = await prisma.bookingEquipment.findMany({
+      where: { booking_ref: bookingRef },
+      select: { unit_group: true }
+    }).catch(() => []);
+    const uGroups = [...new Set(eqRows.map(e => e.unit_group).filter(Boolean))];
+    if (uGroups.length) {
+      await prisma.boardPause.deleteMany({ where: { unit_group: { in: uGroups } } }).catch(() => {});
+    }
     await prisma.bookingEquipment.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
     await prisma.timerPause.deleteMany({ where: { person: { booking_ref: bookingRef } } }).catch(() => {});
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
