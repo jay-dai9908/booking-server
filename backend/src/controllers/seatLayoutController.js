@@ -986,9 +986,20 @@ export async function publishLayout(req, res) {
       };
     });
 
+    const updated = await prisma.seatLayout.findUnique({
+      where: { id },
+      include: {
+        zones: { orderBy: { sort_order: 'asc' } },
+        tables: { orderBy: { sort_order: 'asc' } },
+        seats: { orderBy: { sort_order: 'asc' } }
+      }
+    });
+    const resolved = updated ? resolveLayoutGeometry(updated) : null;
+
     return res.json({
       server_now: new Date().toISOString(),
       message: '版面發布成功',
+      layout: resolved,
       ...publishResult
     });
   } catch (err) {
@@ -1036,10 +1047,21 @@ export async function updateLayoutRules(req, res) {
       }
     });
 
+    const updated = await prisma.seatLayout.findUnique({
+      where: { id },
+      include: {
+        zones: { orderBy: { sort_order: 'asc' } },
+        tables: { orderBy: { sort_order: 'asc' } },
+        seats: { orderBy: { sort_order: 'asc' } }
+      }
+    });
+    const resolved = updated ? resolveLayoutGeometry(updated) : null;
+
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
-      message: '排位規則更新成功'
+      message: '排位規則更新成功',
+      layout: resolved
     });
   } catch (err) {
     console.error('updateLayoutRules error:', err);

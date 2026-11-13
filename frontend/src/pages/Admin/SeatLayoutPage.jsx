@@ -129,6 +129,54 @@ export default function SeatLayoutPage() {
   const fileInputRef = useRef(null);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+  const zoneOrderListRef = useRef(zoneOrderList);
+  zoneOrderListRef.current = zoneOrderList;
+  const currentZoneIdRef = useRef(currentZoneId);
+  currentZoneIdRef.current = currentZoneId;
+
+  const syncLayoutFromServer = useCallback((rawLayout) => {
+    if (!rawLayout) return null;
+    const normalized = { ...rawLayout };
+    if (!normalized.elements_json && normalized.elements) {
+      normalized.elements_json = normalized.elements;
+    }
+    if (!Array.isArray(normalized.elements_json)) {
+      normalized.elements_json = [];
+    }
+    const sortedZones = Array.isArray(normalized.zones)
+      ? [...normalized.zones].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      : [];
+
+    const prevZones = zoneOrderListRef.current || [];
+    const prevSelectedId = currentZoneIdRef.current;
+    const prevIdx = prevZones.findIndex(z => z.id === prevSelectedId);
+    const prevSelected = prevIdx >= 0 ? prevZones[prevIdx] : (layoutRef.current?.zones || []).find(z => z.id === prevSelectedId);
+
+    let nextZoneId = null;
+    if (sortedZones.length > 0) {
+      if (prevSelected) {
+        const byName = sortedZones.find(z => z.name === prevSelected.name);
+        if (byName) {
+          nextZoneId = byName.id;
+        } else if (prevIdx >= 0 && sortedZones[prevIdx]) {
+          nextZoneId = sortedZones[prevIdx].id;
+        } else {
+          nextZoneId = sortedZones[0].id;
+        }
+      } else {
+        nextZoneId = sortedZones[0].id;
+      }
+    }
+
+    layoutRef.current = normalized;
+    zoneOrderListRef.current = sortedZones;
+    currentZoneIdRef.current = nextZoneId;
+
+    setLayout(normalized);
+    setZoneOrderList(sortedZones);
+    setCurrentZoneId(nextZoneId);
+    return { normalized, sortedZones, nextZoneId };
+  }, []);
 
   // 1. Initial Load
   useEffect(() => {
@@ -151,36 +199,23 @@ export default function SeatLayoutPage() {
       }
 
       if (loadedLayout) {
-        // Ensure elements_json is array
-        if (!loadedLayout.elements_json && loadedLayout.elements) {
-          loadedLayout.elements_json = loadedLayout.elements;
-        }
-        if (!Array.isArray(loadedLayout.elements_json)) {
-          loadedLayout.elements_json = [];
-        }
-        setLayout(loadedLayout);
-        setHistory([JSON.parse(JSON.stringify(loadedLayout))]);
+        const synced = syncLayoutFromServer(loadedLayout);
+        const normalized = synced?.normalized || loadedLayout;
+        setHistory([JSON.parse(JSON.stringify(normalized))]);
         setHistoryIndex(0);
-        if (loadedLayout.rules_json) {
+        if (normalized.rules_json) {
           setLayoutRules({
-            spread_tables: loadedLayout.rules_json.spread_tables !== false,
-            avoid_opposite: loadedLayout.rules_json.avoid_opposite !== false,
-            avoid_beside: loadedLayout.rules_json.avoid_beside !== false,
-            zone_mode: (loadedLayout.rules_json.zone_mode === 'spread_across_zones' || !loadedLayout.rules_json.zone_mode)
+            spread_tables: normalized.rules_json.spread_tables !== false,
+            avoid_opposite: normalized.rules_json.avoid_opposite !== false,
+            avoid_beside: normalized.rules_json.avoid_beside !== false,
+            zone_mode: (normalized.rules_json.zone_mode === 'spread_across_zones' || !normalized.rules_json.zone_mode)
               ? 'empty_tables_first'
-              : loadedLayout.rules_json.zone_mode,
+              : normalized.rules_json.zone_mode,
             weights: {
               ...DEFAULT_WEIGHTS,
-              ...(loadedLayout.rules_json.weights || {})
+              ...(normalized.rules_json.weights || {})
             }
           });
-        }
-        if (Array.isArray(loadedLayout.zones)) {
-          const sorted = [...loadedLayout.zones].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-          setZoneOrderList(sorted);
-        }
-        if (loadedLayout.zones?.length > 0) {
-          setCurrentZoneId(loadedLayout.zones[0].id);
         }
       }
     } catch (err) {
@@ -312,7 +347,7 @@ export default function SeatLayoutPage() {
       }
       const res = await api.put(`/seat-layouts/${targetId}`, current);
       if (res.data?.layout) {
-        setLayout(res.data.layout);
+        syncLayoutFromServer(res.data.layout);
       } else {
         setLayout(prev => ({ ...prev, id: targetId, status: 'draft' }));
       }
@@ -385,16 +420,19 @@ export default function SeatLayoutPage() {
     if (!layout?.id) return;
     try {
       setSavingRules(true);
-      await api.put(`/seat-layouts/${layout.id}/rules`, {
+      const res = await api.put(`/seat-layouts/${layout.id}/rules`, {
         rules_json: layoutRules,
         zone_order: zoneOrderList.map(z => z.id)
       });
+      if (res.data?.layout) {
+        syncLayoutFromServer(res.data.layout);
+      } else {
+        const refreshed = await api.get(`/seat-layouts/${layout.id}`);
+        if (refreshed.data?.layout) {
+          syncLayoutFromServer(refreshed.data.layout);
+        }
+      }
       setMessage({ type: 'success', text: '排位規則已儲存並生效！' });
-      setLayout(prev => ({
-        ...prev,
-        rules_json: layoutRules,
-        zones: zoneOrderList.map((z, idx) => ({ ...z, sort_order: idx }))
-      }));
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.error || '儲存排位規則失敗' });
     } finally {
@@ -439,7 +477,7 @@ export default function SeatLayoutPage() {
         sessionStorage.setItem('sg_reseated_c_hints', JSON.stringify(existingHints));
       }
       if (res.data?.layout) {
-        setLayout(res.data.layout);
+        syncLayoutFromServer(res.data.layout);
       } else {
         setLayout(prev => ({ ...prev, status: 'published', effective_from: publishDate }));
       }
