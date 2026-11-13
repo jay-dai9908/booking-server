@@ -8,6 +8,153 @@ const GROUP_COLORS = [
   { stroke: '#C98A2C', fill: 'rgba(201, 138, 44, 0.05)' }   // honey
 ];
 
+// Snap values within tolerance to a canonical list to avoid tiny stair-steps
+function snapToExisting(val, refs, tol = 4) {
+  for (const r of refs) {
+    if (Math.abs(val - r) <= tol) return r;
+  }
+  return val;
+}
+
+// Partition rectangles into connected clusters (overlap or touch within 1px)
+function clusterConnectedRects(rects) {
+  const clusters = [];
+  const visited = new Array(rects.length).fill(false);
+
+  const touches = (a, b) =>
+    a.x0 <= b.x1 + 1 &&
+    a.x1 >= b.x0 - 1 &&
+    a.y0 <= b.y1 + 1 &&
+    a.y1 >= b.y0 - 1;
+
+  for (let i = 0; i < rects.length; i++) {
+    if (visited[i]) continue;
+    visited[i] = true;
+    const queue = [i];
+    const cluster = [];
+    while (queue.length > 0) {
+      const idx = queue.shift();
+      const cur = rects[idx];
+      cluster.push(cur);
+      for (let j = 0; j < rects.length; j++) {
+        if (!visited[j] && touches(cur, rects[j])) {
+          visited[j] = true;
+          queue.push(j);
+        }
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
+}
+
+// Trace the outer orthogonal contour(s) of a union of rectangles and convert to a rounded SVG path
+function rectsToRoundedPath(rects, radius = 16) {
+  if (!rects || rects.length === 0) return '';
+
+  const roundCoord = v => Math.round(v * 2) / 2;
+  const xs = [...new Set(rects.flatMap(r => [roundCoord(r.x0), roundCoord(r.x1)]))].sort((a, b) => a - b);
+  const ys = [...new Set(rects.flatMap(r => [roundCoord(r.y0), roundCoord(r.y1)]))].sort((a, b) => a - b);
+
+  const nx = xs.length - 1;
+  const ny = ys.length - 1;
+  if (nx <= 0 || ny <= 0) return '';
+
+  const filled = Array.from({ length: ny }, (_, iy) =>
+    Array.from({ length: nx }, (__, ix) => {
+      const cx = (xs[ix] + xs[ix + 1]) / 2;
+      const cy = (ys[iy] + ys[iy + 1]) / 2;
+      return rects.some(r => cx > r.x0 && cx < r.x1 && cy > r.y0 && cy < r.y1);
+    })
+  );
+
+  // Directed edges: { x0, y0, x1, y1, dir } (dir: 0=R, 1=D, 2=L, 3=U)
+  const edges = [];
+  const outByVertex = new Map();
+  const addEdge = (ix0, iy0, ix1, iy1, dir) => {
+    const idx = edges.length;
+    edges.push({ ix0, iy0, ix1, iy1, dir });
+    const key = `${ix0},${iy0}`;
+    if (!outByVertex.has(key)) outByVertex.set(key, []);
+    outByVertex.get(key).push(idx);
+  };
+
+  for (let iy = 0; iy < ny; iy++) {
+    for (let ix = 0; ix < nx; ix++) {
+      if (!filled[iy][ix]) continue;
+      if (iy === 0 || !filled[iy - 1][ix]) addEdge(ix, iy, ix + 1, iy, 0);
+      if (ix === nx - 1 || !filled[iy][ix + 1]) addEdge(ix + 1, iy, ix + 1, iy + 1, 1);
+      if (iy === ny - 1 || !filled[iy + 1][ix]) addEdge(ix + 1, iy + 1, ix, iy + 1, 2);
+      if (ix === 0 || !filled[iy][ix - 1]) addEdge(ix, iy + 1, ix, iy, 3);
+    }
+  }
+
+  const used = new Array(edges.length).fill(false);
+  const loops = [];
+
+  for (let startIdx = 0; startIdx < edges.length; startIdx++) {
+    if (used[startIdx]) continue;
+    const rawPts = [];
+    let curIdx = startIdx;
+
+    while (curIdx !== -1 && !used[curIdx]) {
+      used[curIdx] = true;
+      const e = edges[curIdx];
+      rawPts.push({ x: xs[e.ix0], y: ys[e.iy0] });
+
+      const nextKey = `${e.ix1},${e.iy1}`;
+      const candidates = (outByVertex.get(nextKey) || []).filter(idx => !used[idx]);
+      if (candidates.length === 0) break;
+
+      // Prefer turning right (keeps loops non-crossing if touching diagonally)
+      const prefOrder = [(e.dir + 1) % 4, e.dir, (e.dir + 3) % 4, (e.dir + 2) % 4];
+      candidates.sort((a, b) => prefOrder.indexOf(edges[a].dir) - prefOrder.indexOf(edges[b].dir));
+      curIdx = candidates[0];
+    }
+
+    if (rawPts.length < 3) continue;
+
+    // Remove collinear points
+    const pts = rawPts.filter((p, i) => {
+      const prev = rawPts[(i - 1 + rawPts.length) % rawPts.length];
+      const next = rawPts[(i + 1) % rawPts.length];
+      const cross = (p.x - prev.x) * (next.y - p.y) - (p.y - prev.y) * (next.x - p.x);
+      return cross !== 0;
+    });
+
+    if (pts.length < 3) continue;
+
+    // Build rounded orthogonal SVG path using quadratic Bezier corners
+    const k = pts.length;
+    const segments = [];
+    for (let i = 0; i < k; i++) {
+      const prev = pts[(i - 1 + k) % k];
+      const curr = pts[i];
+      const next = pts[(i + 1) % k];
+
+      const dx1 = curr.x - prev.x;
+      const dy1 = curr.y - prev.y;
+      const dIn = Math.hypot(dx1, dy1);
+      const dx2 = next.x - curr.x;
+      const dy2 = next.y - curr.y;
+      const dOut = Math.hypot(dx2, dy2);
+
+      const r = Math.min(radius, dIn / 2, dOut / 2);
+      const ax = curr.x - (dx1 / dIn) * r;
+      const ay = curr.y - (dy1 / dIn) * r;
+      const bx = curr.x + (dx2 / dOut) * r;
+      const by = curr.y + (dy2 / dOut) * r;
+
+      segments.push(`${i === 0 ? 'M' : 'L'} ${ax} ${ay}`);
+      segments.push(`Q ${curr.x} ${curr.y} ${bx} ${by}`);
+    }
+    segments.push('Z');
+    loops.push(segments.join(' '));
+  }
+
+  return loops.join(' ');
+}
+
 export default function TableCard({
   table,
   zoneName = '',
@@ -116,255 +263,289 @@ export default function TableCard({
     const totalActive = activeSeats.length;
     const computed = [];
 
-    // Helper to cluster contiguous runs of seats matching a ref
-    const clusterByContiguity = (seatList, targetRef) => {
-      const clusters = [];
-      let current = [];
-      for (const s of seatList) {
-        if (getBookingRef(s.code) === targetRef) {
-          current.push(s);
-        } else {
-          if (current.length > 0) {
-            clusters.push(current);
-            current = [];
+    const pushMergedGroupShapes = (ref, rects, color) => {
+      if (!rects || rects.length === 0) return;
+      const clusters = clusterConnectedRects(rects);
+      clusters.forEach((cluster, cIdx) => {
+        const d = rectsToRoundedPath(cluster, 16);
+        if (!d) return;
+        computed.push({
+          key: `${ref}-shape-${cIdx}`,
+          d,
+          stroke: color.stroke,
+          fill: color.fill
+        });
+      });
+    };
+
+    // Precompute grid tracks for isOneSide
+    let oneSideGrid = null;
+    if (isOneSide) {
+      const measured = seats.filter(s => seatRects[s.code]);
+      const clusterTracks = (vals, tol = 12) => {
+        const sorted = [...vals].sort((a, b) => a - b);
+        const tracks = [];
+        for (const v of sorted) {
+          if (tracks.length === 0 || v - tracks[tracks.length - 1] > tol) {
+            tracks.push(v);
           }
         }
+        return tracks;
+      };
+      const rowAnchors = clusterTracks(measured.map(s => seatRects[s.code].top));
+      const colAnchors = clusterTracks(measured.map(s => seatRects[s.code].left));
+
+      const findTrack = (val, anchors) => {
+        let best = 0;
+        let bestDiff = Infinity;
+        anchors.forEach((a, idx) => {
+          const diff = Math.abs(val - a);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            best = idx;
+          }
+        });
+        return best;
+      };
+
+      const rowBounds = rowAnchors.map(() => ({ top: Infinity, bottom: -Infinity }));
+      const colBounds = colAnchors.map(() => ({ left: Infinity, right: -Infinity }));
+      const cellOf = {};
+
+      for (const s of measured) {
+        const rRect = seatRects[s.code];
+        const r = findTrack(rRect.top, rowAnchors);
+        const c = findTrack(rRect.left, colAnchors);
+        cellOf[s.code] = { r, c };
+        rowBounds[r].top = Math.min(rowBounds[r].top, rRect.top);
+        rowBounds[r].bottom = Math.max(rowBounds[r].bottom, rRect.bottom);
+        colBounds[c].left = Math.min(colBounds[c].left, rRect.left);
+        colBounds[c].right = Math.max(colBounds[c].right, rRect.right);
       }
-      if (current.length > 0) {
-        clusters.push(current);
-      }
-      return clusters;
-    };
+
+      oneSideGrid = { rowBounds, colBounds, cellOf };
+    }
 
     distinctRefs.forEach((ref, groupIdx) => {
       const color = GROUP_COLORS[groupIdx % GROUP_COLORS.length];
       const gSeats = seats.filter(s => getBookingRef(s.code) === ref && seatRects[s.code]);
       if (gSeats.length === 0) return;
 
-      if (isOneSide) {
-        // Long table: group adjacent seats by line / row
-        const rowMap = new Map();
-        for (const s of seats) {
-          const r = seatRects[s.code];
-          if (!r) continue;
-          const rowKey = Math.round(r.top / 20) * 20;
-          if (!rowMap.has(rowKey)) rowMap.set(rowKey, []);
-          rowMap.get(rowKey).push(s);
+      const groupRects = [];
+
+      if (isOneSide && oneSideGrid) {
+        const { rowBounds, colBounds, cellOf } = oneSideGrid;
+        const cellKeys = new Set();
+        const gCells = [];
+        for (const s of gSeats) {
+          const cell = cellOf[s.code];
+          if (!cell) continue;
+          const key = `${cell.r},${cell.c}`;
+          if (!cellKeys.has(key)) {
+            cellKeys.add(key);
+            gCells.push(cell);
+          }
         }
+        const hasCell = (r, c) => cellKeys.has(`${r},${c}`);
 
-        rowMap.forEach((rSeats, rowKey) => {
-          // Sort seats in row by left coordinate
-          rSeats.sort((a, b) => (seatRects[a.code]?.left || 0) - (seatRects[b.code]?.left || 0));
-          const clusters = clusterByContiguity(rSeats, ref);
-
-          clusters.forEach((cluster, cIdx) => {
-            const rects = cluster.map(s => seatRects[s.code]).filter(Boolean);
-            if (rects.length === 0) return;
-            const minL = Math.min(...rects.map(r => r.left)) - pad;
-            const maxR = Math.max(...rects.map(r => r.right)) + pad;
-            const minT = Math.min(...rects.map(r => r.top)) - pad;
-            const maxB = Math.max(...rects.map(r => r.bottom)) + pad;
-            computed.push({
-              type: 'rect',
-              key: `${ref}-row-${rowKey}-${cIdx}`,
-              x: minL,
-              y: minT,
-              w: maxR - minL,
-              h: maxB - minT,
-              stroke: color.stroke,
-              fill: color.fill
-            });
+        for (const { r, c } of gCells) {
+          const rb = rowBounds[r];
+          const cb = colBounds[c];
+          groupRects.push({
+            x0: cb.left - pad,
+            y0: rb.top - pad,
+            x1: cb.right + pad,
+            y1: rb.bottom + pad
           });
-        });
+
+          // Horizontal bridge to adjacent right neighbor
+          if (hasCell(r, c + 1)) {
+            const cbNext = colBounds[c + 1];
+            groupRects.push({
+              x0: cb.right,
+              y0: rb.top - pad,
+              x1: cbNext.left,
+              y1: rb.bottom + pad
+            });
+          }
+
+          // Vertical bridge to adjacent bottom neighbor
+          if (hasCell(r + 1, c)) {
+            const rbNext = rowBounds[r + 1];
+            groupRects.push({
+              x0: cb.left - pad,
+              y0: rb.bottom,
+              x1: cb.right + pad,
+              y1: rbNext.top
+            });
+          }
+
+          // Fill 2x2 center intersection if all 4 surrounding cells belong to this group
+          if (hasCell(r, c + 1) && hasCell(r + 1, c) && hasCell(r + 1, c + 1)) {
+            const cbNext = colBounds[c + 1];
+            const rbNext = rowBounds[r + 1];
+            groupRects.push({
+              x0: cb.right,
+              y0: rb.bottom,
+              x1: cbNext.left,
+              y1: rbNext.top
+            });
+          }
+        }
       } else {
         // Two-sided table
-        const leftInGroup = leftSeats.filter(s => getBookingRef(s.code) === ref);
-        const rightInGroup = rightSeats.filter(s => getBookingRef(s.code) === ref);
-
         const isMajority = gSeats.length > totalActive / 2;
         const allLeft = leftSeats.length > 0 && leftSeats.every(s => getBookingRef(s.code) === ref);
         const allRight = rightSeats.length > 0 && rightSeats.every(s => getBookingRef(s.code) === ref);
-        const hasFullSide = allLeft || allRight;
-        const wrapTableLabel = isMajority && hasFullSide;
+        const wrapTableLabel = isMajority && (allLeft || allRight);
 
-        // Check if row r has both sides in this group
         const maxR = Math.max(leftSeats.length, rightSeats.length);
         const fullRows = [];
+        const rowBounds = [];
         for (let r = 0; r < maxR; r++) {
           const lS = leftSeats[r];
           const rS = rightSeats[r];
           if (lS && rS && getBookingRef(lS.code) === ref && getBookingRef(rS.code) === ref) {
             fullRows.push(r);
           }
+          const rRects = [lS && seatRects[lS.code], rS && seatRects[rS.code]].filter(Boolean);
+          rowBounds.push(
+            rRects.length > 0
+              ? {
+                  top: Math.min(...rRects.map(x => x.top)),
+                  bottom: Math.max(...rRects.map(x => x.bottom))
+                }
+              : null
+          );
         }
+
+        const measuredLeft = leftSeats.map(s => seatRects[s.code]).filter(Boolean);
+        const measuredRight = rightSeats.map(s => seatRects[s.code]).filter(Boolean);
+        const leftCol =
+          measuredLeft.length > 0
+            ? {
+                left: Math.min(...measuredLeft.map(x => x.left)),
+                right: Math.max(...measuredLeft.map(x => x.right))
+              }
+            : null;
+        const rightCol =
+          measuredRight.length > 0
+            ? {
+                left: Math.min(...measuredRight.map(x => x.left)),
+                right: Math.max(...measuredRight.map(x => x.right))
+              }
+            : null;
 
         if (wrapTableLabel && (gSeats.length === totalActive || (allLeft && allRight))) {
-          // Enclose entire table including center badge
+          // Whole table enclosed including center badge
           const allRects = [...gSeats.map(s => seatRects[s.code]), centerRect].filter(Boolean);
-          const minL = Math.min(...allRects.map(r => r.left)) - pad;
-          const maxR = Math.max(...allRects.map(r => r.right)) + pad;
-          const minT = Math.min(...allRects.map(r => r.top)) - pad;
-          const maxB = Math.max(...allRects.map(r => r.bottom)) + pad;
-          computed.push({
-            type: 'rect',
-            key: `${ref}-all`,
-            x: minL,
-            y: minT,
-            w: maxR - minL,
-            h: maxB - minT,
-            stroke: color.stroke,
-            fill: color.fill
-          });
-        } else if (wrapTableLabel) {
-          // Majority + full side: wraps the table number into the frame!
-          // Box 1: wraps the entire full side + center badge
-          const fullSideSeats = (allLeft ? leftSeats : rightSeats).map(s => seatRects[s.code]);
-          const sidePlusCenter = [...fullSideSeats, centerRect].filter(Boolean);
-          const sMinL = Math.min(...sidePlusCenter.map(r => r.left)) - pad;
-          const sMaxR = Math.max(...sidePlusCenter.map(r => r.right)) + pad;
-          const sMinT = Math.min(...sidePlusCenter.map(r => r.top)) - pad;
-          const sMaxB = Math.max(...sidePlusCenter.map(r => r.bottom)) + pad;
-          computed.push({
-            type: 'rect',
-            key: `${ref}-side-center`,
-            x: sMinL,
-            y: sMinT,
-            w: sMaxR - sMinL,
-            h: sMaxB - sMinT,
-            stroke: color.stroke,
-            fill: color.fill
-          });
-
-          // Box 2+: cluster adjacent seats on other side so opposing groups are NEVER swallowed
-          const otherSideSeats = allLeft ? rightSeats : leftSeats;
-          const otherClusters = clusterByContiguity(otherSideSeats, ref);
-          otherClusters.forEach((cluster, cIdx) => {
-            const rects = cluster.map(s => seatRects[s.code]).filter(Boolean);
-            if (rects.length === 0) return;
-            const cMinL = Math.min(...rects.map(r => r.left)) - pad;
-            const cMaxR = Math.max(...rects.map(r => r.right)) + pad;
-            const cMinT = Math.min(...rects.map(r => r.top)) - pad;
-            const cMaxB = Math.max(...rects.map(r => r.bottom)) + pad;
-            computed.push({
-              type: 'rect',
-              key: `${ref}-other-cluster-${cIdx}`,
-              x: cMinL,
-              y: cMinT,
-              w: cMaxR - cMinL,
-              h: cMaxB - cMinT,
-              stroke: color.stroke,
-              fill: color.fill
-            });
-          });
-        } else if (fullRows.length > 0) {
-          // Rule: 某一排兩面都是同一組，框就穿過中間桌號那一排連起來
-          fullRows.forEach((rIdx) => {
-            const lRect = seatRects[leftSeats[rIdx]?.code];
-            const rRect = seatRects[rightSeats[rIdx]?.code];
-            if (lRect && rRect) {
-              const minL = Math.min(lRect.left, rRect.left) - pad;
-              const maxR = Math.max(lRect.right, rRect.right) + pad;
-              const minT = Math.min(lRect.top, rRect.top) - pad;
-              const maxB = Math.max(lRect.bottom, rRect.bottom) + pad;
-              computed.push({
-                type: 'rect',
-                key: `${ref}-row-${rIdx}`,
-                x: minL,
-                y: minT,
-                w: maxR - minL,
-                h: maxB - minT,
-                stroke: color.stroke,
-                fill: color.fill
-              });
-            }
-          });
-
-          // Any remaining seats not in fullRows
-          const remainingLeft = leftSeats.filter(
-            (s, idx) => !fullRows.includes(idx) && getBookingRef(s.code) === ref
-          );
-          const remainingRight = rightSeats.filter(
-            (s, idx) => !fullRows.includes(idx) && getBookingRef(s.code) === ref
-          );
-
-          clusterByContiguity(remainingLeft, ref).forEach((cluster, cIdx) => {
-            const rects = cluster.map(s => seatRects[s.code]).filter(Boolean);
-            if (rects.length === 0) return;
-            const minL = Math.min(...rects.map(r => r.left)) - pad;
-            const maxR = Math.max(...rects.map(r => r.right)) + pad;
-            const minT = Math.min(...rects.map(r => r.top)) - pad;
-            const maxB = Math.max(...rects.map(r => r.bottom)) + pad;
-            computed.push({
-              type: 'rect',
-              key: `${ref}-rem-left-${cIdx}`,
-              x: minL,
-              y: minT,
-              w: maxR - minL,
-              h: maxB - minT,
-              stroke: color.stroke,
-              fill: color.fill
-            });
-          });
-
-          clusterByContiguity(remainingRight, ref).forEach((cluster, cIdx) => {
-            const rects = cluster.map(s => seatRects[s.code]).filter(Boolean);
-            if (rects.length === 0) return;
-            const minL = Math.min(...rects.map(r => r.left)) - pad;
-            const maxR = Math.max(...rects.map(r => r.right)) + pad;
-            const minT = Math.min(...rects.map(r => r.top)) - pad;
-            const maxB = Math.max(...rects.map(r => r.bottom)) + pad;
-            computed.push({
-              type: 'rect',
-              key: `${ref}-rem-right-${cIdx}`,
-              x: minL,
-              y: minT,
-              w: maxR - minL,
-              h: maxB - minT,
-              stroke: color.stroke,
-              fill: color.fill
-            });
+          groupRects.push({
+            x0: Math.min(...allRects.map(r => r.left)) - pad,
+            y0: Math.min(...allRects.map(r => r.top)) - pad,
+            x1: Math.max(...allRects.map(r => r.right)) + pad,
+            y1: Math.max(...allRects.map(r => r.bottom)) + pad
           });
         } else {
-          // Separate sides with contiguity clustering
-          clusterByContiguity(leftSeats, ref).forEach((cluster, cIdx) => {
-            const rects = cluster.map(s => seatRects[s.code]).filter(Boolean);
-            if (rects.length === 0) return;
-            const minL = Math.min(...rects.map(r => r.left)) - pad;
-            const maxR = Math.max(...rects.map(r => r.right)) + pad;
-            const minT = Math.min(...rects.map(r => r.top)) - pad;
-            const maxB = Math.max(...rects.map(r => r.bottom)) + pad;
-            computed.push({
-              type: 'rect',
-              key: `${ref}-left-${cIdx}`,
-              x: minL,
-              y: minT,
-              w: maxR - minL,
-              h: maxB - minT,
-              stroke: color.stroke,
-              fill: color.fill
-            });
-          });
+          // Left side seats and vertical adjacency bridges
+          if (leftCol) {
+            for (let r = 0; r < leftSeats.length; r++) {
+              const s = leftSeats[r];
+              const rb = rowBounds[r];
+              if (!rb || !seatRects[s.code] || getBookingRef(s.code) !== ref) continue;
+              groupRects.push({
+                x0: leftCol.left - pad,
+                y0: rb.top - pad,
+                x1: leftCol.right + pad,
+                y1: rb.bottom + pad
+              });
+              if (
+                r + 1 < leftSeats.length &&
+                rowBounds[r + 1] &&
+                seatRects[leftSeats[r + 1].code] &&
+                getBookingRef(leftSeats[r + 1].code) === ref
+              ) {
+                groupRects.push({
+                  x0: leftCol.left - pad,
+                  y0: rb.bottom,
+                  x1: leftCol.right + pad,
+                  y1: rowBounds[r + 1].top
+                });
+              }
+            }
+          }
 
-          clusterByContiguity(rightSeats, ref).forEach((cluster, cIdx) => {
-            const rects = cluster.map(s => seatRects[s.code]).filter(Boolean);
-            if (rects.length === 0) return;
-            const minL = Math.min(...rects.map(r => r.left)) - pad;
-            const maxR = Math.max(...rects.map(r => r.right)) + pad;
-            const minT = Math.min(...rects.map(r => r.top)) - pad;
-            const maxB = Math.max(...rects.map(r => r.bottom)) + pad;
-            computed.push({
-              type: 'rect',
-              key: `${ref}-right-${cIdx}`,
-              x: minL,
-              y: minT,
-              w: maxR - minL,
-              h: maxB - minT,
-              stroke: color.stroke,
-              fill: color.fill
+          // Right side seats and vertical adjacency bridges
+          if (rightCol) {
+            for (let r = 0; r < rightSeats.length; r++) {
+              const s = rightSeats[r];
+              const rb = rowBounds[r];
+              if (!rb || !seatRects[s.code] || getBookingRef(s.code) !== ref) continue;
+              groupRects.push({
+                x0: rightCol.left - pad,
+                y0: rb.top - pad,
+                x1: rightCol.right + pad,
+                y1: rb.bottom + pad
+              });
+              if (
+                r + 1 < rightSeats.length &&
+                rowBounds[r + 1] &&
+                seatRects[rightSeats[r + 1].code] &&
+                getBookingRef(rightSeats[r + 1].code) === ref
+              ) {
+                groupRects.push({
+                  x0: rightCol.left - pad,
+                  y0: rb.bottom,
+                  x1: rightCol.right + pad,
+                  y1: rowBounds[r + 1].top
+                });
+              }
+            }
+          }
+
+          // Rule: 某一排兩面都是同一組，框就穿過中間桌號那一排連起來
+          if (leftCol && rightCol) {
+            fullRows.forEach((r) => {
+              const rb = rowBounds[r];
+              if (!rb) return;
+              groupRects.push({
+                x0: leftCol.right,
+                y0: rb.top - pad,
+                x1: rightCol.left,
+                y1: rb.bottom + pad
+              });
+              if (fullRows.includes(r + 1) && rowBounds[r + 1]) {
+                groupRects.push({
+                  x0: leftCol.right,
+                  y0: rb.bottom,
+                  x1: rightCol.left,
+                  y1: rowBounds[r + 1].top
+                });
+              }
             });
-          });
+          }
+
+          // Rule: 超過一半且包下一側全部時，將桌號納入同一外圍輪廓
+          if (wrapTableLabel && centerRect) {
+            const rowTopRefs = rowBounds.filter(Boolean).map(rb => rb.top - pad);
+            const rowBottomRefs = rowBounds.filter(Boolean).map(rb => rb.bottom + pad);
+            const cTop = snapToExisting(centerRect.top - pad, rowTopRefs, 5);
+            const cBottom = snapToExisting(centerRect.bottom + pad, rowBottomRefs, 5);
+            const cLeft = centerRect.left - pad;
+            const cRight = centerRect.right + pad;
+
+            groupRects.push({ x0: cLeft, y0: cTop, x1: cRight, y1: cBottom });
+
+            if (allLeft && leftCol) {
+              groupRects.push({ x0: leftCol.right, y0: cTop, x1: cLeft + 1, y1: cBottom });
+            }
+            if (allRight && rightCol) {
+              groupRects.push({ x0: cRight - 1, y0: cTop, x1: rightCol.left, y1: cBottom });
+            }
+          }
         }
       }
+
+      pushMergedGroupShapes(ref, groupRects, color);
     });
 
     setGroupBoxes(computed);
@@ -423,18 +604,15 @@ export default function TableCard({
           aria-hidden="true"
         >
           {groupBoxes.map((box) => (
-            <rect
+            <path
               key={box.key}
-              x={box.x}
-              y={box.y}
-              width={box.w}
-              height={box.h}
-              rx="16"
-              ry="16"
+              d={box.d}
+              fillRule="evenodd"
               fill={box.fill}
               stroke={box.stroke}
               strokeWidth="2"
               strokeDasharray="5,4"
+              strokeLinejoin="round"
               data-group-box="true"
             />
           ))}
