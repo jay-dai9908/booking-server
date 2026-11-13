@@ -232,6 +232,38 @@ export async function updateLayoutDraft(req, res) {
       return res.status(422).json({ error: '至少要有一個區域', code: 'ZONE_REQUIRED' });
     }
 
+    const seenZoneNames = new Set();
+    const validZoneRefs = new Set();
+    for (const z of zones) {
+      const trimmedName = typeof z.name === 'string' ? z.name.trim() : '';
+      if (!trimmedName || trimmedName.length > 10) {
+        return res.status(422).json({ error: '區域名稱需為 1～10 個字', code: 'INVALID_ZONE_NAME' });
+      }
+      if (seenZoneNames.has(trimmedName)) {
+        return res.status(422).json({ error: `區域名稱重複：${trimmedName}`, code: 'DUPLICATE_ZONE_NAME' });
+      }
+      seenZoneNames.add(trimmedName);
+      if (z.id != null) {
+        validZoneRefs.add(z.id);
+        validZoneRefs.add(String(z.id));
+      }
+      if (z.key) {
+        validZoneRefs.add(z.key);
+        validZoneRefs.add(String(z.key));
+      }
+    }
+
+    for (const t of tables) {
+      const hasKey = t.zone_key != null && validZoneRefs.has(t.zone_key);
+      const hasId = t.zone_id != null && (validZoneRefs.has(t.zone_id) || validZoneRefs.has(String(t.zone_id)));
+      if (!hasKey && !hasId) {
+        return res.status(422).json({
+          error: `桌子 ${t.label || '桌子'} 的區域不存在`,
+          code: 'INVALID_TABLE_ZONE'
+        });
+      }
+    }
+
     const codeRegex = /^[A-Za-z0-9-]{1,8}$/;
     const seenCodes = new Set();
     for (const s of seats) {
@@ -302,7 +334,7 @@ export async function updateLayoutDraft(req, res) {
         const created = await tx.seatZone.create({
           data: {
             layout_id: id,
-            name: z.name,
+            name: z.name.trim(),
             note: z.note || null,
             sort_order: Number(z.sort_order) || 0,
             polygon: z.polygon || null
@@ -322,8 +354,13 @@ export async function updateLayoutDraft(req, res) {
       const tableKeyMap = new Map();
       for (const t of tables) {
         const zoneId = (t.zone_key ? zoneKeyMap.get(t.zone_key) : null) ||
-                       (t.zone_id != null ? (zoneKeyMap.get(t.zone_id) || zoneKeyMap.get(String(t.zone_id))) : null) ||
-                       Array.from(zoneKeyMap.values())[0];
+                       (t.zone_id != null ? (zoneKeyMap.get(t.zone_id) || zoneKeyMap.get(String(t.zone_id))) : null);
+        if (!zoneId) {
+          const err = new Error(`桌子 ${t.label || '桌子'} 的區域不存在`);
+          err.status = 422;
+          err.code = 'INVALID_TABLE_ZONE';
+          throw err;
+        }
         // Normalize rotation to -180 ~ 180
         let rot = (Number(t.rotation) || 0) % 360;
         if (rot > 180) rot -= 360;
@@ -422,6 +459,9 @@ export async function updateLayoutDraft(req, res) {
       layout: resolved
     });
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
     console.error('updateLayoutDraft error:', err);
     return res.status(500).json({ error: '儲存版面失敗', code: 'UPDATE_DRAFT_FAILED' });
   }

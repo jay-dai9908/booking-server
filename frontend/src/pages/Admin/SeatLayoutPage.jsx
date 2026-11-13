@@ -82,6 +82,11 @@ export default function SeatLayoutPage() {
   const [showAdvancedWeights, setShowAdvancedWeights] = useState(false);
   const [draggedZoneIdx, setDraggedZoneIdx] = useState(null);
   const [savingRules, setSavingRules] = useState(false);
+  const [isAddingZone, setIsAddingZone] = useState(false);
+  const [newZoneName, setNewZoneName] = useState('');
+  const [editingZoneId, setEditingZoneId] = useState(null);
+  const [editingZoneName, setEditingZoneName] = useState('');
+  const [zoneError, setZoneError] = useState('');
 
   // History for Undo / Redo (up to 50 steps)
   const [history, setHistory] = useState([]);
@@ -236,6 +241,7 @@ export default function SeatLayoutPage() {
     if (history.length > 0 && historyIndex >= 0 && historyIndex < history.length) {
       const currentHead = history[historyIndex];
       if (
+        JSON.stringify(currentHead.zones) === JSON.stringify(cloned.zones) &&
         JSON.stringify(currentHead.tables) === JSON.stringify(cloned.tables) &&
         JSON.stringify(currentHead.seats) === JSON.stringify(cloned.seats) &&
         JSON.stringify(currentHead.elements_json) === JSON.stringify(cloned.elements_json) &&
@@ -257,6 +263,10 @@ export default function SeatLayoutPage() {
     });
     setHistoryIndex(prev => Math.min(prev + 1, 49));
     setLayout(cloned);
+    if (Array.isArray(cloned.zones)) {
+      const sorted = [...cloned.zones].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      setZoneOrderList(sorted);
+    }
   }, [historyIndex, history]);
 
   // Undo
@@ -266,6 +276,9 @@ export default function SeatLayoutPage() {
       const targetLayout = JSON.parse(JSON.stringify(history[targetIndex]));
       setHistoryIndex(targetIndex);
       setLayout(targetLayout);
+      if (Array.isArray(targetLayout.zones)) {
+        setZoneOrderList([...targetLayout.zones].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)));
+      }
       setMessage({ type: 'info', text: '已復原' });
     }
   }, [historyIndex, history]);
@@ -277,6 +290,9 @@ export default function SeatLayoutPage() {
       const targetLayout = JSON.parse(JSON.stringify(history[targetIndex]));
       setHistoryIndex(targetIndex);
       setLayout(targetLayout);
+      if (Array.isArray(targetLayout.zones)) {
+        setZoneOrderList([...targetLayout.zones].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)));
+      }
       setMessage({ type: 'info', text: '已重做' });
     }
   }, [historyIndex, history]);
@@ -345,7 +361,10 @@ export default function SeatLayoutPage() {
         const draftRes = await api.post('/seat-layouts/draft', { from_id: targetId || undefined });
         targetId = draftRes.data.layout_id;
       }
-      const res = await api.put(`/seat-layouts/${targetId}`, current);
+      const zonesPayload = (zoneOrderListRef.current.length > 0 ? zoneOrderListRef.current : (current.zones || []))
+        .map((z, idx) => ({ ...z, sort_order: idx }));
+      const payloadToSave = { ...current, zones: zonesPayload };
+      const res = await api.put(`/seat-layouts/${targetId}`, payloadToSave);
       if (res.data?.layout) {
         syncLayoutFromServer(res.data.layout);
       } else {
@@ -401,13 +420,105 @@ export default function SeatLayoutPage() {
     }
   };
 
+  const getNextDefaultZoneName = (zones = []) => {
+    const existingNames = new Set(zones.map(z => (z.name || '').trim()));
+    let code = 65 + zones.length;
+    if (code > 90) code = 65;
+    for (let i = 0; i < 26; i++) {
+      const letter = String.fromCharCode(65 + ((code - 65 + i) % 26));
+      const candidate = `${letter} 區`;
+      if (!existingNames.has(candidate)) return candidate;
+    }
+    return `區域 ${zones.length + 1}`;
+  };
+
+  const handleStartAddZone = () => {
+    setZoneError('');
+    setEditingZoneId(null);
+    setNewZoneName(getNextDefaultZoneName(zoneOrderList));
+    setIsAddingZone(true);
+  };
+
+  const handleConfirmAddZone = () => {
+    const trimmed = newZoneName.trim();
+    if (trimmed.length < 1 || trimmed.length > 10) {
+      setZoneError('區域名稱需為 1～10 個字');
+      return;
+    }
+    if (zoneOrderList.some(z => (z.name || '').trim() === trimmed)) {
+      setZoneError('區域名稱不能重複');
+      return;
+    }
+    let nextTempId = -Date.now();
+    while (zoneOrderList.some(z => z.id === nextTempId)) {
+      nextTempId--;
+    }
+    const nextZone = {
+      id: nextTempId,
+      name: trimmed,
+      sort_order: zoneOrderList.length,
+      note: null,
+      polygon: null
+    };
+    const nextList = [...zoneOrderList, nextZone].map((z, idx) => ({ ...z, sort_order: idx }));
+    setZoneOrderList(nextList);
+    commitLayoutChange({ ...layout, zones: nextList });
+    setIsAddingZone(false);
+    setNewZoneName('');
+    setZoneError('');
+  };
+
+  const handleStartRenameZone = (zone) => {
+    setZoneError('');
+    setIsAddingZone(false);
+    setEditingZoneId(zone.id);
+    setEditingZoneName(zone.name || '');
+  };
+
+  const handleConfirmRenameZone = (zoneId) => {
+    const trimmed = editingZoneName.trim();
+    if (trimmed.length < 1 || trimmed.length > 10) {
+      setZoneError('區域名稱需為 1～10 個字');
+      return;
+    }
+    if (zoneOrderList.some(z => z.id !== zoneId && (z.name || '').trim() === trimmed)) {
+      setZoneError('區域名稱不能重複');
+      return;
+    }
+    const nextList = zoneOrderList.map((z, idx) => z.id === zoneId ? { ...z, name: trimmed, sort_order: idx } : { ...z, sort_order: idx });
+    setZoneOrderList(nextList);
+    commitLayoutChange({ ...layout, zones: nextList });
+    setEditingZoneId(null);
+    setEditingZoneName('');
+    setZoneError('');
+  };
+
+  const handleDeleteZone = (zoneId) => {
+    if (zoneOrderList.length <= 1) return;
+    const hasItems = (layout?.tables || []).some(t => t.zone_id === zoneId) ||
+      (layout?.seats || []).some(s => s.zone_id === zoneId);
+    if (hasItems) return;
+
+    const nextList = zoneOrderList
+      .filter(z => z.id !== zoneId)
+      .map((z, idx) => ({ ...z, sort_order: idx }));
+    setZoneOrderList(nextList);
+    if (currentZoneId === zoneId && nextList.length > 0) {
+      setCurrentZoneId(nextList[0].id);
+    }
+    commitLayoutChange({ ...layout, zones: nextList });
+    setZoneError('');
+  };
+
   const moveZone = (fromIdx, toIdx) => {
     if (toIdx < 0 || toIdx >= zoneOrderList.length) return;
     const nextList = [...zoneOrderList];
     const [removed] = nextList.splice(fromIdx, 1);
     nextList.splice(toIdx, 0, removed);
-    setZoneOrderList(nextList);
-    handleTestAllocation(testPax, layoutRules, nextList);
+    const ordered = nextList.map((z, idx) => ({ ...z, sort_order: idx }));
+    setZoneOrderList(ordered);
+    setLayout(prev => prev ? { ...prev, zones: ordered } : prev);
+    handleTestAllocation(testPax, layoutRules, ordered);
   };
 
   useEffect(() => {
@@ -2697,49 +2808,167 @@ export default function SeatLayoutPage() {
             <h3 className="text-[14px] font-bold text-sg-ink flex items-center gap-1.5">
               <span>區域順序（拖曳調整）</span>
             </h3>
-            <div className="space-y-2">
-              {zoneOrderList.map((z, idx) => (
-                <div
-                  key={z.id}
-                  draggable
-                  onDragStart={() => setDraggedZoneIdx(idx)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => {
-                    if (draggedZoneIdx != null && draggedZoneIdx !== idx) {
-                      moveZone(draggedZoneIdx, idx);
-                      setDraggedZoneIdx(null);
-                    }
-                  }}
-                  className="flex items-center justify-between p-3 bg-sg-paper rounded-2xl border border-sg-line hover:border-sg-brown/50 transition cursor-move"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <GripVertical className="w-4 h-4 text-sg-muted" />
-                    <span className="font-bold text-[14px] text-sg-ink font-num">{idx + 1}</span>
-                    <span className="font-bold text-[14px] text-sg-ink">{z.name}</span>
-                    <span className="text-[12px] text-sg-muted">· {getZoneTableSummary(z.id)}</span>
+            <div className="space-y-2" data-testid="zone-order-list">
+              {zoneOrderList.map((z, idx) => {
+                const hasZoneItems = (layout?.tables || []).some(t => t.zone_id === z.id) ||
+                  (layout?.seats || []).some(s => s.zone_id === z.id);
+                const deleteDisabled = zoneOrderList.length <= 1 || hasZoneItems;
+                const deleteTitle = hasZoneItems
+                  ? '先把桌子移到其他區'
+                  : zoneOrderList.length <= 1
+                  ? '至少保留一個區域'
+                  : '刪除區域';
+                const isEditing = editingZoneId === z.id;
+
+                return (
+                  <div
+                    key={z.id}
+                    data-testid={`zone-row-${z.name}`}
+                    draggable={!isEditing}
+                    onDragStart={() => {
+                      if (!isEditing) setDraggedZoneIdx(idx);
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (draggedZoneIdx != null && draggedZoneIdx !== idx) {
+                        moveZone(draggedZoneIdx, idx);
+                        setDraggedZoneIdx(null);
+                      }
+                    }}
+                    className="flex items-center justify-between p-3 bg-sg-paper rounded-2xl border border-sg-line hover:border-sg-brown/50 transition cursor-move"
+                  >
+                    <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+                      <GripVertical className="w-4 h-4 text-sg-muted flex-shrink-0" />
+                      <span className="font-bold text-[14px] text-sg-ink font-num">{idx + 1}</span>
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          autoFocus
+                          maxLength={10}
+                          data-testid="edit-zone-name-input"
+                          value={editingZoneName}
+                          onChange={(e) => setEditingZoneName(e.target.value)}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleConfirmRenameZone(z.id);
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              setEditingZoneId(null);
+                              setZoneError('');
+                            }
+                          }}
+                          onBlur={() => handleConfirmRenameZone(z.id)}
+                          className="px-2.5 py-0.5 rounded-lg border border-sg-brown bg-white font-bold text-[14px] text-sg-ink w-32 focus:outline-none"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid={`zone-name-${z.name}`}
+                          onClick={() => handleStartRenameZone(z)}
+                          title="點擊修改區域名稱"
+                          className="font-bold text-[14px] text-sg-ink hover:text-sg-brown hover:underline text-left cursor-pointer"
+                        >
+                          {z.name}
+                        </button>
+                      )}
+                      <span className="text-[12px] text-sg-muted">· {getZoneTableSummary(z.id)}</span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => moveZone(idx, idx - 1)}
+                        className="p-1.5 rounded-lg hover:bg-white text-sg-muted disabled:opacity-30"
+                        title="上移"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === zoneOrderList.length - 1}
+                        onClick={() => moveZone(idx, idx + 1)}
+                        className="p-1.5 rounded-lg hover:bg-white text-sg-muted disabled:opacity-30"
+                        title="下移"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                      <span title={deleteTitle} className="inline-flex">
+                        <button
+                          type="button"
+                          data-testid={`delete-zone-btn-${z.name}`}
+                          disabled={deleteDisabled}
+                          onClick={() => handleDeleteZone(z.id)}
+                          title={deleteTitle}
+                          aria-label={deleteTitle}
+                          className="p-1.5 rounded-lg hover:bg-sg-danger-soft text-sg-danger disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled={idx === 0}
-                      onClick={() => moveZone(idx, idx - 1)}
-                      className="p-1.5 rounded-lg hover:bg-white text-sg-muted disabled:opacity-30"
-                      title="上移"
-                    >
-                      <ArrowUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={idx === zoneOrderList.length - 1}
-                      onClick={() => moveZone(idx, idx + 1)}
-                      className="p-1.5 rounded-lg hover:bg-white text-sg-muted disabled:opacity-30"
-                      title="下移"
-                    >
-                      <ArrowDown className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                );
+              })}
+
+              {zoneError && (
+                <div data-testid="zone-error-msg" className="text-[12px] font-bold text-sg-danger px-1">
+                  {zoneError}
                 </div>
-              ))}
+              )}
+
+              {isAddingZone ? (
+                <div className="flex items-center gap-2 p-3 bg-white rounded-2xl border border-sg-brown/60">
+                  <input
+                    type="text"
+                    autoFocus
+                    maxLength={10}
+                    data-testid="new-zone-name-input"
+                    value={newZoneName}
+                    onChange={(e) => setNewZoneName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleConfirmAddZone();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setIsAddingZone(false);
+                        setZoneError('');
+                      }
+                    }}
+                    placeholder="輸入區域名稱（1～10 字）"
+                    className="flex-1 max-w-[180px] px-3 py-1.5 rounded-xl border border-sg-line text-[13px] font-bold text-sg-ink focus:outline-none focus:border-sg-brown"
+                  />
+                  <button
+                    type="button"
+                    data-testid="confirm-add-zone-btn"
+                    onClick={handleConfirmAddZone}
+                    className="px-3 py-1.5 rounded-xl bg-sg-brown text-white text-[12px] font-bold hover:bg-sg-brown/90 transition"
+                  >
+                    加入
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingZone(false);
+                      setZoneError('');
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl text-[12px] font-bold text-sg-muted hover:text-sg-ink"
+                  >
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="add-zone-btn"
+                  onClick={handleStartAddZone}
+                  className="w-full py-2.5 rounded-2xl border border-dashed border-sg-line text-[13px] font-bold text-sg-brown hover:bg-sg-paper hover:border-sg-brown/50 transition flex items-center justify-center gap-1"
+                >
+                  ＋ 新增區域
+                </button>
+              )}
             </div>
           </div>
 
