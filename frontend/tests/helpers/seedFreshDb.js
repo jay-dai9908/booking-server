@@ -17,6 +17,7 @@ export async function cleanOperationalData(customPrisma) {
   if (!dbName || !dbName.endsWith('_test')) return;
 
   const prisma = customPrisma || new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
+  await prisma.boardPause.deleteMany({}).catch(() => {});
   await prisma.timerPause.deleteMany({}).catch(() => {});
   await prisma.payment.deleteMany({}).catch(() => {});
   await prisma.bookingEquipment.deleteMany({}).catch(() => {});

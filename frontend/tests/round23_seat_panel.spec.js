@@ -1,0 +1,369 @@
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import crypto from 'node:crypto';
+import { ensureFreshDbSeeded, cleanOperationalData } from './helpers/seedFreshDb.js';
+import { toTaipeiDateString, dateOnly } from '../../shared/time.js';
+
+const require = createRequire(import.meta.url);
+const testDbUrl = process.env.TEST_DATABASE_URL || 'postgresql://user:password@localhost:5432/booking_db_test?schema=public';
+let PrismaClient;
+try {
+  ({ PrismaClient } = require('@prisma/client'));
+} catch {
+  ({ PrismaClient } = require('../../backend/node_modules/@prisma/client/index.js'));
+}
+const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } } });
+
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
+const HEADLESS = process.env.HEADLESS !== 'false';
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
+const MOBILE_VIEWPORT = { width: 390, height: 844 };
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+async function run() {
+  console.log('--- Starting Round 23 Seat Panel Playwright Test ---');
+  await ensureFreshDbSeeded(prisma);
+
+  const now = new Date();
+  const todayStr = toTaipeiDateString(now);
+  const todayDate = dateOnly(todayStr);
+
+  // Pick a 4-hour block overlapping NOW so timeline & "現在" line display clearly
+  const taipeiHour = Number(
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', hour12: false }).format(now)
+  );
+  const startHour = Math.max(0, Math.min(19, taipeiHour - 2));
+  const sessionHours = [0, 1, 2, 3].map(offset => [
+    `${pad2(startHour + offset)}:00`,
+    `${pad2(startHour + offset + 1)}:00`
+  ]);
+
+  const ts = Date.now();
+  const bookingRef = `BK-R23-${ts.toString().slice(-6)}`;
+  const unitGroup = crypto.randomUUID();
+
+  let testLayout = null;
+  let testUser = null;
+  const createdSessions = [];
+
+  try {
+    // 1. Setup 4-seat layout A1-1..A1-4
+    testLayout = await prisma.seatLayout.create({
+      data: {
+        name: `Round 23 Layout ${ts}`,
+        status: 'published',
+        effective_from: todayDate,
+        canvas_w: 600,
+        canvas_h: 400,
+        capacity: 4
+      }
+    });
+    const zone = await prisma.seatZone.create({
+      data: { layout_id: testLayout.id, name: '主區', sort_order: 0 }
+    });
+    const tableA1 = await prisma.seatTable.create({
+      data: {
+        layout_id: testLayout.id,
+        zone_id: zone.id,
+        label: 'A1',
+        shape: 'rect',
+        arrangement: 'two_sides',
+        cx: 220,
+        cy: 180,
+        w: 90,
+        h: 160,
+        rotation: 0,
+        sort_order: 0
+      }
+    });
+    const seatDefs = [
+      { code: 'A1-1', lx: -45, ly: -35, sort_order: 0 },
+      { code: 'A1-2', lx: -45, ly: 35, sort_order: 1 },
+      { code: 'A1-3', lx: 45, ly: -35, sort_order: 2 },
+      { code: 'A1-4', lx: 45, ly: 35, sort_order: 3 }
+    ];
+    for (const sd of seatDefs) {
+      await prisma.seat.create({
+        data: {
+          layout_id: testLayout.id,
+          table_id: tableA1.id,
+          zone_id: zone.id,
+          code: sd.code,
+          lx: sd.lx,
+          ly: sd.ly,
+          side_mode: 'auto',
+          priority: 'normal',
+          is_active: true,
+          sort_order: sd.sort_order
+        }
+      });
+    }
+
+    // 2. Sessions
+    for (const [st, et] of sessionHours) {
+      let s = await prisma.session.findUnique({
+        where: { session_date_start_time: { session_date: todayDate, start_time: st } }
+      });
+      if (!s) {
+        s = await prisma.session.create({
+          data: { session_date: todayDate, start_time: st, end_time: et, max_capacity: 12 }
+        });
+      }
+      createdSessions.push(s);
+    }
+
+    // 3. Test user + equipment configs
+    testUser = await prisma.user.create({
+      data: {
+        line_user_id: `r23_pw_user_${ts}`,
+        name: '時間軸客人',
+        phone: '0912000111'
+      }
+    });
+
+    await prisma.equipmentConfig.upsert({
+      where: { id: 'pegboard_s' },
+      update: { name: '小板 (52×52)', hourly_rate: 90, total_stock: 10 },
+      create: { id: 'pegboard_s', name: '小板 (52×52)', hourly_rate: 90, total_stock: 10 }
+    });
+    await prisma.equipmentConfig.upsert({
+      where: { id: 'pegboard_m' },
+      update: { name: '中板 (78×78)', hourly_rate: 120, total_stock: 10 },
+      create: { id: 'pegboard_m', name: '中板 (78×78)', hourly_rate: 120, total_stock: 10 }
+    });
+
+    const bStart = new Date(`${todayStr}T${sessionHours[0][0]}:00+08:00`);
+    const bEnd = new Date(`${todayStr}T${sessionHours[3][1]}:00+08:00`);
+    const swapAt = new Date(bStart.getTime() + 90 * 60000);
+    const p1PauseStart = new Date(bStart.getTime() + 45 * 60000);
+    const p1PauseEnd = new Date(bStart.getTime() + 57 * 60000);
+    const p2StartedAt = new Date(now.getTime() - 3 * 60000);
+
+    for (const sess of createdSessions) {
+      await prisma.reservation.create({
+        data: {
+          booking_ref: bookingRef,
+          user_id: testUser.id,
+          session_id: sess.id,
+          pax: 2,
+          status: 'confirmed',
+          attendance: 'checked_in',
+          checked_in_at: bStart,
+          assigned_seats: ['A1-1', 'A1-2'],
+          total_amount: 1200,
+          amount_received: 0,
+          billing_status: 'unpaid'
+        }
+      });
+    }
+
+    const p1 = await prisma.bookingPerson.create({
+      data: {
+        booking_ref: bookingRef,
+        person_no: 1,
+        seat_code: 'A1-1',
+        status: 'active',
+        billing_start_at: bStart,
+        timer_started_at: bStart,
+        paused_seconds: 12 * 60
+      }
+    });
+    await prisma.timerPause.create({
+      data: {
+        person_id: p1.id,
+        started_at: p1PauseStart,
+        ended_at: p1PauseEnd,
+        reason: '休息',
+        staff_name: '店長'
+      }
+    });
+
+    // Person 2: newly seated (3 mins ago) -> shows 「這位不玩了」
+    await prisma.bookingPerson.create({
+      data: {
+        booking_ref: bookingRef,
+        person_no: 2,
+        seat_code: 'A1-2',
+        status: 'active',
+        billing_start_at: p2StartedAt,
+        timer_started_at: p2StartedAt
+      }
+    });
+
+    // Person 1 board swapped Small -> Medium
+    await prisma.bookingEquipment.create({
+      data: {
+        booking_ref: bookingRef,
+        equipment_id: 'pegboard_s',
+        equipment_name_snapshot: '小板 (52×52)',
+        quantity: 1,
+        rental_hours: 4,
+        subtotal_price: 0,
+        covered_sessions: [String(createdSessions[0].id), String(createdSessions[1].id)],
+        person_id: p1.id,
+        unit_group: unitGroup,
+        segment_no: 1,
+        start_at: bStart,
+        end_at: swapAt,
+        ended_reason: 'swapped',
+        planned_end_at: bEnd,
+        unit_rate: 90
+      }
+    });
+    await prisma.bookingEquipment.create({
+      data: {
+        booking_ref: bookingRef,
+        equipment_id: 'pegboard_m',
+        equipment_name_snapshot: '中板 (78×78)',
+        quantity: 1,
+        rental_hours: 4,
+        subtotal_price: 0,
+        covered_sessions: [String(createdSessions[1].id), String(createdSessions[2].id), String(createdSessions[3].id)],
+        person_id: p1.id,
+        unit_group: unitGroup,
+        segment_no: 2,
+        start_at: swapAt,
+        end_at: null,
+        planned_end_at: bEnd,
+        unit_rate: 120
+      }
+    });
+
+    // 4. Launch Playwright in mobile viewport (390x844)
+    const launchOptions = { headless: HEADLESS };
+    if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+      launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+    }
+    const browser = await chromium.launch(launchOptions);
+
+    try {
+      const context = await browser.newContext({
+        viewport: MOBILE_VIEWPORT,
+        deviceScaleFactor: 2
+      });
+      const page = await context.newPage();
+
+      await page.addInitScript(() => {
+        localStorage.setItem('shiguang_seating_tab', 'floor');
+      });
+
+      await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
+      await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
+      await page.click('button[type="submit"]');
+      await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 10000 });
+      await page.waitForTimeout(600);
+
+      await page.goto(`${BASE_URL}/admin/seating`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(600);
+      const floorTabMobile = page.locator('button[data-testid="tab-floor"]').last();
+      if (await floorTabMobile.isVisible()) {
+        await floorTabMobile.click();
+      }
+
+      // Click seat A1-1 in mobile TableCard (has swapped boards: 小板 + 中板)
+      const tableCardA1 = page.locator(`#table-card-${tableA1.id}`);
+      await tableCardA1.waitFor({ state: 'visible', timeout: 10000 });
+      const seatA11 = tableCardA1.locator('button[data-seat-code="A1-1"]');
+      await seatA11.waitFor({ state: 'visible', timeout: 10000 });
+      await seatA11.click();
+
+      // Verify timeline renders both board tracks (小板 + 中板) and swap summary + pause/return buttons inside SeatActionPanel
+      const panelContent = page.locator('[data-testid="seat-action-panel-content"]');
+      await panelContent.waitFor({ state: 'visible', timeout: 5000 });
+      await panelContent.locator('text=小板').first().waitFor({ state: 'visible', timeout: 5000 });
+      await panelContent.locator('text=中板').first().waitFor({ state: 'visible', timeout: 5000 });
+      await panelContent.locator('text=換板').first().waitFor({ state: 'visible', timeout: 5000 });
+      await panelContent.locator('[data-testid="seat-panel-board-pause-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+      await panelContent.locator('[data-testid="seat-panel-board-return-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+
+      const shot1 = path.resolve(process.cwd(), 'screenshot_round23_swapped_panel_mobile.png');
+      await page.screenshot({ path: shot1 });
+      console.log(`Saved Screenshot 1: ${shot1}`);
+
+      // Close A1-1 panel
+      await page.locator('[role="dialog"] [aria-label="關閉"]').first().click();
+      await panelContent.waitFor({ state: 'hidden', timeout: 5000 });
+
+      // Click newly seated guest A1-2 -> click 「這位不玩了」 -> screenshot confirm dialog -> click 「確定移除這位」
+      const seatA12 = tableCardA1.locator('button[data-seat-code="A1-2"]');
+      await seatA12.waitFor({ state: 'visible', timeout: 10000 });
+      await seatA12.click();
+      await panelContent.waitFor({ state: 'visible', timeout: 5000 });
+
+      const removeBtn = page.locator('[data-testid="seat-panel-remove-person-btn"]');
+      await removeBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await removeBtn.click();
+
+      const dialog = page.locator('[data-testid="remove-person-confirm-dialog"]');
+      await dialog.waitFor({ state: 'visible', timeout: 5000 });
+      await page.locator('[data-testid="remove-person-confirm-message"]').waitFor({ state: 'visible', timeout: 5000 });
+      await page.locator('[data-testid="remove-person-leave-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+      await page.locator('[data-testid="remove-person-cancel-btn"]').waitFor({ state: 'visible', timeout: 5000 });
+
+      const shot2 = path.resolve(process.cwd(), 'screenshot_round23_remove_confirm_mobile.png');
+      await page.screenshot({ path: shot2 });
+      console.log(`Saved Screenshot 2: ${shot2}`);
+
+      const confirmBtn = page.locator('[data-testid="remove-person-confirm-btn"]');
+      const [removeResp] = await Promise.all([
+        page.waitForResponse(r => r.url().includes(`/floor/${bookingRef}/persons/2`) && r.request().method() === 'DELETE'),
+        confirmBtn.click()
+      ]);
+      assert.equal(removeResp.status(), 200, 'removePerson DELETE should return 200');
+
+      await dialog.waitFor({ state: 'hidden', timeout: 5000 });
+      await page.waitForTimeout(400);
+
+      // Verify A1-2 seat turned empty (tile no longer shows guest name; clickable A1-2 is empty state!)
+      const tileA12Text = await tableCardA1.locator('button[data-seat-code="A1-2"]').innerText();
+      assert.ok(!tileA12Text.includes('時間軸客人'), `Expected seat A1-2 to be empty, got: ${tileA12Text}`);
+
+      // Clicking A1-2 opens empty panel subtitle "空位"
+      await tableCardA1.locator('button[data-seat-code="A1-2"]').click();
+      await page.locator('[role="dialog"] p:has-text("空位")').waitFor({ state: 'visible', timeout: 5000 });
+
+      // Double-check DB: pax decremented to 1, assigned_seats only ['A1-1']
+      const updatedRes = await prisma.reservation.findFirst({ where: { booking_ref: bookingRef } });
+      assert.equal(updatedRes.pax, 1);
+      assert.deepEqual(updatedRes.assigned_seats, ['A1-1']);
+
+      console.log('--- Round 23 Playwright Test Passed! ---');
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await prisma.boardPause.deleteMany({ where: { unit_group: unitGroup } }).catch(() => {});
+    await prisma.bookingEquipment.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
+    await prisma.timerPause.deleteMany({ where: { person: { booking_ref: bookingRef } } }).catch(() => {});
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
+    await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
+    for (const s of createdSessions) {
+      await prisma.session.deleteMany({ where: { id: s.id } }).catch(() => {});
+    }
+    if (testLayout) {
+      await prisma.seat.deleteMany({ where: { layout_id: testLayout.id } }).catch(() => {});
+      await prisma.seatTable.deleteMany({ where: { layout_id: testLayout.id } }).catch(() => {});
+      await prisma.seatZone.deleteMany({ where: { layout_id: testLayout.id } }).catch(() => {});
+      await prisma.seatLayout.deleteMany({ where: { id: testLayout.id } }).catch(() => {});
+    }
+    if (testUser) {
+      await prisma.user.deleteMany({ where: { id: testUser.id } }).catch(() => {});
+    }
+    await cleanOperationalData(prisma);
+    await prisma.$disconnect().catch(() => {});
+  }
+}
+
+run().catch(err => {
+  console.error('Round 23 Playwright Test Failed:', err);
+  process.exit(1);
+});
