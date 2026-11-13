@@ -271,7 +271,12 @@ export function computeBill({
   // Pre-calculate smart board totals for each board unit
   const boardUnitMap = new Map(); // unit_group -> calculated board object
   for (const b of (boards || [])) {
-    const calc = calculateBoardTotal({ segments: b.segments || [], discountConfig });
+    const calc = calculateBoardTotal({
+      segments: b.segments || [],
+      pauses: b.pauses || [],
+      discountConfig,
+      now
+    });
     const total = b.fixed_total != null ? b.fixed_total : calc.total;
     boardUnitMap.set(b.unit_group, { ...b, ...calc, total });
   }

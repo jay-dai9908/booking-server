@@ -131,6 +131,12 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
     orderBy: [{ unit_group: 'asc' }, { segment_no: 'asc' }]
   });
 
+  const unitGroups = [...new Set(bookingEquipments.map(be => be.unit_group).filter(Boolean))];
+  const boardPauses = unitGroups.length ? await tx.boardPause.findMany({
+    where: { unit_group: { in: unitGroups } },
+    orderBy: { started_at: 'asc' }
+  }) : [];
+
   // Payments
   const payments = await tx.payment.findMany({
     where: { booking_ref },
@@ -142,6 +148,7 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
     reservations,
     bookingPersons: persons,
     bookingEquipments,
+    boardPauses,
     payments,
     globalSetting,
     pricing: {

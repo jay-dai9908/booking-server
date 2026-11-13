@@ -9,6 +9,7 @@ export function buildBillInput({
   reservations = [],
   bookingPersons = [],
   bookingEquipments = [],
+  boardPauses = [],
   payments = [],
   globalSetting = {},
   pricing = {},
@@ -83,10 +84,21 @@ export function buildBillInput({
     boardGroups.get(uGroup).raw_items.push(be);
   }
 
+  const boardPausesByGroup = new Map();
+  for (const bp of boardPauses) {
+    if (!bp?.unit_group) continue;
+    if (!boardPausesByGroup.has(bp.unit_group)) {
+      boardPausesByGroup.set(bp.unit_group, []);
+    }
+    boardPausesByGroup.get(bp.unit_group).push(bp);
+  }
+
   const boards = [];
   for (const [uGroup, bg] of boardGroups.entries()) {
     const items = bg.raw_items.sort((a, b) => (a.segment_no || 1) - (b.segment_no || 1));
-    const isSingleUnmodified = items.length === 1 && !items[0].ended_reason;
+    const unitPauses = boardPausesByGroup.get(bg.unit_group) || [];
+    const allRemoved = items.every(be => be.ended_reason === 'person_removed');
+    const isSingleUnmodified = items.length === 1 && !items[0].ended_reason && unitPauses.length === 0;
 
     const segments = items.map(be => {
       const startDt = be.start_at ? new Date(be.start_at) : bookingStartDt;
@@ -113,9 +125,11 @@ export function buildBillInput({
         equipment_id: be.equipment_id,
         name: be.equipment?.name || be.equipment_name_snapshot,
         rate: be.unit_rate || be.equipment?.hourly_rate || 60,
-        hours,
+        hours: be.ended_reason === 'person_removed' ? 0 : hours,
         start_at: be.start_at,
         end_at: be.end_at,
+        effective_start_at: startDt.toISOString(),
+        effective_end_at: endDt.toISOString(),
         ended_reason: be.ended_reason,
         planned_end_at: be.planned_end_at
       };
@@ -124,7 +138,8 @@ export function buildBillInput({
     boards.push({
       unit_group: bg.unit_group,
       person_no: bg.person_no,
-      fixed_total: isSingleUnmodified && bg.subtotal_price != null && Number(bg.subtotal_price) >= 0 ? Number(bg.subtotal_price) : undefined,
+      fixed_total: allRemoved ? 0 : (isSingleUnmodified && bg.subtotal_price != null && Number(bg.subtotal_price) >= 0 ? Number(bg.subtotal_price) : undefined),
+      pauses: unitPauses,
       segments
     });
   }

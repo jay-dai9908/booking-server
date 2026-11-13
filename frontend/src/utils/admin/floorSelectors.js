@@ -490,11 +490,28 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
         }
       }
 
-      const personBoards = (b.boards || []).filter(bd => bd.person_no === (idx + 1));
-      const boardLabels = personBoards.map(bd => {
-        const segs = bd.segments || [];
-        return segs.map(s => displayBoardName(s.name)).join('→');
-      });
+      const personNoForSeat = person?.person_no || (idx + 1);
+      const personBoards = (b.boards || []).filter(bd => bd.person_no === personNoForSeat);
+      let maxSoloPauseMins = 0;
+      for (const bd of personBoards) {
+        const hasActiveSeg = (bd.segments || []).some(s => !s.end_at);
+        if (!hasActiveSeg) continue;
+        const openSolo = (bd.pauses || []).find(bp => bp.source === 'solo' && !bp.ended_at && bp.started_at);
+        if (openSolo) {
+          const startedMs = new Date(openSolo.started_at).getTime();
+          if (Number.isFinite(startedMs)) {
+            const mins = Math.floor((realNowMs - startedMs) / 60000);
+            if (mins > maxSoloPauseMins) maxSoloPauseMins = mins;
+          }
+        }
+      }
+      const boardPauseAlert = maxSoloPauseMins >= 30;
+      const boardLabels = boardPauseAlert
+        ? [`板暫停 ${maxSoloPauseMins} 分`]
+        : personBoards.map(bd => {
+            const segs = bd.segments || [];
+            return segs.map(s => displayBoardName(s.name)).join('→');
+          });
 
       map[seatCode] = {
         state,
@@ -504,7 +521,8 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
         bookingRef: b.booking_ref,
         booking: b,
         boards: boardLabels,
-        personNo: idx + 1
+        boardPauseAlert,
+        personNo: personNoForSeat
       };
     });
   }

@@ -240,6 +240,26 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
     orderBy: [{ unit_group: 'asc' }, { segment_no: 'asc' }]
   }) : [];
 
+  const unitGroups = [...new Set(equipments.map(eq => eq.unit_group).filter(Boolean))];
+  const boardPauses = unitGroups.length ? await prisma.boardPause.findMany({
+    where: { unit_group: { in: unitGroups } },
+    orderBy: { started_at: 'asc' }
+  }) : [];
+  const pausesByUnitGroup = new Map();
+  for (const bp of boardPauses) {
+    if (!pausesByUnitGroup.has(bp.unit_group)) {
+      pausesByUnitGroup.set(bp.unit_group, []);
+    }
+    pausesByUnitGroup.get(bp.unit_group).push({
+      id: bp.id,
+      unit_group: bp.unit_group,
+      started_at: bp.started_at ? bp.started_at.toISOString() : null,
+      ended_at: bp.ended_at ? bp.ended_at.toISOString() : null,
+      source: bp.source,
+      staff_name: bp.staff_name
+    });
+  }
+
   const equipmentsByRef = new Map();
   for (const eq of equipments) {
     if (!equipmentsByRef.has(eq.booking_ref)) {
@@ -316,6 +336,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
         boardGroupMap.set(uGroup, {
           unit_group: eq.unit_group,
           person_no: personNo,
+          pauses: eq.unit_group ? (pausesByUnitGroup.get(eq.unit_group) || []) : [],
           segments: []
         });
       }

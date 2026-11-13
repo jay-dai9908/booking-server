@@ -568,7 +568,9 @@ export async function handleTimer(req, res) {
 
   try {
     await prisma.$transaction(async (tx) => {
-      const now = new Date();
+      const now = (process.env.NODE_ENV === 'test' && (req.body?.now || req.body?.at))
+        ? new Date(req.body.now || req.body.at)
+        : new Date();
       const wherePersons = { booking_ref, status: 'active' };
       if (person_nos !== 'all' && Array.isArray(person_nos)) {
         wherePersons.person_no = { in: person_nos.map(Number) };
@@ -594,6 +596,26 @@ export async function handleTimer(req, res) {
               where: { id: p.id },
               data: { paused_at: now }
             });
+            const pBoards = await tx.bookingEquipment.findMany({
+              where: { booking_ref, person_id: p.id, end_at: null, unit_group: { not: null } },
+              select: { unit_group: true }
+            });
+            const uGroups = [...new Set(pBoards.map(b => b.unit_group).filter(Boolean))];
+            for (const ug of uGroups) {
+              const openBp = await tx.boardPause.findFirst({
+                where: { unit_group: ug, ended_at: null }
+              });
+              if (!openBp) {
+                await tx.boardPause.create({
+                  data: {
+                    unit_group: ug,
+                    started_at: now,
+                    source: 'person',
+                    staff_name: staffName
+                  }
+                });
+              }
+            }
           }
         } else if (action === 'resume') {
           if (p.paused_at) {
@@ -613,6 +635,17 @@ export async function handleTimer(req, res) {
                 paused_seconds: (p.paused_seconds || 0) + Math.max(0, pauseDurationSec)
               }
             });
+            const pBoards = await tx.bookingEquipment.findMany({
+              where: { booking_ref, person_id: p.id, end_at: null, unit_group: { not: null } },
+              select: { unit_group: true }
+            });
+            const uGroups = [...new Set(pBoards.map(b => b.unit_group).filter(Boolean))];
+            if (uGroups.length > 0) {
+              await tx.boardPause.updateMany({
+                where: { unit_group: { in: uGroups }, ended_at: null, source: 'person' },
+                data: { ended_at: now }
+              });
+            }
           }
         } else if (action === 'end') {
           // If paused, end pause first
@@ -639,6 +672,19 @@ export async function handleTimer(req, res) {
               where: { id: p.id },
               data: { timer_ended_at: now }
             });
+          }
+          {
+            const pBoards = await tx.bookingEquipment.findMany({
+              where: { booking_ref, person_id: p.id, unit_group: { not: null } },
+              select: { unit_group: true }
+            });
+            const uGroups = [...new Set(pBoards.map(b => b.unit_group).filter(Boolean))];
+            if (uGroups.length > 0) {
+              await tx.boardPause.updateMany({
+                where: { unit_group: { in: uGroups }, ended_at: null },
+                data: { ended_at: now }
+              });
+            }
           }
         } else if (action === 'restart') {
           // Spec 2.2 item 1: 只限當天而且還沒付款
@@ -681,6 +727,17 @@ export async function handleTimer(req, res) {
 
       if (action === 'end') {
         if (person_nos === 'all') {
+          const allBoards = await tx.bookingEquipment.findMany({
+            where: { booking_ref, unit_group: { not: null } },
+            select: { unit_group: true }
+          });
+          const allUgs = [...new Set(allBoards.map(b => b.unit_group).filter(Boolean))];
+          if (allUgs.length > 0) {
+            await tx.boardPause.updateMany({
+              where: { unit_group: { in: allUgs }, ended_at: null },
+              data: { ended_at: now }
+            });
+          }
           await tx.bookingPerson.updateMany({
             where: { booking_ref, timer_ended_at: null },
             data: { timer_ended_at: now }
@@ -1087,6 +1144,19 @@ export async function swapBoard(req, res) {
         }
       }
 
+      const openSwapPauses = await tx.boardPause.findMany({
+        where: { unit_group, ended_at: null }
+      });
+      for (const bp of openSwapPauses) {
+        const pEndDt = boundaryDt.getTime() >= new Date(bp.started_at).getTime()
+          ? boundaryDt
+          : new Date(bp.started_at);
+        await tx.boardPause.update({
+          where: { id: bp.id },
+          data: { ended_at: pEndDt }
+        });
+      }
+
       if (isStartBoundary) {
         await tx.bookingEquipment.update({
           where: { id: activeSeg.id },
@@ -1205,6 +1275,19 @@ export async function returnBoard(req, res) {
       const keptCoveredSessions = returnIndex >= 0
         ? coveredSessions.slice(0, returnIndex + 1).map(s => String(s.id))
         : [];
+
+      const openRetPauses = await tx.boardPause.findMany({
+        where: { unit_group, ended_at: null }
+      });
+      for (const bp of openRetPauses) {
+        const pEndDt = returnDt.getTime() >= new Date(bp.started_at).getTime()
+          ? returnDt
+          : new Date(bp.started_at);
+        await tx.boardPause.update({
+          where: { id: bp.id },
+          data: { ended_at: pEndDt }
+        });
+      }
 
       await tx.bookingEquipment.update({
         where: { id: activeSeg.id },
@@ -1506,6 +1589,120 @@ export async function addBoardRental(req, res) {
   }
 }
 
+export async function pauseBoard(req, res) {
+  const { booking_ref, unit_group } = req.params;
+  const { at = null } = req.body || {};
+  const deviceInfo = getAdminDeviceInfo(req);
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+
+  try {
+    const pauseDt = at ? new Date(at) : new Date();
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+      const segments = await tx.bookingEquipment.findMany({
+        where: { booking_ref, unit_group },
+        orderBy: { segment_no: 'asc' }
+      });
+      if (!segments.length) throw { status: 404, message: '找不到此板子' };
+
+      const activeSeg = segments.find(seg => !seg.end_at);
+      if (!activeSeg) throw { status: 400, message: '此板子已歸還，無法暫停' };
+
+      let pauseRow = await tx.boardPause.findFirst({
+        where: { unit_group, ended_at: null }
+      });
+      if (!pauseRow) {
+        pauseRow = await tx.boardPause.create({
+          data: {
+            unit_group,
+            started_at: pauseDt,
+            source: 'solo',
+            staff_name: staffName
+          }
+        });
+      }
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'amount_adjusted',
+        category: 'amount',
+        summary: `單獨暫停 ${activeSeg.equipment_name_snapshot}`,
+        reason: '智能板單獨暫停',
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      await refreshBillingCache(tx, booking_ref);
+      return pauseRow;
+    });
+
+    return res.json({ success: true, board_pause: result, server_now: new Date().toISOString() });
+  } catch (error) {
+    console.error('[pauseBoard] Error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    return res.status(500).json({ error: '暫停智能板失敗', details: error.message });
+  }
+}
+
+export async function resumeBoard(req, res) {
+  const { booking_ref, unit_group } = req.params;
+  const { at = null } = req.body || {};
+  const deviceInfo = getAdminDeviceInfo(req);
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+
+  try {
+    const resumeDt = at ? new Date(at) : new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+      const segments = await tx.bookingEquipment.findMany({
+        where: { booking_ref, unit_group },
+        orderBy: { segment_no: 'asc' }
+      });
+      if (!segments.length) throw { status: 404, message: '找不到此板子' };
+
+      const activeSeg = segments.find(seg => !seg.end_at) || segments[segments.length - 1];
+      const openPauses = await tx.boardPause.findMany({
+        where: { unit_group, ended_at: null }
+      });
+      for (const bp of openPauses) {
+        const pEndDt = resumeDt.getTime() >= new Date(bp.started_at).getTime()
+          ? resumeDt
+          : new Date(bp.started_at);
+        await tx.boardPause.update({
+          where: { id: bp.id },
+          data: { ended_at: pEndDt }
+        });
+      }
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'amount_adjusted',
+        category: 'amount',
+        summary: `繼續使用 ${activeSeg.equipment_name_snapshot}`,
+        reason: '繼續使用智能板',
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      await refreshBillingCache(tx, booking_ref);
+    });
+
+    return res.json({ success: true, server_now: new Date().toISOString() });
+  } catch (error) {
+    console.error('[resumeBoard] Error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    return res.status(500).json({ error: '恢復智能板失敗', details: error.message });
+  }
+}
+
 export default {
   getLive,
   checkIn,
@@ -1517,5 +1714,7 @@ export default {
   swapBoard,
   returnBoard,
   reassignBoard,
-  addBoardRental
+  addBoardRental,
+  pauseBoard,
+  resumeBoard
 };

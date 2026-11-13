@@ -228,6 +228,17 @@ model BookingEquipment {
   @@index([unit_group])
 }
 
+model BoardPause {
+  id          Int       @id @default(autoincrement())
+  unit_group  String
+  started_at  DateTime
+  ended_at    DateTime?
+  source      String    // person | solo
+  staff_name  String?
+
+  @@index([unit_group])
+}
+
 model PromoCode {
   id                  Int       @id @default(autoincrement())
   code                String    @unique

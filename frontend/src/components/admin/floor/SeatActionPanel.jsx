@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRightLeft,
@@ -30,6 +30,14 @@ function formatTimeHHMM(val) {
   }
 }
 
+function shortBoardSize(name) {
+  const clean = displayBoardName(name || '');
+  if (clean.includes('小板')) return '小板';
+  if (clean.includes('中板')) return '中板';
+  if (clean.includes('大板')) return '大板';
+  return clean.split(/[\s(（]/)[0] || '智能板';
+}
+
 export default function SeatActionPanel({
   isOpen = false,
   onClose,
@@ -40,6 +48,8 @@ export default function SeatActionPanel({
   onMoveSeat,
   onMoveToWait,
   onBoardSwap,
+  onBoardPauseToggle,
+  onBoardReturn,
   onAddBoard,
   onExtendTime,
   onForceAdd,
@@ -50,6 +60,13 @@ export default function SeatActionPanel({
   serverNow = null
 }) {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [confirmReturnBoard, setConfirmReturnBoard] = useState(false);
+
+  const resetSeatKey = target?.seat?.code || '';
+  const resetBookingRef = target?.booking?.booking_ref || target?.seatInfo?.booking?.booking_ref || '';
+  useEffect(() => {
+    setConfirmReturnBoard(false);
+  }, [isOpen, resetSeatKey, resetBookingRef]);
 
   if (!target) return null;
 
@@ -160,6 +177,49 @@ export default function SeatActionPanel({
 
   // Board for this person
   const currentBoard = (booking?.boards || []).find(bd => bd.person_no === personNo) || (booking?.boards || [])[0];
+  const personBoard =
+    (booking?.boards || []).find(bd => Number(bd.person_no) === Number(personNo)) ||
+    (allPersons.length <= 1 ? (booking?.boards || [])[0] : null);
+  const activeBoardSegment = personBoard?.segments?.find(s => !s.end_at) || null;
+  const activeBoardPause = (personBoard?.pauses || []).find(bp => !bp.ended_at) || null;
+
+  const boardQuickControls = activeBoardSegment && personBoard?.unit_group ? (
+    <div className="flex items-center gap-2">
+      <Button
+        variant={activeBoardPause ? 'primary' : 'secondary'}
+        size="sm"
+        className="flex-1 text-[12px]"
+        data-testid="seat-panel-board-pause-btn"
+        onClick={() => {
+          if (onBoardPauseToggle && booking) {
+            onBoardPauseToggle(booking.booking_ref, personBoard.unit_group, Boolean(activeBoardPause));
+          }
+        }}
+      >
+        {activeBoardPause ? '繼續使用智能板' : '智能板單獨暫停'}
+      </Button>
+      <Button
+        variant={confirmReturnBoard ? 'danger' : 'secondary'}
+        size="sm"
+        className="flex-1 text-[12px]"
+        data-testid="seat-panel-board-return-btn"
+        onClick={() => {
+          if (!confirmReturnBoard) {
+            setConfirmReturnBoard(true);
+            return;
+          }
+          setConfirmReturnBoard(false);
+          if (onBoardReturn && booking) {
+            onBoardReturn(booking.booking_ref, personBoard.unit_group);
+          }
+        }}
+      >
+        {confirmReturnBoard
+          ? `確定歸還${shortBoardSize(activeBoardSegment.name)}？再按一次`
+          : '不用了，歸還'}
+      </Button>
+    </div>
+  ) : null;
 
   const headerRight = (mode === 'in_use' || mode === 'paused' || mode === 'reserved') ? (
     <div className="relative">
@@ -318,6 +378,7 @@ export default function SeatActionPanel({
               personNo={personNo}
               now={serverNow}
             />
+            {boardQuickControls}
             <div className="grid grid-cols-2 gap-2 text-[12px]">
               <Button
                 variant="secondary"
@@ -462,6 +523,7 @@ export default function SeatActionPanel({
               personNo={personNo}
               now={serverNow}
             />
+            {boardQuickControls}
             <div className="grid grid-cols-2 gap-2 text-[12px]">
               <Button
                 variant="secondary"

@@ -566,6 +566,29 @@ export default function SeatingPage() {
     }
   };
 
+  const handleBoardPauseToggle = async (bookingRef, unitGroup, isCurrentlyPaused) => {
+    try {
+      const endpoint = isCurrentlyPaused ? 'resume' : 'pause';
+      await api.post(`/floor/${bookingRef}/boards/${unitGroup}/${endpoint}`, {});
+      await refresh();
+      showToast(isCurrentlyPaused ? '已繼續使用智能板' : '智能板已單獨暫停');
+    } catch (err) {
+      showToast(err.response?.data?.error || '操作智能板失敗');
+    }
+  };
+
+  const handleBoardReturn = async (bookingRef, unitGroup) => {
+    try {
+      await api.post(`/floor/${bookingRef}/boards/${unitGroup}/return`, {
+        at: getServerNow().toISOString()
+      });
+      await refresh();
+      showToast('歸還智能板成功');
+    } catch (err) {
+      showToast(err.response?.data?.error || '歸還智能板失敗');
+    }
+  };
+
   // Move seat action
   const handleMoveSeat = async (bookingRef, fromSeat, toSeat, mode = 'move') => {
     try {
@@ -2230,6 +2253,8 @@ export default function SeatingPage() {
           setSeatActionTarget(null);
           handleMoveSeat(booking.booking_ref, fromSeat, nextEmptyWaitSeat, 'move');
         }}
+        onBoardPauseToggle={handleBoardPauseToggle}
+        onBoardReturn={handleBoardReturn}
         onBoardSwap={({ booking, board, personNo, seatCode }) => {
           setSeatActionTarget(null);
           setBoardSwapTarget({

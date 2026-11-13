@@ -110,17 +110,86 @@ export function chargeableHours(
   return cost[blocks] / 2;
 }
 
+function toMs(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const ms = v instanceof Date ? v.getTime() : new Date(v).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function calcPausedMinutesInRange(rangeStartMs, rangeEndMs, pauses = [], nowMs = Date.now()) {
+  if (!Array.isArray(pauses) || pauses.length === 0 || rangeEndMs <= rangeStartMs) return 0;
+  const intervals = [];
+  for (const p of pauses) {
+    const ps = toMs(p?.started_at);
+    const pe = toMs(p?.ended_at) ?? nowMs;
+    if (ps == null || pe == null) continue;
+    const os = Math.max(rangeStartMs, ps);
+    const oe = Math.min(rangeEndMs, pe);
+    if (oe > os) intervals.push([os, oe]);
+  }
+  if (intervals.length === 0) return 0;
+  intervals.sort((a, b) => a[0] - b[0]);
+  let totalMs = 0;
+  let [curS, curE] = intervals[0];
+  for (let i = 1; i < intervals.length; i++) {
+    const [ns, ne] = intervals[i];
+    if (ns <= curE) {
+      curE = Math.max(curE, ne);
+    } else {
+      totalMs += curE - curS;
+      curS = ns;
+      curE = ne;
+    }
+  }
+  totalMs += curE - curS;
+  return Math.round(totalMs / 60000);
+}
+
 /**
  * 計算同一台板子（含分段換板）的金額（方案 B）
- * @param {{ segments: Array<{ hours: number, rate: number, name?: string, start_at?: any, end_at?: any }>, discountConfig: any }} params
- * @returns {{ H: number, gross: number, chargeable: number, free: number, cheapest: number, discount: number, total: number }}
+ * 每一段若有起訖時間，會先扣除與暫停重疊的分鐘數，再套用半小時取整規則。
+ * @param {{ segments: Array<{ hours?: number, rate: number, name?: string, start_at?: any, end_at?: any, planned_end_at?: any, ended_reason?: string, pauses?: any[] }>, pauses?: Array<{ started_at: any, ended_at?: any }>, discountConfig: any, now?: any }} params
+ * @returns {{ H: number, gross: number, chargeable: number, free: number, cheapest: number, discount: number, total: number, pausedMinutes: number, effectiveMinutes: number }}
  */
-export function calculateBoardTotal({ segments = [], discountConfig }) {
-  const H = segments.reduce((sum, s) => sum + (Number(s.hours) || 0), 0);
-  const gross = segments.reduce((sum, s) => sum + Math.round((Number(s.hours) || 0) * (Number(s.rate) || 0)), 0);
+export function calculateBoardTotal({ segments = [], pauses = [], discountConfig, now = Date.now() }) {
+  const nowMs = toMs(now) ?? Date.now();
+  let totalPausedMinutes = 0;
+  let totalEffectiveMinutes = 0;
+
+  const normalizedSegments = segments.map((s) => {
+    if (s?.ended_reason === 'person_removed') {
+      return { ...s, _hours: 0 };
+    }
+    const sStart = toMs(s?.effective_start_at ?? s?.start_at);
+    const sEnd = toMs(s?.effective_end_at ?? s?.end_at ?? s?.planned_end_at);
+    const combinedPauses = [
+      ...(Array.isArray(pauses) ? pauses : []),
+      ...(Array.isArray(s?.pauses) ? s.pauses : [])
+    ];
+
+    if (sStart != null && sEnd != null && sEnd >= sStart) {
+      const rawMinutes = Math.max(0, Math.round((sEnd - sStart) / 60000));
+      const pMins = Math.min(rawMinutes, calcPausedMinutesInRange(sStart, sEnd, combinedPauses, nowMs));
+      const effMinutes = Math.max(0, rawMinutes - pMins);
+      totalPausedMinutes += pMins;
+      totalEffectiveMinutes += effMinutes;
+      const hrs = (pMins > 0 || s?.hours == null)
+        ? Math.round((effMinutes / 60) * 2) / 2
+        : (Number(s.hours) || 0);
+      return { ...s, _hours: hrs };
+    }
+
+    const hrs = Number(s?.hours) || 0;
+    totalEffectiveMinutes += Math.round(hrs * 60);
+    return { ...s, _hours: hrs };
+  });
+
+  const H = normalizedSegments.reduce((sum, s) => sum + s._hours, 0);
+  const gross = normalizedSegments.reduce((sum, s) => sum + Math.round(s._hours * (Number(s.rate) || 0)), 0);
   const chargeable = chargeableHours(H, discountConfig);
   const free = Math.max(0, H - chargeable);
-  const activeSegs = segments.filter(s => (Number(s.hours) || 0) > 0);
+  const activeSegs = normalizedSegments.filter(s => s._hours > 0);
   const cheapest = activeSegs.length > 0
     ? Math.min(...activeSegs.map(s => Number(s.rate) || 0))
     : 0;
@@ -134,6 +203,8 @@ export function calculateBoardTotal({ segments = [], discountConfig }) {
     free,
     cheapest,
     discount,
-    total
+    total,
+    pausedMinutes: totalPausedMinutes,
+    effectiveMinutes: totalEffectiveMinutes
   };
 }

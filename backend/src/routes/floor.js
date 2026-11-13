@@ -11,7 +11,9 @@ import {
   swapBoard,
   returnBoard,
   reassignBoard,
-  addBoardRental
+  addBoardRental,
+  pauseBoard,
+  resumeBoard
 } from '../controllers/floorController.js';
 
 const router = express.Router();
@@ -27,6 +29,8 @@ router.delete('/:booking_ref/persons/:person_no', ...floorAuth, removePerson);
 router.post('/:booking_ref/boards', ...floorAuth, addBoardRental);
 router.post('/:booking_ref/boards/:unit_group/swap', ...floorAuth, swapBoard);
 router.post('/:booking_ref/boards/:unit_group/return', ...floorAuth, returnBoard);
+router.post('/:booking_ref/boards/:unit_group/pause', ...floorAuth, pauseBoard);
+router.post('/:booking_ref/boards/:unit_group/resume', ...floorAuth, resumeBoard);
 router.patch('/:booking_ref/boards/:unit_group', ...floorAuth, reassignBoard);
 
 export default router;

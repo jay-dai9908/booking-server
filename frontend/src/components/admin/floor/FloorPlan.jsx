@@ -490,6 +490,7 @@ export default function FloorPlan({
                 isVent={isVent}
                 isPaid={Boolean(seatInfo.isPaid)}
                 boards={seatInfo.boards || []}
+                boardPauseAlert={Boolean(seatInfo.boardPauseAlert)}
                 timerText={seatInfo.timerText}
                 paxName={seatInfo.paxName}
                 onClick={

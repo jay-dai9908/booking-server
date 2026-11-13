@@ -25,6 +25,7 @@ export default function SeatTile({
   isVent = false,
   isPaid = false,
   boards = [], // e.g. ['小板'] or ['小→中']
+  boardPauseAlert = false,
   timerText = null,
   paxName = null,
   onClick = null,
@@ -58,6 +59,7 @@ export default function SeatTile({
   }
 
   const boardTag = (boards && boards.length > 0) ? boards[0] : null;
+  const isBoardPauseAlert = boardPauseAlert || (typeof boardTag === 'string' && boardTag.startsWith('板暫停'));
 
   const content = (
     <div
@@ -69,8 +71,14 @@ export default function SeatTile({
       <div className="flex items-center justify-between w-full leading-none">
         <div className="flex items-center gap-0.5 truncate">
           <span className="font-num text-[13px] font-bold tracking-tight">{code}</span>
-          {boardTag && size === 'full' && (
-            <span className="text-[9px] font-bold text-sg-brown px-0.5 rounded bg-sg-brown-soft/80 truncate">
+          {boardTag && (size === 'full' || isBoardPauseAlert) && (
+            <span
+              className={`text-[9px] font-bold px-0.5 rounded truncate ${
+                isBoardPauseAlert
+                  ? 'bg-sg-danger text-white shadow-sm'
+                  : 'text-sg-brown bg-sg-brown-soft/80'
+              }`}
+            >
               {boardTag}
             </span>
           )}
