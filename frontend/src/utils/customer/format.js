@@ -28,6 +28,39 @@ export function safeFormatDate(date, fmt = 'yyyy/MM/dd', fallback = '—') {
   }
 }
 
+const TAIPEI_DT_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Taipei',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23'
+});
+
+export function formatDateTime(ts, fmt = 'MM/dd HH:mm', fallback = '—') {
+  if (!ts) return fallback;
+  try {
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (!d || isNaN(d.getTime())) return fallback;
+    const parts = {};
+    for (const p of TAIPEI_DT_FORMATTER.formatToParts(d)) {
+      if (p.type !== 'literal') parts[p.type] = p.value;
+    }
+    const hour = parts.hour === '24' ? '00' : parts.hour;
+    return fmt
+      .replace('yyyy', parts.year)
+      .replace('MM', parts.month)
+      .replace('dd', parts.day)
+      .replace('HH', hour)
+      .replace('mm', parts.minute)
+      .replace('ss', parts.second);
+  } catch (e) {
+    return fallback;
+  }
+}
+
 export function formatMoney(n) {
   return `NT$${Math.round(Number(n) || 0).toLocaleString('en-US')}`;
 }

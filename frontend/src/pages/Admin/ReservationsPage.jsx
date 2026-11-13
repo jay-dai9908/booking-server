@@ -7,7 +7,7 @@ import StatusPill from '../../components/admin/StatusPill';
 import CheckInPanel from '../../components/admin/floor/CheckInPanel';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
-import { safeFormatDate } from '../../utils/format';
+import { safeFormatDate, formatDateTime } from '../../utils/format';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
 
 function getReservationAttendancePillProps(r) {
@@ -610,18 +610,18 @@ export default function ReservationsPage() {
                         </div>
                         {r.attendance === 'checked_in' && r.checked_in_at && (
                           <div className="mt-1 text-[11px] font-medium text-sg-muted flex items-center gap-0.5">
-                            <span>報到 {safeFormatDate(r.checked_in_at, 'HH:mm')}</span>
+                            <span>報到 {formatDateTime(r.checked_in_at, 'HH:mm')}</span>
                           </div>
                         )}
                         {r.status === 'cancelled' && r.cancelled_at && (
                           <div className="mt-1 text-[11px] text-gray-500 flex flex-col gap-0.5">
-                            <span>{safeFormatDate(r.cancelled_at, 'MM/dd HH:mm')}</span>
+                            <span>{formatDateTime(r.cancelled_at, 'MM/dd HH:mm')}</span>
                             <span>({r.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})</span>
                           </div>
                         )}
                       </td>
                       <td className="px-6 py-4 text-right text-sm text-gray-400">
-                        {safeFormatDate(r.created_at, 'MM/dd HH:mm')}
+                        {formatDateTime(r.created_at, 'MM/dd HH:mm')}
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">

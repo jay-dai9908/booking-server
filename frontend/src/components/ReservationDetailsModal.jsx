@@ -20,7 +20,7 @@ import ReasonChips from './admin/ReasonChips';
 import StatusPill from './admin/StatusPill';
 import ErrorBoundary from './common/ErrorBoundary';
 import { formatBookingRef } from '../utils/admin/floorSelectors';
-import { safeFormatDate } from '../utils/format';
+import { safeFormatDate, formatDateTime } from '../utils/format';
 import { printJobOnThisDevice, isPrintGloballyEnabled } from '../utils/sunmiPrinter';
 
 const ExtendTimeModal = lazy(() => import('./ExtendTimeModal'));
@@ -507,12 +507,12 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                             {reservation.attendance === 'checked_in' && (
                               <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-bold text-sg-brown bg-sg-brown-soft px-2.5 py-1 rounded-lg border border-sg-line">
                                 <Clock className="w-3.5 h-3.5" />
-                                報到時間：{reservation.checked_in_at ? safeFormatDate(reservation.checked_in_at, 'MM/dd HH:mm') : '已完成'}
+                                報到時間：{reservation.checked_in_at ? formatDateTime(reservation.checked_in_at, 'MM/dd HH:mm') : '已完成'}
                               </span>
                             )}
                             {reservation.status === 'cancelled' && reservation.cancelled_at && (
                               <span className="text-xs sm:text-sm text-gray-500">
-                                取消於 {safeFormatDate(reservation.cancelled_at, 'MM/dd HH:mm')} 
+                                取消於 {formatDateTime(reservation.cancelled_at, 'MM/dd HH:mm')} 
                                 ({reservation.cancelled_by === 'admin' ? '管理員取消' : '顧客自行取消'})
                               </span>
                             )}
