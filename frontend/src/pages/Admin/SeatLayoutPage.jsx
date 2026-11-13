@@ -199,7 +199,8 @@ export default function SeatLayoutPage() {
         const res = await api.get(`/seat-layouts/${draft.id}`);
         loadedLayout = res.data.layout;
       } else {
-        const activeRes = await api.get('/seat-layouts/active');
+        const todayTaipei = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+        const activeRes = await api.get('/seat-layouts/active', { params: { date: todayTaipei } });
         loadedLayout = activeRes.data;
       }
 
@@ -1581,6 +1582,23 @@ export default function SeatLayoutPage() {
               >
                 <Plus className="w-3 h-3 text-sg-brown" /> 單獨座位
               </button>
+              <label className="flex items-center gap-1 ml-1 text-[11px] font-bold text-sg-muted">
+                <span>放在：</span>
+                <select
+                  data-testid="new-table-zone-select"
+                  value={currentZoneId ?? ''}
+                  onChange={(e) => {
+                    const zId = Number(e.target.value);
+                    currentZoneIdRef.current = zId;
+                    setCurrentZoneId(zId);
+                  }}
+                  className="px-2 py-1 rounded-xl bg-white border border-sg-line font-bold text-sg-ink text-[12px]"
+                >
+                  {(zoneOrderList.length > 0 ? zoneOrderList : (layout.zones || [])).map(z => (
+                    <option key={z.id} value={z.id}>{z.name}</option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             {/* Architectural & Background Tools */}
@@ -2460,6 +2478,7 @@ export default function SeatLayoutPage() {
                     <div>
                       <label className="block text-sg-muted mb-1 font-medium">所屬區域</label>
                       <select
+                        data-testid="table-zone-select"
                         value={selectedTable.zone_id || ''}
                         onChange={(e) => {
                           const zId = Number(e.target.value);
@@ -2471,7 +2490,7 @@ export default function SeatLayoutPage() {
                         }}
                         className="w-full px-3 py-1.5 rounded-xl border border-sg-line font-bold bg-white"
                       >
-                        {(layout.zones || []).map(z => (
+                        {(zoneOrderList.length > 0 ? zoneOrderList : (layout.zones || [])).map(z => (
                           <option key={z.id} value={z.id}>{z.name}</option>
                         ))}
                       </select>
@@ -3023,49 +3042,61 @@ export default function SeatLayoutPage() {
             </div>
           </div>
 
-          {/* 3. {第一區名稱}每桌都有人之後 */}
-          <div className="space-y-3 pt-2 border-t border-sg-line">
-            <h3 className="text-[14px] font-bold text-sg-ink">
-              {zoneOrderList[0]?.name || layout?.zones?.[0]?.name || '前區'}每桌都有人之後
-            </h3>
-            <div className="space-y-2.5">
-              <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
-                <input
-                  type="radio"
-                  name="zone_mode"
-                  value="empty_tables_first"
-                  checked={layoutRules.zone_mode === 'empty_tables_first' || layoutRules.zone_mode === 'spread_across_zones'}
-                  onChange={(e) => {
-                    const next = { ...layoutRules, zone_mode: e.target.value };
-                    setLayoutRules(next);
-                    handleTestAllocation(testPax, next, zoneOrderList);
-                  }}
-                  className="w-4 h-4 accent-sg-brown"
-                />
-                <span className="font-medium">
-                  先用{zoneOrderList[1]?.name || layout?.zones?.[1]?.name || '後區'}的空桌，最後才排對面（已採用）
-                </span>
-              </label>
+          {/* 3. 跨區排位選項 */}
+          {(() => {
+            const zonesCount = zoneOrderList.length || layout?.zones?.length || 0;
+            const hasThreeOrMoreZones = zonesCount >= 3;
+            const firstZoneName = zoneOrderList[0]?.name || layout?.zones?.[0]?.name || '前區';
+            const secondZoneName = zoneOrderList[1]?.name || layout?.zones?.[1]?.name || '後區';
+            return (
+              <div className="space-y-3 pt-2 border-t border-sg-line">
+                <h3 className="text-[14px] font-bold text-sg-ink">
+                  {hasThreeOrMoreZones ? '前面的區域每桌都有人之後' : `${firstZoneName}每桌都有人之後`}
+                </h3>
+                <div className="space-y-2.5">
+                  <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
+                    <input
+                      type="radio"
+                      name="zone_mode"
+                      value="empty_tables_first"
+                      checked={layoutRules.zone_mode === 'empty_tables_first' || layoutRules.zone_mode === 'spread_across_zones'}
+                      onChange={(e) => {
+                        const next = { ...layoutRules, zone_mode: e.target.value };
+                        setLayoutRules(next);
+                        handleTestAllocation(testPax, next, zoneOrderList);
+                      }}
+                      className="w-4 h-4 accent-sg-brown"
+                    />
+                    <span className="font-medium">
+                      {hasThreeOrMoreZones
+                        ? '前面的區域每桌都有人之後，先用下一區的空桌，最後才排對面'
+                        : `先用${secondZoneName}的空桌，最後才排對面（已採用）`}
+                    </span>
+                  </label>
 
-              <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
-                <input
-                  type="radio"
-                  name="zone_mode"
-                  value="fill_zone_first"
-                  checked={layoutRules.zone_mode === 'fill_zone_first'}
-                  onChange={(e) => {
-                    const next = { ...layoutRules, zone_mode: e.target.value };
-                    setLayoutRules(next);
-                    handleTestAllocation(testPax, next, zoneOrderList);
-                  }}
-                  className="w-4 h-4 accent-sg-brown"
-                />
-                <span className="font-medium">
-                  {zoneOrderList[0]?.name || layout?.zones?.[0]?.name || '前區'}全部坐滿才排{zoneOrderList[1]?.name || layout?.zones?.[1]?.name || '後區'}
-                </span>
-              </label>
-            </div>
-          </div>
+                  <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-sg-ink">
+                    <input
+                      type="radio"
+                      name="zone_mode"
+                      value="fill_zone_first"
+                      checked={layoutRules.zone_mode === 'fill_zone_first'}
+                      onChange={(e) => {
+                        const next = { ...layoutRules, zone_mode: e.target.value };
+                        setLayoutRules(next);
+                        handleTestAllocation(testPax, next, zoneOrderList);
+                      }}
+                      className="w-4 h-4 accent-sg-brown"
+                    />
+                    <span className="font-medium">
+                      {hasThreeOrMoreZones
+                        ? '前面的區域坐滿才排下一區'
+                        : `${firstZoneName}全部坐滿才排${secondZoneName}`}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* 4. 人數說明（逐字） */}
           <div className="p-3.5 bg-sg-paper rounded-2xl border border-sg-line text-[13px] text-sg-ink leading-relaxed">
@@ -3367,7 +3398,7 @@ export default function SeatLayoutPage() {
               className="w-full py-3 rounded-2xl bg-sg-brown text-white font-bold text-[15px] hover:bg-sg-brown/90 transition shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <Save className="w-4 h-4" />
-              <span>{savingRules ? '儲存中...' : '儲存'}</span>
+              <span>{savingRules ? '儲存中...' : '儲存排位規則'}</span>
             </button>
           </div>
         </div>
@@ -3376,9 +3407,25 @@ export default function SeatLayoutPage() {
       {/* TAB 2: MOBILE LIST MODE (清單模式) */}
       {activeTab === 'mobile_list' && layout && (
         <div className="bg-white rounded-3xl border border-sg-line p-4 space-y-4 shadow-xs">
-          <div className="flex items-center justify-between pb-2 border-b border-sg-line">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-sg-line flex-wrap">
             <h2 className="text-[16px] font-bold text-sg-ink">桌子與座位清單</h2>
             <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 text-[11px] font-bold text-sg-muted">
+                <span>放在：</span>
+                <select
+                  value={currentZoneId ?? ''}
+                  onChange={(e) => {
+                    const zId = Number(e.target.value);
+                    currentZoneIdRef.current = zId;
+                    setCurrentZoneId(zId);
+                  }}
+                  className="px-2 py-1 rounded-xl bg-white border border-sg-line font-bold text-sg-ink text-[12px]"
+                >
+                  {(zoneOrderList.length > 0 ? zoneOrderList : (layout.zones || [])).map(z => (
+                    <option key={z.id} value={z.id}>{z.name}</option>
+                  ))}
+                </select>
+              </label>
               <Button size="sm" variant="secondary" onClick={() => handleAddPreset('4p')}>
                 <Plus className="w-4 h-4 mr-1" /> 新增 4 人桌
               </Button>
