@@ -250,10 +250,21 @@ async function run() {
     console.log('Capturing Screenshot 1: MiniMap Zoomed In...');
     const tableA1InMap = page.locator('[data-minimap-table="A1"]');
     await tableA1InMap.waitFor({ state: 'visible', timeout: 10000 });
-    await tableA1InMap.click();
+    const zoneHitTarget = page.locator('[aria-label^="放大"]').first();
+    await zoneHitTarget.waitFor({ state: 'visible', timeout: 10000 });
+    const zoneRect = await zoneHitTarget.boundingBox();
+    const a1Rect = await tableA1InMap.boundingBox();
+    assert.ok(zoneRect && a1Rect, 'Expected bounding boxes for zone hit target and table A1');
+    await zoneHitTarget.click({
+      position: {
+        x: Math.max(4, Math.min(zoneRect.width - 4, a1Rect.x + a1Rect.width / 2 - zoneRect.x)),
+        y: Math.max(4, Math.min(zoneRect.height - 4, a1Rect.y + a1Rect.height / 2 - zoneRect.y))
+      }
+    });
     await page.waitForTimeout(500);
 
-    // Verify zoom: Table labels A1 & A2 are now visible in MiniMap SVG
+    // Verify zoom: header back pill "‹ 全店" and table label A1 in MiniMap SVG are visible
+    await page.locator('button:has-text("‹ 全店")').waitFor({ state: 'visible', timeout: 5000 });
     const svgLabelA1 = page.locator('svg text:has-text("A1")').first();
     await svgLabelA1.waitFor({ state: 'visible', timeout: 5000 });
 
