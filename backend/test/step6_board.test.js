@@ -206,11 +206,11 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
     assert.equal(segs.length, 2);
 
     // Segment 1 (Small): covers 14:00 and 15:00 sessions (up to 16:00). 16:00+ is released!
-    assert.deepEqual(segs[0].covered_sessions, [String(sess14.id), String(sess15.id)]);
+    assert.deepEqual(segs[0].covered_sessions, ['14:00-15:00', '15:00-16:00']);
     assert.equal(segs[0].ended_reason, 'swapped');
 
     // Segment 2 (Medium): starts from 15:00 session to 17:00 session
-    assert.deepEqual(segs[1].covered_sessions, [String(sess15.id), String(sess16.id), String(sess17.id)]);
+    assert.deepEqual(segs[1].covered_sessions, ['15:00-16:00', '16:00-17:00', '17:00-18:00']);
     assert.equal(segs[1].equipment_id, 'pegboard_m');
 
     // Check bill calculation: 4 hours total, 1 hr free @ 90 -> gross 135+300=435 - 90 = 345!
@@ -396,7 +396,7 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
     });
     assert.equal(seg.ended_reason, 'returned');
     // Subsequent sessions (sess16 and sess17) should be removed!
-    assert.deepEqual(seg.covered_sessions, [String(sess14.id), String(sess15.id)]);
+    assert.deepEqual(seg.covered_sessions, ['14:00-15:00', '15:00-16:00']);
 
     // Check audit log
     const event = await prisma.accountingEvent.findFirst({

@@ -7,6 +7,7 @@ import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { refreshBillingCache, getBookingBill } from '../services/billing/billService.js';
 import { swapBoundaryOptions, toTaipeiDateString } from '../../../shared/time.js';
+import { resolveCoveredSessions, formatCoveredSessions } from '../utils/equipmentWindow.js';
 
 export async function getLive(req, res) {
   try {
@@ -1098,12 +1099,15 @@ export async function swapBoard(req, res) {
 
       const activeSeg = segments[segments.length - 1];
 
-      // Load all covered sessions of activeSeg
-      const covSessionIds = (activeSeg.covered_sessions || []).map(Number);
-      const coveredSessions = await tx.session.findMany({
-        where: { id: { in: covSessionIds } },
-        orderBy: { start_time: 'asc' }
+      const bookingReservations = await tx.reservation.findMany({
+        where: { booking_ref, status: { not: 'cancelled' } },
+        include: { session: true },
+        orderBy: { session: { start_time: 'asc' } }
       });
+      const sessionDate = bookingReservations[0]?.session?.session_date || null;
+
+      // Load all covered sessions of activeSeg (supports both "HH:MM-HH:MM" and legacy session IDs)
+      const coveredSessions = await resolveCoveredSessions(tx, sessionDate, activeSeg.covered_sessions || []);
 
       // Determine segment start time in ms
       let segStartMs;
@@ -1164,39 +1168,69 @@ export async function swapBoard(req, res) {
         }
       }
 
-      const oldCoveredSessions = coveredSessions.slice(0, swapSessionIndex + 1).map(s => String(s.id));
-      const newCoveredSessions = isStartBoundary
-        ? coveredSessions.map(s => String(s.id))
-        : coveredSessions.slice(swapSessionIndex).map(s => String(s.id));
+      const oldCoveredSessions = formatCoveredSessions(coveredSessions.slice(0, swapSessionIndex + 1));
+      const newCoveredSessionObjs = isStartBoundary
+        ? coveredSessions
+        : coveredSessions.slice(swapSessionIndex);
+      const newCoveredSessions = formatCoveredSessions(newCoveredSessionObjs);
 
-      // Check stock for targetConfig in all newCoveredSessions
+      // Check stock for targetConfig in all newCoveredSessionObjs (same date, active, non-ended, incl. on-site boards)
       const totalStock = targetConfig.total_stock;
-      if (totalStock !== null && totalStock !== undefined) {
-        const activeEquips = await tx.bookingEquipment.findMany({
+      if (totalStock !== null && totalStock !== undefined && newCoveredSessionObjs.length > 0) {
+        const stockDate = sessionDate || newCoveredSessionObjs[0]?.session_date;
+        const dateReservations = await tx.reservation.findMany({
+          where: {
+            session: { session_date: stockDate },
+            status: { not: 'cancelled' }
+          },
+          include: { session: true }
+        });
+        const activeBookingRefs = Array.from(new Set(dateReservations.map(r => r.booking_ref)));
+        const uncancelledEquips = await tx.bookingEquipment.findMany({
           where: {
             equipment_id: to_equipment_id,
+            booking_ref: { in: activeBookingRefs },
+            ended_reason: null,
             OR: [
               { unit_group: null },
               { unit_group: { not: unit_group } }
             ]
           }
         });
-        const activeResvs = await tx.reservation.findMany({
-          where: {
-            status: { not: 'cancelled' },
-            booking_ref: { in: activeEquips.map(e => e.booking_ref) }
-          },
-          select: { booking_ref: true }
-        });
-        const activeBookingSet = new Set(activeResvs.map(r => r.booking_ref));
-        const uncancelledEquips = activeEquips.filter(e => activeBookingSet.has(e.booking_ref));
 
-        for (const sIdStr of newCoveredSessions) {
-          const sId = Number(sIdStr);
-          const occupiedCount = uncancelledEquips.filter(be => {
-            const cSessions = (be.covered_sessions || []).map(Number);
-            return cSessions.includes(sId);
-          }).reduce((sum, be) => sum + (be.quantity ?? 1), 0);
+        const dStr = typeof stockDate === 'string'
+          ? stockDate.slice(0, 10)
+          : toTaipeiDateString(stockDate);
+
+        for (const sess of newCoveredSessionObjs) {
+          const sId = sess.id;
+          const sessTimeStr = `${sess.start_time}-${sess.end_time}`;
+          let occupiedCount = 0;
+
+          for (const be of uncancelledEquips) {
+            let isCovered = false;
+            if (Array.isArray(be.covered_sessions) && be.covered_sessions.length > 0) {
+              isCovered = be.covered_sessions.some(cs => {
+                if (typeof cs === 'number' || (!isNaN(Number(cs)) && !String(cs).includes(':'))) {
+                  return Number(cs) === sId;
+                }
+                return cs === sess.start_time || cs === sessTimeStr || String(cs).startsWith(sess.start_time);
+              });
+            } else if (be.start_at && (be.end_at || be.planned_end_at)) {
+              let sStart = new Date(`${dStr}T${sess.start_time}:00+08:00`).getTime();
+              let sEnd = new Date(`${dStr}T${sess.end_time}:00+08:00`).getTime();
+              if (sEnd <= sStart) sEnd += 24 * 60 * 60 * 1000;
+              const bStart = new Date(be.start_at).getTime();
+              const bEnd = new Date(be.end_at || be.planned_end_at).getTime();
+              isCovered = Math.max(bStart, sStart) < Math.min(bEnd, sEnd);
+            } else {
+              const bRes = dateReservations.filter(r => r.booking_ref === be.booking_ref);
+              isCovered = bRes.some(r => r.session?.start_time === sess.start_time);
+            }
+            if (isCovered) {
+              occupiedCount += (be.quantity ?? 1);
+            }
+          }
 
           const available = totalStock - occupiedCount;
           if (available < 1) {
@@ -1224,7 +1258,8 @@ export async function swapBoard(req, res) {
           data: {
             equipment_id: to_equipment_id,
             equipment_name_snapshot: targetConfig.name,
-            unit_rate: targetConfig.hourly_rate
+            unit_rate: targetConfig.hourly_rate,
+            covered_sessions: newCoveredSessions
           }
         });
       } else {
@@ -1303,11 +1338,14 @@ export async function returnBoard(req, res) {
       const returnDt = new Date(at);
       const returnMs = returnDt.getTime();
 
-      const covSessionIds = (activeSeg.covered_sessions || []).map(Number);
-      const coveredSessions = await tx.session.findMany({
-        where: { id: { in: covSessionIds } },
-        orderBy: { start_time: 'asc' }
+      const bookingReservations = await tx.reservation.findMany({
+        where: { booking_ref, status: { not: 'cancelled' } },
+        include: { session: true },
+        orderBy: { session: { start_time: 'asc' } }
       });
+      const sessionDate = bookingReservations[0]?.session?.session_date || null;
+
+      const coveredSessions = await resolveCoveredSessions(tx, sessionDate, activeSeg.covered_sessions || []);
 
       let returnIndex = coveredSessions.length - 1;
       if (coveredSessions.length > 0) {
@@ -1334,7 +1372,7 @@ export async function returnBoard(req, res) {
       }
 
       const keptCoveredSessions = returnIndex >= 0
-        ? coveredSessions.slice(0, returnIndex + 1).map(s => String(s.id))
+        ? formatCoveredSessions(coveredSessions.slice(0, returnIndex + 1))
         : [];
 
       const openRetPauses = await tx.boardPause.findMany({

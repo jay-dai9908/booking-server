@@ -58,8 +58,21 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
 
   await prisma.globalSetting.upsert({
     where: { id: 1 },
-    update: { seat_layout_enabled: true },
-    create: { id: 1, seat_layout_enabled: true }
+    update: {
+      seat_layout_enabled: true,
+      equipment_discount_enabled: true,
+      equipment_discount_buy_hours: 3,
+      equipment_discount_free_hours: 1,
+      equipment_discount_stackable: true
+    },
+    create: {
+      id: 1,
+      seat_layout_enabled: true,
+      equipment_discount_enabled: true,
+      equipment_discount_buy_hours: 3,
+      equipment_discount_free_hours: 1,
+      equipment_discount_stackable: true
+    }
   });
 
   await prisma.equipmentConfig.upsert({
@@ -297,5 +310,192 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
     });
     await resumeBoard(brReq, brRes);
     assert.equal(brRes.getStatusCode(), 200);
+
+    // Release stock at end of Item 1 via returnBoard API
+    const { req: ret1Req, res: ret1Res } = createMockReqRes({
+      params: { booking_ref, unit_group: rentedEq.unit_group },
+      body: { at: `${dateStr}T20:30:00+08:00` }
+    });
+    await returnBoard(ret1Req, ret1Res);
+    assert.equal(ret1Res.getStatusCode(), 200);
+  });
+
+  await t.test('Item 2a: board added via addBoardRental can swapBoard & returnBoard cleanly with HH:MM-HH:MM covered_sessions', async () => {
+    const { booking_ref } = await createCheckedInBooking({
+      name: '加租換歸還客',
+      phone: '0988777002'
+    });
+
+    const start19 = new Date(`${dateStr}T19:00:00+08:00`);
+    await prisma.bookingPerson.updateMany({
+      where: { booking_ref, person_no: 1 },
+      data: { billing_start_at: start19, timer_started_at: start19 }
+    });
+
+    const { req: addReq, res: addRes } = createMockReqRes({
+      params: { booking_ref },
+      body: { person_no: 1, equipment_id: 'pegboard_s', from_at: '19:00', to_at: '22:00' }
+    });
+    await addBoardRental(addReq, addRes);
+    assert.equal(addRes.getStatusCode(), 200);
+    const ug = addRes.getResponseData().booking_equipment.unit_group;
+
+    // Swap at 20:00 (segment 1 = 19:00-20:00, segment 2 = 20:00-22:00)
+    const { req: swReq, res: swRes } = createMockReqRes({
+      params: { booking_ref, unit_group: ug },
+      body: {
+        to_equipment_id: 'pegboard_m',
+        boundary_at: `${dateStr}T20:00:00+08:00`,
+        now: `${dateStr}T20:10:00+08:00`
+      }
+    });
+    await swapBoard(swReq, swRes);
+    assert.equal(swRes.getStatusCode(), 200, `swapBoard failed: ${JSON.stringify(swRes.getResponseData())}`);
+
+    const afterSwapSegs = await prisma.bookingEquipment.findMany({
+      where: { booking_ref, unit_group: ug },
+      orderBy: { segment_no: 'asc' }
+    });
+    assert.equal(afterSwapSegs.length, 2);
+    assert.deepEqual(afterSwapSegs[0].covered_sessions, ['19:00-20:00', '20:00-21:00']);
+    assert.deepEqual(afterSwapSegs[1].covered_sessions, ['20:00-21:00', '21:00-22:00']);
+    // 1h small (90) + 2h medium (240) = 330 (total 3h < buy 3 + free 1)
+    assert.equal(swRes.getResponseData().bill.summary.board_total, 330);
+
+    // Return at 20:30 (during 20:00-21:00) -> 21:00-22:00 released from covered_sessions
+    const { req: retReq, res: retRes } = createMockReqRes({
+      params: { booking_ref, unit_group: ug },
+      body: { at: `${dateStr}T20:30:00+08:00` }
+    });
+    await returnBoard(retReq, retRes);
+    assert.equal(retRes.getStatusCode(), 200, `returnBoard failed: ${JSON.stringify(retRes.getResponseData())}`);
+
+    const afterRetSegs = await prisma.bookingEquipment.findMany({
+      where: { booking_ref, unit_group: ug },
+      orderBy: { segment_no: 'asc' }
+    });
+    assert.equal(afterRetSegs[1].ended_reason, 'returned');
+    assert.deepEqual(afterRetSegs[1].covered_sessions, ['20:00-21:00']);
+    assert.equal(retRes.getResponseData().bill.summary.board_total, 330);
+  });
+
+  await t.test('Item 2b: board added at reservation creation swaps & returns cleanly with HH:MM-HH:MM covered_sessions', async () => {
+    const { booking_ref } = await createCheckedInBooking({
+      name: '預約帶板客',
+      phone: '0988777003',
+      equipments: [{ equipment_id: 'pegboard_s', quantity: 1, rental_hours: 3 }]
+    });
+
+    const segs = await prisma.bookingEquipment.findMany({
+      where: { booking_ref },
+      orderBy: { segment_no: 'asc' }
+    });
+    assert.equal(segs.length, 1);
+    const ug = segs[0].unit_group;
+    assert.ok(ug, 'checkIn splitBoardUnits should assign unit_group');
+    assert.deepEqual(segs[0].covered_sessions, ['19:00-20:00', '20:00-21:00', '21:00-22:00']);
+
+    const { req: swReq, res: swRes } = createMockReqRes({
+      params: { booking_ref, unit_group: ug },
+      body: {
+        to_equipment_id: 'pegboard_m',
+        boundary_at: `${dateStr}T20:30:00+08:00`,
+        now: `${dateStr}T20:40:00+08:00`
+      }
+    });
+    await swapBoard(swReq, swRes);
+    assert.equal(swRes.getStatusCode(), 200, `swapBoard failed: ${JSON.stringify(swRes.getResponseData())}`);
+
+    const afterSwap = await prisma.bookingEquipment.findMany({
+      where: { booking_ref, unit_group: ug },
+      orderBy: { segment_no: 'asc' }
+    });
+    assert.equal(afterSwap.length, 2);
+    assert.deepEqual(afterSwap[0].covered_sessions, ['19:00-20:00', '20:00-21:00']);
+    assert.deepEqual(afterSwap[1].covered_sessions, ['20:00-21:00', '21:00-22:00']);
+    // 1.5h small (135) + 1.5h medium (180) = 315 (total 3h < buy 3 + free 1)
+    assert.equal(swRes.getResponseData().bill.summary.board_total, 315);
+
+    const { req: retReq, res: retRes } = createMockReqRes({
+      params: { booking_ref, unit_group: ug },
+      body: { at: `${dateStr}T20:45:00+08:00` }
+    });
+    await returnBoard(retReq, retRes);
+    assert.equal(retRes.getStatusCode(), 200);
+    const afterRet = await prisma.bookingEquipment.findMany({
+      where: { booking_ref, unit_group: ug },
+      orderBy: { segment_no: 'asc' }
+    });
+    assert.deepEqual(afterRet[1].covered_sessions, ['20:00-21:00']);
+  });
+
+  await t.test('Item 2c: swapBoard returns 409 when on-site addBoardRental board occupies last medium board stock', async () => {
+    await prisma.equipmentConfig.update({
+      where: { id: 'pegboard_m' },
+      data: { total_stock: 1 }
+    });
+
+    try {
+      const { booking_ref: occupierRef } = await createCheckedInBooking({
+        name: '佔用庫存客',
+        phone: '0988777004'
+      });
+
+      const { req: addReq, res: addRes } = createMockReqRes({
+        params: { booking_ref: occupierRef },
+        body: { person_no: 1, equipment_id: 'pegboard_m', from_at: '20:00', to_at: '22:00' }
+      });
+      await addBoardRental(addReq, addRes);
+      assert.equal(addRes.getStatusCode(), 200);
+
+      const { booking_ref: swapperRef } = await createCheckedInBooking({
+        name: '想換中板客',
+        phone: '0988777005',
+        equipments: [{ equipment_id: 'pegboard_s', quantity: 1, rental_hours: 3 }]
+      });
+      const swapperEq = await prisma.bookingEquipment.findFirst({ where: { booking_ref: swapperRef } });
+
+      const { req: swReq, res: swRes } = createMockReqRes({
+        params: { booking_ref: swapperRef, unit_group: swapperEq.unit_group },
+        body: {
+          to_equipment_id: 'pegboard_m',
+          boundary_at: `${dateStr}T20:00:00+08:00`,
+          now: `${dateStr}T20:05:00+08:00`
+        }
+      });
+      await swapBoard(swReq, swRes);
+      assert.equal(swRes.getStatusCode(), 409, `Expected 409 when stock is occupied by on-site addBoardRental, got ${swRes.getStatusCode()}`);
+    } finally {
+      await prisma.equipmentConfig.update({
+        where: { id: 'pegboard_m' },
+        data: { total_stock: 10 }
+      });
+    }
+  });
+
+  await t.test('Item 2d: legacy BookingEquipment with session ID covered_sessions can still be returned cleanly', async () => {
+    const { booking_ref } = await createCheckedInBooking({
+      name: '舊格式兼容客',
+      phone: '0988777006',
+      equipments: [{ equipment_id: 'pegboard_s', quantity: 1, rental_hours: 3 }]
+    });
+
+    const seg = await prisma.bookingEquipment.findFirst({ where: { booking_ref } });
+    // Simulate legacy DB row where covered_sessions stored numeric session ID strings
+    await prisma.bookingEquipment.update({
+      where: { id: seg.id },
+      data: { covered_sessions: sessions.map(s => String(s.id)) }
+    });
+
+    const { req: retReq, res: retRes } = createMockReqRes({
+      params: { booking_ref, unit_group: seg.unit_group },
+      body: { at: `${dateStr}T20:30:00+08:00` }
+    });
+    await returnBoard(retReq, retRes);
+    assert.equal(retRes.getStatusCode(), 200, `returnBoard on legacy ID format failed: ${JSON.stringify(retRes.getResponseData())}`);
+
+    const updatedSeg = await prisma.bookingEquipment.findFirst({ where: { id: seg.id } });
+    assert.equal(updatedSeg.ended_reason, 'returned');
+    assert.deepEqual(updatedSeg.covered_sessions, ['19:00-20:00', '20:00-21:00']);
   });
 });

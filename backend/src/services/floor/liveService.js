@@ -6,6 +6,7 @@ import { toTaipeiDateString, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
 import { formatBookingRef } from '../../../../shared/receipts.js';
+import { resolveCoveredSessions, formatCoveredSessions } from '../../utils/equipmentWindow.js';
 
 /**
  * Split booking equipment with quantity > 1 into individual 1-unit records (spec 3.3 item 1)
@@ -43,30 +44,33 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
   for (const eq of equipments) {
     const unitRate = eq.equipment?.hourly_rate || (eq.rental_hours > 0 ? Math.round(eq.subtotal_price / (eq.quantity * eq.rental_hours)) : 60);
 
+    let eqStartAt = eq.start_at || null;
     let eqPlannedEndAt = null;
+    let resolvedCovered = [];
     if (eq.covered_sessions && eq.covered_sessions.length > 0) {
-      const covIds = eq.covered_sessions.map(Number);
-      const matched = reservations.filter(r => covIds.includes(r.session_id));
-      if (matched.length > 0) {
-        matched.sort((a, b) => a.session.start_time.localeCompare(b.session.start_time));
-        const lastMatch = matched[matched.length - 1];
-        const dStr = typeof lastMatch.session.session_date === 'string'
-          ? lastMatch.session.session_date.slice(0, 10)
-          : toTaipeiDateString(lastMatch.session.session_date);
-        eqPlannedEndAt = new Date(`${dStr}T${lastMatch.session.end_time}:00+08:00`);
-      } else {
-        const coveredSessList = await tx.session.findMany({
-          where: { id: { in: covIds } },
-          orderBy: { start_time: 'asc' }
-        });
-        if (coveredSessList.length > 0) {
-          const lastS = coveredSessList[coveredSessList.length - 1];
-          const dStr = typeof lastS.session_date === 'string'
-            ? lastS.session_date.slice(0, 10)
-            : toTaipeiDateString(lastS.session_date);
-          eqPlannedEndAt = new Date(`${dStr}T${lastS.end_time}:00+08:00`);
+      const refDate = reservations[0]?.session?.session_date || null;
+      resolvedCovered = await resolveCoveredSessions(tx, refDate, eq.covered_sessions);
+      if (resolvedCovered.length > 0) {
+        const firstS = resolvedCovered[0];
+        const lastS = resolvedCovered[resolvedCovered.length - 1];
+        const firstDateStr = typeof firstS.session_date === 'string'
+          ? firstS.session_date.slice(0, 10)
+          : toTaipeiDateString(firstS.session_date);
+        const lastDateStr = typeof lastS.session_date === 'string'
+          ? lastS.session_date.slice(0, 10)
+          : toTaipeiDateString(lastS.session_date);
+        if (!eqStartAt) {
+          eqStartAt = new Date(`${firstDateStr}T${firstS.start_time}:00+08:00`);
         }
+        eqPlannedEndAt = new Date(`${lastDateStr}T${lastS.end_time}:00+08:00`);
       }
+    }
+    if (!eqStartAt && reservations.length > 0) {
+      const firstRes = reservations[0];
+      const dStr = typeof firstRes.session.session_date === 'string'
+        ? firstRes.session.session_date.slice(0, 10)
+        : toTaipeiDateString(firstRes.session.session_date);
+      eqStartAt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
     }
     if (!eqPlannedEndAt && reservations.length > 0) {
       const lastRes = reservations[reservations.length - 1];
@@ -75,6 +79,9 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
         : toTaipeiDateString(lastRes.session.session_date);
       eqPlannedEndAt = new Date(`${dStr}T${lastRes.session.end_time}:00+08:00`);
     }
+    const normalizedCovered = resolvedCovered.length > 0
+      ? formatCoveredSessions(resolvedCovered)
+      : eq.covered_sessions;
 
     if (eq.quantity <= 1) {
       if (!eq.unit_group) {
@@ -84,7 +91,9 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
             unit_group: crypto.randomUUID(),
             segment_no: 1,
             unit_rate: unitRate,
-            planned_end_at: eqPlannedEndAt
+            start_at: eqStartAt,
+            planned_end_at: eqPlannedEndAt,
+            covered_sessions: normalizedCovered
           }
         });
       }
@@ -105,7 +114,9 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
         unit_group: crypto.randomUUID(),
         segment_no: 1,
         unit_rate: unitRate,
-        planned_end_at: eqPlannedEndAt
+        start_at: eqStartAt,
+        planned_end_at: eqPlannedEndAt,
+        covered_sessions: normalizedCovered
       }
     });
 
@@ -119,10 +130,11 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
           quantity: 1,
           rental_hours: eq.rental_hours,
           subtotal_price: baseSubtotal,
-          covered_sessions: eq.covered_sessions,
+          covered_sessions: normalizedCovered,
           unit_group: crypto.randomUUID(),
           segment_no: 1,
           unit_rate: unitRate,
+          start_at: eqStartAt,
           planned_end_at: eqPlannedEndAt
         }
       });
@@ -353,8 +365,9 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
         const et = last.includes('-') ? last.split('-')[1] : (last.includes(':') ? last : null);
         if (st && et) {
           segStart = new Date(`${targetDateStr}T${st}:00+08:00`).toISOString();
-          segEnd = new Date(`${targetDateStr}T${et}:00+08:00`).toISOString();
-          if (!segPlannedEnd) segPlannedEnd = segEnd;
+          const endIso = new Date(`${targetDateStr}T${et}:00+08:00`).toISOString();
+          if (!segPlannedEnd) segPlannedEnd = endIso;
+          if (!segEnd && eq.ended_reason) segEnd = endIso;
         }
       }
 
