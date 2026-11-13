@@ -133,11 +133,19 @@ export default function Home({ userRole }) {
       return;
     }
 
-    const isPreorderLogin = oauthState.startsWith('preorder_') || verifyResult.returnPath === '/preorder';
+    const isPreorderPath = (p) =>
+      typeof p === 'string' && (p.startsWith('/preorder') || p.startsWith('/shop'));
+    const isPreorderLogin = oauthState.startsWith('preorder_') || isPreorderPath(verifyResult.returnPath);
     if (isPreorderLogin) {
+      const targetRedirect = isPreorderPath(verifyResult.returnPath) ? verifyResult.returnPath : '/preorder';
       try {
-        sessionStorage.setItem('shiguang_post_login_redirect', '/preorder');
-        localStorage.setItem('shiguang_post_login_redirect', '/preorder');
+        const existingRedirect =
+          sessionStorage.getItem('shiguang_post_login_redirect') ||
+          localStorage.getItem('shiguang_post_login_redirect');
+        if (!isPreorderPath(existingRedirect)) {
+          sessionStorage.setItem('shiguang_post_login_redirect', targetRedirect);
+          localStorage.setItem('shiguang_post_login_redirect', targetRedirect);
+        }
       } catch (e) {}
     }
 

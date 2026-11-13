@@ -19,6 +19,7 @@ const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } }
 
 const INSTAGRAM_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 300.0';
 const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1';
+const LINE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 Line/13.2.0';
 
 async function run() {
   console.log('--- Starting Round 9 Section 3 Playwright Tests ---');
@@ -197,6 +198,69 @@ async function run() {
 
     await authContext.close();
     console.log('PASS: Authenticated customer is unaffected');
+
+    // -------------------------------------------------------------
+    // Test 3b: /preorder (LINE entry) shows direct login button even when official_line_url is set,
+    // while /shop in external browser still guides to official LINE
+    // -------------------------------------------------------------
+    console.log('Testing /preorder vs /shop unauthenticated button behavior...');
+    const shopPreviewContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      userAgent: MOBILE_UA,
+      isMobile: true,
+      hasTouch: true,
+    });
+    const shopPreviewPage = await shopPreviewContext.newPage();
+    await shopPreviewPage.goto(`${BASE_URL}/shop`, { waitUntil: 'networkidle' });
+    const shopPlusBtn = shopPreviewPage.locator('button[aria-label^="增加"]').first();
+    await shopPlusBtn.waitFor({ state: 'visible', timeout: 8000 });
+    await shopPlusBtn.click();
+    const shopCheckoutOaBtn = shopPreviewPage.locator('[aria-label="結帳與金額列"] a:has-text("加入官方 LINE 預約"), [aria-label="結帳與金額列"] button:has-text("加入官方 LINE 預約")').first();
+    await shopCheckoutOaBtn.waitFor({ state: 'visible', timeout: 5000 });
+    assert.strictEqual(await shopCheckoutOaBtn.getAttribute('href'), officialLineUrl, '/shop in external browser must still link to official_line_url after adding item');
+    await shopPreviewContext.close();
+
+    const preorderContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      userAgent: LINE_UA,
+      isMobile: true,
+      hasTouch: true,
+    });
+    const preorderPage = await preorderContext.newPage();
+    await preorderPage.goto(`${BASE_URL}/preorder`, { waitUntil: 'networkidle' });
+
+    // Empty cart -> login button ("使用 LINE 登入預購") without OA link or hint
+    const emptyPreorderBtn = preorderPage.locator('[data-testid="guest-line-login-button"]').first();
+    await emptyPreorderBtn.waitFor({ state: 'visible', timeout: 8000 });
+    assert.strictEqual((await emptyPreorderBtn.innerText()).trim(), '使用 LINE 登入預購');
+    assert.ok(!(await emptyPreorderBtn.getAttribute('href')), '/preorder empty cart login button must not link to official_line_url');
+    assert.strictEqual(await preorderPage.locator(`text=${customHintText}`).count(), 0, '/preorder must not show official LINE redirect hint');
+
+    // Add 1 item -> BottomActionBar shows "登入進行購買" without OA link or hint
+    const preorderPlusBtn = preorderPage.locator('button[aria-label^="增加"]').first();
+    await preorderPlusBtn.click();
+    const buyLoginBtn = preorderPage.locator('[aria-label="結帳與金額列"] button:has-text("登入進行購買")').first();
+    await buyLoginBtn.waitFor({ state: 'visible', timeout: 5000 });
+    assert.ok(!(await buyLoginBtn.getAttribute('href')), '/preorder purchase button must not link to official_line_url');
+    assert.strictEqual(await preorderPage.locator(`text=${customHintText}`).count(), 0, '/preorder cart bar must not show official LINE redirect hint');
+
+    await preorderPage.waitForTimeout(200);
+    await preorderPage.screenshot({ path: path.join(SCREENSHOT_DIR, 'preorder-line-login-mobile.png') });
+
+    // Clicking "登入進行購買" initiates LINE OAuth with preorder_ state (not official_line_url)
+    let interceptedLineOAuthUrl = '';
+    await preorderPage.route('https://access.line.me/**', (route) => {
+      interceptedLineOAuthUrl = route.request().url();
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>LINE OAuth Redirect Mock</body></html>' });
+    });
+    await buyLoginBtn.click();
+    await preorderPage.waitForTimeout(300);
+    if (interceptedLineOAuthUrl) {
+      assert.ok(interceptedLineOAuthUrl.includes('state=preorder_'), `Expected LINE OAuth URL with state=preorder_, got ${interceptedLineOAuthUrl}`);
+    }
+
+    await preorderContext.close();
+    console.log('PASS: /preorder login-to-purchase & /shop OA preview verified');
 
     // -------------------------------------------------------------
     // Test 4: Unset official_line_url falls back with console.warn

@@ -38,7 +38,7 @@ export default function BottomActionBar({
             {summary}
           </div>
         )}
-        <div className="font-num font-extrabold text-[22px] leading-[1.1] text-sg-brown tabular-nums flex items-baseline">
+        <div className="font-num font-extrabold text-[22px] leading-[1.1] text-sg-brown tabular-nums flex items-baseline whitespace-nowrap">
           {price == null ? (
             <Skeleton className="h-[22px] w-24 my-1" />
           ) : (
@@ -63,7 +63,7 @@ export default function BottomActionBar({
         target={target}
         rel={rel}
         onClick={onAction}
-        className="min-h-[44px] px-[22px] min-w-[104px] shrink-0"
+        className="min-h-[44px] px-[18px] min-w-[104px] shrink-0 whitespace-nowrap"
       >
         {actionLabel}
       </Button>

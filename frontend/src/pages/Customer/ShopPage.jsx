@@ -28,7 +28,7 @@ import { useToast } from '../../components/customer/Toast';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
 import api from '../../api/axios';
-import { initiateLineOAuth } from '../../utils/lineAuth';
+import { initiateLineOAuth, getGuestLineAction } from '../../utils/lineAuth';
 import {
   formatMoney,
   formatMoneyBig,
@@ -73,6 +73,10 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
   const { settings: globalSettings } = useGlobalSettings();
   const { user } = useCustomerProfile();
   const isLoggedInCustomer = user?.role === 'customer' || userRole === 'customer';
+  // /preorder and /shop/order are LINE-entry preorder flows -> always allow direct LINE login & purchase.
+  // /shop is the external preview page -> opens official LINE OA outside LINE, or logs in when opened inside LINE.
+  const guestLineAction = isLineEntry ? 'login' : getGuestLineAction('preview');
+  const shouldShowOfficialLine = guestLineAction === 'oa';
 
   // Products and config state
   const [products, setProducts] = useState([]);
@@ -335,15 +339,24 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
     return list;
   }, [products, activeCategory]);
 
+  useEffect(() => {
+    if (view === 'checkout' && !isLoggedInCustomer) {
+      navigate(location.pathname, { replace: true });
+    }
+  }, [view, isLoggedInCustomer, location.pathname, navigate]);
+
   // Handle Checkout Button
   const handleGoToCheckout = () => {
     if (!isLoggedInCustomer) {
-      if (globalSettings?.official_line_url) {
-        window.open(globalSettings.official_line_url, '_blank');
-      } else {
-        console.warn('official_line_url is not configured, falling back to LINE Login');
-        initiateLineOAuth({ prefix: 'preorder_', returnPath: '/shop?view=checkout' });
+      const checkoutReturnPath = `${location.pathname}?view=checkout`;
+      if (shouldShowOfficialLine) {
+        if (!globalSettings?.official_line_url) {
+          console.warn('official_line_url is not configured, falling back to LINE Login');
+          initiateLineOAuth({ prefix: 'preorder_', returnPath: checkoutReturnPath });
+        }
+        return;
       }
+      initiateLineOAuth({ prefix: 'preorder_', returnPath: checkoutReturnPath });
       return;
     }
     setSearchParams({ view: 'checkout' });
@@ -397,7 +410,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
         localStorage.removeItem(SHOP_DRAFT_STORAGE_KEY);
       } catch (e) {}
 
-      navigate(`/shop?view=done&order=${createdOrder.id || createdOrder.order_number}`, { replace: true });
+      navigate(`${location.pathname}?view=done&order=${createdOrder.id || createdOrder.order_number}`, { replace: true });
     } catch (err) {
       console.error('Failed to submit order', err);
       const msg = err.response?.data?.message || err.response?.data?.error || '送出失敗，請重試';
@@ -595,7 +608,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
           <AppBar
             variant="backTwoLine"
             subtitle="確認訂單"
-            onBack={() => navigate('/shop')}
+            onBack={() => navigate(location.pathname)}
           />
         }
         bottom={
@@ -856,15 +869,21 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
               <BottomActionBar
                 summary={summaryBottomText}
                 price={totalAmount}
-                actionLabel={isLoggedInCustomer ? '去結帳' : '加入官方 LINE 預約'}
+                actionLabel={
+                  isLoggedInCustomer
+                    ? '去結帳'
+                    : shouldShowOfficialLine
+                    ? '加入官方 LINE 預約'
+                    : '登入進行購買'
+                }
                 actionVariant={isLoggedInCustomer ? 'primary' : 'line'}
-                actionHref={!isLoggedInCustomer ? (globalSettings?.official_line_url || undefined) : undefined}
-                target={!isLoggedInCustomer && globalSettings?.official_line_url ? '_blank' : undefined}
-                rel={!isLoggedInCustomer && globalSettings?.official_line_url ? 'noopener noreferrer' : undefined}
+                actionHref={!isLoggedInCustomer && shouldShowOfficialLine ? (globalSettings?.official_line_url || undefined) : undefined}
+                target={!isLoggedInCustomer && shouldShowOfficialLine && globalSettings?.official_line_url ? '_blank' : undefined}
+                rel={!isLoggedInCustomer && shouldShowOfficialLine && globalSettings?.official_line_url ? 'noopener noreferrer' : undefined}
                 onAction={handleGoToCheckout}
                 hasTabBarBelow={isLoggedInCustomer}
               />
-              {!isLoggedInCustomer && (
+              {!isLoggedInCustomer && shouldShowOfficialLine && (
                 <div className="bg-sg-paper px-4 pb-2 text-center border-b border-sg-line">
                   <div className="sg-small text-sg-muted">
                     {globalSettings?.guest_line_hint_text || '會打開拾光製所的官方 LINE，從選單點『預約』就能登入'}
@@ -874,7 +893,14 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
             </div>
           ) : !isLoggedInCustomer ? (
             <div className="bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))]">
-              <GuestLineLoginButton globalSettings={globalSettings} returnPath="/shop" />
+              <GuestLineLoginButton
+                globalSettings={globalSettings}
+                page={isLineEntry ? 'home' : 'preview'}
+                action={isLineEntry ? 'login' : undefined}
+                prefix="preorder_"
+                returnPath={location.pathname}
+                label={!shouldShowOfficialLine ? '使用 LINE 登入預購' : undefined}
+              />
             </div>
           ) : null}
           {isLoggedInCustomer && (

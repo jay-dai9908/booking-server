@@ -12,6 +12,7 @@ export default function GuestLineLoginButton({
   size = 'md',
   label,
   showHint,
+  prefix = '',
   returnPath = '/booking',
   onClick,
   ...props
@@ -30,11 +31,11 @@ export default function GuestLineLoginButton({
   const handleClick = (e) => {
     if (onClick) onClick(e);
     if (isLoginAction) {
-      initiateLineOAuth({ returnPath });
+      initiateLineOAuth({ prefix, returnPath });
     } else {
       if (!officialLineUrl) {
         console.warn('official_line_url is not configured, falling back to LINE Login');
-        initiateLineOAuth({ returnPath });
+        initiateLineOAuth({ prefix, returnPath });
       }
     }
   };
