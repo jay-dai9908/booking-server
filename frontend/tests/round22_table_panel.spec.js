@@ -268,8 +268,8 @@ async function run() {
     await tableCardA1.scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
 
-    // Verify SVG overlay dashed rects exist in TableCard
-    const dashedBoxes = tableCardA1.locator('svg rect[stroke-dasharray="5,4"]');
+    // Verify SVG overlay dashed group boundaries exist in TableCard
+    const dashedBoxes = tableCardA1.locator('svg [data-group-box="true"]');
     const boxCount = await dashedBoxes.count();
     assert.ok(boxCount >= 2, `Expected at least 2 group dashed bounding boxes, got ${boxCount}`);
 
