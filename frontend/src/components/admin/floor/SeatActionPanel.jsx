@@ -237,6 +237,56 @@ export default function SeatActionPanel({
   const actionTileClass =
     'rounded-2xl border border-sg-line bg-white hover:bg-sg-paper active:scale-[0.98] text-sg-ink py-3 px-2 flex flex-col items-center justify-center gap-1.5 text-[12px] font-bold transition cursor-pointer shadow-2xs';
 
+  const renderOtherPersonsSection = () => {
+    if (otherPersons.length === 0) return null;
+    return (
+      <div className="space-y-2 pt-2 border-t border-sg-line">
+        <div className="space-y-2">
+          {otherPersons.map(p => {
+            const isPaused = Boolean(p.timer?.paused_at && !p.timer?.timer_ended_at);
+            const pStatusText = getPersonStatusText(p, booking);
+            const pReason = p.timer?.pause_reason;
+            const seatCodeStr = p.seat_code || (booking?.assigned_seats && booking.assigned_seats[p.person_no - 1]) || '未排座';
+
+            return (
+              <div
+                key={p.person_no}
+                className="flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-2xl bg-sg-paper/80 border border-sg-line"
+              >
+                <span className="px-2 py-1 rounded-lg bg-[#EFE7DE] text-sg-brown font-num text-[11px] font-bold shrink-0">
+                  {seatCodeStr}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-bold text-sg-ink leading-tight">
+                    同組 · 第 {p.person_no} 位
+                  </div>
+                  <div className="text-[11px] text-sg-muted truncate mt-0.5">
+                    {pStatusText}{pReason ? ` · ${pReason}` : ''}
+                  </div>
+                </div>
+                {!p.timer?.timer_ended_at && (
+                  <button
+                    type="button"
+                    aria-label={isPaused ? `繼續第 ${p.person_no} 位計時` : `暫停第 ${p.person_no} 位計時`}
+                    title={isPaused ? '繼續計時' : '暫停計時'}
+                    onClick={() => {
+                      if (onTimerAction && booking) {
+                        onTimerAction(booking.booking_ref, [p.person_no], isPaused ? 'resume' : 'pause');
+                      }
+                    }}
+                    className="w-9 h-9 rounded-full bg-sg-brown hover:bg-sg-brown/90 active:scale-95 text-white flex items-center justify-center shrink-0 shadow-2xs transition cursor-pointer"
+                  >
+                    {isPaused ? <Play className="w-4 h-4 ml-0.5" /> : <Pause className="w-4 h-4" />}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const removeInfo = getPersonTimerElapsedForRemove(currentPerson, serverNow || new Date());
   const canShowRemove = (mode === 'in_use' || mode === 'paused') && removeInfo.canShow;
 
@@ -501,44 +551,7 @@ export default function SeatActionPanel({
             </div>
 
             {/* 同組清單 (Spec 6.6) */}
-            {otherPersons.length > 0 && (
-              <div className="space-y-2 pt-2 border-t border-sg-line">
-                <div className="text-[12px] font-bold text-sg-ink">同組</div>
-                <div className="space-y-1.5">
-                  {otherPersons.map(p => {
-                    const isPaused = Boolean(p.timer?.paused_at && !p.timer?.timer_ended_at);
-                    const pStatusText = getPersonStatusText(p, booking);
-                    const pReason = p.timer?.pause_reason;
-                    const seatCodeStr = p.seat_code || (booking?.assigned_seats && booking.assigned_seats[p.person_no - 1]) || '未排座';
-
-                    return (
-                      <div
-                        key={p.person_no}
-                        className="flex items-center justify-between p-2 rounded-xl bg-sg-paper/50 border border-sg-line text-[12px]"
-                      >
-                        <span className="font-medium text-sg-ink truncate">
-                          {seatCodeStr} 第 {p.person_no} 位 {pStatusText}
-                          {pReason ? ` · ${pReason}` : ''}
-                        </span>
-                        {!p.timer?.timer_ended_at && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (onTimerAction && booking) {
-                                onTimerAction(booking.booking_ref, [p.person_no], isPaused ? 'resume' : 'pause');
-                              }
-                            }}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-sg-line bg-white hover:bg-sg-paper text-sg-brown transition"
-                          >
-                            {isPaused ? '繼續' : '暫停'}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {renderOtherPersonsSection()}
 
             <p className="text-[11px] text-sg-muted text-center pt-2">
               也可以長按座位，直接拖到其他空位。
@@ -607,44 +620,7 @@ export default function SeatActionPanel({
             </div>
 
             {/* 同組清單 */}
-            {otherPersons.length > 0 && (
-              <div className="space-y-2 pt-2 border-t border-sg-line">
-                <div className="text-[12px] font-bold text-sg-ink">同組</div>
-                <div className="space-y-1.5">
-                  {otherPersons.map(p => {
-                    const isPaused = Boolean(p.timer?.paused_at && !p.timer?.timer_ended_at);
-                    const pStatusText = getPersonStatusText(p, booking);
-                    const pReason = p.timer?.pause_reason;
-                    const seatCodeStr = p.seat_code || (booking?.assigned_seats && booking.assigned_seats[p.person_no - 1]) || '未排座';
-
-                    return (
-                      <div
-                        key={p.person_no}
-                        className="flex items-center justify-between p-2 rounded-xl bg-sg-paper/50 border border-sg-line text-[12px]"
-                      >
-                        <span className="font-medium text-sg-ink truncate">
-                          {seatCodeStr} 第 {p.person_no} 位 {pStatusText}
-                          {pReason ? ` · ${pReason}` : ''}
-                        </span>
-                        {!p.timer?.timer_ended_at && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (onTimerAction && booking) {
-                                onTimerAction(booking.booking_ref, [p.person_no], isPaused ? 'resume' : 'pause');
-                              }
-                            }}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-sg-line bg-white hover:bg-sg-paper text-sg-brown transition"
-                          >
-                            {isPaused ? '繼續' : '暫停'}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {renderOtherPersonsSection()}
           </div>
         )}
       </div>
