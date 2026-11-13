@@ -212,6 +212,50 @@ export default function TableCard({
     return summaries.join(' · ');
   }, [seats, seatStates]);
 
+  const tableStatusBadge = useMemo(() => {
+    const states = seats.map(s => seatStates[s.code]?.state).filter(Boolean);
+    if (states.includes('over') || states.includes('overtime')) {
+      return { label: '超時', cls: 'bg-sg-danger-soft text-sg-danger' };
+    }
+    if (states.includes('warn') || states.includes('expiring')) {
+      return { label: '快到時', cls: 'bg-sg-honey-soft text-sg-honey-ink' };
+    }
+    if (states.includes('in_use') || states.includes('run')) {
+      return { label: '計時中', cls: 'bg-sg-sage-soft text-sg-sage-ink' };
+    }
+    if (states.includes('paused') || states.includes('pause')) {
+      return { label: '已暫停', cls: 'bg-sg-vent/15 text-sg-vent' };
+    }
+    if (states.includes('reserved') || states.includes('resv') || states.includes('pending')) {
+      return { label: '待入座', cls: 'bg-white text-sg-brown border border-sg-brown/50' };
+    }
+    return null;
+  }, [seats, seatStates]);
+
+  const renderCardSeat = (seat) => {
+    const seatInfo = seatStates[seat.code] || {};
+    let state = seatInfo.state || (seat.is_active ? 'empty' : 'off');
+    if (selectedSeats.includes(seat.code)) state = 'pick';
+    else if (suggestedSeats.includes(seat.code)) state = 'sugg';
+
+    return (
+      <div key={seat.code} data-seat-code={seat.code} className="w-full">
+        <SeatTile
+          variant="card"
+          code={seat.code}
+          state={state}
+          isVent={seat.priority === 'last'}
+          isPaid={Boolean(seatInfo.isPaid)}
+          boards={seatInfo.boards || []}
+          boardPauseAlert={Boolean(seatInfo.boardPauseAlert)}
+          timerText={seatInfo.timerText}
+          paxName={seatInfo.paxName}
+          onClick={onSeatClick ? () => onSeatClick(seat) : null}
+        />
+      </div>
+    );
+  };
+
   // Measure seat positions and calculate dashed frames for each group
   const updateGroupBoxes = useCallback(() => {
     if (!containerRef.current) return;
@@ -569,31 +613,36 @@ export default function TableCard({
   return (
     <div
       id={`table-card-${table.id}`}
-      className={`bg-white rounded-2xl border border-sg-line p-4 shadow-xs space-y-3 scroll-mt-20 ${className}`}
+      className={`bg-white/65 rounded-2xl border border-sg-line/60 p-3 space-y-2.5 scroll-mt-20 ${className}`}
     >
-      <div className="flex flex-wrap items-center justify-between pb-2 border-b border-sg-line gap-2">
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          {/* Table title button (約 58 行改成按鈕，後面加「›」，點了開第 3 項的整桌面板) */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <button
             type="button"
             onClick={() => onTableTitleClick && onTableTitleClick(table)}
             data-testid={`table-title-btn-${table.id}`}
             aria-label={`${table.label} 整桌管理`}
-            className="flex items-center gap-1 font-bold text-[16px] text-sg-ink hover:text-sg-brown group transition cursor-pointer select-none"
+            className="flex items-center gap-0.5 font-bold text-[15px] text-sg-ink hover:text-sg-brown group transition cursor-pointer select-none shrink-0"
           >
             <span>{table.label}</span>
-            <span className="text-sg-muted group-hover:text-sg-brown text-[16px] leading-none">›</span>
+            <span className="text-sg-muted group-hover:text-sg-brown text-[15px] leading-none">›</span>
           </button>
 
           {groupSummary && (
-            <span className="text-[13px] font-bold text-sg-brown truncate">
+            <span className="text-[12px] font-medium text-sg-muted truncate">
               {groupSummary}
             </span>
           )}
         </div>
-        <span className="text-[12px] font-medium text-sg-muted shrink-0">
-          {seats.filter(s => s.is_active).length} 個座位
-        </span>
+        {tableStatusBadge ? (
+          <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full shrink-0 ${tableStatusBadge.cls}`}>
+            {tableStatusBadge.label}
+          </span>
+        ) : (
+          <span className="text-[11px] font-medium text-sg-muted shrink-0">
+            {seats.filter(s => s.is_active).length} 個座位
+          </span>
+        )}
       </div>
 
       {/* Seats container with SVG dashed boundary overlay */}
@@ -620,94 +669,33 @@ export default function TableCard({
 
         {isOneSide ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 relative z-10">
-            {seats.map((seat) => {
-              const seatInfo = seatStates[seat.code] || {};
-              let state = seatInfo.state || (seat.is_active ? 'empty' : 'off');
-              if (selectedSeats.includes(seat.code)) state = 'pick';
-              else if (suggestedSeats.includes(seat.code)) state = 'sugg';
-
-              return (
-                <div key={seat.code} data-seat-code={seat.code} className="inline-block">
-                  <SeatTile
-                    code={seat.code}
-                    state={state}
-                    isVent={seat.priority === 'last'}
-                    isPaid={Boolean(seatInfo.isPaid)}
-                    boards={seatInfo.boards || []}
-                    timerText={seatInfo.timerText}
-                    paxName={seatInfo.paxName}
-                    onClick={onSeatClick ? () => onSeatClick(seat) : null}
-                  />
-                </div>
-              );
-            })}
+            {seats.map(renderCardSeat)}
           </div>
         ) : (
-          <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-center relative z-10">
+          <div className="grid grid-cols-[minmax(0,1fr)_28px_minmax(0,1fr)] gap-2 items-stretch relative z-10">
             {/* Left side (L) */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-bold text-sg-muted text-center">左側 (L)</div>
-              <div className="space-y-2 flex flex-col items-center">
-                {leftSeats.map((seat) => {
-                  const seatInfo = seatStates[seat.code] || {};
-                  let state = seatInfo.state || (seat.is_active ? 'empty' : 'off');
-                  if (selectedSeats.includes(seat.code)) state = 'pick';
-                  else if (suggestedSeats.includes(seat.code)) state = 'sugg';
-
-                  return (
-                    <div key={seat.code} data-seat-code={seat.code} className="inline-block">
-                      <SeatTile
-                        code={seat.code}
-                        state={state}
-                        isVent={seat.priority === 'last'}
-                        isPaid={Boolean(seatInfo.isPaid)}
-                        boards={seatInfo.boards || []}
-                        timerText={seatInfo.timerText}
-                        paxName={seatInfo.paxName}
-                        onClick={onSeatClick ? () => onSeatClick(seat) : null}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="space-y-2 flex flex-col">
+              {leftSeats.map(renderCardSeat)}
             </div>
 
-            {/* Center table surface with table label */}
-            <div className="flex flex-col items-center justify-center pt-5">
+            {/* Center table surface bar */}
+            <div className="flex items-stretch justify-center">
               <div
                 data-table-center={table.id}
-                className="px-2 py-3 rounded-xl bg-sg-paper/90 border border-sg-line/80 text-sg-brown flex flex-col items-center justify-center shadow-2xs select-none min-h-[46px]"
+                className="w-7 rounded-xl bg-[#EAE0D5] border border-[#D8CBB9] text-sg-brown flex items-center justify-center shadow-2xs select-none py-2"
               >
-                <span className="text-[11px] font-bold tracking-wider">{table.label}</span>
+                <span
+                  className="text-[11px] font-bold tracking-wider whitespace-nowrap"
+                  style={{ writingMode: 'vertical-rl' }}
+                >
+                  {table.label}
+                </span>
               </div>
             </div>
 
             {/* Right side (R) */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-bold text-sg-muted text-center">右側 (R)</div>
-              <div className="space-y-2 flex flex-col items-center">
-                {rightSeats.map((seat) => {
-                  const seatInfo = seatStates[seat.code] || {};
-                  let state = seatInfo.state || (seat.is_active ? 'empty' : 'off');
-                  if (selectedSeats.includes(seat.code)) state = 'pick';
-                  else if (suggestedSeats.includes(seat.code)) state = 'sugg';
-
-                  return (
-                    <div key={seat.code} data-seat-code={seat.code} className="inline-block">
-                      <SeatTile
-                        code={seat.code}
-                        state={state}
-                        isVent={seat.priority === 'last'}
-                        isPaid={Boolean(seatInfo.isPaid)}
-                        boards={seatInfo.boards || []}
-                        timerText={seatInfo.timerText}
-                        paxName={seatInfo.paxName}
-                        onClick={onSeatClick ? () => onSeatClick(seat) : null}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="space-y-2 flex flex-col">
+              {rightSeats.map(renderCardSeat)}
             </div>
           </div>
         )}

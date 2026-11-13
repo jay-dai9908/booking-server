@@ -11,12 +11,12 @@ const STATE_COLORS = {
 };
 
 const LEGEND_ITEMS = [
-  { key: 'empty', label: '空位', color: STATE_COLORS.empty },
-  { key: 'in_use', label: '計時中', color: STATE_COLORS.in_use },
+  { key: 'in_use', label: '使用中', color: STATE_COLORS.in_use },
   { key: 'warn', label: '快到時', color: STATE_COLORS.warn },
   { key: 'over', label: '超時', color: STATE_COLORS.over },
   { key: 'paused', label: '暫停', color: STATE_COLORS.paused },
-  { key: 'reserved', label: '已預約', color: STATE_COLORS.reserved }
+  { key: 'reserved', label: '待入座', color: STATE_COLORS.reserved, hollow: true },
+  { key: 'empty', label: '空位', color: STATE_COLORS.empty }
 ];
 
 export default function MiniMap({
@@ -231,6 +231,46 @@ export default function MiniMap({
     }
   };
 
+  const zones = useMemo(() => layout.zones || [], [layout.zones]);
+  const zoneBoxes = useMemo(() => {
+    const boxes = [];
+    for (const z of zones) {
+      const zTables = tables.filter(t => t.zone_id === z.id);
+      if (zTables.length === 0) continue;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const t of zTables) {
+        const hw = (t.w || 60) / 2 + 24;
+        const hh = (t.h || 60) / 2 + 24;
+        minX = Math.min(minX, t.cx - hw);
+        maxX = Math.max(maxX, t.cx + hw);
+        minY = Math.min(minY, t.cy - hh);
+        maxY = Math.max(maxY, t.cy + hh);
+      }
+      boxes.push({
+        id: z.id,
+        name: z.name,
+        x: minX - 10,
+        y: minY - 22,
+        w: (maxX - minX) + 20,
+        h: (maxY - minY) + 30
+      });
+    }
+    return boxes;
+  }, [zones, tables]);
+
+  const categoryCounts = useMemo(() => {
+    const counts = { in_use: 0, warn: 0, over: 0, paused: 0, reserved: 0, empty: 0 };
+    for (const s of seats) {
+      if (s.is_active === false) continue;
+      const cat = getSeatCategory(s.code);
+      counts[cat] = (counts[cat] || 0) + 1;
+    }
+    return counts;
+  }, [seats, getSeatCategory]);
+
   // Active viewBox
   const currentViewBox = viewport
     ? `${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`
@@ -263,7 +303,7 @@ export default function MiniMap({
           )}
         </div>
         <span className="text-[11px] text-sg-muted">
-          {isZoomed ? '拖曳移動 · 點桌號捲至桌卡' : '點桌子可檢視座位'}
+          {isZoomed ? '拖曳移動 · 點桌號捲至桌卡' : (tables.length > 8 ? '點區域放大' : '點桌子可檢視座位')}
         </span>
       </div>
 
@@ -334,6 +374,38 @@ export default function MiniMap({
                 }
                 return null;
               })}
+            </g>
+
+            {/* Zone dashed bounding boxes & titles */}
+            <g className="pointer-events-none">
+              {zoneBoxes.map((zb) => (
+                <g key={zb.id}>
+                  <rect
+                    x={zb.x}
+                    y={zb.y}
+                    width={zb.w}
+                    height={zb.h}
+                    rx="12"
+                    fill="none"
+                    stroke="#A89F95"
+                    strokeWidth="1.5"
+                    strokeDasharray="6,4"
+                    opacity="0.7"
+                  />
+                  <text
+                    x={zb.x + 12}
+                    y={zb.y + 15}
+                    fill="#5C4E43"
+                    fontSize="16"
+                    fontWeight="bold"
+                    stroke="#FFFFFF"
+                    strokeWidth="4"
+                    style={{ paintOrder: 'stroke' }}
+                  >
+                    {zb.name}
+                  </text>
+                </g>
+              ))}
             </g>
 
             {/* Tables */}
@@ -407,9 +479,9 @@ export default function MiniMap({
                     cx={cx}
                     cy={cy}
                     r={dotRadius}
-                    fill={color}
-                    stroke={category === 'empty' ? '#A89F95' : '#FFFFFF'}
-                    strokeWidth="1.2"
+                    fill={category === 'reserved' ? '#FFFFFF' : color}
+                    stroke={category === 'reserved' ? color : (category === 'empty' ? '#A89F95' : '#FFFFFF')}
+                    strokeWidth={category === 'reserved' ? '2.2' : '1.2'}
                   />
                   {activeFilter && isMatch && (
                     <circle
@@ -430,10 +502,11 @@ export default function MiniMap({
       </div>
 
       {/* Legend & Filter Bar (下方圖例同時是篩選：點「快到時」，只亮快到時的點) */}
-      <div className="flex items-center justify-between px-2 py-1 border-t border-sg-line/60 bg-sg-paper/60 text-[10px] gap-1 overflow-x-auto shrink-0">
-        <div className="flex items-center gap-1.5 flex-nowrap">
+      <div className="flex items-center justify-between px-2.5 py-1.5 border-t border-sg-line/60 bg-sg-paper/60 text-[10px] gap-1.5 flex-wrap shrink-0">
+        <div className="flex items-center gap-x-2 gap-y-1 flex-wrap min-w-0">
           {LEGEND_ITEMS.map((item) => {
             const isSelected = activeFilter === item.key;
+            const count = categoryCounts[item.key] ?? 0;
             return (
               <button
                 key={item.key}
@@ -447,9 +520,13 @@ export default function MiniMap({
               >
                 <span
                   className="w-2 h-2 rounded-full shrink-0"
-                  style={{ backgroundColor: item.color }}
+                  style={item.hollow
+                    ? { backgroundColor: '#FFFFFF', border: `2px solid ${item.color}` }
+                    : { backgroundColor: item.color }
+                  }
                 />
                 <span>{item.label}</span>
+                <span className="font-num font-bold text-sg-ink/80">{count}</span>
               </button>
             );
           })}
@@ -462,7 +539,7 @@ export default function MiniMap({
             const el = document.getElementById('waiting-area-section');
             if (el) el.scrollIntoView({ behavior: 'smooth' });
           }}
-          className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-white border border-sg-line text-sg-brown shadow-2xs hover:bg-sg-brown-soft transition flex items-center gap-1 shrink-0 ml-1"
+          className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white border border-sg-line text-sg-brown shadow-2xs hover:bg-sg-brown-soft transition flex items-center gap-1 shrink-0 ml-auto"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-sg-honey" />
           <span>等待區 {effectiveWaitPax}</span>

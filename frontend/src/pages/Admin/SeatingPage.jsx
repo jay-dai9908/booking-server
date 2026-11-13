@@ -1336,16 +1336,22 @@ export default function SeatingPage() {
                   顯示 {selectedSlot} 的座位
                 </div>
               )}
-              {zoneGroupedTables.map((group) => (
-                <div key={group.zone?.id || 'unzoned'} className="space-y-3">
-                  <div className="bg-sg-paper/90 border border-sg-line px-3.5 py-2 rounded-2xl flex items-center justify-between text-[13px] font-bold text-sg-ink">
-                    <div className="flex items-center gap-2">
-                      <span>{group.zoneTitle}</span>
+              {zoneGroupedTables.map((group, groupIdx) => (
+                <div
+                  key={group.zone?.id || 'unzoned'}
+                  className="bg-sg-paper/75 border border-sg-line rounded-3xl p-3.5 space-y-3"
+                >
+                  <div className="flex items-center justify-between gap-2 px-0.5 text-[13px] font-bold text-sg-ink">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-full bg-sg-brown text-white text-[12px] font-bold flex items-center justify-center shrink-0 font-num">
+                        {groupIdx + 1}
+                      </span>
+                      <span className="truncate">{group.zone?.name || group.zoneTitle}</span>
                       {group.zone?.note && (
-                        <span className="text-[12px] text-sg-muted font-normal">{group.zone.note}</span>
+                        <span className="text-[12px] text-sg-muted font-normal truncate">{group.zone.note}</span>
                       )}
                     </div>
-                    <div className="text-[12px] text-sg-muted">
+                    <div className="text-[12px] text-sg-muted shrink-0">
                       使用中 <span className="font-bold text-sg-ink font-num">{group.inUseSeats}</span> / <span className="font-num">{group.totalSeats}</span> 位
                     </div>
                   </div>
