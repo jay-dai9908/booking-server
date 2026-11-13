@@ -4,13 +4,16 @@ import {
   ArrowRightLeft,
   RotateCcw,
   Plus,
-  Clock,
   FileText,
   MoreHorizontal,
   LogOut,
   CreditCard,
   RefreshCw,
-  UserCheck
+  UserCheck,
+  Pause,
+  Play,
+  Move,
+  Receipt
 } from 'lucide-react';
 import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
@@ -188,24 +191,25 @@ export default function SeatActionPanel({
   const activeBoardPause = (personBoard?.pauses || []).find(bp => !bp.ended_at) || null;
 
   const boardQuickControls = activeBoardSegment && personBoard?.unit_group ? (
-    <div className="flex items-center gap-2">
-      <Button
-        variant={activeBoardPause ? 'primary' : 'secondary'}
-        size="sm"
-        className="flex-1 text-[12px]"
+    <>
+      <button
+        type="button"
         data-testid="seat-panel-board-pause-btn"
         onClick={() => {
           if (onBoardPauseToggle && booking) {
             onBoardPauseToggle(booking.booking_ref, personBoard.unit_group, Boolean(activeBoardPause));
           }
         }}
+        className={`rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition cursor-pointer whitespace-nowrap ${
+          activeBoardPause
+            ? 'bg-sg-brown text-white border-sg-brown hover:bg-sg-brown/90 shadow-2xs'
+            : 'bg-white text-sg-ink border-sg-line hover:bg-sg-bg'
+        }`}
       >
         {activeBoardPause ? '繼續使用智能板' : '智能板單獨暫停'}
-      </Button>
-      <Button
-        variant={confirmReturnBoard ? 'danger' : 'secondary'}
-        size="sm"
-        className="flex-1 text-[12px]"
+      </button>
+      <button
+        type="button"
         data-testid="seat-panel-board-return-btn"
         onClick={() => {
           if (!confirmReturnBoard) {
@@ -217,13 +221,21 @@ export default function SeatActionPanel({
             onBoardReturn(booking.booking_ref, personBoard.unit_group);
           }
         }}
+        className={`rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition cursor-pointer whitespace-nowrap ${
+          confirmReturnBoard
+            ? 'bg-sg-danger text-white border-sg-danger hover:bg-sg-danger/90 shadow-2xs'
+            : 'bg-white text-sg-danger border-sg-line hover:bg-sg-danger-soft/40'
+        }`}
       >
         {confirmReturnBoard
           ? `確定歸還${shortBoardSize(activeBoardSegment.name)}？再按一次`
           : '不用了，歸還'}
-      </Button>
-    </div>
+      </button>
+    </>
   ) : null;
+
+  const actionTileClass =
+    'rounded-2xl border border-sg-line bg-white hover:bg-sg-paper active:scale-[0.98] text-sg-ink py-3 px-2 flex flex-col items-center justify-center gap-1.5 text-[12px] font-bold transition cursor-pointer shadow-2xs';
 
   const removeInfo = getPersonTimerElapsedForRemove(currentPerson, serverNow || new Date());
   const canShowRemove = (mode === 'in_use' || mode === 'paused') && removeInfo.canShow;
@@ -300,20 +312,6 @@ export default function SeatActionPanel({
               }}
             >
               報到並帶位
-            </Button>
-          </div>
-        ) : mode === 'in_use' || mode === 'paused' ? (
-          <div className="w-full">
-            <Button
-              variant="primary"
-              size="lg"
-              className="w-full font-bold"
-              data-testid="seat-panel-checkout-btn"
-              onClick={() => {
-                if (onCheckout && booking) onCheckout(booking.booking_ref);
-              }}
-            >
-              結帳
             </Button>
           </div>
         ) : mode === 'empty' ? (
@@ -396,27 +394,29 @@ export default function SeatActionPanel({
               person={currentPerson}
               personNo={personNo}
               now={serverNow}
-            />
-            {boardQuickControls}
-            <div className="grid grid-cols-2 gap-2 text-[12px]">
-              <Button
-                variant="secondary"
-                size="sm"
+            >
+              {boardQuickControls}
+            </PersonTimeline>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
                 data-testid="seat-panel-timer-toggle-btn"
+                className={actionTileClass}
                 onClick={() => {
                   if (onTimerAction && booking) {
                     onTimerAction(booking.booking_ref, [personNo], mode === 'paused' ? 'resume' : 'pause');
                   }
                 }}
               >
-                {mode === 'paused' ? '繼續計時' : '暫停計時'}
-              </Button>
+                {mode === 'paused' ? <Play className="w-4 h-4 text-sg-brown" /> : <Pause className="w-4 h-4 text-sg-brown" />}
+                <span>{mode === 'paused' ? '繼續計時' : '暫停計時'}</span>
+              </button>
 
               {currentBoard ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
+                <button
+                  type="button"
                   data-testid="seat-panel-swap-board-btn"
+                  className={actionTileClass}
                   onClick={() => {
                     if (onBoardSwap && booking && seat) {
                       onBoardSwap({
@@ -428,27 +428,27 @@ export default function SeatActionPanel({
                     }
                   }}
                 >
-                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                  換板
-                </Button>
+                  <RotateCcw className="w-4 h-4 text-sg-brown" />
+                  <span>換板</span>
+                </button>
               ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
+                <button
+                  type="button"
                   data-testid="seat-panel-add-board-btn"
+                  className={actionTileClass}
                   onClick={() => {
                     if (onAddBoard && booking) onAddBoard(booking);
                   }}
                 >
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  加租智能板
-                </Button>
+                  <Plus className="w-4 h-4 text-sg-brown" />
+                  <span>加租智能板</span>
+                </button>
               )}
 
-              <Button
-                variant="secondary"
-                size="sm"
+              <button
+                type="button"
                 data-testid="seat-panel-move-btn"
+                className={actionTileClass}
                 onClick={() => {
                   if (onMoveSeat && booking && seat) {
                     onMoveSeat({
@@ -459,33 +459,45 @@ export default function SeatActionPanel({
                   }
                 }}
               >
-                <ArrowRightLeft className="w-3.5 h-3.5 mr-1" />
-                換座位
-              </Button>
+                <Move className="w-4 h-4 text-sg-brown" />
+                <span>換座位</span>
+              </button>
 
-              <Button
-                variant="secondary"
-                size="sm"
+              <button
+                type="button"
                 data-testid="seat-panel-extend-btn"
+                className={actionTileClass}
                 onClick={() => {
                   if (onExtendTime && booking) onExtendTime(booking);
                 }}
               >
-                <Clock className="w-3.5 h-3.5 mr-1" />
-                加時
-              </Button>
+                <Plus className="w-4 h-4 text-sg-brown" />
+                <span>加時</span>
+              </button>
 
-              <Button
-                variant="secondary"
-                size="sm"
+              <button
+                type="button"
                 data-testid="seat-panel-details-btn"
+                className={actionTileClass}
                 onClick={() => {
                   if (onDetails && booking) onDetails(booking.booking_ref);
                 }}
               >
-                <FileText className="w-3.5 h-3.5 mr-1" />
-                訂單詳情
-              </Button>
+                <FileText className="w-4 h-4 text-sg-brown" />
+                <span>訂單詳情</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="seat-panel-checkout-btn"
+                onClick={() => {
+                  if (onCheckout && booking) onCheckout(booking.booking_ref);
+                }}
+                className="rounded-2xl border border-sg-brown bg-sg-brown hover:bg-sg-brown/90 active:scale-[0.98] text-white py-3 px-2 flex flex-col items-center justify-center gap-1.5 text-[12px] font-bold transition cursor-pointer shadow-xs"
+              >
+                <Receipt className="w-4 h-4" />
+                <span>結帳</span>
+              </button>
             </div>
 
             {/* 同組清單 (Spec 6.6) */}
@@ -541,8 +553,9 @@ export default function SeatActionPanel({
               person={currentPerson}
               personNo={personNo}
               now={serverNow}
-            />
-            {boardQuickControls}
+            >
+              {boardQuickControls}
+            </PersonTimeline>
             <div className="grid grid-cols-2 gap-2 text-[12px]">
               <Button
                 variant="secondary"

@@ -25,7 +25,7 @@ const STRIPE_STYLE = {
  * 座位面板的時間軸（計時軸 + 智能板軸）
  * 以共用時間刻度繪製已玩、剩餘、暫停斜線、超時紅條、現在紅線與換板虛線。
  */
-export default function PersonTimeline({ booking, person, personNo, now }) {
+export default function PersonTimeline({ booking, person, personNo, now, children = null }) {
   if (!booking) return null;
 
   const nowMs = toMs(now) ?? Date.now();
@@ -352,6 +352,13 @@ export default function PersonTimeline({ booking, person, personNo, now }) {
       {boardSummaryParts.length > 0 && (
         <div className="text-[11px] font-medium text-sg-muted pt-0.5 leading-snug">
           {boardSummaryParts.join(' · ')}
+        </div>
+      )}
+
+      {/* 智能板專屬控制膠囊（留在時間軸卡片內，與下方動作格線區隔） */}
+      {children && (
+        <div className="pt-2 border-t border-sg-line/60 flex items-center justify-center gap-2 flex-wrap">
+          {children}
         </div>
       )}
     </div>
