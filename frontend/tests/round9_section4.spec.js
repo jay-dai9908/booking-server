@@ -26,6 +26,10 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
 async function run() {
   console.log('--- Starting Round 9 Section 4 Playwright Tests ---');
   await ensureFreshDbSeeded(prisma);
+  await prisma.globalSetting.update({
+    where: { id: 1 },
+    data: { weekend_hourly_price: 150, weekend_unlimited_price: 750 }
+  });
 
   const todayStr = toTaipeiDateString(new Date());
   const todayDate = new Date(`${todayStr}T00:00:00.000Z`);

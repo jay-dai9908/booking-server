@@ -182,7 +182,7 @@ export default function SeatTile({
         type="button"
         onClick={onClick}
         data-seat-code={code}
-        className={`focus:outline-none active:scale-95 transition cursor-pointer p-0 m-0 border-0 bg-transparent block ${isCard ? 'w-full' : ''}`}
+        className={`focus:outline-none active:scale-95 transition cursor-pointer p-0 m-0 border-0 bg-transparent ${isCard ? 'w-full flex flex-col' : 'block'}`}
         style={isCard ? undefined : {
           width: size === 'mini' ? 24 : (size === 'demo' ? 48 : (size === 'edit' ? 42 : (size === 'map' ? 20 : 58))),
           height: size === 'mini' ? 16 : (size === 'demo' ? 33 : (size === 'edit' ? 29 : (size === 'map' ? 14 : 46)))
