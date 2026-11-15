@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import prisma from '../src/prismaClient.js';
-import { updateLayoutDraft } from '../src/controllers/seatLayoutController.js';
+import { updateLayoutDraft, updateLayoutRules } from '../src/controllers/seatLayoutController.js';
 
 function createMockReqRes({ params = {}, body = {}, user = { name: '店長測試員', id: 1 } } = {}) {
   const req = {
@@ -129,5 +129,65 @@ test('Round 24 Item 2: Draft zone persistence and unknown table zone_id rejectio
       after.tables.map(tbl => ({ id: tbl.id, label: tbl.label, zone_id: tbl.zone_id })),
       before.tables.map(tbl => ({ id: tbl.id, label: tbl.label, zone_id: tbl.zone_id }))
     );
+  });
+
+  await t.test('3. updateLayoutRules ignores invalid/foreign/temp zone_order ids and orders valid layout zones', async () => {
+    const otherLayout = await prisma.seatLayout.create({
+      data: {
+        name: `Round 24b Other Layout ${Date.now()}`,
+        status: 'draft',
+        canvas_w: 1000,
+        canvas_h: 625,
+        capacity: 4
+      }
+    });
+    const otherZone = await prisma.seatZone.create({
+      data: { layout_id: otherLayout.id, name: '別版區', sort_order: 0 }
+    });
+
+    try {
+      const current = await prisma.seatLayout.findUnique({
+        where: { id: draft.id },
+        include: { zones: { orderBy: { sort_order: 'asc' } } }
+      });
+      const [zoneA, zoneB, zoneC] = current.zones;
+      const desiredOrder = [-1794707987191, 'tmp-1', otherZone.id, zoneC.id, zoneB.id, zoneA.id];
+      const rulesPayload = {
+        spread_tables: false,
+        avoid_opposite: true,
+        avoid_beside: true,
+        zone_mode: 'fill_zone_first'
+      };
+
+      const { req, res } = createMockReqRes({
+        params: { id: String(draft.id) },
+        body: {
+          rules_json: rulesPayload,
+          zone_order: desiredOrder
+        }
+      });
+      await updateLayoutRules(req, res);
+
+      assert.equal(res.getStatusCode(), 200);
+      const data = res.getResponseData();
+      assert.equal(data.success, true);
+      assert.equal(data.layout.rules_json.zone_mode, 'fill_zone_first');
+      assert.equal(data.layout.rules_json.spread_tables, false);
+      assert.deepEqual(
+        data.layout.zones.map(z => z.name),
+        [zoneC.name, zoneB.name, zoneA.name]
+      );
+      assert.deepEqual(
+        data.layout.zones.map(z => z.sort_order),
+        [0, 1, 2]
+      );
+
+      // Ensure otherLayout's zone was not modified
+      const untouchedOther = await prisma.seatZone.findUnique({ where: { id: otherZone.id } });
+      assert.equal(untouchedOther.sort_order, 0);
+    } finally {
+      await prisma.seatZone.deleteMany({ where: { layout_id: otherLayout.id } });
+      await prisma.seatLayout.deleteMany({ where: { id: otherLayout.id } });
+    }
   });
 });

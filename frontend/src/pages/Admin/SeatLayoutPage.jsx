@@ -363,8 +363,19 @@ export default function SeatLayoutPage() {
         targetId = draftRes.data.layout_id;
       }
       const zonesPayload = (zoneOrderListRef.current.length > 0 ? zoneOrderListRef.current : (current.zones || []))
-        .map((z, idx) => ({ ...z, sort_order: idx }));
-      const payloadToSave = { ...current, zones: zonesPayload };
+        .map((z, idx) => ({ ...z, key: z.key || String(z.id), sort_order: idx }));
+      const payloadToSave = {
+        ...current,
+        zones: zonesPayload,
+        tables: (current.tables || []).map(t => ({
+          ...t,
+          zone_key: t.zone_id != null ? String(t.zone_id) : t.zone_key
+        })),
+        seats: (current.seats || []).map(s => ({
+          ...s,
+          zone_key: s.zone_id != null ? String(s.zone_id) : s.zone_key
+        }))
+      };
       const res = await api.put(`/seat-layouts/${targetId}`, payloadToSave);
       if (res.data?.layout) {
         syncLayoutFromServer(res.data.layout);
@@ -450,12 +461,14 @@ export default function SeatLayoutPage() {
       setZoneError('區域名稱不能重複');
       return;
     }
-    let nextTempId = -Date.now();
-    while (zoneOrderList.some(z => z.id === nextTempId)) {
-      nextTempId--;
+    let tmpIdx = 1;
+    while (zoneOrderList.some(z => String(z.id) === `tmp-${tmpIdx}` || String(z.key) === `tmp-${tmpIdx}`)) {
+      tmpIdx++;
     }
+    const tempId = `tmp-${tmpIdx}`;
     const nextZone = {
-      id: nextTempId,
+      id: tempId,
+      key: tempId,
       name: trimmed,
       sort_order: zoneOrderList.length,
       note: null,
@@ -467,6 +480,13 @@ export default function SeatLayoutPage() {
     setIsAddingZone(false);
     setNewZoneName('');
     setZoneError('');
+  };
+
+  const resolveZoneSelectValue = (rawVal) => {
+    const allZones = zoneOrderList.length > 0 ? zoneOrderList : (layout?.zones || []);
+    const matched = allZones.find(z => String(z.id) === String(rawVal));
+    if (matched) return matched.id;
+    return /^\d+$/.test(String(rawVal)) ? Number(rawVal) : rawVal;
   };
 
   const handleStartRenameZone = (zone) => {
@@ -1588,7 +1608,7 @@ export default function SeatLayoutPage() {
                   data-testid="new-table-zone-select"
                   value={currentZoneId ?? ''}
                   onChange={(e) => {
-                    const zId = Number(e.target.value);
+                    const zId = resolveZoneSelectValue(e.target.value);
                     currentZoneIdRef.current = zId;
                     setCurrentZoneId(zId);
                   }}
@@ -2481,7 +2501,7 @@ export default function SeatLayoutPage() {
                         data-testid="table-zone-select"
                         value={selectedTable.zone_id || ''}
                         onChange={(e) => {
-                          const zId = Number(e.target.value);
+                          const zId = resolveZoneSelectValue(e.target.value);
                           commitLayoutChange({
                             ...layout,
                             tables: layout.tables.map(t => t.id === selectedTable.id ? { ...t, zone_id: zId } : t),
@@ -3415,7 +3435,7 @@ export default function SeatLayoutPage() {
                 <select
                   value={currentZoneId ?? ''}
                   onChange={(e) => {
-                    const zId = Number(e.target.value);
+                    const zId = resolveZoneSelectValue(e.target.value);
                     currentZoneIdRef.current = zId;
                     setCurrentZoneId(zId);
                   }}

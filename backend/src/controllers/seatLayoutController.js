@@ -254,7 +254,7 @@ export async function updateLayoutDraft(req, res) {
     }
 
     for (const t of tables) {
-      const hasKey = t.zone_key != null && validZoneRefs.has(t.zone_key);
+      const hasKey = t.zone_key != null && (validZoneRefs.has(t.zone_key) || validZoneRefs.has(String(t.zone_key)));
       const hasId = t.zone_id != null && (validZoneRefs.has(t.zone_id) || validZoneRefs.has(String(t.zone_id)));
       if (!hasKey && !hasId) {
         return res.status(422).json({
@@ -353,7 +353,7 @@ export async function updateLayoutDraft(req, res) {
       // 4. Insert tables
       const tableKeyMap = new Map();
       for (const t of tables) {
-        const zoneId = (t.zone_key ? zoneKeyMap.get(t.zone_key) : null) ||
+        const zoneId = (t.zone_key ? (zoneKeyMap.get(t.zone_key) || zoneKeyMap.get(String(t.zone_key))) : null) ||
                        (t.zone_id != null ? (zoneKeyMap.get(t.zone_id) || zoneKeyMap.get(String(t.zone_id))) : null);
         if (!zoneId) {
           const err = new Error(`桌子 ${t.label || '桌子'} 的區域不存在`);
@@ -411,12 +411,12 @@ export async function updateLayoutDraft(req, res) {
             (t.id != null && (t.id === s.table_id || String(t.id) === String(s.table_id)))
           );
           if (tObj) {
-            zoneId = (tObj.zone_key ? zoneKeyMap.get(tObj.zone_key) : null) ||
+            zoneId = (tObj.zone_key ? (zoneKeyMap.get(tObj.zone_key) || zoneKeyMap.get(String(tObj.zone_key))) : null) ||
                      (tObj.zone_id != null ? (zoneKeyMap.get(tObj.zone_id) || zoneKeyMap.get(String(tObj.zone_id))) : null);
           }
         }
         if (!zoneId) {
-          zoneId = (s.zone_key ? zoneKeyMap.get(s.zone_key) : null) ||
+          zoneId = (s.zone_key ? (zoneKeyMap.get(s.zone_key) || zoneKeyMap.get(String(s.zone_key))) : null) ||
                    (s.zone_id != null ? (zoneKeyMap.get(s.zone_id) || zoneKeyMap.get(String(s.zone_id))) : null) ||
                    Array.from(zoneKeyMap.values())[0];
         }
@@ -1060,10 +1060,24 @@ export async function updateLayoutRules(req, res) {
     }
 
     const layout = await prisma.seatLayout.findUnique({
-      where: { id }
+      where: { id },
+      include: { zones: { select: { id: true }, orderBy: { sort_order: 'asc' } } }
     });
     if (!layout) {
       return res.status(404).json({ error: '找不到該版面', code: 'LAYOUT_NOT_FOUND' });
+    }
+
+    const validZoneIds = new Set((layout.zones || []).map(z => z.id));
+    const validOrderedIds = [];
+    if (Array.isArray(zone_order)) {
+      for (const raw of zone_order) {
+        const num = typeof raw === 'number'
+          ? raw
+          : (typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN);
+        if (Number.isInteger(num) && num > 0 && num <= 2147483647 && validZoneIds.has(num) && !validOrderedIds.includes(num)) {
+          validOrderedIds.push(num);
+        }
+      }
     }
 
     await prisma.$transaction(async (tx) => {
@@ -1074,15 +1088,14 @@ export async function updateLayoutRules(req, res) {
         });
       }
 
-      if (Array.isArray(zone_order) && zone_order.length > 0) {
-        for (let i = 0; i < zone_order.length; i++) {
-          const zoneId = parseInt(zone_order[i], 10);
-          if (!isNaN(zoneId)) {
-            await tx.seatZone.updateMany({
-              where: { id: zoneId, layout_id: id },
-              data: { sort_order: i }
-            });
-          }
+      if (validOrderedIds.length > 0) {
+        const remainingIds = (layout.zones || []).map(z => z.id).filter(zid => !validOrderedIds.includes(zid));
+        const finalZoneIds = [...validOrderedIds, ...remainingIds];
+        for (let i = 0; i < finalZoneIds.length; i++) {
+          await tx.seatZone.update({
+            where: { id: finalZoneIds[i] },
+            data: { sort_order: i }
+          });
         }
       }
     });
