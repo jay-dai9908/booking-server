@@ -87,6 +87,7 @@ export default function SeatLayoutPage() {
   const [editingZoneId, setEditingZoneId] = useState(null);
   const [editingZoneName, setEditingZoneName] = useState('');
   const [zoneError, setZoneError] = useState('');
+  const [showUnsavedDraftPrompt, setShowUnsavedDraftPrompt] = useState(false);
 
   // History for Undo / Redo (up to 50 steps)
   const [history, setHistory] = useState([]);
@@ -138,6 +139,65 @@ export default function SeatLayoutPage() {
   zoneOrderListRef.current = zoneOrderList;
   const currentZoneIdRef = useRef(currentZoneId);
   currentZoneIdRef.current = currentZoneId;
+  const lastSavedSignatureRef = useRef('');
+
+  const computeLayoutDraftSignature = useCallback((layoutObj, zonesOverride = null) => {
+    if (!layoutObj) return '';
+    const zonesList = Array.isArray(zonesOverride) && zonesOverride.length > 0
+      ? zonesOverride
+      : (layoutObj.zones || []);
+    const canonicalZones = zonesList
+      .map(z => ({
+        id: String(z.id ?? ''),
+        name: (z.name || '').trim(),
+        note: z.note || null,
+        polygon: z.polygon || null
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const canonicalTables = (layoutObj.tables || [])
+      .map(t => ({
+        id: String(t.id ?? ''),
+        label: t.label || '',
+        zone_id: String(t.zone_id ?? ''),
+        shape: t.shape || 'rect',
+        arrangement: t.arrangement || 'two_sides',
+        cx: Number(t.cx) || 0,
+        cy: Number(t.cy) || 0,
+        w: Number(t.w) || 0,
+        h: Number(t.h) || 0,
+        rotation: Number(t.rotation) || 0
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const canonicalSeats = (layoutObj.seats || [])
+      .map(s => ({
+        code: s.code || '',
+        origin_code: s.origin_code || s.code || '',
+        table_id: s.table_id != null ? String(s.table_id) : null,
+        zone_id: String(s.zone_id ?? ''),
+        lx: Number(s.lx) || 0,
+        ly: Number(s.ly) || 0,
+        side_mode: s.side_mode || 'auto',
+        side: s.side || null,
+        tags: [...(s.tags || [])].sort(),
+        priority: s.priority || 'normal',
+        is_active: s.is_active !== false,
+        adjacent_codes: [...(s.adjacent_codes || [])].sort(),
+        opposite_codes: [...(s.opposite_codes || [])].sort()
+      }))
+      .sort((a, b) => a.code.localeCompare(b.code));
+    return JSON.stringify({
+      canvas_w: Number(layoutObj.canvas_w) || 1000,
+      canvas_h: Number(layoutObj.canvas_h) || 625,
+      grid_size: Number(layoutObj.grid_size) || 10,
+      background_image: layoutObj.background_image || null,
+      background_opacity: layoutObj.background_opacity ?? 40,
+      background_rect: layoutObj.background_rect || null,
+      elements_json: layoutObj.elements_json || [],
+      zones: canonicalZones,
+      tables: canonicalTables,
+      seats: canonicalSeats
+    });
+  }, []);
 
   const syncLayoutFromServer = useCallback((rawLayout) => {
     if (!rawLayout) return null;
@@ -176,12 +236,14 @@ export default function SeatLayoutPage() {
     layoutRef.current = normalized;
     zoneOrderListRef.current = sortedZones;
     currentZoneIdRef.current = nextZoneId;
+    lastSavedSignatureRef.current = computeLayoutDraftSignature(normalized, sortedZones);
 
     setLayout(normalized);
     setZoneOrderList(sortedZones);
     setCurrentZoneId(nextZoneId);
+    setShowUnsavedDraftPrompt(false);
     return { normalized, sortedZones, nextZoneId };
-  }, []);
+  }, [computeLayoutDraftSignature]);
 
   // 1. Initial Load
   useEffect(() => {
@@ -548,22 +610,73 @@ export default function SeatLayoutPage() {
     }
   }, [activeTab, layout]);
 
+  useEffect(() => {
+    if (showUnsavedDraftPrompt && layout && computeLayoutDraftSignature(layout, zoneOrderList) === lastSavedSignatureRef.current) {
+      setShowUnsavedDraftPrompt(false);
+    }
+  }, [showUnsavedDraftPrompt, layout, zoneOrderList, computeLayoutDraftSignature]);
+
   const handleSaveRules = async () => {
-    if (!layout?.id) return;
+    const currentLayout = layoutRef.current || layout;
+    if (!currentLayout?.id) return;
+
+    const currentZones = zoneOrderListRef.current.length > 0
+      ? zoneOrderListRef.current
+      : (currentLayout.zones || []);
+    const currentSig = computeLayoutDraftSignature(currentLayout, currentZones);
+    if (lastSavedSignatureRef.current && currentSig !== lastSavedSignatureRef.current) {
+      setShowUnsavedDraftPrompt(true);
+      setMessage({
+        type: 'error',
+        text: '版面有修改還沒儲存，請先按「儲存草稿」，再儲存排位規則。',
+        showSaveDraft: true
+      });
+      return;
+    }
+
     try {
       setSavingRules(true);
-      const res = await api.put(`/seat-layouts/${layout.id}/rules`, {
+      const res = await api.put(`/seat-layouts/${currentLayout.id}/rules`, {
         rules_json: layoutRules,
-        zone_order: zoneOrderList.map(z => z.id)
+        zone_order: currentZones.map(z => z.id)
       });
-      if (res.data?.layout) {
-        syncLayoutFromServer(res.data.layout);
-      } else {
-        const refreshed = await api.get(`/seat-layouts/${layout.id}`);
-        if (refreshed.data?.layout) {
-          syncLayoutFromServer(refreshed.data.layout);
-        }
+
+      const serverLayout = res.data?.layout || null;
+      const serverZones = serverLayout?.zones || [];
+      const serverSortMap = new Map(serverZones.map(z => [String(z.id), z.sort_order]));
+
+      // Only update sort_order of saved zones & rules_json; preserve unsaved zones in position & keep tables/seats/elements untouched
+      const latestLayout = layoutRef.current || currentLayout;
+      const latestZones = zoneOrderListRef.current.length > 0
+        ? zoneOrderListRef.current
+        : (latestLayout.zones || []);
+
+      let mergedZones = latestZones;
+      if (serverSortMap.size > 0) {
+        const savedInOrder = latestZones
+          .filter(z => serverSortMap.has(String(z.id)))
+          .sort((a, b) => serverSortMap.get(String(a.id)) - serverSortMap.get(String(b.id)));
+        let savedPtr = 0;
+        mergedZones = latestZones.map((z, idx) => {
+          if (serverSortMap.has(String(z.id))) {
+            const nextSaved = savedInOrder[savedPtr++];
+            return { ...nextSaved, sort_order: idx };
+          }
+          return { ...z, sort_order: idx };
+        });
       }
+
+      const nextRulesJson = serverLayout?.rules_json || layoutRules;
+      const nextLayout = {
+        ...latestLayout,
+        rules_json: nextRulesJson,
+        zones: mergedZones
+      };
+      layoutRef.current = nextLayout;
+      zoneOrderListRef.current = mergedZones;
+      setZoneOrderList(mergedZones);
+      setLayout(nextLayout);
+      setShowUnsavedDraftPrompt(false);
       setMessage({ type: 'success', text: '排位規則已儲存並生效！' });
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.error || '儲存排位規則失敗' });
@@ -1508,13 +1621,26 @@ export default function SeatLayoutPage() {
       </div>
 
       {message && (
-        <div className={`p-3.5 rounded-2xl text-[13px] font-bold flex items-center justify-between animate-fade-in ${
+        <div className={`p-3.5 rounded-2xl text-[13px] font-bold flex items-center justify-between gap-2 animate-fade-in ${
           message.type === 'success' ? 'bg-sg-sage-soft text-sg-sage-ink' : 'bg-sg-danger-soft text-sg-danger'
         }`}>
           <span>{message.text}</span>
-          <button type="button" onClick={() => setMessage(null)} className="text-[12px] opacity-75">
-            <X className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {message.showSaveDraft && (
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="message-save-draft-btn"
+                onClick={handleSaveDraft}
+                loading={saving}
+              >
+                儲存草稿
+              </Button>
+            )}
+            <button type="button" onClick={() => setMessage(null)} className="text-[12px] opacity-75">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -3409,7 +3535,25 @@ export default function SeatLayoutPage() {
           </div>
 
           {/* 7. 主按鈕「儲存」，立即生效 */}
-          <div className="pt-2 border-t border-sg-line">
+          <div className="pt-2 border-t border-sg-line space-y-3">
+            {showUnsavedDraftPrompt && (
+              <div
+                data-testid="unsaved-draft-rules-prompt"
+                className="p-3.5 rounded-2xl bg-sg-danger-soft text-sg-danger text-[13px] font-bold flex flex-wrap items-center justify-between gap-2"
+              >
+                <span>版面有修改還沒儲存，請先按「儲存草稿」，再儲存排位規則。</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  data-testid="rules-prompt-save-draft-btn"
+                  onClick={handleSaveDraft}
+                  loading={saving}
+                >
+                  <Save className="w-3.5 h-3.5 mr-1" />
+                  儲存草稿
+                </Button>
+              </div>
+            )}
             <button
               type="button"
               data-testid="save-rules-btn"
