@@ -1,5 +1,6 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { ensureFreshDbSeeded, cleanOperationalData } from './helpers/seedFreshDb.js';
@@ -23,7 +24,10 @@ if (!process.env.ADMIN_PASSWORD?.trim()) {
 }
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
 const DESKTOP_VIEWPORT = { width: 1280, height: 800 };
-const ARTIFACT_DIR = 'C:\\Users\\jayda\\.gemini\\antigravity\\brain\\0fafdb18-5ae0-4501-b130-c9f498355dd3';
+const SCREENSHOT_DIR = process.env.SCREENSHOT_DIR
+  ? path.resolve(process.env.SCREENSHOT_DIR)
+  : path.resolve('tests/screenshots');
+fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 async function run() {
   console.log('--- Starting Round 24 Zones Playwright Test ---');
@@ -129,7 +133,7 @@ async function run() {
       assert.equal(await newZoneInput.inputValue(), 'C 區', 'Default next zone name should be C 區');
 
       await page.waitForTimeout(200);
-      const shot1 = path.join(ARTIFACT_DIR, 'round24_zone_adding_desktop.png');
+      const shot1 = path.join(SCREENSHOT_DIR, 'round24_zone_adding_desktop.png');
       await page.screenshot({ path: shot1 });
       console.log(`Saved Screenshot 1: ${shot1}`);
 
@@ -180,7 +184,7 @@ async function run() {
       assert.ok(rowCText.includes('1 張 4 人桌'), `Expected C 區 to show 1 張 4 人桌, got: ${rowCText}`);
 
       await page.waitForTimeout(250);
-      const shot2 = path.join(ARTIFACT_DIR, 'round24_zone_order_published_desktop.png');
+      const shot2 = path.join(SCREENSHOT_DIR, 'round24_zone_order_published_desktop.png');
       await page.screenshot({ path: shot2 });
       console.log(`Saved Screenshot 2: ${shot2}`);
 
@@ -209,7 +213,89 @@ async function run() {
       assert.ok((await zoneRows.nth(2).innerText()).includes('B 區'));
       assert.ok((await zoneRows.nth(2).innerText()).includes('1 張 4 人桌'));
 
-      console.log('--- Round 24 Zones Playwright Test Passed! ---');
+      // --- Round 24b: Unsaved canvas + unsaved zone should prompt draft save instead of failing or wiping ---
+      // Step 1: Switch to editor, add 桌 4 (preset-4p in default A 區) without saving draft
+      await page.locator('[data-testid="tab-editor"]').click();
+      await page.locator('[data-testid="preset-4p"]').click();
+      await page.locator('[data-testid="table-node-桌 4"]').waitFor({ state: 'visible', timeout: 5000 });
+
+      // Step 2: Switch to rules tab, add unsaved zone「窗邊區」
+      await page.locator('[data-testid="tab-rules"]').click();
+      await page.locator('[data-testid="add-zone-btn"]').click();
+      await page.locator('[data-testid="new-zone-name-input"]').fill('窗邊區');
+      await page.locator('[data-testid="confirm-add-zone-btn"]').click();
+
+      const rowWindow = page.locator('[data-testid="zone-row-窗邊區"]');
+      await rowWindow.waitFor({ state: 'visible', timeout: 5000 });
+      const rowAAfterAddText = await page.locator('[data-testid="zone-row-A 區"]').innerText();
+      assert.ok(rowAAfterAddText.includes('2 張 4 人桌'), `Expected A 區 to show 2 張 4 人桌 before saving, got: ${rowAAfterAddText}`);
+
+      // Step 3: Click 儲存排位規則 while draft is dirty -> block API call & show inline prompt + 儲存草稿 button
+      let rulesPutRequests = 0;
+      const rulesRequestWatcher = (req) => {
+        if (req.url().includes('/rules') && req.method() === 'PUT') {
+          rulesPutRequests += 1;
+        }
+      };
+      page.on('request', rulesRequestWatcher);
+      try {
+        await page.locator('[data-testid="save-rules-btn"]').click();
+        await page.locator('[data-testid="unsaved-draft-rules-prompt"]').waitFor({ state: 'visible', timeout: 5000 });
+      } finally {
+        page.off('request', rulesRequestWatcher);
+      }
+      assert.equal(rulesPutRequests, 0, 'Should NOT send PUT /rules when draft has unsaved layout edits');
+      const promptText = await page.locator('[data-testid="unsaved-draft-rules-prompt"]').innerText();
+      assert.ok(
+        promptText.includes('版面有修改還沒儲存，請先按「儲存草稿」，再儲存排位規則。'),
+        `Expected unsaved draft prompt message, got: ${promptText}`
+      );
+      const promptSaveBtn = page.locator('[data-testid="rules-prompt-save-draft-btn"]');
+      await promptSaveBtn.waitFor({ state: 'visible', timeout: 5000 });
+
+      // Verify unsaved zone & unsaved table count were NOT wiped
+      assert.equal(await rowWindow.isVisible(), true, 'Unsaved zone 窗邊區 should remain visible');
+      assert.ok(
+        (await page.locator('[data-testid="zone-row-A 區"]').innerText()).includes('2 張 4 人桌'),
+        'Unsaved table 桌 4 in A 區 should remain visible'
+      );
+
+      // Step 4: Take Desktop (1280×800) screenshot of unsaved draft prompt
+      await page.waitForTimeout(200);
+      const shot3 = path.join(SCREENSHOT_DIR, 'round24b_unsaved_draft_prompt_desktop.png');
+      await page.screenshot({ path: shot3 });
+      console.log(`Saved Screenshot 3: ${shot3}`);
+
+      // Step 5: Click inline「儲存草稿」, then click「儲存排位規則」, then reload and verify persistence
+      const [draftSaveAfterPrompt] = await Promise.all([
+        page.waitForResponse(r => r.url().includes('/seat-layouts/') && !r.url().includes('/rules') && r.request().method() === 'PUT'),
+        promptSaveBtn.click()
+      ]);
+      assert.equal(draftSaveAfterPrompt.status(), 200, 'Save draft via prompt button should return 200');
+      const draftAfterPromptBody = await draftSaveAfterPrompt.json();
+      if (draftAfterPromptBody?.layout?.id) createdLayoutIds.push(draftAfterPromptBody.layout.id);
+      await page.getByText('草稿儲存成功！').waitFor({ state: 'visible', timeout: 5000 });
+      await page.locator('[data-testid="unsaved-draft-rules-prompt"]').waitFor({ state: 'hidden', timeout: 5000 });
+      await rowWindow.waitFor({ state: 'visible', timeout: 5000 });
+
+      const [rulesSaveAfterDraft] = await Promise.all([
+        page.waitForResponse(r => r.url().includes('/rules') && r.request().method() === 'PUT'),
+        page.locator('[data-testid="save-rules-btn"]').click()
+      ]);
+      assert.equal(rulesSaveAfterDraft.status(), 200, 'Save rules after saving draft should return 200');
+      await page.getByText('排位規則已儲存並生效！').waitFor({ state: 'visible', timeout: 5000 });
+
+      // Step 6: Reload and verify 桌 4 + 窗邊區 + 2 張 4 人桌 in A 區 persist
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.locator('[data-testid="table-node-桌 4"]').waitFor({ state: 'visible', timeout: 10000 });
+      await page.locator('[data-testid="tab-rules"]').click();
+      await page.locator('[data-testid="zone-row-窗邊區"]').waitFor({ state: 'visible', timeout: 5000 });
+      assert.ok(
+        (await page.locator('[data-testid="zone-row-A 區"]').innerText()).includes('2 張 4 人桌'),
+        'Expected A 區 to persist 2 張 4 人桌 after reload'
+      );
+
+      console.log('--- Round 24 & 24b Zones Playwright Test Passed! ---');
     } finally {
       await browser.close();
     }

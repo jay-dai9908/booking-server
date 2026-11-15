@@ -16,7 +16,9 @@ const scanDirs = [
 const FORBIDDEN_PATTERNS = [
   { name: 'ADMIN_PASSWORD ||', regex: /ADMIN_PASSWORD\s*\|\|/ },
   { name: 'JWT_SECRET ||', regex: /JWT_SECRET\s*\|\|/ },
-  { name: 'super_secret', regex: /super_secret/i }
+  { name: 'super_secret', regex: /super_secret/i },
+  { name: 'Hardcoded Windows user path (C:\\Users\\)', regex: /C:\\+Users\\+/i },
+  { name: 'Hardcoded Unix user path (/Users/)', regex: /\/Users\// }
 ];
 
 // SHA-256 hashes of known leaked credentials (never commit plaintext secrets)
