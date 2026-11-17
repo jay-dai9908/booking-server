@@ -708,7 +708,21 @@ const ensureDatabaseSchema = async () => {
     `CREATE UNIQUE INDEX IF NOT EXISTS "KioskAccessLog_device_id_event_id_key" ON "KioskAccessLog"("device_id", "event_id")`,
     `CREATE INDEX IF NOT EXISTS "KioskAccessLog_at_idx" ON "KioskAccessLog"("at")`,
     `CREATE INDEX IF NOT EXISTS "KioskAccessLog_booking_ref_idx" ON "KioskAccessLog"("booking_ref")`,
-    `ALTER TABLE "SeatLayout" ADD COLUMN IF NOT EXISTS "kiosk_map_rotation" INTEGER NOT NULL DEFAULT 0`
+    `ALTER TABLE "SeatLayout" ADD COLUMN IF NOT EXISTS "kiosk_map_rotation" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "slides_rev" INTEGER NOT NULL DEFAULT 0`,
+
+    `CREATE TABLE IF NOT EXISTS "KioskSlide" (
+      "id" SERIAL NOT NULL,
+      "title" TEXT NOT NULL,
+      "sort_order" INTEGER NOT NULL DEFAULT 0,
+      "duration_sec" INTEGER NOT NULL DEFAULT 8,
+      "enabled" BOOLEAN NOT NULL DEFAULT true,
+      "sha256" TEXT NOT NULL,
+      "bytes" BYTEA NOT NULL,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "KioskSlide_pkey" PRIMARY KEY ("id")
+    )`
   ];
 
   for (const sql of statements) {

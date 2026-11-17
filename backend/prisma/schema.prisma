@@ -724,7 +724,20 @@ model KioskSetting {
   setup_pin                String?
   setup_pin_rev            Int       @default(0)
   config_rev               Int       @default(1)
+  slides_rev               Int       @default(0)
   updated_at               DateTime  @default(now()) @updatedAt
+}
+
+model KioskSlide {
+  id           Int      @id @default(autoincrement())
+  title        String
+  sort_order   Int      @default(0)
+  duration_sec Int      @default(8)
+  enabled      Boolean  @default(true)
+  sha256       String
+  bytes        Bytes
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
 }
 
 model BookingPrepay {

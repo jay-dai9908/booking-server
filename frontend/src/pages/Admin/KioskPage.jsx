@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   MonitorSmartphone,
   RefreshCw,
@@ -10,10 +10,20 @@ import {
   MessageCircle,
   Clock,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Image as ImageIcon,
+  Upload,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  Cpu,
+  Bell,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import api from '../../api/axios';
 import { toTaipeiDateString } from '@shared/time.js';
+import { rgbaToRgb565, rgb565ToRgba, SLIDE_WIDTH, SLIDE_HEIGHT } from '../../utils/admin/rgb565';
 
 const METHOD_LABELS = {
   qr: '條碼',
@@ -130,6 +140,17 @@ export default function KioskPage() {
   const [setupPinErr, setSetupPinErr] = useState('');
   const [savingSetupPin, setSavingSetupPin] = useState(false);
 
+  // 待機輪播圖（Item 3）
+  const [slides, setSlides] = useState([]);
+  const [loadingSlides, setLoadingSlides] = useState(false);
+  const [slideTitle, setSlideTitle] = useState('');
+  const [slideDuration, setSlideDuration] = useState(8);
+  const [slideCropMode, setSlideCropMode] = useState('cover');
+  const [slidePreviewDataUrl, setSlidePreviewDataUrl] = useState('');
+  const [slideImageData, setSlideImageData] = useState(null);
+  const [uploadingSlide, setUploadingSlide] = useState(false);
+  const [slideError, setSlideError] = useState('');
+
   const [notice, setNotice] = useState(null);
 
   const showNotice = (type, text) => {
@@ -173,13 +194,157 @@ export default function KioskPage() {
     }
   }, []);
 
+  const fetchSlides = useCallback(async () => {
+    setLoadingSlides(true);
+    try {
+      const res = await api.get('/kiosk/admin/slides');
+      setSlides(Array.isArray(res.data?.slides) ? res.data.slides : []);
+    } catch (err) {
+      console.warn('Failed to load slides:', err);
+    } finally {
+      setLoadingSlides(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchOverview();
-  }, [fetchOverview]);
+    fetchSlides();
+  }, [fetchOverview, fetchSlides]);
 
   useEffect(() => {
     fetchLogs(logDate);
   }, [logDate, fetchLogs]);
+
+  // 處理圖片選擇與裁切預覽（Cover / Contain 轉 800x480）
+  const processImageFile = (file, mode = slideCropMode) => {
+    if (!file) return;
+    setSlideError('');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = SLIDE_WIDTH;
+        canvas.height = SLIDE_HEIGHT;
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, SLIDE_WIDTH, SLIDE_HEIGHT);
+
+        const imgRatio = img.width / img.height;
+        const targetRatio = SLIDE_WIDTH / SLIDE_HEIGHT; // 800 / 480 = 1.6667
+
+        let drawW, drawH, drawX, drawY;
+
+        if (mode === 'cover') {
+          if (imgRatio > targetRatio) {
+            drawH = SLIDE_HEIGHT;
+            drawW = SLIDE_HEIGHT * imgRatio;
+            drawX = (SLIDE_WIDTH - drawW) / 2;
+            drawY = 0;
+          } else {
+            drawW = SLIDE_WIDTH;
+            drawH = SLIDE_WIDTH / imgRatio;
+            drawX = 0;
+            drawY = (SLIDE_HEIGHT - drawH) / 2;
+          }
+        } else {
+          // contain: 保持比例留黑邊
+          if (imgRatio > targetRatio) {
+            drawW = SLIDE_WIDTH;
+            drawH = SLIDE_WIDTH / imgRatio;
+            drawX = 0;
+            drawY = (SLIDE_HEIGHT - drawH) / 2;
+          } else {
+            drawH = SLIDE_HEIGHT;
+            drawW = SLIDE_HEIGHT * imgRatio;
+            drawX = (SLIDE_WIDTH - drawW) / 2;
+            drawY = 0;
+          }
+        }
+
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        const imgData = ctx.getImageData(0, 0, SLIDE_WIDTH, SLIDE_HEIGHT);
+        setSlideImageData(imgData);
+        setSlidePreviewDataUrl(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleUploadSlide = async () => {
+    if (!slideImageData) {
+      setSlideError('請先選取圖片');
+      return;
+    }
+    setUploadingSlide(true);
+    setSlideError('');
+    try {
+      const rgb565Bytes = rgbaToRgb565(slideImageData, { dither: true });
+      let binaryStr = '';
+      const len = rgb565Bytes.byteLength;
+      for (let i = 0; i < len; i += 8192) {
+        const chunk = rgb565Bytes.subarray(i, Math.min(i + 8192, len));
+        binaryStr += String.fromCharCode.apply(null, chunk);
+      }
+      const b64 = btoa(binaryStr);
+
+      await api.post('/kiosk/admin/slides', {
+        title: slideTitle || '輪播圖片',
+        duration_sec: Number(slideDuration) || 8,
+        raw_base64: b64,
+        enabled: true
+      });
+
+      showNotice('success', '待機輪播圖片上傳成功');
+      setSlidePreviewDataUrl('');
+      setSlideImageData(null);
+      setSlideTitle('');
+      fetchSlides();
+    } catch (err) {
+      setSlideError(err.response?.data?.message || err.response?.data?.error || '上傳輪播圖失敗');
+    } finally {
+      setUploadingSlide(false);
+    }
+  };
+
+  const handleToggleSlide = async (slide) => {
+    try {
+      await api.patch(`/kiosk/admin/slides/${slide.id}`, { enabled: !slide.enabled });
+      fetchSlides();
+    } catch (err) {
+      showNotice('error', err.response?.data?.message || '更新狀態失敗');
+    }
+  };
+
+  const handleMoveSlide = async (index, dir) => {
+    const targetIdx = index + dir;
+    if (targetIdx < 0 || targetIdx >= slides.length) return;
+    const newSlides = [...slides];
+    const temp = newSlides[index];
+    newSlides[index] = newSlides[targetIdx];
+    newSlides[targetIdx] = temp;
+
+    const orders = newSlides.map((s, idx) => ({ id: s.id, sort_order: idx }));
+    try {
+      await api.put('/kiosk/admin/slides/order', { orders });
+      fetchSlides();
+    } catch (err) {
+      showNotice('error', '重排順序失敗');
+    }
+  };
+
+  const handleDeleteSlide = async (slideId) => {
+    if (!window.confirm('確定要刪除這張待機輪播圖片嗎？')) return;
+    try {
+      await api.delete(`/kiosk/admin/slides/${slideId}`);
+      showNotice('success', '已刪除輪播圖');
+      fetchSlides();
+    } catch (err) {
+      showNotice('error', '刪除失敗');
+    }
+  };
 
   const handleSaveRules = async (e) => {
     e.preventDefault();
@@ -619,7 +784,199 @@ export default function KioskPage() {
             </section>
           </div>
 
-          {/* 5. 進出紀錄 */}
+          {/* 5. 待機輪播圖（Item 3） */}
+          <section
+            data-testid="kiosk-carousel-section"
+            className="lg:col-span-2 bg-white border border-stone-200 rounded-xl shadow-sm p-4 sm:p-5 space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-stone-800 flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-sg-brown" />
+                待機輪播圖（ESP32-P4）
+              </h2>
+              <span className="text-xs text-stone-500 font-mono">
+                {slides.filter((s) => s.enabled).length}/5 張啟用中 · 800×480 RGB565
+              </span>
+            </div>
+
+            {/* 現有輪播圖清單 */}
+            {loadingSlides ? (
+              <div className="py-4 text-center text-sm text-stone-400">載入輪播圖中...</div>
+            ) : slides.length === 0 ? (
+              <div className="py-6 text-center text-sm text-stone-400 border border-dashed border-stone-200 rounded-lg">
+                目前沒有待機輪播圖，機台將顯示預設待機畫面
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {slides.map((slide, idx) => (
+                  <div
+                    key={slide.id}
+                    className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-stone-200 bg-stone-50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-xs text-stone-400 w-4 text-center">#{idx + 1}</span>
+                      <div className="w-16 h-10 bg-black rounded overflow-hidden flex items-center justify-center border border-stone-300">
+                        <img
+                          src={`/api/kiosk/files/slides/${slide.id}.bin`}
+                          alt={slide.title}
+                          className="w-full h-full object-cover hidden"
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                        <span className="text-[10px] text-stone-400 font-mono">800×480</span>
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-stone-800">{slide.title}</div>
+                        <div className="text-xs text-stone-500 font-mono">
+                          播放 {slide.duration_sec} 秒 · SHA: {slide.sha256.slice(0, 8)}...
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSlide(slide)}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
+                          slide.enabled
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                            : 'bg-stone-100 text-stone-500 border-stone-300'
+                        }`}
+                      >
+                        {slide.enabled ? '啟用中' : '已停用'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => handleMoveSlide(idx, -1)}
+                        className="p-1 rounded hover:bg-stone-200 text-stone-600 disabled:opacity-30"
+                        title="上移"
+                      >
+                        <ArrowUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === slides.length - 1}
+                        onClick={() => handleMoveSlide(idx, 1)}
+                        className="p-1 rounded hover:bg-stone-200 text-stone-600 disabled:opacity-30"
+                        title="下移"
+                      >
+                        <ArrowDown className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSlide(slide.id)}
+                        className="p-1 rounded hover:bg-rose-100 text-rose-600"
+                        title="刪除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 上傳新輪播圖 */}
+            <div className="border-t border-stone-100 pt-4 space-y-3">
+              <h3 className="text-sm font-bold text-stone-700 flex items-center gap-1.5">
+                <Upload className="w-4 h-4 text-sg-brown" />
+                新增輪播圖
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-stone-500 mb-1">圖片檔案（PNG / JPG / WEBP）</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => processImageFile(e.target.files?.[0])}
+                      className="text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:bg-stone-800 file:text-white file:text-xs"
+                    />
+                  </div>
+                  <div className="flex gap-4 text-xs text-stone-700">
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="cropMode"
+                        value="cover"
+                        checked={slideCropMode === 'cover'}
+                        onChange={(e) => {
+                          setSlideCropMode(e.target.value);
+                          if (slidePreviewDataUrl) processImageFile(document.querySelector('input[type="file"]')?.files?.[0], 'cover');
+                        }}
+                      />
+                      裁切填滿（Cover）
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="cropMode"
+                        value="contain"
+                        checked={slideCropMode === 'contain'}
+                        onChange={(e) => {
+                          setSlideCropMode(e.target.value);
+                          if (slidePreviewDataUrl) processImageFile(document.querySelector('input[type="file"]')?.files?.[0], 'contain');
+                        }}
+                      />
+                      等比留黑（Contain）
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-stone-500 mb-1">圖片標題</label>
+                      <input
+                        type="text"
+                        value={slideTitle}
+                        onChange={(e) => setSlideTitle(e.target.value)}
+                        placeholder="例：今日精選咖啡"
+                        className="w-full px-2.5 py-1.5 border border-stone-300 rounded text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-stone-500 mb-1">播放秒數 (5~30)</label>
+                      <input
+                        type="number"
+                        min={5}
+                        max={30}
+                        value={slideDuration}
+                        onChange={(e) => setSlideDuration(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-stone-300 rounded text-xs"
+                      />
+                    </div>
+                  </div>
+                  {slideError && <p className="text-xs text-rose-600 font-medium">{slideError}</p>}
+                  <button
+                    type="button"
+                    onClick={handleUploadSlide}
+                    disabled={!slideImageData || uploadingSlide || slides.filter((s) => s.enabled).length >= 5}
+                    className="px-4 py-2 bg-sg-brown text-white text-xs font-bold rounded-lg hover:opacity-95 disabled:opacity-50"
+                  >
+                    {uploadingSlide ? '轉檔編碼並上傳中...' : '轉為 RGB565 並上傳至機台'}
+                  </button>
+                  {slides.filter((s) => s.enabled).length >= 5 && (
+                    <p className="text-[11px] text-amber-600">已達 5 張啟用上限，請先停用或刪除其他圖片。</p>
+                  )}
+                </div>
+
+                {/* 預覽畫布 */}
+                <div className="flex flex-col items-center justify-center p-3 bg-stone-100 rounded-lg border border-stone-200">
+                  <span className="text-[11px] text-stone-500 mb-1 font-mono">800 × 480 預覽 (RGB565)</span>
+                  {slidePreviewDataUrl ? (
+                    <img
+                      src={slidePreviewDataUrl}
+                      alt="預覽"
+                      className="w-full max-w-[280px] aspect-[5/3] object-contain rounded border border-stone-400 bg-black shadow-sm"
+                    />
+                  ) : (
+                    <div className="w-full max-w-[280px] aspect-[5/3] rounded border border-dashed border-stone-300 flex items-center justify-center text-xs text-stone-400 bg-white">
+                      選取圖片後在此預覽
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* 6. 進出紀錄 */}
           <section className="lg:col-span-2 bg-white border border-stone-200 rounded-xl shadow-sm p-4 sm:p-5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-bold text-stone-800">進出紀錄</h2>

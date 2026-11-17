@@ -100,6 +100,8 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     psram_kb: Number.isFinite(Number(body.psram_kb)) ? Number(body.psram_kb) : null,
     rssi: Number.isFinite(Number(body.rssi)) ? Number(body.rssi) : null,
     scanner_ok: typeof body.scanner_ok === 'boolean' ? body.scanner_ok : null,
+    fw_state: typeof body.fw_state === 'string' ? body.fw_state : (body.status?.fw_state || null),
+    ota_failed: body.ota_failed !== undefined ? body.ota_failed : (body.status?.ota_failed || null),
     last_sync_at: now.toISOString()
   };
 
@@ -157,14 +159,19 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     ackEventIds.push(eventId);
   }
 
-  const [kioskSetting, globalSetting, days, activeLayout] = await Promise.all([
+  const [kioskSetting, globalSetting, days, activeLayout, enabledSlides] = await Promise.all([
     ensureKioskSetting(db),
     db.globalSetting.findUnique({
       where: { id: 1 },
       select: { official_line_url: true, line_button_url: true, seat_layout_enabled: true }
     }),
     buildSevenDaysSchedule(db, now),
-    getActiveLayoutForDate(db, now)
+    getActiveLayoutForDate(db, now),
+    db.kioskSlide.findMany({
+      where: { enabled: true },
+      orderBy: { sort_order: 'asc' },
+      select: { id: true, sha256: true, duration_sec: true }
+    })
   ]);
 
   const effectiveLineUrl =
@@ -185,6 +192,16 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
       size: jsonBuf.length
     };
   }
+
+  const slidesPayload = {
+    rev: kioskSetting.slides_rev ?? 0,
+    items: enabledSlides.map((s) => ({
+      id: s.id,
+      sha256: s.sha256,
+      duration_sec: s.duration_sec,
+      url: `/api/kiosk/files/slides/${s.id}.bin`
+    }))
+  };
 
   return {
     sync_interval_s: 180,
@@ -209,7 +226,7 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     setup_pin: kioskSetting.setup_pin
       ? { rev: kioskSetting.setup_pin_rev ?? 0, pin: kioskSetting.setup_pin }
       : null,
-    slides: { rev: 0, items: [] },
+    slides: slidesPayload,
     floor_map: floorMapPayload,
     firmware: null,
     ack_event_ids: ackEventIds

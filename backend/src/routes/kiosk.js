@@ -8,7 +8,13 @@ import {
   getKioskBackupCodeHandler,
   updateKioskSetupPinHandler,
   getKioskAccessLogsHandler,
-  getFloorMapFileHandler
+  getFloorMapFileHandler,
+  listSlidesHandler,
+  createSlideHandler,
+  updateSlideHandler,
+  reorderSlidesHandler,
+  deleteSlideHandler,
+  downloadSlideHandler
 } from '../controllers/kioskController.js';
 import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
 import { kioskEnvelope } from '../middlewares/kioskEnvelope.js';
@@ -26,8 +32,23 @@ router.get('/admin/backup-code', verifyToken, requireAnyPermission(['settings'])
 router.put('/admin/setup-pin', verifyToken, requireAnyPermission(['settings']), updateKioskSetupPinHandler);
 router.get('/admin/access-logs', verifyToken, requireAnyPermission(['settings']), getKioskAccessLogsHandler);
 
+// 待機輪播圖管理（權限：settings）
+router.get('/admin/slides', verifyToken, requireAnyPermission(['settings']), listSlidesHandler);
+router.post(
+  '/admin/slides',
+  verifyToken,
+  requireAnyPermission(['settings']),
+  express.raw({ type: ['application/octet-stream', 'application/x-raw-rgb565'], limit: '2mb' }),
+  express.json({ limit: '2mb' }),
+  createSlideHandler
+);
+router.patch('/admin/slides/:id', verifyToken, requireAnyPermission(['settings']), updateSlideHandler);
+router.put('/admin/slides/order', verifyToken, requireAnyPermission(['settings']), reorderSlidesHandler);
+router.delete('/admin/slides/:id', verifyToken, requireAnyPermission(['settings']), deleteSlideHandler);
+
 // 檔案下載（公開，靠檢查碼）
 router.get('/files/floor-map/:version.json', getFloorMapFileHandler);
+router.get('/files/slides/:id.bin', downloadSlideHandler);
 
 // 報到機 SGK1 v1 加密通訊端點
 router.post('/v1/sync', kioskEnvelope('sync'), postKioskSyncHandler);

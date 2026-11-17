@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
@@ -349,5 +350,254 @@ export const getFloorMapFileHandler = async (req, res) => {
   } catch (err) {
     console.error('[kioskController] getFloorMapFileHandler error:', err);
     return res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+};
+
+/**
+ * 待機輪播圖（RGB565，協定 Section 8）
+ */
+export const listSlidesHandler = async (req, res) => {
+  try {
+    const slides = await prisma.kioskSlide.findMany({
+      orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        title: true,
+        sort_order: true,
+        duration_sec: true,
+        enabled: true,
+        sha256: true,
+        created_at: true
+      }
+    });
+
+    res.json({
+      ok: true,
+      slides: slides.map((s) => ({
+        ...s,
+        size: 768000
+      }))
+    });
+  } catch (err) {
+    console.error('[kioskController] listSlidesHandler error:', err);
+    res.status(500).json({ error: '取得輪播圖列表失敗' });
+  }
+};
+
+export const createSlideHandler = async (req, res) => {
+  try {
+    let rawBuffer = null;
+    let title = '待機圖片';
+    let durationSec = 8;
+    let enabled = true;
+
+    if (Buffer.isBuffer(req.body)) {
+      rawBuffer = req.body;
+      if (req.query.title) title = String(req.query.title).trim();
+      if (req.query.duration_sec) durationSec = parseInt(req.query.duration_sec, 10) || 8;
+      if (req.query.enabled !== undefined) enabled = req.query.enabled === 'true';
+    } else if (req.body && typeof req.body === 'object') {
+      const { title: t, duration_sec: d, enabled: e, raw_base64: b64 } = req.body;
+      if (t) title = String(t).trim();
+      if (d !== undefined) durationSec = parseInt(d, 10) || 8;
+      if (e !== undefined) enabled = Boolean(e);
+      if (b64) rawBuffer = Buffer.from(b64, 'base64');
+    }
+
+    if (!rawBuffer || rawBuffer.length !== 768000) {
+      return res.status(400).json({
+        error: 'SLIDE_INVALID_SIZE',
+        message: `待機輪播圖大小必須恰好 768,000 bytes (800x480 RGB565)，目前為 ${rawBuffer ? rawBuffer.length : 0} bytes`
+      });
+    }
+
+    if (enabled) {
+      const enabledCount = await prisma.kioskSlide.count({ where: { enabled: true } });
+      if (enabledCount >= 5) {
+        return res.status(400).json({
+          error: 'MAX_SLIDES_EXCEEDED',
+          message: '最多只能有 5 張啟用中的待機輪播圖'
+        });
+      }
+    }
+
+    const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
+    const maxOrder = await prisma.kioskSlide.aggregate({ _max: { sort_order: true } });
+    const sortOrder = (maxOrder._max.sort_order ?? -1) + 1;
+
+    const slide = await prisma.kioskSlide.create({
+      data: {
+        title,
+        sort_order: sortOrder,
+        duration_sec: Math.max(5, Math.min(60, durationSec)),
+        enabled,
+        sha256,
+        bytes: rawBuffer
+      }
+    });
+
+    await prisma.kioskSetting.upsert({
+      where: { id: 1 },
+      update: { slides_rev: { increment: 1 } },
+      create: { id: 1, slides_rev: 1 }
+    });
+
+    res.status(201).json({
+      ok: true,
+      slide: {
+        id: slide.id,
+        title: slide.title,
+        sort_order: slide.sort_order,
+        duration_sec: slide.duration_sec,
+        enabled: slide.enabled,
+        sha256: slide.sha256,
+        size: 768000,
+        created_at: slide.created_at
+      }
+    });
+  } catch (err) {
+    console.error('[kioskController] createSlideHandler error:', err);
+    res.status(500).json({ error: '新增輪播圖失敗' });
+  }
+};
+
+export const updateSlideHandler = async (req, res) => {
+  try {
+    const slideId = parseInt(req.params.id, 10);
+    const existing = await prisma.kioskSlide.findUnique({ where: { id: slideId } });
+    if (!existing) {
+      return res.status(404).json({ error: 'SLIDE_NOT_FOUND' });
+    }
+
+    const { title, sort_order, duration_sec, enabled } = req.body;
+    let revNeedsIncrement = false;
+    const dataToUpdate = {};
+
+    if (title !== undefined) {
+      dataToUpdate.title = String(title).trim();
+    }
+    if (duration_sec !== undefined) {
+      const d = Math.max(5, Math.min(60, parseInt(duration_sec, 10) || 8));
+      if (d !== existing.duration_sec) revNeedsIncrement = true;
+      dataToUpdate.duration_sec = d;
+    }
+    if (sort_order !== undefined) {
+      const s = parseInt(sort_order, 10) || 0;
+      if (s !== existing.sort_order) revNeedsIncrement = true;
+      dataToUpdate.sort_order = s;
+    }
+    if (enabled !== undefined) {
+      const e = Boolean(enabled);
+      if (e && !existing.enabled) {
+        const enabledCount = await prisma.kioskSlide.count({ where: { enabled: true } });
+        if (enabledCount >= 5) {
+          return res.status(400).json({
+            error: 'MAX_SLIDES_EXCEEDED',
+            message: '最多只能有 5 張啟用中的待機輪播圖'
+          });
+        }
+      }
+      if (e !== existing.enabled) revNeedsIncrement = true;
+      dataToUpdate.enabled = e;
+    }
+
+    const updated = await prisma.kioskSlide.update({
+      where: { id: slideId },
+      data: dataToUpdate
+    });
+
+    if (revNeedsIncrement) {
+      await prisma.kioskSetting.upsert({
+        where: { id: 1 },
+        update: { slides_rev: { increment: 1 } },
+        create: { id: 1, slides_rev: 1 }
+      });
+    }
+
+    res.json({
+      ok: true,
+      slide: {
+        id: updated.id,
+        title: updated.title,
+        sort_order: updated.sort_order,
+        duration_sec: updated.duration_sec,
+        enabled: updated.enabled,
+        sha256: updated.sha256,
+        size: 768000,
+        updated_at: updated.updated_at
+      }
+    });
+  } catch (err) {
+    console.error('[kioskController] updateSlideHandler error:', err);
+    res.status(500).json({ error: '更新輪播圖失敗' });
+  }
+};
+
+export const reorderSlidesHandler = async (req, res) => {
+  try {
+    const { orders } = req.body;
+    if (!Array.isArray(orders)) {
+      return res.status(400).json({ error: 'INVALID_ORDERS_ARRAY' });
+    }
+
+    await prisma.$transaction(
+      orders.map((item) =>
+        prisma.kioskSlide.update({
+          where: { id: parseInt(item.id, 10) },
+          data: { sort_order: parseInt(item.sort_order, 10) || 0 }
+        })
+      )
+    );
+
+    await prisma.kioskSetting.upsert({
+      where: { id: 1 },
+      update: { slides_rev: { increment: 1 } },
+      create: { id: 1, slides_rev: 1 }
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[kioskController] reorderSlidesHandler error:', err);
+    res.status(500).json({ error: '重新排序輪播圖失敗' });
+  }
+};
+
+export const deleteSlideHandler = async (req, res) => {
+  try {
+    const slideId = parseInt(req.params.id, 10);
+    await prisma.kioskSlide.delete({ where: { id: slideId } });
+
+    await prisma.kioskSetting.upsert({
+      where: { id: 1 },
+      update: { slides_rev: { increment: 1 } },
+      create: { id: 1, slides_rev: 1 }
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[kioskController] deleteSlideHandler error:', err);
+    res.status(500).json({ error: '刪除輪播圖失敗' });
+  }
+};
+
+export const downloadSlideHandler = async (req, res) => {
+  try {
+    const slideId = parseInt(req.params.id, 10);
+    const slide = await prisma.kioskSlide.findUnique({
+      where: { id: slideId }
+    });
+
+    if (!slide) {
+      return res.status(404).json({ error: 'SLIDE_NOT_FOUND' });
+    }
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', slide.bytes.length);
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    res.setHeader('ETag', `"${slide.sha256}"`);
+    return res.end(slide.bytes);
+  } catch (err) {
+    console.error('[kioskController] downloadSlideHandler error:', err);
+    res.status(500).json({ error: '下載輪播圖失敗' });
   }
 };
