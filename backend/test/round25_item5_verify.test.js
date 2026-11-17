@@ -11,7 +11,7 @@ import {
   remindAdminPrepayHandler
 } from '../src/controllers/prepayController.js';
 import { ensureDefaultEquipmentConfigs } from '../src/controllers/equipmentController.js';
-import { voidPayment } from '../src/services/billing/billService.js';
+import { voidPayment, getBookingBill } from '../src/services/billing/billService.js';
 import { releaseExpiredPrepays } from '../src/services/selfService/prepayService.js';
 import { getClosingPreview } from '../src/controllers/accountingController.js';
 
@@ -41,10 +41,13 @@ function makeAdminReq({ body = {}, params = {}, query = {} } = {}) {
 test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch, remind, void restore, and closing preview', async () => {
   const futureDateStr = '2099-08-20';
   const testDate = dateOnly(futureDateStr);
+  const normalDateStr = '2099-08-21';
+  const normalDate = dateOnly(normalDateStr);
 
   let savedKiosk = null;
   let savedSmallEq = null;
   let savedTransferMethod = null;
+  let savedGlobal = null;
   let testUser = null;
   const createdRefs = [];
   const createdPoolIds = [];
@@ -56,6 +59,7 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
     await ensureDefaultEquipmentConfigs();
     savedKiosk = await prisma.kioskSetting.findUnique({ where: { id: 1 } });
     savedSmallEq = await prisma.equipmentConfig.findUnique({ where: { id: 'pegboard_s' } });
+    savedGlobal = await prisma.globalSetting.findUnique({ where: { id: 1 } });
 
     const oldSess = await prisma.session.findMany({ where: { session_date: testDate }, select: { id: true } });
     const oldSessIds = oldSess.map((s) => s.id);
@@ -464,6 +468,84 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
       assert.ok((closeRes.body.by_method?.transfer?.amount || 0) >= 3000);
       assert.equal(closeRes.body.by_method?.pass, undefined);
     }
+
+    // ---------------------------------------------------------
+    // Round 25b Item 1: pricing_snapshot pins self-service entry price at creation,
+    // while non-self-service booking bill still follows updated GlobalSetting prices.
+    // ---------------------------------------------------------
+    {
+      // Create self-service booking E at 750/person before rate hike
+      const rSelf = createMockRes();
+      await createReservation(makeCustomerReq(testUser, {
+        body: {
+          session_ids: sessionIds,
+          pax: 1,
+          isUnlimited: true,
+          self_service_ack: true,
+          prepay: {
+            pass_uses: [],
+            transfer: { payment_method_code: 'r25_item5_bank' },
+            expected_transfer_amount: 750
+          }
+        }
+      }), rSelf);
+      assert.equal(rSelf.statusCode, 201);
+      const refSelf = rSelf.body.reservation.booking_ref;
+      createdRefs.push(refSelf);
+
+      const prepayE = await prisma.bookingPrepay.findUnique({ where: { booking_ref: refSelf } });
+      assert.ok(prepayE.pricing_snapshot, 'BookingPrepay must store pricing_snapshot');
+      assert.equal(prepayE.pricing_snapshot.unlimited, 750);
+
+      // Prepare normal (non-self-service) day booking F before rate hike
+      await prisma.dailySetting.deleteMany({ where: { date: normalDate } });
+      await prisma.session.deleteMany({ where: { session_date: normalDate } });
+      const normalSess = await Promise.all([
+        prisma.session.create({ data: { session_date: normalDate, start_time: '13:00', end_time: '14:00', max_capacity: 20 } }),
+        prisma.session.create({ data: { session_date: normalDate, start_time: '14:00', end_time: '15:00', max_capacity: 20 } })
+      ]);
+      const rNormal = createMockRes();
+      await createReservation(makeCustomerReq(testUser, {
+        body: {
+          session_ids: normalSess.map((s) => s.id),
+          pax: 1,
+          isUnlimited: true
+        }
+      }), rNormal);
+      assert.equal(rNormal.statusCode, 201);
+      const refNormal = rNormal.body.reservation.booking_ref;
+      createdRefs.push(refNormal);
+
+      // Admin raises BOTH DailySetting.unlimited_price AND GlobalSetting weekday/weekend prices
+      await prisma.dailySetting.update({
+        where: { date: testDate },
+        data: { unlimited_price: 880, hourly_price: 180 }
+      });
+      await prisma.globalSetting.update({
+        where: { id: 1 },
+        data: {
+          weekday_hourly_price: 220,
+          weekday_unlimited_price: 920,
+          weekend_hourly_price: 260,
+          weekend_unlimited_price: 990
+        }
+      });
+
+      // Verify self-service booking E -> must still use pinned 750 -> 200 OK & paid
+      const vSelf = createMockRes();
+      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refSelf } }), vSelf);
+      assert.equal(vSelf.statusCode, 200, 'Expected verify 200 despite price change when pricing_snapshot is pinned');
+      assert.equal(vSelf.body.prepay.amount_due, 750);
+      const dbSelfRes = await prisma.reservation.findFirst({ where: { booking_ref: refSelf } });
+      assert.equal(dbSelfRes.billing_status, 'paid');
+
+      // Normal-day booking F still follows the updated GlobalSetting price
+      const normalBill = await getBookingBill(refNormal);
+      const isNormalWknd = normalBill.pricing.day_type === 'weekend';
+      assert.equal(normalBill.pricing.unlimited, isNormalWknd ? 990 : 920);
+      assert.equal(normalBill.pricing.hourly, isNormalWknd ? 260 : 220);
+      assert.equal(normalBill.bill.summary.amount_due, 2 * (isNormalWknd ? 260 : 220));
+    }
   } finally {
     if (savedTransferMethod) {
       await prisma.paymentMethodConfig.update({
@@ -480,6 +562,19 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
     }
     await prisma.session.deleteMany({ where: { session_date: testDate } });
     await prisma.dailySetting.deleteMany({ where: { date: testDate } });
+    await prisma.session.deleteMany({ where: { session_date: normalDate } });
+    await prisma.dailySetting.deleteMany({ where: { date: normalDate } });
+    if (savedGlobal) {
+      await prisma.globalSetting.update({
+        where: { id: 1 },
+        data: {
+          weekday_hourly_price: savedGlobal.weekday_hourly_price,
+          weekday_unlimited_price: savedGlobal.weekday_unlimited_price,
+          weekend_hourly_price: savedGlobal.weekend_hourly_price,
+          weekend_unlimited_price: savedGlobal.weekend_unlimited_price
+        }
+      }).catch(() => {});
+    }
     if (createdPlanIds.length) {
       await prisma.userPass.deleteMany({ where: { plan_id: { in: createdPlanIds } } });
       await prisma.passPlan.deleteMany({ where: { id: { in: createdPlanIds } } });

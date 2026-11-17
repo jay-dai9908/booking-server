@@ -631,6 +631,7 @@ const ensureDatabaseSchema = async () => {
       "total_amount" INTEGER NOT NULL,
       "pass_persons" INTEGER NOT NULL DEFAULT 0,
       "pass_holds" JSONB NOT NULL DEFAULT '[]',
+      "pricing_snapshot" JSONB,
       "amount_due" INTEGER NOT NULL,
       "status" TEXT NOT NULL DEFAULT 'pending_payment',
       "deadline_at" TIMESTAMP(3),
@@ -652,7 +653,8 @@ const ensureDatabaseSchema = async () => {
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "BookingPrepay_booking_ref_key" ON "BookingPrepay"("booking_ref")`,
     `CREATE INDEX IF NOT EXISTS "BookingPrepay_user_id_status_idx" ON "BookingPrepay"("user_id", "status")`,
-    `CREATE INDEX IF NOT EXISTS "BookingPrepay_status_deadline_at_idx" ON "BookingPrepay"("status", "deadline_at")`
+    `CREATE INDEX IF NOT EXISTS "BookingPrepay_status_deadline_at_idx" ON "BookingPrepay"("status", "deadline_at")`,
+    `ALTER TABLE "BookingPrepay" ADD COLUMN IF NOT EXISTS "pricing_snapshot" JSONB`
   ];
 
   for (const sql of statements) {

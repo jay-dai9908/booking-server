@@ -84,7 +84,26 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
 
   // Pricing
   const globalSetting = await tx.globalSetting.findFirst() || {};
-  const { hourly_price, unlimited_price, allow_unlimited, is_weekend } = await getEffectiveDailyRates(tx, sessionDate);
+  let effectiveRates = null;
+  if (firstRes.is_self_service) {
+    const prepaySnapRow = await tx.bookingPrepay.findUnique({
+      where: { booking_ref },
+      select: { pricing_snapshot: true }
+    });
+    const snap = prepaySnapRow?.pricing_snapshot;
+    if (snap && typeof snap === 'object' && snap.hourly !== undefined && snap.unlimited !== undefined) {
+      effectiveRates = {
+        hourly_price: Number(snap.hourly),
+        unlimited_price: Number(snap.unlimited),
+        allow_unlimited: Boolean(snap.allow_unlimited),
+        is_weekend: Boolean(snap.is_weekend)
+      };
+    }
+  }
+  if (!effectiveRates) {
+    effectiveRates = await getEffectiveDailyRates(tx, sessionDate);
+  }
+  const { hourly_price, unlimited_price, allow_unlimited, is_weekend } = effectiveRates;
 
   const pricing = {
     hourly: hourly_price,

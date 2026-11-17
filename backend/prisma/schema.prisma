@@ -725,6 +725,7 @@ model BookingPrepay {
   total_amount           Int
   pass_persons           Int       @default(0)
   pass_holds             Json      @default("[]")
+  pricing_snapshot       Json?
   amount_due             Int
   status                 String    @default("pending_payment") // pending_payment | reported_pending_verify | mismatch | verified | expired | cancelled
   deadline_at            DateTime?

@@ -720,6 +720,12 @@ export const createReservation = async (req, res) => {
             total_amount: finalTotalAmount,
             pass_persons: quote.pass_persons,
             pass_holds: passHolds,
+            pricing_snapshot: {
+              hourly: dailyRates.hourly_price,
+              unlimited: dailyRates.unlimited_price,
+              allow_unlimited: dailyRates.allow_unlimited,
+              is_weekend: dailyRates.is_weekend
+            },
             amount_due: finalTransferAmount,
             status: 'pending_payment',
             deadline_at: quote.deadline_at,
