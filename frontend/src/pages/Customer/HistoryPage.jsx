@@ -26,6 +26,7 @@ import BarcodeSheet from '../../components/customer/sheets/BarcodeSheet';
 import EquipmentAddonSheet from '../../components/customer/sheets/EquipmentAddonSheet';
 import ConfirmSheet from '../../components/customer/sheets/ConfirmSheet';
 import PrepayTransferCard from '../../components/customer/PrepayTransferCard';
+import EntryPassCard from '../../components/customer/EntryPassCard';
 import { useToast } from '../../components/customer/Toast';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
@@ -50,6 +51,14 @@ function parseReservationDate(datePart) {
   if (!datePart) return [new Date().getFullYear(), 1, 1];
   const d = toDateObj(datePart);
   return [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+}
+
+function isTodayReservation(res) {
+  if (!res) return false;
+  const rawDate = res.session_date || res.session?.session_date;
+  if (!rawDate) return false;
+  const taipeiToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+  return formatYMD(rawDate) === taipeiToday;
 }
 
 function formatBoardDetails(e, resStartTime) {
@@ -564,15 +573,24 @@ export default function HistoryPage() {
                 </Card>
               )}
               {r.prepay.status === 'verified' && (
-                <Card data-testid="history-prepay-verified" className="bg-sg-sage-soft border border-sg-sage/50" gap={6}>
-                  <div className="text-[15px] font-bold text-sg-sage-ink">付款已確認</div>
-                  <div className="text-[14px] font-bold text-sg-ink">
-                    當天 {r.self_info?.open_at || ''} 起可進場
-                  </div>
-                  <div className="text-[12.5px] text-sg-muted">
-                    預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場條碼到時候會出現在這裡。
-                  </div>
-                </Card>
+                isTodayReservation(r) ? (
+                  <EntryPassCard
+                    bookingRef={r.booking_ref}
+                    reservation={r}
+                    customerPhone={user?.phone || r.customer_phone}
+                    onCheckInSuccess={fetchReservations}
+                  />
+                ) : (
+                  <Card data-testid="history-prepay-verified" className="bg-sg-sage-soft border border-sg-sage/50" gap={6}>
+                    <div className="text-[15px] font-bold text-sg-sage-ink">付款已確認</div>
+                    <div className="text-[14px] font-bold text-sg-ink">
+                      當天 {r.self_info?.open_at || ''} 起可進場
+                    </div>
+                    <div className="text-[12.5px] text-sg-muted">
+                      預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場條碼到時候會出現在這裡。
+                    </div>
+                  </Card>
+                )
               )}
             </>
           )}
@@ -915,13 +933,13 @@ export default function HistoryPage() {
                         </div>
                       )}
 
-                      {/* Self-service prepay state (P4a / P4b / P4c / verified) */}
-                      {r.is_self_service && r.prepay && (
+                      {/* Self-service for today: EntryPassCard */}
+                      {r.is_self_service && isTodayReservation(r) && r.status !== 'cancelled' ? (
                         <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
-                          {r.prepay.status === 'pending_payment' && (
+                          {r.prepay?.status === 'pending_payment' && (
                             <PrepayTransferCard reservation={r} onReported={fetchReservations} />
                           )}
-                          {r.prepay.status === 'reported_pending_verify' && (
+                          {r.prepay?.status === 'reported_pending_verify' && (
                             <div
                               data-testid={`list-prepay-reported-${r.booking_ref}`}
                               className="rounded-[12px] border border-sg-honey bg-sg-honey-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-0.5"
@@ -932,7 +950,7 @@ export default function HistoryPage() {
                               </div>
                             </div>
                           )}
-                          {r.prepay.status === 'mismatch' && (
+                          {r.prepay?.status === 'mismatch' && (
                             <div
                               data-testid={`list-prepay-mismatch-${r.booking_ref}`}
                               className="rounded-[12px] border border-sg-danger/40 bg-sg-danger-soft px-3 py-2.5 text-[13px] text-sg-danger grid gap-2"
@@ -949,36 +967,83 @@ export default function HistoryPage() {
                               </a>
                             </div>
                           )}
-                          {r.prepay.status === 'verified' && (
-                            <div
-                              data-testid={`list-prepay-verified-${r.booking_ref}`}
-                              className="rounded-[12px] border border-sg-sage/50 bg-sg-sage-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-0.5"
-                            >
-                              <div className="font-bold text-sg-sage-ink">付款已確認 · 當天 {r.self_info?.open_at || ''} 起可進場</div>
-                              <div className="text-[12px] text-sg-muted">
-                                預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場條碼到時候會出現在這裡。
-                              </div>
-                            </div>
+                          {(r.prepay?.status === 'verified' || r.billing_status === 'paid' || r.billing_status === 'waived') && (
+                            <EntryPassCard
+                              bookingRef={r.booking_ref}
+                              reservation={r}
+                              customerPhone={user?.phone || r.customer_phone}
+                              onCheckInSuccess={fetchReservations}
+                            />
                           )}
                         </div>
-                      )}
+                      ) : (
+                        <>
+                          {/* Self-service prepay state for non-today (P4a / P4b / P4c / verified) */}
+                          {r.is_self_service && r.prepay && (
+                            <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
+                              {r.prepay.status === 'pending_payment' && (
+                                <PrepayTransferCard reservation={r} onReported={fetchReservations} />
+                              )}
+                              {r.prepay.status === 'reported_pending_verify' && (
+                                <div
+                                  data-testid={`list-prepay-reported-${r.booking_ref}`}
+                                  className="rounded-[12px] border border-sg-honey bg-sg-honey-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-0.5"
+                                >
+                                  <div className="font-bold">已回報，等店員對帳</div>
+                                  <div className="text-[12px] text-sg-muted">
+                                    帳號末五碼 <span className="font-num font-bold text-sg-ink">{r.prepay.remittance_last5}</span> · 對帳沒完成前，報到機不會開門
+                                  </div>
+                                </div>
+                              )}
+                              {r.prepay.status === 'mismatch' && (
+                                <div
+                                  data-testid={`list-prepay-mismatch-${r.booking_ref}`}
+                                  className="rounded-[12px] border border-sg-danger/40 bg-sg-danger-soft px-3 py-2.5 text-[13px] text-sg-danger grid gap-2"
+                                >
+                                  <div className="font-bold">匯款金額和預約金額不同，請用 LINE 聯絡我們</div>
+                                  <a
+                                    href={globalSettings?.line_button_url || globalSettings?.official_line_url || 'https://lin.ee/vsZhRW5'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#06C755] text-white font-bold text-[13px] py-2 px-3"
+                                  >
+                                    <MessageCircle className="w-4 h-4" />
+                                    透過 LINE 聯絡我們
+                                  </a>
+                                </div>
+                              )}
+                              {r.prepay.status === 'verified' && (
+                                <div
+                                  data-testid={`list-prepay-verified-${r.booking_ref}`}
+                                  className="rounded-[12px] border border-sg-sage/50 bg-sg-sage-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-0.5"
+                                >
+                                  <div className="font-bold text-sg-sage-ink">付款已確認 · 當天 {r.self_info?.open_at || ''} 起可進場</div>
+                                  <div className="text-[12px] text-sg-muted">
+                                    預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場條碼到時候會出現在這裡。
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
-                      {/* Barcode button */}
-                      <Button
-                        variant={isNearest ? 'primary' : 'secondary'}
-                        size="sm"
-                        icon={<QrCode className="w-4 h-4" />}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveBarcodeData({
-                            ref: r.booking_ref,
-                            summary: `${dateShort} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`,
-                          });
-                        }}
-                        className="w-full mt-1"
-                      >
-                        出示到店條碼
-                      </Button>
+                          {/* Barcode button */}
+                          <Button
+                            variant={isNearest ? 'primary' : 'secondary'}
+                            size="sm"
+                            icon={<QrCode className="w-4 h-4" />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveBarcodeData({
+                                ref: r.booking_ref,
+                                summary: `${dateShort} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`,
+                              });
+                            }}
+                            className="w-full mt-1"
+                          >
+                            出示到店條碼
+                          </Button>
+                        </>
+                      )}
 
                       {/* Link to details and cancel */}
                       <div className="flex justify-end pt-0.5">

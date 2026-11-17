@@ -26,6 +26,7 @@ import {
 import { earliestEntry, ironText } from '../../../shared/selfService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
+import { getReservationEntryPass } from '../services/kiosk/entryService.js';
 
 function mergeCustomerEquipments(rawList = []) {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
@@ -2879,5 +2880,24 @@ export const adminQuickLookup = async (req, res) => {
   } catch (error) {
     console.error('adminQuickLookup error:', error);
     res.status(500).json({ error: '查詢失敗' });
+  }
+};
+
+/**
+ * 顧客手機進場條碼與狀態端點
+ * GET /api/reservations/:booking_ref/entry
+ */
+export const getReservationEntryPassHandler = async (req, res) => {
+  try {
+    const { booking_ref } = req.params;
+    const userId = req.user?.id;
+    const result = await getReservationEntryPass(prisma, { bookingRef: booking_ref, userId });
+    return res.json(result);
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    console.error('getReservationEntryPassHandler error:', err);
+    return res.status(500).json({ error: '無法取得進場資訊' });
   }
 };

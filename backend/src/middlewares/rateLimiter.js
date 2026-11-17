@@ -146,5 +146,41 @@ export const prepayQuoteLimiter = (() => {
   };
 })();
 
+/**
+ * 6. 半自助進場條碼查詢：同一會員每分鐘最多 60 次
+ */
+export const entryPassLimiter = (() => {
+  const store = new Map();
+  const windowMs = 60 * 1000;
+  const max = 60;
+
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of store.entries()) {
+      if (now > record.resetTime) {
+        store.delete(key);
+      }
+    }
+  }, 60000);
+  if (cleanup.unref) cleanup.unref();
+
+  return (req, res, next) => {
+    const actorKey = req.user?.id ? `u:${req.user.id}` : `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+    const key = `entry-pass-${actorKey}`;
+    const now = Date.now();
+    let record = store.get(key);
+    if (!record || now > record.resetTime) {
+      record = { count: 1, resetTime: now + windowMs };
+      store.set(key, record);
+    } else {
+      record.count += 1;
+    }
+    if (record.count > max) {
+      return res.status(429).json({ error: '查詢進場條碼過於頻繁，請稍候再試', code: 'RATE_LIMITED' });
+    }
+    next();
+  };
+})();
+
 // 舊相容相容函式
 export const rateLimiter = (options) => createMemoryLimiter(options);

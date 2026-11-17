@@ -1,5 +1,5 @@
 import express from 'express';
-import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount, updateReservationNotes, getAdminNavBadges, adminQuickLookup } from '../controllers/reservationController.js';
+import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount, updateReservationNotes, getAdminNavBadges, adminQuickLookup, getReservationEntryPassHandler } from '../controllers/reservationController.js';
 import { verifyToken, requireAdmin, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
 
 import { modifyBookingEquipment } from '../controllers/equipmentController.js';
@@ -12,7 +12,7 @@ import {
   mismatchAdminPrepayHandler,
   remindAdminPrepayHandler
 } from '../controllers/prepayController.js';
-import { prepayQuoteLimiter } from '../middlewares/rateLimiter.js';
+import { prepayQuoteLimiter, entryPassLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
@@ -22,6 +22,7 @@ const prepayStaffAuth = [verifyToken, requireAnyPermission(['reservations', 'sho
 router.get('/prepay-options', verifyToken, requireRegisteredUser, getPrepayOptionsHandler);
 router.post('/prepay-quote', verifyToken, requireRegisteredUser, prepayQuoteLimiter, postPrepayQuoteHandler);
 router.patch('/:booking_ref/prepay/remittance', verifyToken, requireRegisteredUser, patchRemittanceLast5Handler);
+router.get('/:booking_ref/entry', verifyToken, requireRegisteredUser, entryPassLimiter, getReservationEntryPassHandler);
 
 router.get('/admin/prepays', ...prepayStaffAuth, getAdminPrepaysHandler);
 router.post('/admin/prepays/:booking_ref/verify', ...prepayStaffAuth, verifyAdminPrepayHandler);
