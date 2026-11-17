@@ -15,7 +15,8 @@ import {
   getPrepayOptions,
   computeSelfServiceQuote,
   submitRemittanceLast5,
-  settleSelfServiceBooking
+  settleSelfServiceBooking,
+  lockPrepay
 } from '../services/selfService/prepayService.js';
 
 export const getPrepayOptionsHandler = async (req, res) => {
@@ -327,15 +328,21 @@ export const verifyAdminPrepayHandler = async (req, res) => {
 
   try {
     const txResult = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
-
-      const prepay = await tx.bookingPrepay.findUnique({ where: { booking_ref } });
+      const prepay = await lockPrepay(tx, booking_ref);
       if (!prepay) {
         return { errorStatus: 404, errorBody: { error: '找不到這筆半自助預付紀錄' } };
       }
 
       if (prepay.status === 'verified' && prepay.settled_at) {
         return { alreadyVerified: true, prepay };
+      }
+
+      const resRows = await tx.reservation.findMany({
+        where: { booking_ref },
+        select: { id: true, status: true }
+      });
+      if (resRows.length === 0 || resRows.some((r) => r.status !== 'confirmed')) {
+        return { errorStatus: 409, errorBody: { error: '這筆預約已取消，不能入帳' } };
       }
 
       if (!['pending_payment', 'reported_pending_verify', 'mismatch'].includes(prepay.status)) {
@@ -462,31 +469,47 @@ export const mismatchAdminPrepayHandler = async (req, res) => {
   }
 
   try {
-    const prepay = await prisma.bookingPrepay.findUnique({ where: { booking_ref } });
-    if (!prepay) {
-      return res.status(404).json({ error: '找不到這筆預付紀錄' });
-    }
-    if (!['pending_payment', 'reported_pending_verify', 'mismatch'].includes(prepay.status)) {
-      return res.status(409).json({ error: `目前狀態 (${prepay.status}) 不可標記金額不符` });
+    const txResult = await prisma.$transaction(async (tx) => {
+      const prepay = await lockPrepay(tx, booking_ref);
+      if (!prepay) {
+        return { errorStatus: 404, errorBody: { error: '找不到這筆預付紀錄' } };
+      }
+      const resRows = await tx.reservation.findMany({
+        where: { booking_ref },
+        select: { id: true, status: true }
+      });
+      if (resRows.length === 0 || resRows.some((r) => r.status !== 'confirmed')) {
+        return { errorStatus: 409, errorBody: { error: '這筆預約已取消，不可標記金額不符' } };
+      }
+      if (!['pending_payment', 'reported_pending_verify', 'mismatch'].includes(prepay.status)) {
+        return { errorStatus: 409, errorBody: { error: `目前狀態 (${prepay.status}) 不可標記金額不符` } };
+      }
+
+      const updated = await tx.bookingPrepay.update({
+        where: { booking_ref },
+        data: {
+          status: 'mismatch',
+          admin_note: cleanNote
+        }
+      });
+      return { updated };
+    });
+
+    if (txResult.errorStatus) {
+      return res.status(txResult.errorStatus).json(txResult.errorBody);
     }
 
-    const updated = await prisma.bookingPrepay.update({
-      where: { booking_ref },
-      data: {
-        status: 'mismatch',
-        admin_note: cleanNote
-      }
-    });
+    const updated = txResult.updated;
 
     try {
       const user = await prisma.user.findUnique({
-        where: { id: prepay.user_id },
+        where: { id: updated.user_id },
         select: { id: true, name: true, line_user_id: true }
       });
       await sendSelfServiceMismatchNotification(
         {
           booking_ref,
-          amount_due: prepay.amount_due,
+          amount_due: updated.amount_due,
           note: cleanNote
         },
         user

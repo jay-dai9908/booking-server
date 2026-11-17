@@ -701,6 +701,14 @@ export async function computeSelfServiceQuote(
 }
 
 /**
+ * 取得同一筆 booking_ref 的交易層級互斥鎖（PostgreSQL advisory xact lock），並回傳最新的 BookingPrepay 紀錄
+ */
+export async function lockPrepay(tx, booking_ref) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+  return tx.bookingPrepay.findUnique({ where: { booking_ref } });
+}
+
+/**
  * 預約建立/對帳確認後內部一次性入帳（不使用 collectPayment，避免二次扣卡或重複累加優惠碼）
  */
 export async function settleSelfServiceBooking(
@@ -713,9 +721,7 @@ export async function settleSelfServiceBooking(
     note = null
   }
 ) {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
-
-  const prepay = await tx.bookingPrepay.findUnique({ where: { booking_ref } });
+  const prepay = await lockPrepay(tx, booking_ref);
   if (!prepay) {
     throw makePrepayError('PREPAY_NOT_FOUND', '找不到此筆預約的預付紀錄', 404);
   }
@@ -895,36 +901,40 @@ export async function submitRemittanceLast5(prismaClient, { bookingRef, userId, 
     throw makePrepayError('INVALID_LAST5', '帳號末五碼必須為 5 位數字', 400);
   }
 
-  const prepay = await prismaClient.bookingPrepay.findUnique({
-    where: { booking_ref: bookingRef }
-  });
-  if (!prepay) {
-    throw makePrepayError('PREPAY_NOT_FOUND', '找不到此筆預約的付款紀錄', 404);
-  }
-  if (prepay.user_id !== Number(userId)) {
-    throw makePrepayError('FORBIDDEN', '無權限修改此筆預約的匯款資料', 403);
-  }
+  const runInTx = typeof prismaClient.$transaction === 'function'
+    ? (fn) => prismaClient.$transaction(fn)
+    : (fn) => fn(prismaClient);
 
-  const allowedStatuses = ['pending_payment', 'reported_pending_verify', 'mismatch'];
-  if (!allowedStatuses.includes(prepay.status)) {
-    throw makePrepayError('INVALID_PREPAY_STATUS', '此筆預約目前的付款狀態不可填寫末五碼', 409);
-  }
-
-  const activeRes = await prismaClient.reservation.findFirst({
-    where: { booking_ref: bookingRef, status: 'confirmed' }
-  });
-  if (!activeRes) {
-    throw makePrepayError('BOOKING_CANCELLED', '此預約已取消，無法回報匯款末五碼', 409);
-  }
-
-  const now = new Date();
-  return prismaClient.bookingPrepay.update({
-    where: { booking_ref: bookingRef },
-    data: {
-      remittance_last5: cleanLast5,
-      remittance_reported_at: now,
-      status: 'reported_pending_verify'
+  return runInTx(async (tx) => {
+    const prepay = await lockPrepay(tx, bookingRef);
+    if (!prepay) {
+      throw makePrepayError('PREPAY_NOT_FOUND', '找不到此筆預約的付款紀錄', 404);
     }
+    if (prepay.user_id !== Number(userId)) {
+      throw makePrepayError('FORBIDDEN', '無權限修改此筆預約的匯款資料', 403);
+    }
+
+    const allowedStatuses = ['pending_payment', 'reported_pending_verify', 'mismatch'];
+    if (!allowedStatuses.includes(prepay.status)) {
+      throw makePrepayError('INVALID_PREPAY_STATUS', '此筆預約目前的付款狀態不可填寫末五碼', 409);
+    }
+
+    const activeRes = await tx.reservation.findFirst({
+      where: { booking_ref: bookingRef, status: 'confirmed' }
+    });
+    if (!activeRes) {
+      throw makePrepayError('BOOKING_CANCELLED', '此預約已取消，無法回報匯款末五碼', 409);
+    }
+
+    const now = new Date();
+    return tx.bookingPrepay.update({
+      where: { booking_ref: bookingRef },
+      data: {
+        remittance_last5: cleanLast5,
+        remittance_reported_at: now,
+        status: 'reported_pending_verify'
+      }
+    });
   });
 }
 
@@ -1052,23 +1062,28 @@ export async function releaseExpiredPrepays(now = new Date()) {
   for (const prepay of expiredPrepays) {
     try {
       const outcome = await prisma.$transaction(async (tx) => {
-        const updatedPrepay = await tx.bookingPrepay.updateMany({
-          where: {
-            booking_ref: prepay.booking_ref,
-            status: 'pending_payment',
-            deadline_at: { lt: now }
-          },
+        const lockedPrepay = await lockPrepay(tx, prepay.booking_ref);
+        if (
+          !lockedPrepay ||
+          lockedPrepay.status !== 'pending_payment' ||
+          !lockedPrepay.deadline_at ||
+          lockedPrepay.deadline_at >= now
+        ) {
+          return null;
+        }
+
+        await tx.bookingPrepay.update({
+          where: { booking_ref: lockedPrepay.booking_ref },
           data: { status: 'expired' }
         });
-        if (updatedPrepay.count === 0) return null;
 
         const reservations = await tx.reservation.findMany({
-          where: { booking_ref: prepay.booking_ref },
+          where: { booking_ref: lockedPrepay.booking_ref },
           include: { session: true }
         });
 
         await tx.reservation.updateMany({
-          where: { booking_ref: prepay.booking_ref, status: 'confirmed' },
+          where: { booking_ref: lockedPrepay.booking_ref, status: 'confirmed' },
           data: {
             status: 'cancelled',
             cancelled_at: now,
@@ -1076,21 +1091,21 @@ export async function releaseExpiredPrepays(now = new Date()) {
           }
         });
 
-        if (prepay.assigned_pool_account) {
+        if (lockedPrepay.assigned_pool_account) {
           await releasePoolAccount(tx, {
-            accountNumber: prepay.assigned_pool_account,
-            orderRef: prepay.booking_ref
+            accountNumber: lockedPrepay.assigned_pool_account,
+            orderRef: lockedPrepay.booking_ref
           });
         }
 
-        const holds = Array.isArray(prepay.pass_holds) ? prepay.pass_holds : [];
+        const holds = Array.isArray(lockedPrepay.pass_holds) ? lockedPrepay.pass_holds : [];
         let passRestored = false;
         for (const h of holds) {
           if (h?.user_pass_id && (Number(h.units) || 0) > 0) {
             await restorePass(tx, {
               user_pass_id: Number(h.user_pass_id),
               units: Number(h.units),
-              booking_ref: prepay.booking_ref,
+              booking_ref: lockedPrepay.booking_ref,
               payment_no: null,
               person_no: null,
               staff_name: 'system:prepay_expired'
@@ -1123,7 +1138,7 @@ export async function releaseExpiredPrepays(now = new Date()) {
             : '';
 
         return {
-          userId: prepay.user_id,
+          userId: lockedPrepay.user_id,
           session_date: sortedSess[0]?.session_date || null,
           time_range: timeRange,
           pass_restored: passRestored

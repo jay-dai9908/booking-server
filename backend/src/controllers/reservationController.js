@@ -20,7 +20,8 @@ import {
   computeSelfServiceQuote,
   settleSelfServiceBooking,
   attachSelfInfoToReservations,
-  makePrepayError
+  makePrepayError,
+  lockPrepay
 } from '../services/selfService/prepayService.js';
 import { earliestEntry, ironText } from '../../../shared/selfService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
@@ -571,6 +572,9 @@ export const createReservation = async (req, res) => {
           if (!quote.transfer_open) {
             throw makePrepayError('PREPAY_DEADLINE_PASSED', '已超過半自助日匯款期限，無法成立需要匯款的預約', 409);
           }
+
+          // Serialize concurrent self-service bookings from the same member before counting unpaid orders
+          await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
 
           const maxUnpaid = kioskSetting.max_unpaid_self_bookings ?? 2;
           const unpaidCount = await tx.bookingPrepay.count({
@@ -1386,177 +1390,172 @@ export const cancelReservation = async (req, res) => {
   const userId = req.user?.id;
   const isAdmin = req.user?.role === 'admin';
   const confirmPaidCancel = Boolean(req.body?.confirmPaidCancel || req.query?.confirmPaidCancel === 'true');
+  const operatorName = isAdmin ? (req.user?.name || '管理員') : 'customer';
+  const cancelledByTag = isAdmin ? `admin:${operatorName}` : 'customer';
 
   try {
-    // Find all reservations with this booking_ref
-    const reservations = await prisma.reservation.findMany({
-      where: { booking_ref },
-      include: { session: true }
-    });
+    const txResult = await prisma.$transaction(async (tx) => {
+      const lockedPrepay = await lockPrepay(tx, booking_ref);
 
-    if (reservations.length === 0) {
-      return res.status(404).json({ error: '找不到該筆預約' });
-    }
+      // Find all reservations with this booking_ref under lock
+      const reservations = await tx.reservation.findMany({
+        where: { booking_ref },
+        include: { session: true }
+      });
 
-    // Check ownership
-    if (!isAdmin && reservations[0].user_id !== userId) {
-      return res.status(403).json({ error: '無權限取消此預約' });
-    }
-
-    if (reservations[0].status === 'cancelled') {
-      return res.status(400).json({ error: '此預約先前已取消' });
-    }
-
-    const prepay = await prisma.bookingPrepay.findUnique({ where: { booking_ref } });
-    const isSelfCustomerAllPassVerified =
-      !isAdmin &&
-      Boolean(prepay) &&
-      prepay.status === 'verified' &&
-      (prepay.amount_due ?? 0) === 0 &&
-      !reservations.some(r => (r.amount_received && r.amount_received > 0));
-
-    if (!isAdmin && prepay) {
-      if (['reported_pending_verify', 'mismatch'].includes(prepay.status)) {
-        return res.status(400).json({ error: '這筆預約已經付款或正在對帳，如需取消請用 LINE 聯絡我們' });
+      if (reservations.length === 0) {
+        return { errorStatus: 404, errorBody: { error: '找不到該筆預約' } };
       }
-      if (prepay.status === 'verified' && !isSelfCustomerAllPassVerified) {
-        return res.status(400).json({ error: '這筆預約已經付款或正在對帳，如需取消請用 LINE 聯絡我們' });
+
+      // Check ownership
+      if (!isAdmin && reservations[0].user_id !== userId) {
+        return { errorStatus: 403, errorBody: { error: '無權限取消此預約' } };
       }
-    }
 
-    const isCollected = !isSelfCustomerAllPassVerified &&
-      reservations.some(r => (r.amount_received && r.amount_received > 0) || r.is_paid);
-    if (isCollected) {
-      const amt = reservations[0].amount_received || 0;
-      return res.status(409).json({ error: `這筆已收款 NT$${amt}，請先退款或作廢收款` });
-    }
+      if (reservations[0].status === 'cancelled') {
+        return { errorStatus: 400, errorBody: { error: '此預約先前已取消' } };
+      }
 
-    const hasPaid = !isSelfCustomerAllPassVerified && reservations.some(r => r.is_paid);
-    const hasCheckedIn = reservations.some(r => r.attendance === 'checked_in');
+      const isSelfCustomerAllPassVerified =
+        !isAdmin &&
+        Boolean(lockedPrepay) &&
+        lockedPrepay.status === 'verified' &&
+        (lockedPrepay.amount_due ?? 0) === 0 &&
+        !reservations.some(r => (r.amount_received && r.amount_received > 0));
 
-    // 計算該預約最早開始的時間
-    let earliestStartDateTime = null;
-    for (const r of reservations) {
-      if (r.session?.session_date && r.session?.start_time) {
-        const dateStr = r.session.session_date.toISOString().slice(0, 10);
-        const dt = new Date(`${dateStr}T${r.session.start_time}:00+08:00`);
-        if (!earliestStartDateTime || dt < earliestStartDateTime) {
-          earliestStartDateTime = dt;
+      if (!isAdmin && lockedPrepay && lockedPrepay.status !== 'pending_payment' && !isSelfCustomerAllPassVerified) {
+        return { errorStatus: 400, errorBody: { error: '這筆預約已經付款或正在對帳，如需取消請用 LINE 聯絡我們' } };
+      }
+
+      const isCollected = !isSelfCustomerAllPassVerified &&
+        reservations.some(r => (r.amount_received && r.amount_received > 0) || r.is_paid);
+      if (isCollected) {
+        const amt = reservations[0].amount_received || 0;
+        return { errorStatus: 409, errorBody: { error: `這筆已收款 NT$${amt}，請先退款或作廢收款` } };
+      }
+
+      const hasPaid = !isSelfCustomerAllPassVerified && reservations.some(r => r.is_paid);
+      const hasCheckedIn = reservations.some(r => r.attendance === 'checked_in');
+
+      // 計算該預約最早開始的時間
+      let earliestStartDateTime = null;
+      for (const r of reservations) {
+        if (r.session?.session_date && r.session?.start_time) {
+          const dateStr = r.session.session_date.toISOString().slice(0, 10);
+          const dt = new Date(`${dateStr}T${r.session.start_time}:00+08:00`);
+          if (!earliestStartDateTime || dt < earliestStartDateTime) {
+            earliestStartDateTime = dt;
+          }
         }
       }
-    }
-    const hasStarted = earliestStartDateTime && new Date() >= earliestStartDateTime;
+      const hasStarted = earliestStartDateTime && new Date() >= earliestStartDateTime;
 
-    // 顧客端規則校驗 (非管理員一律嚴格攔截)
-    if (!isAdmin) {
-      if (hasPaid) {
-        return res.status(400).json({ error: '此預約已完成付款，如需取消或退款請直接聯繫門市人員協助！' });
+      // 顧客端規則校驗 (非管理員一律嚴格攔截)
+      if (!isAdmin) {
+        if (hasPaid) {
+          return { errorStatus: 400, errorBody: { error: '此預約已完成付款，如需取消或退款請直接聯繫門市人員協助！' } };
+        }
+        if (hasCheckedIn) {
+          return { errorStatus: 400, errorBody: { error: '此預約已報到入座，無法取消。' } };
+        }
+        if (hasStarted) {
+          return { errorStatus: 400, errorBody: { error: '此預約時段已過開始時間，無法線上取消。如需協助請聯繫門市人員。' } };
+        }
+      } else {
+        // 員工端防呆二次確認：若訂單已付款且未帶確認旗標，要求二次確認以保護營收帳務
+        if (hasPaid && !confirmPaidCancel) {
+          return {
+            errorStatus: 409,
+            errorBody: {
+              code: 'REQUIRE_PAID_CANCEL_CONFIRM',
+              error: '此預約已完成付款結帳，取消將影響營收帳務，請再次確認是否強制取消？'
+            }
+          };
+        }
       }
-      if (hasCheckedIn) {
-        return res.status(400).json({ error: '此預約已報到入座，無法取消。' });
-      }
-      if (hasStarted) {
-        return res.status(400).json({ error: '此預約時段已過開始時間，無法線上取消。如需協助請聯繫門市人員。' });
-      }
-    } else {
-      // 員工端防呆二次確認：若訂單已付款且未帶確認旗標，要求二次確認以保護營收帳務
-      if (hasPaid && !confirmPaidCancel) {
-        return res.status(409).json({
-          code: 'REQUIRE_PAID_CANCEL_CONFIRM',
-          error: '此預約已完成付款結帳，取消將影響營收帳務，請再次確認是否強制取消？'
-        });
-      }
-    }
 
-    const operatorName = isAdmin ? (req.user.name || '管理員') : 'customer';
-    const cancelledByTag = isAdmin ? `admin:${operatorName}` : 'customer';
-
-    const updated = await prisma.$transaction(async (tx) => {
-      if (prepay) {
-        const lockedPrepay = await tx.bookingPrepay.findUnique({ where: { booking_ref } });
-        if (lockedPrepay && lockedPrepay.status !== 'cancelled' && lockedPrepay.status !== 'expired') {
-          if (isSelfCustomerAllPassVerified) {
-            const validPayments = await tx.payment.findMany({
-              where: { booking_ref, status: 'valid' }
-            });
-            const nowVoid = new Date();
-            for (const vp of validPayments) {
-              await tx.payment.update({
-                where: { id: vp.id },
-                data: {
-                  status: 'voided',
-                  voided_at: nowVoid,
-                  voided_by_name: 'customer',
-                  void_reason: '顧客取消半自助卡券預約'
-                }
-              });
-              if (vp.method === 'pass' && Array.isArray(vp.pass_json)) {
-                for (const pj of vp.pass_json) {
-                  if (pj?.user_pass_id) {
-                    await restorePass(tx, {
-                      user_pass_id: Number(pj.user_pass_id),
-                      units: Number(pj.units) || 1,
-                      booking_ref,
-                      payment_no: vp.payment_no,
-                      person_no: pj.person_no ?? null,
-                      staff_name: 'customer'
-                    });
-                    await auditLog(tx, {
-                      booking_ref,
-                      event_type: 'pass_restored',
-                      category: 'pass',
-                      summary: `卡券退回（取消預約）· ${pj.plan_name || '計次卡'} · ${pj.units || 1} 次`,
-                      payment_id: vp.id,
-                      staff_name: 'customer',
-                      device_label: '線上取消'
-                    });
-                  }
-                }
+      if (lockedPrepay && lockedPrepay.status !== 'cancelled' && lockedPrepay.status !== 'expired') {
+        if (isSelfCustomerAllPassVerified) {
+          const validPayments = await tx.payment.findMany({
+            where: { booking_ref, status: 'valid' }
+          });
+          const nowVoid = new Date();
+          for (const vp of validPayments) {
+            await tx.payment.update({
+              where: { id: vp.id },
+              data: {
+                status: 'voided',
+                voided_at: nowVoid,
+                voided_by_name: 'customer',
+                void_reason: '顧客取消半自助卡券預約'
               }
-              await auditLog(tx, {
-                booking_ref,
-                event_type: 'payment_voided',
-                category: 'payment',
-                summary: `作廢收款（取消預約）· ${vp.payment_no}`,
-                amount: -(vp.amount || 0),
-                reason: '顧客取消半自助卡券預約',
-                payment_id: vp.id,
-                staff_name: 'customer',
-                device_label: '線上取消'
-              });
-            }
-            await refreshBillingCache(tx, booking_ref);
-          } else {
-            // Release held pool account if any
-            if (lockedPrepay.assigned_pool_account) {
-              await releasePoolAccount(tx, {
-                accountNumber: lockedPrepay.assigned_pool_account,
-                orderRef: booking_ref
-              });
-            }
-            // Restore held passes if not yet settled (if settled, admin already voided payments first)
-            if (!lockedPrepay.settled_at) {
-              const holds = Array.isArray(lockedPrepay.pass_holds) ? lockedPrepay.pass_holds : [];
-              for (const h of holds) {
-                if (h?.user_pass_id && (Number(h.units) || 0) > 0) {
+            });
+            if (vp.method === 'pass' && Array.isArray(vp.pass_json)) {
+              for (const pj of vp.pass_json) {
+                if (pj?.user_pass_id) {
                   await restorePass(tx, {
-                    user_pass_id: Number(h.user_pass_id),
-                    units: Number(h.units),
+                    user_pass_id: Number(pj.user_pass_id),
+                    units: Number(pj.units) || 1,
                     booking_ref,
-                    payment_no: null,
-                    person_no: null,
-                    staff_name: operatorName
+                    payment_no: vp.payment_no,
+                    person_no: pj.person_no ?? null,
+                    staff_name: 'customer'
+                  });
+                  await auditLog(tx, {
+                    booking_ref,
+                    event_type: 'pass_restored',
+                    category: 'pass',
+                    summary: `卡券退回（取消預約）· ${pj.plan_name || '計次卡'} · ${pj.units || 1} 次`,
+                    payment_id: vp.id,
+                    staff_name: 'customer',
+                    device_label: '線上取消'
                   });
                 }
               }
             }
+            await auditLog(tx, {
+              booking_ref,
+              event_type: 'payment_voided',
+              category: 'payment',
+              summary: `作廢收款（取消預約）· ${vp.payment_no}`,
+              amount: -(vp.amount || 0),
+              reason: '顧客取消半自助卡券預約',
+              payment_id: vp.id,
+              staff_name: 'customer',
+              device_label: '線上取消'
+            });
           }
-
-          await tx.bookingPrepay.update({
-            where: { booking_ref },
-            data: { status: 'cancelled' }
-          });
+          await refreshBillingCache(tx, booking_ref);
+        } else {
+          // Release held pool account if any
+          if (lockedPrepay.assigned_pool_account) {
+            await releasePoolAccount(tx, {
+              accountNumber: lockedPrepay.assigned_pool_account,
+              orderRef: booking_ref
+            });
+          }
+          // Restore held passes if not yet settled (if settled, admin already voided payments first)
+          if (!lockedPrepay.settled_at) {
+            const holds = Array.isArray(lockedPrepay.pass_holds) ? lockedPrepay.pass_holds : [];
+            for (const h of holds) {
+              if (h?.user_pass_id && (Number(h.units) || 0) > 0) {
+                await restorePass(tx, {
+                  user_pass_id: Number(h.user_pass_id),
+                  units: Number(h.units),
+                  booking_ref,
+                  payment_no: null,
+                  person_no: null,
+                  staff_name: operatorName
+                });
+              }
+            }
+          }
         }
+
+        await tx.bookingPrepay.update({
+          where: { booking_ref },
+          data: { status: 'cancelled' }
+        });
       }
 
       // Cancel all related rows
@@ -1580,8 +1579,15 @@ export const cancelReservation = async (req, res) => {
         }
       }
 
-      return cancelledRes;
+      return { cancelledRes, reservations };
     });
+
+    if (txResult.errorStatus) {
+      return res.status(txResult.errorStatus).json(txResult.errorBody);
+    }
+
+    const updated = txResult.cancelledRes;
+    const reservations = txResult.reservations;
 
     res.json({ message: '預約已成功取消', count: updated.count });
 
