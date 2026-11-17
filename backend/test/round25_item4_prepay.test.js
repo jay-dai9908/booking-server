@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import prisma from '../src/prismaClient.js';
 import { dateOnly } from '../../shared/time.js';
+import { ensureTestPublishedLayout, cleanupTestPublishedLayout } from './helpers/seedTestLayout.js';
 import {
   createReservation,
   cancelReservation,
@@ -86,36 +87,13 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
     await prisma.dailySetting.deleteMany({ where: { date: { in: testDates } } });
 
     // Ensure SeatLayout with seats exists so allocateSeats succeeds cleanly
-    const existingLayouts = await prisma.seatLayout.findMany({
-      where: { status: 'published' },
-      include: { tables: { include: { seats: true } } }
+    createdLayoutId = await ensureTestPublishedLayout(prisma, {
+      name: 'R25 Test Layout',
+      effectiveFrom: '2020-01-01',
+      effectiveDate: futureDateStr,
+      codePrefix: 'A',
+      seatCount: 16
     });
-    if (existingLayouts.length === 0) {
-      const layout = await prisma.seatLayout.create({
-        data: {
-          name: 'R25 Test Layout',
-          status: 'published',
-          capacity: 16,
-          tables: {
-            create: {
-              name: 'T1',
-              x: 0,
-              y: 0,
-              seats: {
-                create: Array.from({ length: 16 }, (_, i) => ({
-                  code: `A${i + 1}`,
-                  seat_no: i + 1,
-                  x: i * 40,
-                  y: 0,
-                  is_active: true
-                }))
-              }
-            }
-          }
-        }
-      });
-      createdLayoutId = layout.id;
-    }
 
     // Ensure KioskSetting baseline
     await prisma.kioskSetting.upsert({
@@ -876,12 +854,18 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
     }
   } finally {
     // Cleanup in reverse dependency order (never delete append-only AccountingEvent)
-    if (createdRefs.length) {
-      await prisma.payment.deleteMany({ where: { booking_ref: { in: createdRefs } } });
-      await prisma.bookingPrepay.deleteMany({ where: { booking_ref: { in: createdRefs } } });
-      await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: createdRefs } } });
-      await prisma.bookingEquipment.deleteMany({ where: { booking_ref: { in: createdRefs } } });
-      await prisma.reservation.deleteMany({ where: { booking_ref: { in: createdRefs } } });
+    const remainingSess = await prisma.session.findMany({ where: { session_date: { in: testDates } }, select: { id: true } });
+    const remainingSessIds = remainingSess.map(s => s.id);
+    const remainingRes = remainingSessIds.length
+      ? await prisma.reservation.findMany({ where: { session_id: { in: remainingSessIds } }, select: { booking_ref: true } })
+      : [];
+    const allCleanupRefs = [...new Set([...createdRefs, ...remainingRes.map(r => r.booking_ref)])];
+    if (allCleanupRefs.length) {
+      await prisma.payment.deleteMany({ where: { booking_ref: { in: allCleanupRefs } } });
+      await prisma.bookingPrepay.deleteMany({ where: { booking_ref: { in: allCleanupRefs } } });
+      await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: allCleanupRefs } } });
+      await prisma.bookingEquipment.deleteMany({ where: { booking_ref: { in: allCleanupRefs } } });
+      await prisma.reservation.deleteMany({ where: { booking_ref: { in: allCleanupRefs } } });
     }
     await prisma.session.deleteMany({ where: { session_date: { in: testDates } } });
     await prisma.dailySetting.deleteMany({ where: { date: { in: testDates } } });
@@ -898,9 +882,7 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
     if (createdMethodCode) {
       await prisma.paymentMethodConfig.deleteMany({ where: { code: createdMethodCode } });
     }
-    if (createdLayoutId) {
-      await prisma.seatLayout.deleteMany({ where: { id: createdLayoutId } });
-    }
+    await cleanupTestPublishedLayout(prisma, createdLayoutId);
     if (savedKiosk) {
       await prisma.kioskSetting.update({
         where: { id: 1 },

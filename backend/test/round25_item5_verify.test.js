@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import prisma from '../src/prismaClient.js';
 import { dateOnly, toTaipeiDateString } from '../../shared/time.js';
+import { ensureTestPublishedLayout, cleanupTestPublishedLayout } from './helpers/seedTestLayout.js';
 import { createReservation, getAdminNavBadges } from '../src/controllers/reservationController.js';
 import {
   patchRemittanceLast5Handler,
@@ -77,36 +78,13 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
     }
     await prisma.dailySetting.deleteMany({ where: { date: testDate } });
 
-    const existingLayouts = await prisma.seatLayout.findMany({
-      where: { status: 'published' },
-      include: { tables: { include: { seats: true } } }
+    createdLayoutId = await ensureTestPublishedLayout(prisma, {
+      name: 'R25 Verify Test Layout',
+      effectiveFrom: '2020-01-01',
+      effectiveDate: futureDateStr,
+      codePrefix: 'B',
+      seatCount: 16
     });
-    if (existingLayouts.length === 0) {
-      const layout = await prisma.seatLayout.create({
-        data: {
-          name: 'R25 Verify Test Layout',
-          status: 'published',
-          capacity: 16,
-          tables: {
-            create: {
-              name: 'T1',
-              x: 0,
-              y: 0,
-              seats: {
-                create: Array.from({ length: 16 }, (_, i) => ({
-                  code: `B${i + 1}`,
-                  seat_no: i + 1,
-                  x: i * 40,
-                  y: 0,
-                  is_active: true
-                }))
-              }
-            }
-          }
-        }
-      });
-      createdLayoutId = layout.id;
-    }
 
     await prisma.kioskSetting.upsert({
       where: { id: 1 },
@@ -585,9 +563,7 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
     if (createdMethodCode) {
       await prisma.paymentMethodConfig.deleteMany({ where: { code: createdMethodCode } });
     }
-    if (createdLayoutId) {
-      await prisma.seatLayout.deleteMany({ where: { id: createdLayoutId } });
-    }
+    await cleanupTestPublishedLayout(prisma, createdLayoutId);
     if (savedKiosk) {
       await prisma.kioskSetting.update({
         where: { id: 1 },
