@@ -117,9 +117,9 @@ async function run() {
       }
     });
 
-    // Create session covering current time in Taipei (10:00 to 23:00)
-    const startTimeStr = '10:00';
-    const endTimeStr = '23:00';
+    // Create session covering current time in Taipei (00:00 to 23:59)
+    const startTimeStr = '00:00';
+    const endTimeStr = '23:59';
 
     const sess = await prisma.session.upsert({
       where: {

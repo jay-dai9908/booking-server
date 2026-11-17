@@ -166,10 +166,12 @@ export function buildBillInput({
 
   // 5. Pricing
   const pricingObj = {
-    hourly: pricing.hourly_price ?? 150,
-    unlimited: pricing.unlimited_price ?? 750,
+    hourly: pricing.hourly_price ?? pricing.hourly ?? 150,
+    unlimited: pricing.unlimited_price ?? pricing.unlimited ?? 750,
     allow_unlimited: pricing.allow_unlimited !== false,
-    day_type: pricing.is_weekend ? 'weekend' : 'weekday'
+    day_type: pricing.is_weekend !== undefined
+      ? (pricing.is_weekend ? 'weekend' : 'weekday')
+      : (pricing.day_type || 'weekday')
   };
 
   const nowMs = typeof now === 'number' ? now : (now instanceof Date ? now.getTime() : new Date(now).getTime());

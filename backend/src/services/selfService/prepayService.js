@@ -505,7 +505,9 @@ export async function computeSelfServiceQuote(
 
   const pricing = {
     hourly: dailyRates.hourly_price,
+    hourly_price: dailyRates.hourly_price,
     unlimited: dailyRates.unlimited_price,
+    unlimited_price: dailyRates.unlimited_price,
     allow_unlimited: dailyRates.allow_unlimited,
     is_weekend: dailyRates.is_weekend
   };
