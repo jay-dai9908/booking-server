@@ -815,3 +815,54 @@ export const downloadFirmwareHandler = async (req, res) => {
     res.status(500).json({ error: '下載韌體失敗' });
   }
 };
+
+/**
+ * 報到機警報通知收件人設定（Item 5）
+ */
+export const getAlertRecipientsHandler = async (req, res) => {
+  try {
+    const setting = await ensureKioskSettingRow(prisma);
+    const alertUserIds = Array.isArray(setting.alert_user_ids) ? setting.alert_user_ids : [];
+
+    // 尋找已綁定真實 LINE 的會員/員工帳號供勾選
+    const users = await prisma.user.findMany({
+      select: { id: true, name: true, phone: true, line_user_id: true }
+    });
+
+    const candidates = users
+      .filter((u) => u.line_user_id && !u.line_user_id.startsWith('manual_'))
+      .map((u) => ({
+        id: u.id,
+        name: u.name,
+        phone: u.phone,
+        has_line: true
+      }));
+
+    res.json({
+      ok: true,
+      alert_user_ids: alertUserIds,
+      candidates
+    });
+  } catch (err) {
+    console.error('[kioskController] getAlertRecipientsHandler error:', err);
+    res.status(500).json({ error: '取得警報收件人列表失敗' });
+  }
+};
+
+export const updateAlertRecipientsHandler = async (req, res) => {
+  try {
+    const { user_ids } = req.body;
+    const userIds = Array.isArray(user_ids) ? user_ids.map(Number).filter((n) => Number.isInteger(n)) : [];
+
+    await prisma.kioskSetting.upsert({
+      where: { id: 1 },
+      update: { alert_user_ids: userIds },
+      create: { id: 1, alert_user_ids: userIds }
+    });
+
+    res.json({ ok: true, alert_user_ids: userIds });
+  } catch (err) {
+    console.error('[kioskController] updateAlertRecipientsHandler error:', err);
+    res.status(500).json({ error: '更新警報收件人失敗' });
+  }
+};

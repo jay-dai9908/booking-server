@@ -3,6 +3,7 @@ import prisma from './prismaClient.js';
 import { getTaipeiDateParts } from './utils/dateUtils.js';
 import { releasePoolAccount } from './services/selfService/poolAccountService.js';
 import { releaseExpiredPrepays } from './services/selfService/prepayService.js';
+import { checkKioskOfflineAlerts } from './services/kiosk/alertService.js';
 
 export const startCronJobs = () => {
   // 1. Run every day at midnight (00:00) Taipei time
@@ -138,7 +139,16 @@ export const startCronJobs = () => {
     }
   }, { timezone: 'Asia/Taipei' });
 
-  console.log('[Cron Job] Scheduled midnight attendance check, hourly preorder pool cleaner, and price solidification.');
+  // 4. Kiosk Offline Alert Check (every 5 minutes)
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      await checkKioskOfflineAlerts(prisma);
+    } catch (err) {
+      console.error('[Cron Job] checkKioskOfflineAlerts error:', err);
+    }
+  });
+
+  console.log('[Cron Job] Scheduled midnight attendance check, hourly preorder pool cleaner, price solidification, and kiosk offline monitor.');
 };
 
 /**

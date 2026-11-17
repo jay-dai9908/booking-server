@@ -162,6 +162,12 @@ export default function KioskPage() {
   const [uploadingFw, setUploadingFw] = useState(false);
   const [fwError, setFwError] = useState('');
 
+  // 警報通知收件人（Item 5）
+  const [alertUserIds, setAlertUserIds] = useState([]);
+  const [alertCandidates, setAlertCandidates] = useState([]);
+  const [loadingRecipients, setLoadingRecipients] = useState(false);
+  const [savingRecipients, setSavingRecipients] = useState(false);
+
   const [notice, setNotice] = useState(null);
 
   const showNotice = (type, text) => {
@@ -235,11 +241,25 @@ export default function KioskPage() {
     }
   }, []);
 
+  const fetchRecipients = useCallback(async () => {
+    setLoadingRecipients(true);
+    try {
+      const res = await api.get('/kiosk/admin/alerts/recipients');
+      setAlertUserIds(Array.isArray(res.data?.alert_user_ids) ? res.data.alert_user_ids : []);
+      setAlertCandidates(Array.isArray(res.data?.candidates) ? res.data.candidates : []);
+    } catch (err) {
+      console.warn('Failed to load alert recipients:', err);
+    } finally {
+      setLoadingRecipients(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchOverview();
     fetchSlides();
     fetchFirmwares();
-  }, [fetchOverview, fetchSlides, fetchFirmwares]);
+    fetchRecipients();
+  }, [fetchOverview, fetchSlides, fetchFirmwares, fetchRecipients]);
 
   useEffect(() => {
     fetchLogs(logDate);
@@ -470,6 +490,25 @@ export default function KioskPage() {
       fetchFirmwares();
     } catch (err) {
       showNotice('error', err.response?.data?.message || '刪除韌體失敗');
+    }
+  };
+
+  const handleToggleRecipient = (userId) => {
+    setAlertUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const handleSaveRecipients = async () => {
+    setSavingRecipients(true);
+    try {
+      await api.put('/kiosk/admin/alerts/recipients', { user_ids: alertUserIds });
+      showNotice('success', '警報收件人已更新');
+      fetchRecipients();
+    } catch (err) {
+      showNotice('error', '儲存警報收件人失敗');
+    } finally {
+      setSavingRecipients(false);
     }
   };
 
@@ -1270,7 +1309,72 @@ export default function KioskPage() {
             )}
           </section>
 
-          {/* 7. 進出紀錄 */}
+          {/* 7. LINE 警報通知收件人（Item 5） */}
+          <section
+            data-testid="kiosk-alerts-section"
+            className="lg:col-span-2 bg-white border border-stone-200 rounded-xl shadow-sm p-4 sm:p-5 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-stone-800 flex items-center gap-2">
+                <Bell className="w-4 h-4 text-sg-brown" />
+                LINE 警報通知收件人
+              </h2>
+              <span className="text-xs text-stone-500">
+                機台離線超過 10 分鐘或備用密碼開門時即刻推播
+              </span>
+            </div>
+
+            {loadingRecipients ? (
+              <div className="py-2 text-center text-xs text-stone-400">載入收件人中...</div>
+            ) : alertCandidates.length === 0 ? (
+              <div className="text-xs text-stone-400 text-center py-3 border border-dashed border-stone-200 rounded">
+                尚無綁定 LINE 的管理員帳號
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {alertCandidates.map((user) => {
+                    const isChecked = alertUserIds.includes(user.id);
+                    return (
+                      <label
+                        key={user.id}
+                        className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer select-none transition-colors ${
+                          isChecked
+                            ? 'bg-emerald-50/60 border-emerald-300 text-emerald-950 font-medium'
+                            : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleRecipient(user.id)}
+                          className="rounded text-emerald-600"
+                        />
+                        <div>
+                          <div>{user.name}</div>
+                          <div className="text-[11px] text-stone-500 font-mono">{user.phone || '無電話'}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveRecipients}
+                    disabled={savingRecipients}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sg-brown text-white text-xs font-bold hover:opacity-95 disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    {savingRecipients ? '儲存中...' : '儲存警報收件人'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* 8. 進出紀錄 */}
           <section className="lg:col-span-2 bg-white border border-stone-200 rounded-xl shadow-sm p-4 sm:p-5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-bold text-stone-800">進出紀錄</h2>

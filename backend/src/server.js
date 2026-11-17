@@ -713,6 +713,8 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "fw_target_id" INTEGER`,
     `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "fw_policy" TEXT NOT NULL DEFAULT 'none'`,
     `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "fw_policy_set_at" TIMESTAMP(3)`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "alert_user_ids" JSONB`,
+    `ALTER TABLE "KioskDevice" ADD COLUMN IF NOT EXISTS "offline_alerted_at" TIMESTAMP(3)`,
 
     `CREATE TABLE IF NOT EXISTS "KioskSlide" (
       "id" SERIAL NOT NULL,

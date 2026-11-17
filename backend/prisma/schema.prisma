@@ -728,6 +728,7 @@ model KioskSetting {
   fw_target_id             Int?
   fw_policy                String    @default("none")
   fw_policy_set_at         DateTime?
+  alert_user_ids           Json?
   updated_at               DateTime  @default(now()) @updatedAt
 }
 
@@ -795,6 +796,7 @@ model KioskDevice {
   fw_version   String?
   status_json  Json?
   have_json    Json?
+  offline_alerted_at DateTime?
   created_at   DateTime  @default(now())
 
   @@index([is_active])

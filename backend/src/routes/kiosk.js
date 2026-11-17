@@ -19,7 +19,9 @@ import {
   uploadFirmwareHandler,
   setFirmwareTargetHandler,
   deleteFirmwareHandler,
-  downloadFirmwareHandler
+  downloadFirmwareHandler,
+  getAlertRecipientsHandler,
+  updateAlertRecipientsHandler
 } from '../controllers/kioskController.js';
 import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
 import { kioskEnvelope } from '../middlewares/kioskEnvelope.js';
@@ -63,6 +65,10 @@ router.post(
 );
 router.put('/admin/firmware/target', verifyToken, requireAnyPermission(['settings']), setFirmwareTargetHandler);
 router.delete('/admin/firmware/:id', verifyToken, requireAnyPermission(['settings']), deleteFirmwareHandler);
+
+// 警報通知收件人設定（權限：settings）
+router.get('/admin/alerts/recipients', verifyToken, requireAnyPermission(['settings']), getAlertRecipientsHandler);
+router.put('/admin/alerts/recipients', verifyToken, requireAnyPermission(['settings']), updateAlertRecipientsHandler);
 
 // 檔案下載（公開，靠檢查碼）
 router.get('/files/floor-map/:version.json', getFloorMapFileHandler);

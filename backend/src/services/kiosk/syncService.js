@@ -5,6 +5,7 @@ import { ironText } from '../../../../shared/selfService.js';
 import { ensureKioskSetting } from '../selfService/prepayService.js';
 import { getActiveLayoutForDate } from '../seating/layoutService.js';
 import { buildFloorMap } from '../../../../shared/floorMap.js';
+import { notifyBackupCodeUsed } from './alertService.js';
 
 export function addDaysYmd(ymd, offsetDays) {
   const [y, m, d] = String(ymd).split('-').map(Number);
@@ -131,6 +132,21 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
       const evAt = hasValidTime ? new Date(evAtSec * 1000) : now;
       const atUnknown = !hasValidTime;
       const isBackup = ev.type === 'backup_open';
+
+      const existingLog = await db.kioskAccessLog.findUnique({
+        where: {
+          device_id_event_id: {
+            device_id: device.id,
+            event_id: eventId
+          }
+        }
+      });
+
+      if (!existingLog && isBackup) {
+        notifyBackupCodeUsed(db, now, evAtSec).catch((err) =>
+          console.warn('[syncService] notifyBackupCodeUsed error:', err)
+        );
+      }
 
       await db.kioskAccessLog.upsert({
         where: {
