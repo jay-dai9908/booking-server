@@ -95,17 +95,23 @@ model Reservation {
   paid_persons     Int       @default(0)
   amount_due       Int?      // 目前應收總額（帳單重算結果）
   amount_received  Int       @default(0)       // 有效收款 + 補收 − 退款（不含卡券折抵）
+  is_self_service  Boolean   @default(false)
   
   session        Session  @relation(fields: [session_id], references: [id])
   user           User     @relation(fields: [user_id], references: [id])
 }
 
 model DailySetting {
-  id              Int      @id @default(autoincrement())
-  date            DateTime @unique @db.Date
-  allow_unlimited Boolean  @default(true)
-  hourly_price    Int?
-  unlimited_price Int?
+  id                   Int       @id @default(autoincrement())
+  date                 DateTime  @unique @db.Date
+  allow_unlimited      Boolean   @default(true)
+  hourly_price         Int?
+  unlimited_price      Int?
+  is_self_service      Boolean   @default(false)
+  self_allow_hourly    Boolean   @default(false)
+  self_allow_equipment Boolean   @default(false)
+  iron_mode            String    @default("today") // today | next | date
+  iron_date            DateTime? @db.Date
 }
 
 model GlobalSetting {
@@ -197,6 +203,10 @@ model EquipmentConfig {
   min_contiguous_hours Int                @default(2)
   allow_exceed_pax     Boolean            @default(false)
   sort_order           Int                @default(0)
+  self_enabled         Boolean            @default(false)
+  self_hourly_rate     Int?
+  self_daily_cap       Int?
+  self_stock           Int?
   created_at           DateTime           @default(now())
 
   booking_equipments   BookingEquipment[]
@@ -693,6 +703,48 @@ model DailyCounter {
   key         String   // payment | job
   value       Int      @default(0)
   @@unique([date, key])
+}
+
+// -------------------------------------------------------------
+// 半自助日與報到機設定／預約預付紀錄 (Round 25)
+// -------------------------------------------------------------
+
+model KioskSetting {
+  id                       Int      @id @default(1)
+  early_minutes            Int      @default(30)
+  after_close_minutes      Int      @default(60)
+  prepay_deadline_hour     Int      @default(12)
+  max_unpaid_self_bookings Int      @default(2)
+  updated_at               DateTime @default(now()) @updatedAt
+}
+
+model BookingPrepay {
+  id                     Int       @id @default(autoincrement())
+  booking_ref            String    @unique
+  user_id                Int
+  total_amount           Int
+  pass_persons           Int       @default(0)
+  pass_holds             Json      @default("[]")
+  amount_due             Int
+  status                 String    @default("pending_payment") // pending_payment | reported_pending_verify | mismatch | verified | expired | cancelled
+  deadline_at            DateTime?
+  payment_method_code    String?
+  selected_bank_info     String?
+  assigned_pool_account  String?
+  assigned_pool_url      String?
+  remittance_last5       String?
+  remittance_reported_at DateTime?
+  agreed_terms_at        DateTime?
+  settled_at             DateTime?
+  verified_at            DateTime?
+  verified_by_name       String?
+  reminded_at            DateTime?
+  admin_note             String?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @default(now()) @updatedAt
+
+  @@index([user_id, status])
+  @@index([status, deadline_at])
 }
 
 

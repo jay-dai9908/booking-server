@@ -393,7 +393,8 @@ export function computeBill({
     targetPersonNo = null,
     scope = 'all',
     addedAfterPayment = false,
-    includePaid = false
+    includePaid = false,
+    allowedPersonNos = null
   }) => {
     if (totalAmount === 0) return;
 
@@ -407,21 +408,25 @@ export function computeBill({
     }
 
     if (!addedAfterPayment) {
+      const targetUnpaid = Array.isArray(allowedPersonNos)
+        ? unpaidPersons.filter(p => allowedPersonNos.includes(Number(p.person_no)))
+        : unpaidPersons;
+
       // Standard item: remaining amount goes to unpaid persons
       const remainingAmount = totalAmount - frozenAllocated;
-      if (remainingAmount === 0 || unpaidPersons.length === 0) return;
+      if (remainingAmount === 0 || targetUnpaid.length === 0) return;
 
       let weights = [];
       if (splitMode === 'even') {
-        weights = unpaidPersons.map(p => ({ person_no: p.person_no, weight: 1 }));
+        weights = targetUnpaid.map(p => ({ person_no: p.person_no, weight: 1 }));
       } else if (splitMode === 'first') {
-        const first = unpaidPersons[0];
-        weights = unpaidPersons.map(p => ({ person_no: p.person_no, weight: p.person_no === first.person_no ? 1 : 0 }));
+        const first = targetUnpaid[0];
+        weights = targetUnpaid.map(p => ({ person_no: p.person_no, weight: p.person_no === first.person_no ? 1 : 0 }));
       } else if (splitMode === 'person' && targetPersonNo != null) {
-        weights = unpaidPersons.map(p => ({ person_no: p.person_no, weight: p.person_no === targetPersonNo ? 1 : 0 }));
+        weights = targetUnpaid.map(p => ({ person_no: p.person_no, weight: p.person_no === targetPersonNo ? 1 : 0 }));
       } else {
         // Proportional based on scope
-        weights = unpaidPersons.map(p => {
+        weights = targetUnpaid.map(p => {
           let w = p.base_amount || 0;
           if (scope === 'seating') w = p.entry.amount;
           else if (scope === 'equipment') w = p.board.amount;
@@ -431,7 +436,7 @@ export function computeBill({
 
       const splitResults = splitAmount(remainingAmount, weights);
       for (const res of splitResults) {
-        const p = unpaidPersons.find(u => u.person_no === res.person_no);
+        const p = targetUnpaid.find(u => u.person_no === res.person_no);
         if (p) {
           p.shares.push({ source_key, label, amount: res.amount });
         }
@@ -514,11 +519,18 @@ export function computeBill({
 
   // 2b. Order Promos
   for (const op of orderPromos || []) {
+    const allowedPersonNos = Array.isArray(op.person_nos)
+      ? op.person_nos.map(Number)
+      : null;
+    const promoTargetUnpaid = allowedPersonNos
+      ? unpaidPersons.filter(up => allowedPersonNos.includes(Number(up.person_no)))
+      : unpaidPersons;
+
     // Calculate promo discount amount
     let promoDiscount = 0;
     if (op.discount_type === 'percentage') {
       // Target scope bases
-      for (const up of unpaidPersons) {
+      for (const up of promoTargetUnpaid) {
         let base = up.base_amount;
         if (op.target_scope === 'seating') base = up.entry.amount;
         else if (op.target_scope === 'equipment') base = up.board.amount;
@@ -527,7 +539,7 @@ export function computeBill({
       }
       continue;
     } else if (op.discount_type === 'fixed_per_pax') {
-      for (const up of unpaidPersons) {
+      for (const up of promoTargetUnpaid) {
         up.promos.push({ code: op.code, name: op.name, amount: -Math.min(up.base_amount, Number(op.discount_value) || 0) });
       }
       continue;
@@ -543,7 +555,8 @@ export function computeBill({
         totalAmount: -promoDiscount,
         splitMode: op.split?.mode || op.split_mode || 'proportional',
         targetPersonNo: op.split?.person_no || op.target_person_no || op.person_no,
-        scope: op.target_scope || 'all'
+        scope: op.target_scope || 'all',
+        allowedPersonNos
       });
     }
   }

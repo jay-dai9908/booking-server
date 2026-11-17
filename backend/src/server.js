@@ -598,7 +598,60 @@ const ensureDatabaseSchema = async () => {
       "value" INTEGER NOT NULL DEFAULT 0,
       CONSTRAINT "DailyCounter_pkey" PRIMARY KEY ("id")
     )`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS "DailyCounter_date_key_key" ON "DailyCounter"("date", "key")`
+    `CREATE UNIQUE INDEX IF NOT EXISTS "DailyCounter_date_key_key" ON "DailyCounter"("date", "key")`,
+
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "is_self_service" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "self_allow_hourly" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "self_allow_equipment" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "iron_mode" TEXT NOT NULL DEFAULT 'today'`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "iron_date" DATE`,
+
+    `ALTER TABLE "EquipmentConfig" ADD COLUMN IF NOT EXISTS "self_enabled" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "EquipmentConfig" ADD COLUMN IF NOT EXISTS "self_hourly_rate" INTEGER`,
+    `ALTER TABLE "EquipmentConfig" ADD COLUMN IF NOT EXISTS "self_daily_cap" INTEGER`,
+    `ALTER TABLE "EquipmentConfig" ADD COLUMN IF NOT EXISTS "self_stock" INTEGER`,
+
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "is_self_service" BOOLEAN NOT NULL DEFAULT false`,
+
+    `CREATE TABLE IF NOT EXISTS "KioskSetting" (
+      "id" INTEGER NOT NULL DEFAULT 1,
+      "early_minutes" INTEGER NOT NULL DEFAULT 30,
+      "after_close_minutes" INTEGER NOT NULL DEFAULT 60,
+      "prepay_deadline_hour" INTEGER NOT NULL DEFAULT 12,
+      "max_unpaid_self_bookings" INTEGER NOT NULL DEFAULT 2,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "KioskSetting_pkey" PRIMARY KEY ("id")
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "BookingPrepay" (
+      "id" SERIAL NOT NULL,
+      "booking_ref" TEXT NOT NULL,
+      "user_id" INTEGER NOT NULL,
+      "total_amount" INTEGER NOT NULL,
+      "pass_persons" INTEGER NOT NULL DEFAULT 0,
+      "pass_holds" JSONB NOT NULL DEFAULT '[]',
+      "amount_due" INTEGER NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'pending_payment',
+      "deadline_at" TIMESTAMP(3),
+      "payment_method_code" TEXT,
+      "selected_bank_info" TEXT,
+      "assigned_pool_account" TEXT,
+      "assigned_pool_url" TEXT,
+      "remittance_last5" TEXT,
+      "remittance_reported_at" TIMESTAMP(3),
+      "agreed_terms_at" TIMESTAMP(3),
+      "settled_at" TIMESTAMP(3),
+      "verified_at" TIMESTAMP(3),
+      "verified_by_name" TEXT,
+      "reminded_at" TIMESTAMP(3),
+      "admin_note" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "BookingPrepay_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "BookingPrepay_booking_ref_key" ON "BookingPrepay"("booking_ref")`,
+    `CREATE INDEX IF NOT EXISTS "BookingPrepay_user_id_status_idx" ON "BookingPrepay"("user_id", "status")`,
+    `CREATE INDEX IF NOT EXISTS "BookingPrepay_status_deadline_at_idx" ON "BookingPrepay"("status", "deadline_at")`
   ];
 
   for (const sql of statements) {

@@ -654,4 +654,57 @@ test('Round 21 Item 1: calculatePersonRefundInfo per-person paid and max_refunda
   assert.equal(part2.paid_amount, 100);
 });
 
+test('Round 25 Item 1: orderPromos person_nos targets only listed unpaid persons', () => {
+  const pricing = { hourly: 150, unlimited: 550, allow_unlimited: true };
+  const rules = { grace: 10, block: 30, early_leave_mode: 'booked', default_split_mode: 'proportional' };
+  const threeUnlimitedPersons = [
+    { person_no: 1, status: 'active', mode: 'unlimited' },
+    { person_no: 2, status: 'active', mode: 'unlimited' },
+    { person_no: 3, status: 'active', mode: 'unlimited' }
+  ];
+
+  // 1) Percentage 10% with person_nos: [1, 2] -> person 3 gets 0 discount
+  const pctBill = computeBill({
+    pricing,
+    rules,
+    booking: { booked_minutes: 240 },
+    persons: threeUnlimitedPersons,
+    orderPromos: [
+      { code: 'VIP90', name: '9折', discount_type: 'percentage', discount_value: 10, target_scope: 'all', person_nos: [1, 2] }
+    ]
+  });
+  assert.equal(pctBill.persons[0].total, 495);
+  assert.equal(pctBill.persons[1].total, 495);
+  assert.equal(pctBill.persons[2].total, 550);
+
+  // 2) Fixed order $100 with person_nos: [1, 2] -> $100 split only across person 1 & 2; person 3 unchanged
+  const fixedBill = computeBill({
+    pricing,
+    rules,
+    booking: { booked_minutes: 240 },
+    persons: threeUnlimitedPersons,
+    orderPromos: [
+      { code: 'OFF100', name: '整單折100', discount_type: 'fixed_order', discount_value: 100, target_scope: 'all', person_nos: [1, 2] }
+    ]
+  });
+  assert.equal(fixedBill.persons[0].total, 500);
+  assert.equal(fixedBill.persons[1].total, 500);
+  assert.equal(fixedBill.persons[2].total, 550);
+  assert.equal(fixedBill.summary.amount_due, 1550);
+
+  // 3) Fixed per pax $50 with person_nos: [1, 2] -> person 3 unchanged
+  const perPaxBill = computeBill({
+    pricing,
+    rules,
+    booking: { booked_minutes: 240 },
+    persons: threeUnlimitedPersons,
+    orderPromos: [
+      { code: 'PAX50', name: '每人折50', discount_type: 'fixed_per_pax', discount_value: 50, target_scope: 'all', person_nos: [1, 2] }
+    ]
+  });
+  assert.equal(perPaxBill.persons[0].total, 500);
+  assert.equal(perPaxBill.persons[1].total, 500);
+  assert.equal(perPaxBill.persons[2].total, 550);
+});
+
 
