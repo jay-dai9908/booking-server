@@ -4,6 +4,11 @@ import {
   sendProductOrderDepositVerifiedNotification,
   sendProductArrivalNotification
 } from '../utils/lineMessaging.js';
+import {
+  assignPoolAccount,
+  releasePoolAccount,
+  markPoolAccountUsed
+} from '../services/selfService/poolAccountService.js';
 
 /**
  * Public: Get active products for customer shop
@@ -220,50 +225,23 @@ export const createProductOrder = async (req, res) => {
 
     // Execute in transaction
     const order = await prisma.$transaction(async (tx) => {
-      // 交易內先以 FOR UPDATE 鎖定使用者資料列，確保同一會員高併發下單請求依序排隊
-      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
-
       let assignedPoolAccount = null;
       let assignedPoolUrl = null;
 
-      // 防洗單機制：若選擇社群收款 (ctbc_pool)，在交易內鎖定狀態下檢查顧客尚未完成付款且佔用虛擬帳號的筆數上限 (最多 2 筆)
+      // 防洗單機制：若選擇社群收款 (ctbc_pool)，在交易內鎖定狀態下檢查顧客尚未完成付款且佔用虛擬帳號的筆數上限 (商城＋半自助預約合計最多 2 筆)
       if (payment_method_code === 'ctbc_pool') {
-        const activePendingPoolOrdersCount = await tx.productOrder.count({
-          where: {
-            user_id: userId,
-            order_status: { not: 'cancelled' },
-            payment_status: 'pending_payment',
-            assigned_pool_account: { not: null }
-          }
+        const allocated = await assignPoolAccount(tx, {
+          userId,
+          orderRef,
+          paymentMethodCode: 'ctbc_pool',
+          maxHolds: 2,
+          checkHoldLimit: true,
+          holdLimitMessage: '您目前已有 2 筆待繳納訂金並佔用專屬收款帳號的訂單／預約，請先完成現有款項之匯款與回報，或聯繫門市人員協助！'
         });
 
-        if (activePendingPoolOrdersCount >= 2) {
-          const err = new Error('您目前已有 2 筆待繳納訂金並佔用專屬收款帳號的訂單，請先完成現有訂單之匯款與回報，或聯繫門市人員協助！');
-          err.isBusinessError = true;
-          throw err;
-        }
-
-        // If CTBC one-time account pool selected, pull one AVAILABLE account from pool atomically with FOR UPDATE SKIP LOCKED.
-        // If none left, allow order creation and instruct customer to contact store for payment.
-        const allocated = await tx.$queryRaw`
-          UPDATE "OneTimeAccountPool"
-          SET "status" = 'ASSIGNED',
-              "assigned_order_ref" = ${orderRef},
-              "assigned_user_id" = ${userId},
-              "assigned_at" = NOW()
-          WHERE "id" = (
-            SELECT "id" FROM "OneTimeAccountPool"
-            WHERE "payment_method_code" = 'ctbc_pool' AND "status" = 'AVAILABLE'
-            ORDER BY "id" ASC
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1
-          )
-          RETURNING "id", "account_number", "payment_url";
-        `;
-
-        if (Array.isArray(allocated) && allocated.length > 0) {
-          assignedPoolAccount = allocated[0].account_number;
-          assignedPoolUrl = allocated[0].payment_url || null;
+        if (allocated) {
+          assignedPoolAccount = allocated.accountNumber;
+          assignedPoolUrl = allocated.paymentUrl;
         }
       }
 
@@ -495,13 +473,7 @@ export const verifyOrderPayment = async (req, res) => {
     const updated = await prisma.$transaction(async (tx) => {
       // If order had assigned pool account, update OneTimeAccountPool status to USED
       if (order.assigned_pool_account) {
-        await tx.oneTimeAccountPool.updateMany({
-          where: { account_number: order.assigned_pool_account },
-          data: {
-            status: 'USED',
-            verified_at: new Date()
-          }
-        });
+        await markPoolAccountUsed(tx, { accountNumber: order.assigned_pool_account });
       }
 
       return tx.productOrder.update({
@@ -582,18 +554,7 @@ export const updateAdminOrder = async (req, res) => {
     // If order transitioned to cancelled, release any assigned pool account back to AVAILABLE
     if (order_status === 'cancelled' && order.order_status !== 'cancelled') {
       if (order.assigned_pool_account) {
-        await prisma.oneTimeAccountPool.updateMany({
-          where: {
-            account_number: order.assigned_pool_account,
-            status: 'ASSIGNED'
-          },
-          data: {
-            status: 'AVAILABLE',
-            assigned_order_ref: null,
-            assigned_user_id: null,
-            assigned_at: null
-          }
-        });
+        await releasePoolAccount(prisma, { accountNumber: order.assigned_pool_account });
       }
     }
 

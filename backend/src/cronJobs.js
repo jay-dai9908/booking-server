@@ -1,6 +1,8 @@
 import cron from 'node-cron';
 import prisma from './prismaClient.js';
 import { getTaipeiDateParts } from './utils/dateUtils.js';
+import { releasePoolAccount } from './services/selfService/poolAccountService.js';
+import { releaseExpiredPrepays } from './services/selfService/prepayService.js';
 
 export const startCronJobs = () => {
   // 1. Run every day at midnight (00:00) Taipei time
@@ -87,6 +89,15 @@ export const startCronJobs = () => {
     }
   }, { timezone: 'Asia/Taipei' });
 
+  // 2b. 每小時第 5 分鐘檢查並自動取消逾期未付款之半自助日預約
+  cron.schedule('5 * * * *', async () => {
+    try {
+      await releaseExpiredPrepays();
+    } catch (err) {
+      console.error('[Cron Job] Error releasing expired self-service prepays:', err);
+    }
+  }, { timezone: 'Asia/Taipei' });
+
   // 3. Run every day at 23:59 to solidify today's price (Taipei time)
   cron.schedule('59 23 * * *', async () => {
     console.log('[Cron Job] Solidifying daily settings for today...');
@@ -170,18 +181,9 @@ export const releaseExpiredPreorders = async () => {
 
         // 僅在訂單成功被更新為 cancelled 且確有佔用帳號時，才釋放帳號回帳號池
         if (updateResult.count > 0 && order.assigned_pool_account) {
-          await tx.oneTimeAccountPool.updateMany({
-            where: {
-              account_number: order.assigned_pool_account,
-              status: 'ASSIGNED',
-              assigned_order_ref: order.order_ref
-            },
-            data: {
-              status: 'AVAILABLE',
-              assigned_order_ref: null,
-              assigned_user_id: null,
-              assigned_at: null
-            }
+          await releasePoolAccount(tx, {
+            accountNumber: order.assigned_pool_account,
+            orderRef: order.order_ref
           });
           cancelledCount++;
         }

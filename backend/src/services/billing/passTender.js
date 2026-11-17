@@ -111,7 +111,8 @@ export async function deductPass(tx, {
   booking_ref,
   payment_no,
   person_no,
-  staff_name
+  staff_name,
+  source = 'checkout'
 }) {
   const client = tx || prisma;
   const pass = await client.userPass.findUnique({
@@ -141,7 +142,7 @@ export async function deductPass(tx, {
     person_no,
     units,
     by: staff_name || '櫃檯人員',
-    source: 'checkout'
+    source
   });
 
   return await client.userPass.update({

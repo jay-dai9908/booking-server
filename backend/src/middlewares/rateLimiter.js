@@ -110,5 +110,41 @@ export const promoValidateLimiter = createMemoryLimiter({
   message: '折扣碼驗證次數過多，請於 10 分鐘後再試'
 });
 
+/**
+ * 5. 半自助預約試算：同一會員每分鐘最多 30 次
+ */
+export const prepayQuoteLimiter = (() => {
+  const store = new Map();
+  const windowMs = 60 * 1000;
+  const max = 30;
+
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of store.entries()) {
+      if (now > record.resetTime) {
+        store.delete(key);
+      }
+    }
+  }, 60000);
+  if (cleanup.unref) cleanup.unref();
+
+  return (req, res, next) => {
+    const actorKey = req.user?.id ? `u:${req.user.id}` : `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+    const key = `prepay-quote-${actorKey}`;
+    const now = Date.now();
+    let record = store.get(key);
+    if (!record || now > record.resetTime) {
+      record = { count: 1, resetTime: now + windowMs };
+      store.set(key, record);
+    } else {
+      record.count += 1;
+    }
+    if (record.count > max) {
+      return res.status(429).json({ error: '試算次數過於頻繁，請稍候 1 分鐘再試', code: 'RATE_LIMITED' });
+    }
+    next();
+  };
+})();
+
 // 舊相容相容函式
 export const rateLimiter = (options) => createMemoryLimiter(options);

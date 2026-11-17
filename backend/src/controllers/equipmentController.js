@@ -812,6 +812,13 @@ export const modifyBookingEquipment = async (req, res) => {
       return res.status(409).json({ error: '已報到的預約請洽櫃檯修改' });
     }
 
+    if (!isAdmin && firstRes.is_self_service) {
+      return res.status(409).json({
+        error: '半自助預約送出後不能修改智能板，如需調整請取消後重新預約',
+        code: 'SELF_SERVICE_EQUIPMENT_LOCKED'
+      });
+    }
+
     if (firstRes.status === 'cancelled') {
       return res.status(400).json({ error: '預約已結束或已取消，無法異動智能板', code: 'ORDER_EXPIRED' });
     }

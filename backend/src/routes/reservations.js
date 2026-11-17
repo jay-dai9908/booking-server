@@ -3,10 +3,20 @@ import { createReservation, getAdminReservations, getAdminReservationDetails, ge
 import { verifyToken, requireAdmin, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
 
 import { modifyBookingEquipment } from '../controllers/equipmentController.js';
+import {
+  getPrepayOptionsHandler,
+  postPrepayQuoteHandler,
+  patchRemittanceLast5Handler
+} from '../controllers/prepayController.js';
+import { prepayQuoteLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
 const reservationStaffAuth = [verifyToken, requireAnyPermission(['reservations', 'seating', 'weekly'])];
+
+router.get('/prepay-options', verifyToken, requireRegisteredUser, getPrepayOptionsHandler);
+router.post('/prepay-quote', verifyToken, requireRegisteredUser, prepayQuoteLimiter, postPrepayQuoteHandler);
+router.patch('/:booking_ref/prepay/remittance', verifyToken, requireRegisteredUser, patchRemittanceLast5Handler);
 
 router.post('/', verifyToken, requireRegisteredUser, createReservation);
 router.get('/my', verifyToken, requireRegisteredUser, getMyReservations);

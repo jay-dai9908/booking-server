@@ -8,9 +8,21 @@ import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { evaluatePromoCode } from './checkoutController.js';
 import {
   sendBookingConfirmationNotification,
-  sendBookingCancellationNotification
+  sendBookingCancellationNotification,
+  sendSelfServiceTransferPendingNotification
 } from '../utils/lineMessaging.js';
-import { markUnpaid, collectPayment, saveDraft, getBookingBill } from '../services/billing/billService.js';
+import { markUnpaid, collectPayment, saveDraft, getBookingBill, refreshBillingCache } from '../services/billing/billService.js';
+import { deductPass, restorePass } from '../services/billing/passTender.js';
+import { assignPoolAccount, releasePoolAccount } from '../services/selfService/poolAccountService.js';
+import { log as auditLog } from '../services/audit/auditService.js';
+import {
+  ensureKioskSetting,
+  computeSelfServiceQuote,
+  settleSelfServiceBooking,
+  attachSelfInfoToReservations,
+  makePrepayError
+} from '../services/selfService/prepayService.js';
+import { earliestEntry, ironText } from '../../../shared/selfService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 
@@ -107,6 +119,7 @@ const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
         addons_amount: r.addons_amount || 0,
         customer_note: r.customer_note || null,
         admin_note: includeAdminNote ? (r.admin_note || null) : undefined,
+        is_self_service: Boolean(r.is_self_service),
         cancelled_at: r.cancelled_at || null,
         cancelled_by: r.cancelled_by || null
       };
@@ -247,6 +260,7 @@ const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
       addons_amount: group.addons_amount,
       customer_note: group.customer_note || null,
       admin_note: group.admin_note || null,
+      is_self_service: Boolean(group.is_self_service),
       cancelled_at: group.cancelled_at,
       cancelled_by: group.cancelled_by,
       checked_in_at: group.checked_in_at || null,
@@ -484,6 +498,288 @@ export const createReservation = async (req, res) => {
       const sessionUpdates = []; 
       const newReservationsData = [];
       const mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES')?.assigned_seats || [];
+      const is_unlimited = req.body.isUnlimited === true;
+      const cleanCustomerNote = req.body.customer_note ? String(req.body.customer_note).trim() : null;
+      const sortedRequestedSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+      const dailySetting = await tx.dailySetting.findUnique({
+        where: { date: new Date(`${dateStr}T00:00:00.000Z`) }
+      });
+      const isSelfServiceDay = Boolean(dailySetting?.is_self_service);
+      if (isSelfServiceDay) {
+        if (req.body.self_service_ack !== true) {
+          throw makePrepayError('SELF_ACK_REQUIRED', '請先勾選同意半自助時段須知', 400);
+        }
+        if (!req.body.prepay || typeof req.body.prepay !== 'object') {
+          throw makePrepayError('PREPAY_REQUIRED', '半自助預約必須提供預付付款資訊', 400);
+        }
+      }
+
+      if (isSelfServiceDay) {
+        const prepayPayload = req.body.prepay || {};
+        const kioskSetting = await ensureKioskSetting(tx);
+        const dailyRates = await getEffectiveDailyRates(tx, sessionDate);
+
+        const quote = await computeSelfServiceQuote(tx, {
+          userId,
+          requestedSessions: sortedRequestedSessions,
+          dailySetting,
+          dailyRates,
+          kioskSetting,
+          pax: parsedPax,
+          isUnlimited: is_unlimited,
+          equipments: req.body.equipments || [],
+          promoCode: req.body.promo_code || null,
+          passUses: prepayPayload.pass_uses || [],
+          strict: true,
+          skipUsageCheck: false
+        });
+
+        if (
+          prepayPayload.expected_transfer_amount !== undefined &&
+          prepayPayload.expected_transfer_amount !== null &&
+          Number(prepayPayload.expected_transfer_amount) !== quote.transfer_amount
+        ) {
+          throw makePrepayError('AMOUNT_CHANGED', '預約金額已變動，請確認最新金額後再送出', 409, {
+            quote: {
+              total_amount: quote.total_amount,
+              persons: quote.persons,
+              pass_persons: quote.pass_persons,
+              unpaid_entry_persons: quote.unpaid_entry_persons,
+              entry_amount: quote.entry_amount,
+              board_amount: quote.board_amount,
+              promo: quote.promo
+                ? {
+                    code: quote.promo.code,
+                    discount: quote.promo.discount,
+                    applies_to_persons: quote.promo.applies_to_persons
+                  }
+                : null,
+              pass_units: quote.pass_units,
+              transfer_amount: quote.transfer_amount,
+              transfer_open: quote.transfer_open
+            }
+          });
+        }
+
+        let paymentMethodCode = null;
+        let selectedBankInfo = null;
+        let assignedPoolAccount = null;
+        let assignedPoolUrl = null;
+
+        if (quote.transfer_amount > 0) {
+          if (!quote.transfer_open) {
+            throw makePrepayError('PREPAY_DEADLINE_PASSED', '已超過半自助日匯款期限，無法成立需要匯款的預約', 409);
+          }
+
+          const maxUnpaid = kioskSetting.max_unpaid_self_bookings ?? 2;
+          const unpaidCount = await tx.bookingPrepay.count({
+            where: { user_id: userId, status: 'pending_payment' }
+          });
+          if (unpaidCount >= maxUnpaid) {
+            throw makePrepayError('TOO_MANY_UNPAID', `待付款的半自助預約已達上限（${maxUnpaid} 筆）`, 409);
+          }
+
+          const transferInput = prepayPayload.transfer || {};
+          paymentMethodCode = transferInput.payment_method_code || transferInput.code || null;
+          selectedBankInfo = transferInput.selected_bank_info || transferInput.bank_info || null;
+          if (!paymentMethodCode) {
+            throw makePrepayError('PREPAY_REQUIRED', '請選擇匯款方式', 400);
+          }
+
+          const methodCfg = await tx.paymentMethodConfig.findUnique({
+            where: { code: String(paymentMethodCode) }
+          });
+          if (!methodCfg || !methodCfg.is_enabled || methodCfg.method_type === 'ONSITE') {
+            throw makePrepayError('PREPAY_REQUIRED', '選擇的匯款方式無效或未啟用', 400);
+          }
+
+          const needsPoolAccount =
+            methodCfg.method_type === 'POOL_ACCOUNT' || methodCfg.code === 'ctbc_pool';
+          if (needsPoolAccount) {
+            const allocated = await assignPoolAccount(tx, {
+              userId,
+              orderRef: booking_ref,
+              paymentMethodCode: methodCfg.code,
+              maxHolds: 2,
+              checkHoldLimit: true,
+              holdLimitMessage: '您目前已有 2 筆待付款並佔用專屬收款帳號的訂單／預約，請先完成匯款回報，或聯繫門市人員協助！'
+            });
+            if (!allocated) {
+              throw makePrepayError('NO_POOL_ACCOUNT', '目前專屬收款帳號已發完，請改選其他匯款方式', 409);
+            }
+            assignedPoolAccount = allocated.accountNumber;
+            assignedPoolUrl = allocated.paymentUrl;
+          }
+        }
+
+        // Deduct punch card holds immediately upon reservation submission
+        const passHolds = [];
+        for (const hold of quote.pass_holds_plan) {
+          const updatedPass = await deductPass(tx, {
+            user_pass_id: hold.user_pass_id,
+            units: hold.units,
+            booking_ref,
+            payment_no: null,
+            person_no: null,
+            staff_name: '半自助預約',
+            source: 'self_service_prepay'
+          });
+          passHolds.push({
+            user_pass_id: hold.user_pass_id,
+            pass_code: hold.pass_code,
+            plan_name: hold.plan_name,
+            units: hold.units,
+            person_nos: hold.person_nos,
+            remaining_after: updatedPass.remaining_quota
+          });
+        }
+
+        const appliedPromoCode = quote.promo?.code || null;
+        const appliedDiscountAmount = quote.promo?.discount || 0;
+        if (quote.promo?.promo_row?.id) {
+          await tx.promoCode.update({
+            where: { id: quote.promo.promo_row.id },
+            data: { used_count: { increment: 1 } }
+          });
+        }
+
+        for (const update of allocResult.updates) {
+          if (update.booking_ref !== 'NEW_RES') {
+            sessionUpdates.push(
+              tx.reservation.updateMany({
+                where: { booking_ref: update.booking_ref },
+                data: { assigned_seats: update.assigned_seats }
+              })
+            );
+          }
+        }
+        if (sessionUpdates.length > 0) {
+          await Promise.all(sessionUpdates);
+        }
+
+        const resRowsData = session_ids.map((sessionId) => ({
+          booking_ref,
+          session_id: sessionId,
+          user_id: userId,
+          pax: parsedPax,
+          status: 'confirmed',
+          assigned_seats: mySeats,
+          is_force_split: forceSplit === true,
+          is_unlimited: is_unlimited,
+          is_self_service: true,
+          total_amount: quote.total_amount,
+          promo_code: appliedPromoCode,
+          discount_amount: appliedDiscountAmount,
+          checkout_details: quote.draft,
+          customer_note: cleanCustomerNote
+        }));
+
+        const createdRes = await tx.reservation.createMany({ data: resRowsData });
+
+        if (quote.equipmentRecordsSpec.length > 0) {
+          await tx.bookingEquipment.createMany({
+            data: quote.equipmentRecordsSpec.map((eq) => ({
+              booking_ref,
+              equipment_id: eq.equipment_id,
+              equipment_name_snapshot: eq.equipment_name_snapshot,
+              quantity: eq.quantity,
+              rental_hours: eq.rental_hours,
+              unit_rate: eq.unit_rate,
+              subtotal_price: eq.subtotal_price,
+              covered_sessions: eq.covered_sessions
+            }))
+          });
+        }
+
+        // Authoritative amount verification against persisted getBookingBill
+        const authoritativeBillData = await getBookingBill(booking_ref, tx);
+        const authoritativeTotal = authoritativeBillData.bill?.summary?.amount_due ?? quote.total_amount;
+        let finalTotalAmount = quote.total_amount;
+        let finalTransferAmount = quote.transfer_amount;
+
+        if (authoritativeTotal !== quote.total_amount) {
+          console.warn('[createReservation] Self-service total differed from getBookingBill; using bill total:', {
+            booking_ref,
+            quoteTotal: quote.total_amount,
+            billTotal: authoritativeTotal
+          });
+          finalTotalAmount = authoritativeTotal;
+          const passCover = quote.total_amount - quote.transfer_amount;
+          finalTransferAmount = Math.max(0, authoritativeTotal - passCover);
+          await tx.reservation.updateMany({
+            where: { booking_ref },
+            data: { total_amount: finalTotalAmount }
+          });
+        }
+
+        let createdPrepay = await tx.bookingPrepay.create({
+          data: {
+            booking_ref,
+            user_id: userId,
+            total_amount: finalTotalAmount,
+            pass_persons: quote.pass_persons,
+            pass_holds: passHolds,
+            amount_due: finalTransferAmount,
+            status: 'pending_payment',
+            deadline_at: quote.deadline_at,
+            payment_method_code: paymentMethodCode,
+            selected_bank_info: selectedBankInfo,
+            assigned_pool_account: assignedPoolAccount,
+            assigned_pool_url: assignedPoolUrl,
+            agreed_terms_at: new Date()
+          }
+        });
+
+        if (finalTransferAmount === 0) {
+          const settleResult = await settleSelfServiceBooking(tx, {
+            booking_ref,
+            staffName: '系統'
+          });
+          createdPrepay = settleResult.prepay;
+        }
+
+        const allDaySess = await tx.session.findMany({
+          where: { session_date: sessionDate },
+          select: { end_time: true }
+        });
+        const maxDayEnd = allDaySess.reduce((mx, s) => (s.end_time > mx ? s.end_time : mx), '') ||
+          sortedRequestedSessions[sortedRequestedSessions.length - 1].end_time;
+        const openAt = earliestEntry(
+          sortedRequestedSessions[0].start_time,
+          kioskSetting.early_minutes ?? 30
+        );
+        const iText = ironText({
+          iron_mode: dailySetting.iron_mode,
+          iron_date: dailySetting.iron_date,
+          date: dateStr
+        });
+
+        return {
+          booking_ref,
+          count: createdRes.count,
+          pax: parsedPax,
+          is_unlimited,
+          session_date: dateStr,
+          start_time: sortedRequestedSessions[0].start_time,
+          end_time: sortedRequestedSessions[sortedRequestedSessions.length - 1].end_time,
+          sessions: sortedRequestedSessions,
+          assigned_seats: mySeats,
+          total_amount: finalTotalAmount,
+          promo_code: appliedPromoCode,
+          discount_amount: appliedDiscountAmount,
+          requested_sessions: sortedRequestedSessions,
+          is_self_service: true,
+          prepay: createdPrepay,
+          self_info: {
+            open_at: openAt,
+            earliest_entry: openAt,
+            until: maxDayEnd,
+            iron_text: iText,
+            early_minutes: kioskSetting.early_minutes ?? 30
+          }
+        };
+      }
       
       // Smart Pegboard / Equipment fee calculation
       const equipments = req.body.equipments;
@@ -612,7 +908,6 @@ export const createReservation = async (req, res) => {
         }
       }
 
-      const is_unlimited = req.body.isUnlimited === true;
       const { hourly_price } = await getEffectiveDailyRates(tx, sessionDate);
       const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
       let subtotalAmount = baseSeatingPrice + totalEquipmentFee;
@@ -645,7 +940,6 @@ export const createReservation = async (req, res) => {
       }
 
       const totalAmount = Math.max(0, subtotalAmount - appliedDiscountAmount);
-      const cleanCustomerNote = req.body.customer_note ? String(req.body.customer_note).trim() : null;
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -691,8 +985,6 @@ export const createReservation = async (req, res) => {
         });
       }
 
-      const sortedRequestedSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
-
       return { 
         booking_ref, 
         count: newReservations.count, 
@@ -704,7 +996,13 @@ export const createReservation = async (req, res) => {
       };
     });
 
-    res.status(201).json({ message: 'Reservation successful', reservation: result });
+    res.status(201).json({
+      message: 'Reservation successful',
+      reservation: result,
+      ...(result.is_self_service
+        ? { prepay: result.prepay, self_info: result.self_info }
+        : {})
+    });
 
     // Auto LINE confirmation notification (asynchronously dispatched, never blocks response)
     (async () => {
@@ -722,6 +1020,20 @@ export const createReservation = async (req, res) => {
             const reqSessions = result.requested_sessions || [];
             const firstSession = reqSessions[0];
             const timeRange = formatSessionsToTimeRange(reqSessions);
+
+            if (result.is_self_service && result.prepay?.status === 'pending_payment') {
+              await sendSelfServiceTransferPendingNotification(
+                {
+                  booking_ref: result.booking_ref,
+                  session_date: firstSession?.session_date,
+                  time_range: timeRange,
+                  amount_due: result.prepay.amount_due,
+                  deadline_at: result.prepay.deadline_at
+                },
+                user
+              );
+              return;
+            }
 
             const equipments = req.body.equipments;
             let equipmentSummary = '';
@@ -764,6 +1076,19 @@ export const createReservation = async (req, res) => {
 
   } catch (error) {
     console.error('Reservation error:', error);
+    if (error.isPrepayError) {
+      return res.status(error.status || 400).json({
+        error: error.message,
+        code: error.code,
+        ...(error.quote ? { quote: error.quote } : {})
+      });
+    }
+    if (error.isBusinessError) {
+      return res.status(error.status || 409).json({
+        error: error.message,
+        code: error.code || 'POOL_HOLD_LIMIT'
+      });
+    }
     if (error.message && error.message.startsWith('EQUIPMENT_WINDOW_INVALID:')) {
       return res.status(400).json({ error: error.message.replace('EQUIPMENT_WINDOW_INVALID:', '') });
     }
@@ -1019,7 +1344,8 @@ export const getMyReservations = async (req, res) => {
 
     // 顧客端不回傳 admin_note 與敏感資料，並合併未換板的設備
     const grouped = groupReservations(reservations, equipmentsMap, { includeAdminNote: false, mergeEquipments: true });
-    res.json(grouped);
+    const enriched = await attachSelfInfoToReservations(grouped, prisma);
+    res.json(enriched);
   } catch (error) {
     console.error('Error fetching my reservations:', error);
     res.status(500).json({ error: 'Failed to fetch your reservations' });
@@ -1053,13 +1379,31 @@ export const cancelReservation = async (req, res) => {
       return res.status(400).json({ error: '此預約先前已取消' });
     }
 
-    const isCollected = reservations.some(r => (r.amount_received && r.amount_received > 0) || r.is_paid);
+    const prepay = await prisma.bookingPrepay.findUnique({ where: { booking_ref } });
+    const isSelfCustomerAllPassVerified =
+      !isAdmin &&
+      Boolean(prepay) &&
+      prepay.status === 'verified' &&
+      (prepay.amount_due ?? 0) === 0 &&
+      !reservations.some(r => (r.amount_received && r.amount_received > 0));
+
+    if (!isAdmin && prepay) {
+      if (['reported_pending_verify', 'mismatch'].includes(prepay.status)) {
+        return res.status(400).json({ error: '這筆預約已經付款或正在對帳，如需取消請用 LINE 聯絡我們' });
+      }
+      if (prepay.status === 'verified' && !isSelfCustomerAllPassVerified) {
+        return res.status(400).json({ error: '這筆預約已經付款或正在對帳，如需取消請用 LINE 聯絡我們' });
+      }
+    }
+
+    const isCollected = !isSelfCustomerAllPassVerified &&
+      reservations.some(r => (r.amount_received && r.amount_received > 0) || r.is_paid);
     if (isCollected) {
       const amt = reservations[0].amount_received || 0;
       return res.status(409).json({ error: `這筆已收款 NT$${amt}，請先退款或作廢收款` });
     }
 
-    const hasPaid = reservations.some(r => r.is_paid);
+    const hasPaid = !isSelfCustomerAllPassVerified && reservations.some(r => r.is_paid);
     const hasCheckedIn = reservations.some(r => r.attendance === 'checked_in');
 
     // 計算該預約最早開始的時間
@@ -1099,26 +1443,117 @@ export const cancelReservation = async (req, res) => {
     const operatorName = isAdmin ? (req.user.name || '管理員') : 'customer';
     const cancelledByTag = isAdmin ? `admin:${operatorName}` : 'customer';
 
-    // Cancel all related rows
-    const updated = await prisma.reservation.updateMany({
-      where: { booking_ref },
-      data: { 
-        status: 'cancelled',
-        cancelled_at: new Date(),
-        cancelled_by: cancelledByTag
-      }
-    });
+    const updated = await prisma.$transaction(async (tx) => {
+      if (prepay) {
+        const lockedPrepay = await tx.bookingPrepay.findUnique({ where: { booking_ref } });
+        if (lockedPrepay && lockedPrepay.status !== 'cancelled' && lockedPrepay.status !== 'expired') {
+          if (isSelfCustomerAllPassVerified) {
+            const validPayments = await tx.payment.findMany({
+              where: { booking_ref, status: 'valid' }
+            });
+            const nowVoid = new Date();
+            for (const vp of validPayments) {
+              await tx.payment.update({
+                where: { id: vp.id },
+                data: {
+                  status: 'voided',
+                  voided_at: nowVoid,
+                  voided_by_name: 'customer',
+                  void_reason: '顧客取消半自助卡券預約'
+                }
+              });
+              if (vp.method === 'pass' && Array.isArray(vp.pass_json)) {
+                for (const pj of vp.pass_json) {
+                  if (pj?.user_pass_id) {
+                    await restorePass(tx, {
+                      user_pass_id: Number(pj.user_pass_id),
+                      units: Number(pj.units) || 1,
+                      booking_ref,
+                      payment_no: vp.payment_no,
+                      person_no: pj.person_no ?? null,
+                      staff_name: 'customer'
+                    });
+                    await auditLog(tx, {
+                      booking_ref,
+                      event_type: 'pass_restored',
+                      category: 'pass',
+                      summary: `卡券退回（取消預約）· ${pj.plan_name || '計次卡'} · ${pj.units || 1} 次`,
+                      payment_id: vp.id,
+                      staff_name: 'customer',
+                      device_label: '線上取消'
+                    });
+                  }
+                }
+              }
+              await auditLog(tx, {
+                booking_ref,
+                event_type: 'payment_voided',
+                category: 'payment',
+                summary: `作廢收款（取消預約）· ${vp.payment_no}`,
+                amount: -(vp.amount || 0),
+                reason: '顧客取消半自助卡券預約',
+                payment_id: vp.id,
+                staff_name: 'customer',
+                device_label: '線上取消'
+              });
+            }
+            await refreshBillingCache(tx, booking_ref);
+          } else {
+            // Release held pool account if any
+            if (lockedPrepay.assigned_pool_account) {
+              await releasePoolAccount(tx, {
+                accountNumber: lockedPrepay.assigned_pool_account,
+                orderRef: booking_ref
+              });
+            }
+            // Restore held passes if not yet settled (if settled, admin already voided payments first)
+            if (!lockedPrepay.settled_at) {
+              const holds = Array.isArray(lockedPrepay.pass_holds) ? lockedPrepay.pass_holds : [];
+              for (const h of holds) {
+                if (h?.user_pass_id && (Number(h.units) || 0) > 0) {
+                  await restorePass(tx, {
+                    user_pass_id: Number(h.user_pass_id),
+                    units: Number(h.units),
+                    booking_ref,
+                    payment_no: null,
+                    person_no: null,
+                    staff_name: operatorName
+                  });
+                }
+              }
+            }
+          }
 
-    // Return promo code usage quota if order used promo codes
-    if (reservations[0].promo_code) {
-      const promoCodes = reservations[0].promo_code.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
-      for (const code of promoCodes) {
-        await prisma.promoCode.updateMany({
-          where: { code, used_count: { gt: 0 } },
-          data: { used_count: { decrement: 1 } }
-        });
+          await tx.bookingPrepay.update({
+            where: { booking_ref },
+            data: { status: 'cancelled' }
+          });
+        }
       }
-    }
+
+      // Cancel all related rows
+      const cancelledRes = await tx.reservation.updateMany({
+        where: { booking_ref },
+        data: {
+          status: 'cancelled',
+          cancelled_at: new Date(),
+          cancelled_by: cancelledByTag
+        }
+      });
+
+      // Return promo code usage quota if order used promo codes
+      if (reservations[0].promo_code) {
+        const promoCodes = reservations[0].promo_code.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
+        for (const code of promoCodes) {
+          await tx.promoCode.updateMany({
+            where: { code, used_count: { gt: 0 } },
+            data: { used_count: { decrement: 1 } }
+          });
+        }
+      }
+
+      return cancelledRes;
+    });
 
     res.json({ message: '預約已成功取消', count: updated.count });
 
