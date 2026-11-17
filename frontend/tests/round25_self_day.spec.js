@@ -414,6 +414,7 @@ async function run() {
     console.log('--- Round 25 Playwright Test PASSED ---');
   } finally {
     await cleanOperationalData(prisma).catch(() => {});
+    await prisma.oneTimeAccountPool.deleteMany({ where: { account_number: '82288881111' } }).catch(() => {});
     await prisma.session.deleteMany({ where: { session_date: targetDateObj } }).catch(() => {});
     await prisma.dailySetting.deleteMany({ where: { date: targetDateObj } }).catch(() => {});
     if (createdPromoId) {

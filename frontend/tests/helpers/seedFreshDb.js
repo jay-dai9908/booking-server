@@ -25,6 +25,7 @@ export async function cleanOperationalData(customPrisma) {
   await prisma.bookingPerson.deleteMany({}).catch(() => {});
   await prisma.reservation.deleteMany({}).catch(() => {});
   await prisma.printJob.deleteMany({}).catch(() => {});
+  await prisma.oneTimeAccountPool.deleteMany({}).catch(() => {});
   await prisma.cashClosing.deleteMany({}).catch(() => {});
   await prisma.userLoginLog.deleteMany({}).catch(() => {});
   if (!customPrisma) {
