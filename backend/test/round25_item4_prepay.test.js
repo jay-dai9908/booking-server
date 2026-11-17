@@ -893,6 +893,8 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
           max_unpaid_self_bookings: savedKiosk.max_unpaid_self_bookings
         }
       });
+    } else {
+      await prisma.kioskSetting.delete({ where: { id: 1 } }).catch(() => {});
     }
     if (savedSmallEq) {
       await prisma.equipmentConfig.update({

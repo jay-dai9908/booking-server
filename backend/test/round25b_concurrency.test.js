@@ -395,6 +395,8 @@ test('Round 25b Item 3: Prepay verify vs expiry, verify vs cancel, and concurren
           max_unpaid_self_bookings: savedKiosk.max_unpaid_self_bookings
         }
       });
+    } else {
+      await prisma.kioskSetting.delete({ where: { id: 1 } }).catch(() => {});
     }
   }
 });

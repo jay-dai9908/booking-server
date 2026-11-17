@@ -570,6 +570,8 @@ test('Round 26 Item 3: Kiosk access handles all 8 outcomes, QR windows, WAIT fal
           max_unpaid_self_bookings: savedKiosk.max_unpaid_self_bookings
         }
       });
+    } else {
+      await prisma.kioskSetting.delete({ where: { id: 1 } }).catch(() => {});
     }
     if (savedSmallEq) {
       await prisma.equipmentConfig.update({

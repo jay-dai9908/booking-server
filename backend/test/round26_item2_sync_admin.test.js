@@ -263,6 +263,8 @@ test('Round 26 Item 2: Kiosk sync 7-day schedule, event dedup, backup code valid
           config_rev: savedKiosk.config_rev
         }
       });
+    } else {
+      await prisma.kioskSetting.delete({ where: { id: 1 } }).catch(() => {});
     }
   }
 });

@@ -574,6 +574,8 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
           max_unpaid_self_bookings: savedKiosk.max_unpaid_self_bookings
         }
       });
+    } else {
+      await prisma.kioskSetting.delete({ where: { id: 1 } }).catch(() => {});
     }
     if (savedSmallEq) {
       await prisma.equipmentConfig.update({

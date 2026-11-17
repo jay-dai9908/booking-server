@@ -263,6 +263,8 @@ test('Round 25b Item 4: Abort creation with 409 AMOUNT_CHANGED and full rollback
           max_unpaid_self_bookings: savedKiosk.max_unpaid_self_bookings
         }
       });
+    } else {
+      await prisma.kioskSetting.delete({ where: { id: 1 } }).catch(() => {});
     }
     if (savedSmallEq) {
       await prisma.equipmentConfig.update({

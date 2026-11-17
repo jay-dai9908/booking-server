@@ -200,6 +200,8 @@ test('Round 25 Item 2: Daily self-service settings, kiosk settings, and equipmen
           max_unpaid_self_bookings: savedKiosk.max_unpaid_self_bookings
         }
       }).catch(() => {});
+    } else {
+      await prisma.kioskSetting.delete({ where: { id: 1 } }).catch(() => {});
     }
     if (savedSmallCfg) {
       await prisma.equipmentConfig.update({
