@@ -1,0 +1,184 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'crypto';
+import prisma from '../src/prismaClient.js';
+import { processKioskSync } from '../src/services/kiosk/syncService.js';
+
+const ADMIN_PORT = 3001;
+const BASE_URL = `http://localhost:${ADMIN_PORT}`;
+
+function createEsp32Binary(versionStr, size = 1024) {
+  const buf = Buffer.alloc(size, 0xff);
+  buf[0] = 0xe9; // ESP32 image magic byte
+  buf[1] = 0x04; // segment count
+  buf[2] = 0x00; // spi mode
+  buf[3] = 0x20; // spi speed / size
+
+  // Write version string at offset 48 (0x30)
+  buf.fill(0, 48, 80);
+  buf.write(versionStr, 48, 'ascii');
+  return buf;
+}
+
+test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async () => {
+  // 1. Setup admin staff user and login
+  const staffPass = `test_fw_pwd_${Date.now()}`;
+  const admin = await prisma.adminUser.create({
+    data: {
+      name: 'FW Admin',
+      password: staffPass,
+      role: 'staff',
+      permissions: ['settings'],
+      is_active: true
+    }
+  });
+
+  const loginRes = await fetch(`${BASE_URL}/api/auth/admin/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: staffPass })
+  });
+  assert.equal(loginRes.status, 200);
+  const { token } = await loginRes.json();
+  assert.ok(token);
+
+  // Clean firmware and reset setting
+  await prisma.kioskFirmware.deleteMany();
+  await prisma.kioskSetting.upsert({
+    where: { id: 1 },
+    update: { fw_target_id: null, fw_policy: 'none' },
+    create: { id: 1, fw_target_id: null, fw_policy: 'none' }
+  });
+
+  // 2. Reject non-0xE9 magic byte
+  const badMagicBuf = Buffer.alloc(256, 0x00);
+  const resBadMagic = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      raw_base64: badMagicBuf.toString('base64'),
+      note: 'Bad magic'
+    })
+  });
+  assert.equal(resBadMagic.status, 400);
+  const dataBadMagic = await resBadMagic.json();
+  assert.equal(dataBadMagic.error, 'INVALID_FIRMWARE_HEADER');
+
+  // 3. Upload valid ESP32 firmware v1.0.0
+  const binV1 = createEsp32Binary('v1.0.0', 2048);
+  const sha256_v1 = crypto.createHash('sha256').update(binV1).digest('hex');
+
+  const resV1 = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      raw_base64: binV1.toString('base64'),
+      note: 'Initial Release'
+    })
+  });
+  assert.equal(resV1.status, 201);
+  const dataV1 = await resV1.json();
+  assert.equal(dataV1.ok, true);
+  assert.equal(dataV1.firmware.version, 'v1.0.0');
+  assert.equal(dataV1.firmware.size, 2048);
+  assert.equal(dataV1.firmware.sha256, sha256_v1);
+  const fw1Id = dataV1.firmware.id;
+
+  // 4. Upload 4 more versions to test retention (v1.1, v1.2, v1.3, v1.4)
+  const fwIds = [fw1Id];
+  for (let i = 1; i <= 4; i++) {
+    const bin = createEsp32Binary(`v1.${i}.0`, 2048 + i * 100);
+    const res = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        raw_base64: bin.toString('base64'),
+        note: `Release 1.${i}`
+      })
+    });
+    assert.equal(res.status, 201);
+    const d = await res.json();
+    fwIds.push(d.firmware.id);
+  }
+
+  // Verify list: max 3 non-target versions retained
+  const resList = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(resList.status, 200);
+  const dataList = await resList.json();
+  assert.equal(dataList.ok, true);
+  assert(dataList.firmwares.length <= 4);
+
+  // 5. Set target version with policy "force"
+  const targetId = fwIds[fwIds.length - 1]; // newest
+  const resTarget = await fetch(`${BASE_URL}/api/kiosk/admin/firmware/target`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      target_id: targetId,
+      policy: 'force'
+    })
+  });
+  assert.equal(resTarget.status, 200);
+  const dataTarget = await resTarget.json();
+  assert.equal(dataTarget.ok, true);
+  assert.equal(dataTarget.target_id, targetId);
+  assert.equal(dataTarget.policy, 'force');
+
+  // 6. Attempt deleting target firmware -> must be rejected
+  const resDelTarget = await fetch(`${BASE_URL}/api/kiosk/admin/firmware/${targetId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(resDelTarget.status, 400);
+  const dataDelTarget = await resDelTarget.json();
+  assert.equal(dataDelTarget.error, 'CANNOT_DELETE_TARGET_FIRMWARE');
+
+  // 7. Download firmware file
+  const resDown = await fetch(`${BASE_URL}/api/kiosk/files/firmware/${targetId}.bin`);
+  assert.equal(resDown.status, 200);
+  assert.equal(resDown.headers.get('content-type'), 'application/octet-stream');
+  assert.equal(resDown.headers.get('cache-control'), 'public, max-age=86400, immutable');
+
+  // 8. Test processKioskSync response with firmware payload
+  let device = await prisma.kioskDevice.findFirst({ where: { is_active: true } });
+  if (!device) {
+    device = await prisma.kioskDevice.create({
+      data: { name: '門口報到機', key_wrapped: 'dummy' }
+    });
+  }
+
+  const syncPayload = await processKioskSync(prisma, {
+    device,
+    body: {
+      status: { fw_state: 'downloading', ota_failed: null }
+    },
+    clientIp: '127.0.0.1',
+    now: new Date()
+  });
+
+  assert.ok(syncPayload.firmware);
+  assert.equal(syncPayload.firmware.policy, 'force');
+  assert.equal(syncPayload.firmware.url, `/api/kiosk/files/firmware/${targetId}.bin`);
+
+  // Device status_json updated
+  const updatedDev = await prisma.kioskDevice.findUnique({ where: { id: device.id } });
+  assert.equal(updatedDev.status_json.fw_state, 'downloading');
+
+  // Cleanup
+  await prisma.kioskFirmware.deleteMany();
+  await prisma.adminUser.delete({ where: { id: admin.id } }).catch(() => {});
+});

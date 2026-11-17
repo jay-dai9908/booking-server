@@ -14,7 +14,12 @@ import {
   updateSlideHandler,
   reorderSlidesHandler,
   deleteSlideHandler,
-  downloadSlideHandler
+  downloadSlideHandler,
+  listFirmwareHandler,
+  uploadFirmwareHandler,
+  setFirmwareTargetHandler,
+  deleteFirmwareHandler,
+  downloadFirmwareHandler
 } from '../controllers/kioskController.js';
 import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
 import { kioskEnvelope } from '../middlewares/kioskEnvelope.js';
@@ -46,9 +51,23 @@ router.patch('/admin/slides/:id', verifyToken, requireAnyPermission(['settings']
 router.put('/admin/slides/order', verifyToken, requireAnyPermission(['settings']), reorderSlidesHandler);
 router.delete('/admin/slides/:id', verifyToken, requireAnyPermission(['settings']), deleteSlideHandler);
 
+// 韌體 OTA 管理（權限：settings）
+router.get('/admin/firmware', verifyToken, requireAnyPermission(['settings']), listFirmwareHandler);
+router.post(
+  '/admin/firmware',
+  verifyToken,
+  requireAnyPermission(['settings']),
+  express.raw({ type: ['application/octet-stream', 'application/x-esp32-bin'], limit: '2mb' }),
+  express.json({ limit: '4mb' }),
+  uploadFirmwareHandler
+);
+router.put('/admin/firmware/target', verifyToken, requireAnyPermission(['settings']), setFirmwareTargetHandler);
+router.delete('/admin/firmware/:id', verifyToken, requireAnyPermission(['settings']), deleteFirmwareHandler);
+
 // 檔案下載（公開，靠檢查碼）
 router.get('/files/floor-map/:version.json', getFloorMapFileHandler);
 router.get('/files/slides/:id.bin', downloadSlideHandler);
+router.get('/files/firmware/:id.bin', downloadFirmwareHandler);
 
 // 報到機 SGK1 v1 加密通訊端點
 router.post('/v1/sync', kioskEnvelope('sync'), postKioskSyncHandler);

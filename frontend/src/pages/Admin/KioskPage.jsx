@@ -151,6 +151,17 @@ export default function KioskPage() {
   const [uploadingSlide, setUploadingSlide] = useState(false);
   const [slideError, setSlideError] = useState('');
 
+  // 韌體更新 OTA（Item 4）
+  const [firmwares, setFirmwares] = useState([]);
+  const [loadingFirmwares, setLoadingFirmwares] = useState(false);
+  const [fwTarget, setFwTarget] = useState({ id: null, policy: 'none' });
+  const [savingFwTarget, setSavingFwTarget] = useState(false);
+  const [fwFileBuffer, setFwFileBuffer] = useState(null);
+  const [fwFileVersion, setFwFileVersion] = useState('');
+  const [fwFileNote, setFwFileNote] = useState('');
+  const [uploadingFw, setUploadingFw] = useState(false);
+  const [fwError, setFwError] = useState('');
+
   const [notice, setNotice] = useState(null);
 
   const showNotice = (type, text) => {
@@ -206,10 +217,29 @@ export default function KioskPage() {
     }
   }, []);
 
+  const fetchFirmwares = useCallback(async () => {
+    setLoadingFirmwares(true);
+    try {
+      const res = await api.get('/kiosk/admin/firmware');
+      setFirmwares(Array.isArray(res.data?.firmwares) ? res.data.firmwares : []);
+      if (res.data?.target) {
+        setFwTarget({
+          id: res.data.target.id || null,
+          policy: res.data.target.policy || 'none'
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to load firmware:', err);
+    } finally {
+      setLoadingFirmwares(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchOverview();
     fetchSlides();
-  }, [fetchOverview, fetchSlides]);
+    fetchFirmwares();
+  }, [fetchOverview, fetchSlides, fetchFirmwares]);
 
   useEffect(() => {
     fetchLogs(logDate);
@@ -343,6 +373,103 @@ export default function KioskPage() {
       fetchSlides();
     } catch (err) {
       showNotice('error', '刪除失敗');
+    }
+  };
+
+  // 處理韌體檔案選擇
+  const handleFwFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFwError('');
+    setFwFileVersion('');
+    setFwFileBuffer(null);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const buf = new Uint8Array(ev.target.result);
+      if (buf.length < 64 || buf.length > 2097152) {
+        setFwError('韌體檔案大小必須在 64 bytes 至 2MB 之間');
+        return;
+      }
+      if (buf[0] !== 0xe9) {
+        setFwError('非 ESP32 韌體格式（Magic byte 必須為 0xE9）');
+        return;
+      }
+      const verSub = buf.subarray(48, 80);
+      let nullIdx = verSub.indexOf(0);
+      if (nullIdx === -1) nullIdx = verSub.length;
+      let verStr = '';
+      for (let i = 0; i < nullIdx; i++) {
+        verStr += String.fromCharCode(verSub[i]);
+      }
+      verStr = verStr.trim();
+      if (!verStr) {
+        setFwError('韌體標頭未找到有效版本字串');
+        return;
+      }
+      setFwFileVersion(verStr);
+      setFwFileBuffer(buf);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleUploadFirmware = async () => {
+    if (!fwFileBuffer) {
+      setFwError('請先選取有效的 ESP32 .bin 韌體檔案');
+      return;
+    }
+    setUploadingFw(true);
+    setFwError('');
+    try {
+      let binStr = '';
+      const len = fwFileBuffer.byteLength;
+      for (let i = 0; i < len; i += 8192) {
+        const chunk = fwFileBuffer.subarray(i, Math.min(i + 8192, len));
+        binStr += String.fromCharCode.apply(null, chunk);
+      }
+      const b64 = btoa(binStr);
+
+      await api.post('/kiosk/admin/firmware', {
+        raw_base64: b64,
+        note: fwFileNote || null
+      });
+
+      showNotice('success', `韌體 ${fwFileVersion} 上傳成功`);
+      setFwFileBuffer(null);
+      setFwFileVersion('');
+      setFwFileNote('');
+      fetchFirmwares();
+    } catch (err) {
+      setFwError(err.response?.data?.message || err.response?.data?.error || '上傳韌體失敗');
+    } finally {
+      setUploadingFw(false);
+    }
+  };
+
+  const handleSaveFwTarget = async () => {
+    setSavingFwTarget(true);
+    try {
+      await api.put('/kiosk/admin/firmware/target', {
+        target_id: fwTarget.id ? Number(fwTarget.id) : null,
+        policy: fwTarget.policy || 'none'
+      });
+      showNotice('success', '韌體目標與更新策略已儲存');
+      fetchFirmwares();
+    } catch (err) {
+      showNotice('error', err.response?.data?.message || '儲存韌體設定失敗');
+    } finally {
+      setSavingFwTarget(false);
+    }
+  };
+
+  const handleDeleteFirmware = async (id) => {
+    if (!window.confirm('確定要刪除此韌體版本嗎？')) return;
+    try {
+      await api.delete(`/kiosk/admin/firmware/${id}`);
+      showNotice('success', '已刪除韌體');
+      fetchFirmwares();
+    } catch (err) {
+      showNotice('error', err.response?.data?.message || '刪除韌體失敗');
     }
   };
 
@@ -976,7 +1103,174 @@ export default function KioskPage() {
             </div>
           </section>
 
-          {/* 6. 進出紀錄 */}
+          {/* 6. 韌體更新（OTA，Item 4） */}
+          <section
+            data-testid="kiosk-firmware-section"
+            className="lg:col-span-2 bg-white border border-stone-200 rounded-xl shadow-sm p-4 sm:p-5 space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-stone-800 flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-sg-brown" />
+                韌體更新（OTA）
+              </h2>
+              <span className="text-xs text-stone-500 font-mono">ESP32-P4 SGK1 v1</span>
+            </div>
+
+            {/* 機台目前韌體狀態與目標推送策略 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 bg-stone-50 rounded-xl border border-stone-200 text-xs">
+              <div className="space-y-1">
+                <div className="text-stone-500">機台目前韌體</div>
+                <div className="font-mono text-stone-800 font-bold text-sm">
+                  {primaryDevice?.fw_version || '未知'}
+                </div>
+                <div className="text-stone-500">
+                  狀態：<span className="font-mono">{primaryDevice?.status_json?.fw_state || 'idle'}</span>
+                  {primaryDevice?.status_json?.ota_failed && (
+                    <span className="text-rose-600 ml-1">({primaryDevice.status_json.ota_failed})</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-stone-600">目標版本：</span>
+                  <select
+                    value={fwTarget.id || ''}
+                    onChange={(e) => setFwTarget((t) => ({ ...t, id: e.target.value ? Number(e.target.value) : null }))}
+                    className="px-2 py-1 border border-stone-300 rounded font-mono text-xs"
+                  >
+                    <option value="">(無目標版本)</option>
+                    {firmwares.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.version} ({f.note || '無備註'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-stone-600">推送策略：</span>
+                  <select
+                    value={fwTarget.policy}
+                    onChange={(e) => setFwTarget((t) => ({ ...t, policy: e.target.value }))}
+                    className="px-2 py-1 border border-stone-300 rounded text-xs"
+                  >
+                    <option value="none">不推送 (none)</option>
+                    <option value="idle_only">打烊或閒置時更新 (idle_only)</option>
+                    <option value="force">立即強制更新 (force)</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleSaveFwTarget}
+                    disabled={savingFwTarget}
+                    className="px-3 py-1 bg-stone-800 text-white font-medium rounded hover:bg-stone-700 disabled:opacity-50"
+                  >
+                    {savingFwTarget ? '儲存中...' : '儲存策略'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 上傳新韌體 .bin */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold text-stone-700">上傳新版本韌體 (.bin)</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="file"
+                  accept=".bin"
+                  onChange={handleFwFileSelect}
+                  className="text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:bg-stone-800 file:text-white file:text-xs"
+                />
+                {fwFileVersion && (
+                  <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-mono text-xs font-semibold border border-emerald-200">
+                    偵測到版本：{fwFileVersion}
+                  </span>
+                )}
+                <input
+                  type="text"
+                  value={fwFileNote}
+                  onChange={(e) => setFwFileNote(e.target.value)}
+                  placeholder="版本備註（例：修正掃碼穩定度）"
+                  className="px-2.5 py-1 border border-stone-300 rounded text-xs min-w-[200px]"
+                />
+                <button
+                  type="button"
+                  onClick={handleUploadFirmware}
+                  disabled={!fwFileBuffer || uploadingFw}
+                  className="px-3 py-1 bg-sg-brown text-white font-bold text-xs rounded hover:opacity-95 disabled:opacity-50"
+                >
+                  {uploadingFw ? '上傳中...' : '上傳韌體'}
+                </button>
+              </div>
+              {fwError && <p className="text-xs text-rose-600 font-medium">{fwError}</p>}
+            </div>
+
+            {/* 歷史韌體版本列表 */}
+            {loadingFirmwares ? (
+              <div className="py-2 text-center text-xs text-stone-400">載入韌體列表中...</div>
+            ) : firmwares.length === 0 ? (
+              <div className="text-xs text-stone-400 text-center py-3 border border-dashed border-stone-200 rounded">
+                尚未上傳任何韌體版本
+              </div>
+            ) : (
+              <div className="border border-stone-200 rounded-lg overflow-hidden text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-stone-50 border-b border-stone-200 text-stone-500">
+                    <tr>
+                      <th className="py-2 px-3">版本</th>
+                      <th className="py-2 px-3">檔案大小</th>
+                      <th className="py-2 px-3">SHA-256</th>
+                      <th className="py-2 px-3">備註</th>
+                      <th className="py-2 px-3 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100 font-mono">
+                    {firmwares.map((fw) => {
+                      const isTarget = fwTarget.id === fw.id;
+                      return (
+                        <tr key={fw.id} className={isTarget ? 'bg-amber-50/50' : 'bg-white'}>
+                          <td className="py-2 px-3 font-bold text-stone-800">
+                            {fw.version}
+                            {isTarget && (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-sans font-medium">
+                                目標版本 ({fwTarget.policy})
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-stone-600">{(fw.size / 1024).toFixed(1)} KB</td>
+                          <td className="py-2 px-3 text-stone-500">{fw.sha256.slice(0, 10)}...</td>
+                          <td className="py-2 px-3 font-sans text-stone-700">{fw.note || '—'}</td>
+                          <td className="py-2 px-3 text-right font-sans space-x-2">
+                            {!isTarget && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFwTarget((t) => ({ ...t, id: fw.id }));
+                                }}
+                                className="text-sg-brown hover:underline font-medium"
+                              >
+                                選為目標
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={isTarget}
+                              onClick={() => handleDeleteFirmware(fw.id)}
+                              className="text-rose-600 hover:underline font-medium disabled:opacity-30"
+                            >
+                              刪除
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* 7. 進出紀錄 */}
           <section className="lg:col-span-2 bg-white border border-stone-200 rounded-xl shadow-sm p-4 sm:p-5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-bold text-stone-800">進出紀錄</h2>

@@ -203,6 +203,23 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     }))
   };
 
+  let firmwarePayload = null;
+  if (kioskSetting.fw_target_id && kioskSetting.fw_policy && kioskSetting.fw_policy !== 'none') {
+    const targetFw = await db.kioskFirmware.findUnique({
+      where: { id: kioskSetting.fw_target_id },
+      select: { id: true, version: true, sha256: true, size: true }
+    });
+    if (targetFw) {
+      firmwarePayload = {
+        version: targetFw.version,
+        url: `/api/kiosk/files/firmware/${targetFw.id}.bin`,
+        sha256: targetFw.sha256,
+        size: targetFw.size,
+        policy: kioskSetting.fw_policy
+      };
+    }
+  }
+
   return {
     sync_interval_s: 180,
     tz_offset_min: 480,
@@ -228,7 +245,7 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
       : null,
     slides: slidesPayload,
     floor_map: floorMapPayload,
-    firmware: null,
+    firmware: firmwarePayload,
     ack_event_ids: ackEventIds
   };
 }

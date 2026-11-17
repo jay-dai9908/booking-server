@@ -725,6 +725,9 @@ model KioskSetting {
   setup_pin_rev            Int       @default(0)
   config_rev               Int       @default(1)
   slides_rev               Int       @default(0)
+  fw_target_id             Int?
+  fw_policy                String    @default("none")
+  fw_policy_set_at         DateTime?
   updated_at               DateTime  @default(now()) @updatedAt
 }
 
@@ -738,6 +741,17 @@ model KioskSlide {
   bytes        Bytes
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
+}
+
+model KioskFirmware {
+  id          Int      @id @default(autoincrement())
+  version     String
+  size        Int
+  sha256      String
+  bytes       Bytes
+  note        String?
+  uploaded_by String?
+  created_at  DateTime @default(now())
 }
 
 model BookingPrepay {

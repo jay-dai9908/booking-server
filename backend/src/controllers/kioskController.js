@@ -601,3 +601,217 @@ export const downloadSlideHandler = async (req, res) => {
     res.status(500).json({ error: '下載輪播圖失敗' });
   }
 };
+
+/**
+ * 韌體 OTA 管理（協定 Section 7）
+ */
+export const listFirmwareHandler = async (req, res) => {
+  try {
+    const [firmwares, setting] = await Promise.all([
+      prisma.kioskFirmware.findMany({
+        orderBy: { created_at: 'desc' },
+        select: {
+          id: true,
+          version: true,
+          size: true,
+          sha256: true,
+          note: true,
+          uploaded_by: true,
+          created_at: true
+        }
+      }),
+      ensureKioskSettingRow(prisma)
+    ]);
+
+    res.json({
+      ok: true,
+      firmwares,
+      target: {
+        id: setting.fw_target_id,
+        policy: setting.fw_policy || 'none',
+        set_at: setting.fw_policy_set_at
+      }
+    });
+  } catch (err) {
+    console.error('[kioskController] listFirmwareHandler error:', err);
+    res.status(500).json({ error: '取得韌體列表失敗' });
+  }
+};
+
+export const uploadFirmwareHandler = async (req, res) => {
+  try {
+    let rawBuffer = null;
+    let note = null;
+
+    if (Buffer.isBuffer(req.body)) {
+      rawBuffer = req.body;
+      if (req.query.note) note = String(req.query.note).trim();
+    } else if (req.body && typeof req.body === 'object') {
+      const { note: n, raw_base64: b64 } = req.body;
+      if (n) note = String(n).trim();
+      if (b64) rawBuffer = Buffer.from(b64, 'base64');
+    }
+
+    if (!rawBuffer || rawBuffer.length <= 64 || rawBuffer.length > 2097152) {
+      return res.status(400).json({
+        error: 'INVALID_FIRMWARE_SIZE',
+        message: '韌體大小必須在 64 bytes 至 2MB 之間'
+      });
+    }
+
+    // 檢查 ESP32 image magic byte (0xE9)
+    if (rawBuffer[0] !== 0xe9) {
+      return res.status(400).json({
+        error: 'INVALID_FIRMWARE_HEADER',
+        message: '無效的 ESP32 韌體檔頭（Magic byte 必須為 0xE9）'
+      });
+    }
+
+    // 版本字串在 offset 0x30 (48) 處，最長 32 bytes
+    const verBytes = rawBuffer.subarray(48, 80);
+    let nullIdx = verBytes.indexOf(0);
+    if (nullIdx === -1) nullIdx = verBytes.length;
+    const version = verBytes.subarray(0, nullIdx).toString('ascii').trim();
+
+    if (!version) {
+      return res.status(400).json({
+        error: 'INVALID_FIRMWARE_VERSION',
+        message: '韌體檔頭 offset 0x30 處未找到有效 ASCII 版本字串'
+      });
+    }
+
+    const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
+    const uploader = req.user?.name || '管理員';
+
+    const fw = await prisma.kioskFirmware.create({
+      data: {
+        version,
+        size: rawBuffer.length,
+        sha256,
+        bytes: rawBuffer,
+        note: note || null,
+        uploaded_by: uploader
+      }
+    });
+
+    // 最多保留 3 個歷史版本＋目前 target 版本（自動清理更舊的非 target 版本）
+    const kioskSetting = await ensureKioskSettingRow(prisma);
+    const targetId = kioskSetting.fw_target_id;
+    const allFirmwares = await prisma.kioskFirmware.findMany({
+      orderBy: { created_at: 'desc' }
+    });
+    const nonTargetFirmwares = allFirmwares.filter((f) => f.id !== targetId);
+    if (nonTargetFirmwares.length > 3) {
+      const toDelete = nonTargetFirmwares.slice(3);
+      await prisma.kioskFirmware.deleteMany({
+        where: { id: { in: toDelete.map((f) => f.id) } }
+      });
+    }
+
+    res.status(201).json({
+      ok: true,
+      firmware: {
+        id: fw.id,
+        version: fw.version,
+        size: fw.size,
+        sha256: fw.sha256,
+        note: fw.note,
+        uploaded_by: fw.uploaded_by,
+        created_at: fw.created_at
+      }
+    });
+  } catch (err) {
+    console.error('[kioskController] uploadFirmwareHandler error:', err);
+    res.status(500).json({ error: '上傳韌體失敗' });
+  }
+};
+
+export const setFirmwareTargetHandler = async (req, res) => {
+  try {
+    const { target_id, policy = 'none' } = req.body;
+    const targetId = target_id === null || target_id === undefined ? null : parseInt(target_id, 10);
+    const validPolicy = ['none', 'force', 'idle_only'].includes(policy) ? policy : 'none';
+
+    if (targetId !== null) {
+      const exists = await prisma.kioskFirmware.findUnique({ where: { id: targetId } });
+      if (!exists) {
+        return res.status(404).json({ error: 'FIRMWARE_NOT_FOUND', message: '指定的韌體版本不存在' });
+      }
+    }
+
+    await prisma.kioskSetting.upsert({
+      where: { id: 1 },
+      update: {
+        fw_target_id: targetId,
+        fw_policy: validPolicy,
+        fw_policy_set_at: new Date(),
+        config_rev: { increment: 1 }
+      },
+      create: {
+        id: 1,
+        fw_target_id: targetId,
+        fw_policy: validPolicy,
+        fw_policy_set_at: new Date(),
+        config_rev: 2
+      }
+    });
+
+    res.json({
+      ok: true,
+      target_id: targetId,
+      policy: validPolicy
+    });
+  } catch (err) {
+    console.error('[kioskController] setFirmwareTargetHandler error:', err);
+    res.status(500).json({ error: '設定韌體目標失敗' });
+  }
+};
+
+export const deleteFirmwareHandler = async (req, res) => {
+  try {
+    const fwId = parseInt(req.params.id, 10);
+    const kioskSetting = await ensureKioskSettingRow(prisma);
+
+    if (kioskSetting.fw_target_id === fwId) {
+      return res.status(400).json({
+        error: 'CANNOT_DELETE_TARGET_FIRMWARE',
+        message: '此韌體正被指定為目標版本，無法刪除'
+      });
+    }
+
+    await prisma.kioskFirmware.delete({ where: { id: fwId } });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[kioskController] deleteFirmwareHandler error:', err);
+    res.status(500).json({ error: '刪除韌體失敗' });
+  }
+};
+
+export const downloadFirmwareHandler = async (req, res) => {
+  try {
+    const fwId = parseInt(req.params.id, 10);
+    const kioskSetting = await ensureKioskSettingRow(prisma);
+
+    if (
+      kioskSetting.fw_target_id !== fwId ||
+      !kioskSetting.fw_policy ||
+      kioskSetting.fw_policy === 'none'
+    ) {
+      return res.status(404).json({ error: 'FIRMWARE_NOT_TARGET' });
+    }
+
+    const fw = await prisma.kioskFirmware.findUnique({ where: { id: fwId } });
+    if (!fw) {
+      return res.status(404).json({ error: 'FIRMWARE_NOT_FOUND' });
+    }
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', fw.bytes.length);
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    res.setHeader('ETag', `"${fw.sha256}"`);
+    return res.end(fw.bytes);
+  } catch (err) {
+    console.error('[kioskController] downloadFirmwareHandler error:', err);
+    res.status(500).json({ error: '下載韌體失敗' });
+  }
+};

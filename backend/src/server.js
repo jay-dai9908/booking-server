@@ -710,6 +710,9 @@ const ensureDatabaseSchema = async () => {
     `CREATE INDEX IF NOT EXISTS "KioskAccessLog_booking_ref_idx" ON "KioskAccessLog"("booking_ref")`,
     `ALTER TABLE "SeatLayout" ADD COLUMN IF NOT EXISTS "kiosk_map_rotation" INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "slides_rev" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "fw_target_id" INTEGER`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "fw_policy" TEXT NOT NULL DEFAULT 'none'`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "fw_policy_set_at" TIMESTAMP(3)`,
 
     `CREATE TABLE IF NOT EXISTS "KioskSlide" (
       "id" SERIAL NOT NULL,
@@ -722,6 +725,18 @@ const ensureDatabaseSchema = async () => {
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "KioskSlide_pkey" PRIMARY KEY ("id")
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "KioskFirmware" (
+      "id" SERIAL NOT NULL,
+      "version" TEXT NOT NULL,
+      "size" INTEGER NOT NULL,
+      "sha256" TEXT NOT NULL,
+      "bytes" BYTEA NOT NULL,
+      "note" TEXT,
+      "uploaded_by" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "KioskFirmware_pkey" PRIMARY KEY ("id")
     )`
   ];
 
