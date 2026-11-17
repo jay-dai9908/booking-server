@@ -9,9 +9,11 @@ import EmptyState from '../../../components/customer/EmptyState';
 import { ErrorBanner } from '../../../components/customer/Banners';
 import BottomActionBar from '../../../components/customer/BottomActionBar';
 import SplitSeatSheet from '../../../components/customer/sheets/SplitSeatSheet';
+import Stepper from '../../../components/customer/Stepper';
 import { BeadLoader } from '../../../components/customer/Bead';
 import { useToast } from '../../../components/customer/Toast';
 import api from '../../../api/axios';
+import { earliestEntry, ironText as buildIronText } from '../../../../../shared/selfService.js';
 import {
   formatDateShort,
   weekdayChar,
@@ -39,6 +41,13 @@ export default function StepConfirm({
   onChangePromo,
   globalSettings,
   dayPricing,
+  daily = null,
+  selfPassUses = {},
+  onChangeSelfPassUses = () => {},
+  selfTransferMethod = null,
+  onChangeSelfTransferMethod = () => {},
+  selfServiceAck = false,
+  onChangeSelfServiceAck = () => {},
   hasPricing = true,
   globalLoading = false,
   globalError = null,
@@ -54,6 +63,15 @@ export default function StepConfirm({
   const [promoError, setPromoError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showSplitSheet, setShowSplitSheet] = useState(false);
+
+  const isSelfService = Boolean(daily?.is_self_service);
+  const [prepayOptions, setPrepayOptions] = useState(null);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  const [prepayQuote, setPrepayQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
+  const [quoteNonce, setQuoteNonce] = useState(0);
+  const quoteSeqRef = React.useRef(0);
 
   const H = bookingSessions.length;
   const startTime = bookingSessions[0]?.start_time || '';
@@ -109,8 +127,156 @@ export default function StepConfirm({
     }
   }, [pax, promo]);
 
+  const passUsesList = useMemo(() => {
+    return Object.entries(selfPassUses || {})
+      .map(([id, count]) => ({ user_pass_id: Number(id), units: Number(count) || 0 }))
+      .filter((item) => Number.isFinite(item.user_pass_id) && item.units > 0);
+  }, [selfPassUses]);
+
+  const totalPassPersons = useMemo(
+    () => passUsesList.reduce((sum, item) => sum + item.units, 0),
+    [passUsesList]
+  );
+
+  const allUsingPass = isSelfService && totalPassPersons >= pax;
+
+  // Clear promo when all participants use punch cards
+  useEffect(() => {
+    if (allUsingPass && promo) {
+      onChangePromo(null);
+      setPromoError('');
+    }
+  }, [allUsingPass, promo, onChangePromo]);
+
+  // Fetch prepay options on self-service days
+  useEffect(() => {
+    if (!isSelfService || !date) {
+      setPrepayOptions(null);
+      return;
+    }
+    let cancelled = false;
+    setOptionsLoading(true);
+    api.get(`/reservations/prepay-options?date=${encodeURIComponent(date)}&pax=${pax}`)
+      .then((res) => {
+        if (cancelled) return;
+        const data = res.data || null;
+        setPrepayOptions(data);
+
+        // Clamp pass selection against updated usable_units & pax
+        const availMap = Object.fromEntries(
+          (data?.passes || []).map((p) => [p.user_pass_id, p.usable_units ?? p.remaining_uses ?? 0])
+        );
+        let changed = false;
+        let running = 0;
+        const nextUses = {};
+        for (const [k, rawVal] of Object.entries(selfPassUses || {})) {
+          const val = Math.max(0, Number(rawVal) || 0);
+          const cap = availMap[Number(k)] ?? 0;
+          const allowed = Math.min(val, cap, Math.max(0, pax - running));
+          if (allowed > 0) {
+            nextUses[k] = allowed;
+            running += allowed;
+          }
+          if (allowed !== val) changed = true;
+        }
+        if (changed) {
+          onChangeSelfPassUses(nextUses);
+        }
+
+        // Auto-select default transfer method if unset or unavailable
+        const methods = data?.transfer_methods || [];
+        const isMethodUsable = (m) =>
+          m && !(m.code === 'ctbc_pool' && (m.pool_available ?? data?.ctbc_pool_available_count ?? 1) === 0);
+        const curCode = selfTransferMethod?.code;
+        const matched = methods.find((m) => m.code === curCode && isMethodUsable(m));
+        if (!matched) {
+          const first = methods.find(isMethodUsable);
+          if (first) {
+            let banks = [];
+            try {
+              banks = Array.isArray(first.bank_accounts_json)
+                ? first.bank_accounts_json
+                : JSON.parse(first.bank_accounts_json || '[]');
+            } catch (e) {
+              banks = [];
+            }
+            const firstBank = banks[0] ? `${banks[0].bank_name} (${banks[0].bank_code}) ${banks[0].account}` : null;
+            onChangeSelfTransferMethod({ code: first.code, bank_info: firstBank });
+          } else {
+            onChangeSelfTransferMethod(null);
+          }
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch prepay options', err);
+        if (!cancelled) setPrepayOptions(null);
+      })
+      .finally(() => {
+        if (!cancelled) setOptionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSelfService, date, pax]);
+
+  // Fetch server prepay quote on self-service days
+  useEffect(() => {
+    if (!isSelfService || !bookingSessions.length) {
+      setPrepayQuote(null);
+      setQuoteError('');
+      return;
+    }
+    let cancelled = false;
+    const seq = ++quoteSeqRef.current;
+    setQuoteLoading(true);
+    setQuoteError('');
+
+    const sessionIds = bookingSessions.map((s) => s.id || s.session_id).filter(Boolean);
+    const payloadEquipments = units.map((u) => {
+      const cfg = configsMap[u.equipment_id] || {};
+      return {
+        equipment_id: u.equipment_id,
+        name: cfg.name || '',
+        quantity: 1,
+        rental_hours: u.to - u.from,
+        start_time: hourStartTimes[u.from],
+      };
+    });
+
+    api.post('/reservations/prepay-quote', {
+      session_ids: sessionIds,
+      pax,
+      isUnlimited: mode === 'unlimited',
+      equipments: payloadEquipments,
+      promo_code: (!allUsingPass && promo?.code) ? promo.code : null,
+      pass_uses: passUsesList,
+    })
+      .then((res) => {
+        if (cancelled || seq !== quoteSeqRef.current) return;
+        setPrepayQuote(res.data || null);
+      })
+      .catch((err) => {
+        if (cancelled || seq !== quoteSeqRef.current) return;
+        const msg = err.response?.data?.error || err.response?.data?.message || '試算金額失敗';
+        setQuoteError(msg);
+      })
+      .finally(() => {
+        if (!cancelled && seq === quoteSeqRef.current) {
+          setQuoteLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSelfService, bookingSessions, pax, mode, units, configsMap, hourStartTimes, promo, allUsingPass, passUsesList, quoteNonce]);
+
   // Validate Promo Code
   const handleApplyPromo = async () => {
+    if (allUsingPass) {
+      setPromoError('全部用卡時不能使用優惠碼');
+      return;
+    }
     const cleanCode = promoInput.trim().toUpperCase();
     if (!cleanCode) return;
 
@@ -118,10 +284,11 @@ export default function StepConfirm({
     setPromoError('');
 
     try {
+      const effectivePax = isSelfService ? Math.max(1, pax - totalPassPersons) : pax;
       const payload = {
         code: cleanCode,
         session_date: date,
-        pax,
+        pax: effectivePax,
         hours: H,
         is_unlimited: mode === 'unlimited' || priceCalculation.seat.isCapped,
         base_amount: priceCalculation.seat.raw,
@@ -190,9 +357,19 @@ export default function StepConfirm({
         pax,
         isUnlimited: mode === 'unlimited',
         equipments: payloadEquipments,
-        promo_code: promo?.code || null,
+        promo_code: (!allUsingPass && promo?.code) ? promo.code : null,
         customer_note: customerNote.trim() || null,
         forceSplit,
+        ...(isSelfService
+          ? {
+              self_service_ack: selfServiceAck,
+              prepay: {
+                pass_uses: passUsesList,
+                transfer: (prepayQuote?.transfer_amount ?? 0) > 0 ? selfTransferMethod : null,
+                expected_transfer_amount: prepayQuote?.transfer_amount ?? 0,
+              },
+            }
+          : {}),
       };
 
       const res = await api.post('/reservations', body);
@@ -203,7 +380,10 @@ export default function StepConfirm({
       const data = err.response?.data;
       const errorMsg = data?.message || data?.error || '';
 
-      if (status === 409 && errorMsg.includes('拆散')) {
+      if (status === 409 && (data?.code === 'AMOUNT_CHANGED' || errorMsg.includes('金額'))) {
+        setQuoteNonce((n) => n + 1);
+        toast.show(errorMsg || '金額已更新，請確認最新金額後再送出', { type: 'info' });
+      } else if (status === 409 && errorMsg.includes('拆散')) {
         setShowSplitSheet(true);
       } else if ((status === 409 || status === 400) && (errorMsg.includes('capacity') || errorMsg.includes('額滿') || errorMsg.includes('Not enough'))) {
         toast.show('剛剛有人訂走了部分時段，請重新選擇', { type: 'error' });
@@ -240,7 +420,21 @@ export default function StepConfirm({
 
   // Bottom action bar summary
   const savingAmount = priceCalculation.saving;
-  const summaryNode = (
+  const selfTransferOpen = isSelfService
+    ? Boolean(prepayQuote?.transfer_open ?? prepayOptions?.transfer_open ?? true)
+    : true;
+  const needsTransferOnSelfDay = isSelfService && (prepayQuote?.transfer_amount ?? 0) > 0;
+  const deadlineHourStr = `${String(daily?.self_service?.prepay_deadline_hour ?? 12).padStart(2, '0')}:00`;
+  const selfIronText =
+    daily?.self_service?.iron_text ||
+    buildIronText({ iron_mode: daily?.iron_mode, iron_date: daily?.iron_date, date });
+  const selfEarliestTime = earliestEntry(startTime, daily?.self_service?.early_minutes ?? 30);
+
+  const summaryNode = isSelfService ? (
+    <div className="flex items-center gap-1">
+      <span>{prepayQuote?.transfer_amount === 0 ? '計次卡全額折抵' : '需先匯款'}</span>
+    </div>
+  ) : (
     <div className="flex items-center gap-1">
       <span>現場付款</span>
       {savingAmount > 0 && (
@@ -276,35 +470,56 @@ export default function StepConfirm({
             <KV label="日期" value={<b>{dateLineText}</b>} />
             <KV label="時段" value={<b className="font-num">{timeLineText}</b>} />
             <KV label="人數" value={<b>{pax} 位</b>} />
+            {isSelfService && (
+              <>
+                <KV label="最早進場" value={<b className="font-num">{selfEarliestTime}</b>} />
+                <KV label="熨燙" value={<span className="font-medium text-right">{selfIronText}</span>} />
+              </>
+            )}
 
-            <Divider className="my-1" />
+            {!isSelfService && (
+              <>
+                <Divider className="my-1" />
 
-            {(!hasPricing || !dayPricing) ? (
-              <div className="grid gap-2 py-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-4 w-1/2" />
-              </div>
-            ) : (
-              <PriceLines lines={priceCalculation.lines} />
+                {(!hasPricing || !dayPricing) ? (
+                  <div className="grid gap-2 py-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
+                  </div>
+                ) : (
+                  <PriceLines lines={priceCalculation.lines} />
+                )}
+              </>
             )}
 
         <Divider className="my-1" />
 
         {/* Promo code inline input / status */}
-        {promo ? (
-          <div className="flex items-center justify-between py-1">
-            <span className="text-[13px] font-bold text-sg-sage-ink">
-              已套用 {promo.code}
-            </span>
-            <Button
-              variant="text"
-              size="sm"
-              onClick={handleRemovePromo}
-              className="text-[13px] text-sg-muted hover:text-sg-ink"
-            >
-              移除
-            </Button>
+        {allUsingPass ? (
+          <div className="text-[13px] text-sg-muted py-1">
+            全部用卡時不能使用優惠碼
+          </div>
+        ) : promo ? (
+          <div className="grid gap-1">
+            <div className="flex items-center justify-between py-1">
+              <span className="text-[13px] font-bold text-sg-sage-ink">
+                已套用 {promo.code}
+              </span>
+              <Button
+                variant="text"
+                size="sm"
+                onClick={handleRemovePromo}
+                className="text-[13px] text-sg-muted hover:text-sg-ink"
+              >
+                移除
+              </Button>
+            </div>
+            {isSelfService && totalPassPersons > 0 && totalPassPersons < pax && (
+              <div className="text-[12px] text-sg-muted">
+                優惠碼只折抵沒有用卡的 {pax - totalPassPersons} 位
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid gap-1">
@@ -328,6 +543,11 @@ export default function StepConfirm({
                 套用
               </Button>
             </div>
+            {isSelfService && totalPassPersons > 0 && totalPassPersons < pax && (
+              <div className="text-[12px] text-sg-muted px-1">
+                優惠碼只折抵沒有用卡的 {pax - totalPassPersons} 位
+              </div>
+            )}
             {promoError && (
               <div className="text-[12px] text-sg-danger px-1">
                 {promoError}
@@ -336,6 +556,234 @@ export default function StepConfirm({
           </div>
         )}
       </Card>
+
+      {isSelfService && (
+        <Card gap={10} data-testid="self-payment-card">
+          <div className="text-[15px] font-bold text-sg-ink">付款方式</div>
+
+          {/* Punch cards */}
+          <div className="grid gap-2 rounded-[12px] bg-sg-bg/70 border border-sg-line p-3">
+            <div className="flex items-center justify-between">
+              <div className="text-[13.5px] font-bold text-sg-ink">計次不限時卡</div>
+              {totalPassPersons > 0 && (
+                <span className="text-[12px] font-bold text-sg-sage-ink">
+                  這次用卡 {totalPassPersons} 位
+                </span>
+              )}
+            </div>
+            {optionsLoading && !prepayOptions ? (
+              <Skeleton className="h-10 w-full" />
+            ) : !prepayOptions?.passes?.length ? (
+              <div className="text-[13px] text-sg-muted">你目前沒有計次不限時卡</div>
+            ) : (
+              <div className="grid gap-2.5">
+                {prepayOptions.passes.map((pass) => {
+                  const cur = Number(selfPassUses?.[pass.user_pass_id] || 0);
+                  const remainingGlobal = Math.max(0, pax - totalPassPersons);
+                  const maxForPass = Math.min(pass.usable_units ?? pass.remaining_uses ?? 0, cur + remainingGlobal);
+                  return (
+                    <div
+                      key={pass.user_pass_id}
+                      data-testid={`self-pass-row-${pass.user_pass_id}`}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[13.5px] font-bold text-sg-ink truncate">
+                          {pass.name || '計次不限時卡'}
+                        </div>
+                        <div className="text-[12px] text-sg-muted">
+                          剩 <span className="font-num font-bold">{pass.remaining_uses}</span> 次
+                        </div>
+                      </div>
+                      <Stepper
+                        value={cur}
+                        min={0}
+                        max={maxForPass}
+                        label={`${pass.name || '計次不限時卡'} 使用次數`}
+                        onMinus={() =>
+                          onChangeSelfPassUses((prev) => ({
+                            ...(prev || {}),
+                            [pass.user_pass_id]: Math.max(0, cur - 1),
+                          }))
+                        }
+                        onPlus={() =>
+                          onChangeSelfPassUses((prev) => ({
+                            ...(prev || {}),
+                            [pass.user_pass_id]: Math.min(maxForPass, cur + 1),
+                          }))
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Server quote breakdown */}
+          {quoteLoading && !prepayQuote ? (
+            <div className="grid gap-2 py-1">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          ) : quoteError ? (
+            <div className="text-[13px] text-sg-danger bg-sg-danger-soft rounded-[10px] px-3 py-2">
+              {quoteError}
+            </div>
+          ) : prepayQuote ? (
+            <div className="grid gap-1.5 text-[14px]" data-testid="self-quote-breakdown">
+              {prepayQuote.pass_persons > 0 && (
+                <div className="flex justify-between items-center text-sg-ink">
+                  <span>入場費 用卡 {prepayQuote.pass_persons} 位</span>
+                  <span className="font-num font-bold text-sg-sage-ink">已用卡折抵</span>
+                </div>
+              )}
+              {prepayQuote.unpaid_entry_persons > 0 && (
+                <div className="flex justify-between items-center text-sg-ink">
+                  <span>入場費 匯款 {prepayQuote.unpaid_entry_persons} 位</span>
+                  <span className="font-num font-bold">{formatMoney(prepayQuote.entry_amount)}</span>
+                </div>
+              )}
+              {prepayQuote.board_amount > 0 && (
+                <div className="flex justify-between items-center text-sg-ink">
+                  <span>智能板</span>
+                  <span className="font-num font-bold">{formatMoney(prepayQuote.board_amount)}</span>
+                </div>
+              )}
+              {prepayQuote.promo?.discount > 0 && (
+                <div className="flex justify-between items-center text-sg-sage-ink">
+                  <span>優惠碼 {prepayQuote.promo.code}</span>
+                  <span className="font-num font-bold">−{formatMoney(prepayQuote.promo.discount)}</span>
+                </div>
+              )}
+              <Divider className="my-0.5" />
+              <div className="flex justify-between items-center text-[15px] font-bold text-sg-ink">
+                <span>需要匯款</span>
+                <span className="font-num text-[17px] text-sg-brown" data-testid="self-quote-transfer-amount">
+                  {formatMoney(prepayQuote.transfer_amount)}
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Transfer selection or 0-transfer notice */}
+          {prepayQuote && !quoteError && (
+            prepayQuote.transfer_amount === 0 ? (
+              <div
+                data-testid="self-no-transfer-notice"
+                className="rounded-[12px] bg-sg-sage-soft border border-sg-sage/40 px-3 py-2.5 text-[13px] font-bold text-sg-sage-ink"
+              >
+                不需要匯款，送出後預約直接成立
+              </div>
+            ) : !selfTransferOpen ? (
+              <div
+                data-testid="self-deadline-passed-notice"
+                className="rounded-[12px] bg-sg-danger-soft border border-sg-danger/40 px-3 py-2.5 text-[13px] font-bold text-sg-danger"
+              >
+                已超過付款期限（前一日 {deadlineHourStr}），需要匯款的預約無法線上成立。全部用計次不限時卡而且不租智能板，仍然可以預約。
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                <div className="text-[13px] font-bold text-sg-ink">選擇匯款帳號</div>
+                {(prepayOptions?.transfer_methods || []).map((m) => {
+                  const isPool = m.code === 'ctbc_pool';
+                  const poolAvail = m.pool_available ?? prepayOptions?.ctbc_pool_available_count ?? 1;
+                  const isPoolExhausted = isPool && poolAvail === 0;
+                  const isSelected = selfTransferMethod?.code === m.code;
+                  let bankAccounts = [];
+                  try {
+                    bankAccounts = Array.isArray(m.bank_accounts_json)
+                      ? m.bank_accounts_json
+                      : JSON.parse(m.bank_accounts_json || '[]');
+                  } catch (e) {
+                    bankAccounts = [];
+                  }
+                  const hasMultipleBanks = bankAccounts.length > 1;
+                  return (
+                    <div key={m.code} className="grid gap-1.5">
+                      <label
+                        className={`flex items-center gap-[10px] rounded-[12px] border-[1.5px] bg-sg-paper px-3 py-2 cursor-pointer transition select-none ${
+                          isSelected ? 'border-sg-brown bg-sg-selected' : 'border-sg-line'
+                        } ${isPoolExhausted ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="self_transfer_method"
+                          value={m.code}
+                          disabled={isPoolExhausted}
+                          checked={isSelected}
+                          onChange={() => {
+                            const firstBank = bankAccounts[0]
+                              ? `${bankAccounts[0].bank_name} (${bankAccounts[0].bank_code}) ${bankAccounts[0].account}`
+                              : null;
+                            onChangeSelfTransferMethod({ code: m.code, bank_info: firstBank });
+                          }}
+                          className="sr-only"
+                        />
+                        <div
+                          className={`w-[18px] h-[18px] rounded-full border-2 transition grid place-items-center shrink-0 ${
+                            isSelected ? 'border-[5px] border-sg-brown bg-white' : 'border-sg-line'
+                          }`}
+                        />
+                        <div className="flex-1 text-[13px] leading-[1.4]">
+                          <b>{isPool ? '中信專屬轉帳帳號' : m.name}</b>
+                          {isPool && (
+                            <div className="sg-small">
+                              {isPoolExhausted
+                                ? '目前帳號已發完，請選其他方式'
+                                : '送出後給你一組中信專用轉帳帳號，對帳最快'}
+                            </div>
+                          )}
+                        </div>
+                      </label>
+
+                      {isSelected && hasMultipleBanks && (
+                        <div className="pl-6 pr-1 grid gap-1.5">
+                          <div className="text-[12px] font-bold text-sg-muted">請選擇匯款銀行：</div>
+                          {bankAccounts.map((b, bIdx) => {
+                            const bankStr = `${b.bank_name} (${b.bank_code}) ${b.account}`;
+                            const isBankSelected = selfTransferMethod?.bank_info === bankStr;
+                            return (
+                              <label
+                                key={bIdx}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-[10px] border text-[13px] cursor-pointer transition ${
+                                  isBankSelected
+                                    ? 'border-sg-brown bg-sg-paper font-bold text-sg-ink shadow-sm'
+                                    : 'border-sg-line bg-sg-bg text-sg-muted'
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name="self_transfer_bank"
+                                  value={bankStr}
+                                  checked={isBankSelected}
+                                  onChange={() =>
+                                    onChangeSelfTransferMethod({ code: m.code, bank_info: bankStr })
+                                  }
+                                  className="sr-only"
+                                />
+                                <div
+                                  className={`w-3.5 h-3.5 rounded-full border transition grid place-items-center shrink-0 ${
+                                    isBankSelected ? 'border-[4px] border-sg-brown bg-white' : 'border-sg-line'
+                                  }`}
+                                />
+                                <span>{b.bank_name} ({b.bank_code}) {b.account}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="text-[12px] text-sg-muted px-0.5">
+                  送出後顯示帳號，前一日 {deadlineHourStr} 前匯款並回報末五碼
+                </div>
+              </div>
+            )
+          )}
+        </Card>
+      )}
 
       {/* 3. Note Card */}
       <Card gap={8}>
@@ -373,9 +821,26 @@ export default function StepConfirm({
         />
       </Card>
 
+      {isSelfService && (
+        <label className="flex items-start gap-2.5 rounded-[14px] border border-sg-line bg-sg-paper px-3.5 py-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            data-testid="self-ack-checkbox"
+            checked={selfServiceAck}
+            onChange={(e) => onChangeSelfServiceAck(e.target.checked)}
+            className="mt-0.5 h-[18px] w-[18px] accent-sg-brown shrink-0"
+          />
+          <span className="text-[13.5px] font-bold text-sg-ink leading-[1.45]">
+            我已經會玩拼豆，了解當天部分時段沒有店員教學
+          </span>
+        </label>
+      )}
+
       {/* 4. Small notice text */}
       <div className="sg-small px-1">
-        座位保留 15 分鐘，遲到請先傳 LINE 告訴我們；費用在現場報到後付款。
+        {isSelfService
+          ? `前一日 ${deadlineHourStr} 前未完成匯款，預約將自動取消。`
+          : '座位保留 15 分鐘，遲到請先傳 LINE 告訴我們；費用在現場報到後付款。'}
       </div>
         </>
       )}
@@ -384,10 +849,26 @@ export default function StepConfirm({
       <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
         <BottomActionBar
           summary={summaryNode}
-          price={hasPricing && dayPricing ? priceCalculation.total : null}
+          price={
+            isSelfService
+              ? (prepayQuote ? prepayQuote.transfer_amount : null)
+              : (hasPricing && dayPricing ? priceCalculation.total : null)
+          }
           actionLabel="送出預約"
           loading={submitting}
-          disabled={submitting || !hasPricing || !dayPricing || globalLoading || Boolean(globalError)}
+          disabled={
+            submitting ||
+            !hasPricing ||
+            !dayPricing ||
+            globalLoading ||
+            Boolean(globalError) ||
+            (isSelfService &&
+              (!selfServiceAck ||
+                quoteLoading ||
+                !prepayQuote ||
+                Boolean(quoteError) ||
+                (needsTransferOnSelfDay && (!selfTransferOpen || !selfTransferMethod?.code))))
+          }
           onAction={() => executeBooking(false)}
           hasTabBarBelow={false}
         />

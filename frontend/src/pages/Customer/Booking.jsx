@@ -8,7 +8,7 @@ import StepConfirm from './booking/StepConfirm';
 import StepDone from './booking/StepDone';
 import { useToast } from '../../components/customer/Toast';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
-import { useSessions, useSessionRange, BOOKING_LOOKAHEAD_DAYS } from '../../hooks/customer/useSessions';
+import { useSessions, useSessionRange, useSelfServiceRange, BOOKING_LOOKAHEAD_DAYS } from '../../hooks/customer/useSessions';
 import { useDayPricing } from '../../hooks/customer/useDayPricing';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
 import api from '../../api/axios';
@@ -69,6 +69,7 @@ export default function Booking() {
   const todayStr = useMemo(() => getTodayString(), []);
   const lookaheadEndStr = useMemo(() => getEndDateString(BOOKING_LOOKAHEAD_DAYS - 1), []);
   const { sessionsByDate } = useSessionRange(todayStr, lookaheadEndStr);
+  const { selfServiceDates } = useSelfServiceRange(todayStr, lookaheadEndStr);
 
   // Draft state
   const initialDraft = useMemo(() => loadInitialDraft(), []);
@@ -81,6 +82,9 @@ export default function Booking() {
   const [units, setUnits] = useState(() => initialDraft?.units || []);
   const [customerNote, setCustomerNote] = useState(() => initialDraft?.customerNote || '');
   const [promo, setPromo] = useState(() => initialDraft?.promo || null);
+  const [selfPassUses, setSelfPassUses] = useState(() => initialDraft?.selfPassUses || {});
+  const [selfTransferMethod, setSelfTransferMethod] = useState(() => initialDraft?.selfTransferMethod || null);
+  const [selfServiceAck, setSelfServiceAck] = useState(() => Boolean(initialDraft?.selfServiceAck));
 
   // Save draft whenever state changes
   useEffect(() => {
@@ -96,14 +100,17 @@ export default function Booking() {
         units,
         customerNote,
         promo,
+        selfPassUses,
+        selfTransferMethod,
+        selfServiceAck,
         savedAt: Date.now(),
       };
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draftObj));
     } catch (e) {}
-  }, [step, date, mode, sel, arrival, leave, pax, units, customerNote, promo]);
+  }, [step, date, mode, sel, arrival, leave, pax, units, customerNote, promo, selfPassUses, selfTransferMethod, selfServiceAck]);
 
   // Pricing for selected date
-  const { dayPricing } = useDayPricing(date, globalSettings);
+  const { daily, dayPricing } = useDayPricing(date, globalSettings);
 
   // Sessions for selected date
   const {
@@ -201,6 +208,9 @@ export default function Booking() {
     setArrival(null);
     setLeave(null);
     setUnits([]);
+    setSelfPassUses({});
+    setSelfTransferMethod(null);
+    setSelfServiceAck(false);
   };
 
   // Completed booking
@@ -273,6 +283,8 @@ export default function Booking() {
           sessions={sessions}
           sessionsLoading={sessionsLoading}
           sessionsByDate={sessionsByDate}
+          selfServiceDates={selfServiceDates}
+          daily={daily}
           equipmentConfigs={equipmentConfigs}
           onNext={() => navigate('/booking?step=2')}
           userRole={userRole}
@@ -292,6 +304,7 @@ export default function Booking() {
           onChangeUnits={setUnits}
           globalSettings={globalSettings}
           dayPricing={dayPricing}
+          daily={daily}
           hasPricing={hasPricing}
           globalLoading={globalLoading}
           globalError={globalError}
@@ -316,6 +329,13 @@ export default function Booking() {
           onChangePromo={setPromo}
           globalSettings={globalSettings}
           dayPricing={dayPricing}
+          daily={daily}
+          selfPassUses={selfPassUses}
+          onChangeSelfPassUses={setSelfPassUses}
+          selfTransferMethod={selfTransferMethod}
+          onChangeSelfTransferMethod={setSelfTransferMethod}
+          selfServiceAck={selfServiceAck}
+          onChangeSelfServiceAck={setSelfServiceAck}
           hasPricing={hasPricing}
           globalLoading={globalLoading}
           globalError={globalError}

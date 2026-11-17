@@ -12,6 +12,7 @@ export default function PlanCards({
   onChangeMode,
   hourlyPrice,
   unlimitedPrice,
+  allowHourly = true,
   allowUnlimited = true,
   dateStr = '',
   dayPricing,
@@ -21,13 +22,23 @@ export default function PlanCards({
 }) {
   const toast = useToast();
   const selectMode = onSelectMode || onChangeMode || (() => {});
-  const isTimed = mode === 'timed';
-  const isUnlimited = mode === 'unlimited';
+  const isTimed = mode === 'timed' && allowHourly;
+  const isUnlimited = mode === 'unlimited' && allowUnlimited;
 
   const dateLabel = dateStr ? formatDateShort(dateStr) : '';
   const priceType = dayPricing?.dayType || 'weekday';
   const priceTypeLabel = DAY_PRICE_LABEL[priceType] || '平日價';
   const isWeekendOrSpecial = priceType === 'weekend' || priceType === 'special';
+
+  const handleHourlyClick = () => {
+    if (!allowHourly) {
+      const msg = '此日未開放一般計時';
+      if (onShowToast) onShowToast(msg);
+      else if (toast?.show) toast.show(msg, { type: 'info' });
+      return;
+    }
+    selectMode('timed');
+  };
 
   const handleUnlimitedClick = () => {
     if (!allowUnlimited) {
@@ -49,9 +60,12 @@ export default function PlanCards({
           type="button"
           role="radio"
           aria-checked={isTimed}
-          onClick={() => selectMode('timed')}
+          aria-disabled={!allowHourly ? 'true' : undefined}
+          onClick={handleHourlyClick}
           className={`relative grid rounded-[16px] border-[1.5px] bg-sg-paper pt-[10px] px-3 pb-[11px] text-left transition select-none ${
-            isTimed
+            !allowHourly
+              ? 'border-dashed border-sg-line cursor-not-allowed opacity-75'
+              : isTimed
               ? 'border-2 border-sg-brown bg-sg-selected shadow-sg-pop p-[calc(10px-0.5px)_calc(12px-0.5px)_calc(11px-0.5px)]'
               : 'border-sg-line hover:border-sg-brown/50'
           }`}
@@ -69,16 +83,20 @@ export default function PlanCards({
           </span>
           <span
             className={`font-num font-extrabold text-[26px] leading-[1.15] mt-1 ${
-              isTimed ? 'text-sg-brown' : 'text-sg-ink'
+              !allowHourly
+                ? 'text-sg-full'
+                : isTimed
+                ? 'text-sg-brown'
+                : 'text-sg-ink'
             }`}
           >
-            {hourlyPrice != null ? formatMoney(hourlyPrice) : <Skeleton className="h-7 w-20 inline-block my-1 rounded" />}
+            {!allowHourly ? '—' : hourlyPrice != null ? formatMoney(hourlyPrice) : <Skeleton className="h-7 w-20 inline-block my-1 rounded" />}
           </span>
           <span className="text-[11.5px] text-sg-muted">
             每小時
           </span>
           <span className="text-[12px] text-sg-muted mt-1 pt-1 border-t border-dashed border-sg-line">
-            玩幾小時算幾小時
+            {!allowHourly ? '此日未開放' : '玩幾小時算幾小時'}
           </span>
         </button>
 

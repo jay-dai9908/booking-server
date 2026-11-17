@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, Copy, QrCode } from 'lucide-react';
+import { Check, Clock, Copy, QrCode } from 'lucide-react';
 import { Card, Divider } from '../../../components/customer/Card';
 import Button from '../../../components/customer/Button';
 import BarcodeSheet from '../../../components/customer/sheets/BarcodeSheet';
+import PrepayTransferCard from '../../../components/customer/PrepayTransferCard';
+import SelfServiceInfoCard from '../../../components/customer/SelfServiceInfoCard';
 import { BeadLoader } from '../../../components/customer/Bead';
 import { useToast } from '../../../components/customer/Toast';
 import { formatBookingRef, formatDateShort, weekdayChar, formatYMD } from '../../../utils/customer/format';
 import { shortBoardName } from '../../../utils/customer/pricing';
 import { getGoogleCalendarUrl, downloadIcsFile } from '../../../utils/calendarHelper';
+import { earliestEntry } from '../../../../../shared/selfService.js';
 import api from '../../../api/axios';
 
 export default function StepDone({ result }) {
@@ -18,11 +21,34 @@ export default function StepDone({ result }) {
   const [showBarcode, setShowBarcode] = useState(false);
 
   const refParam = searchParams.get('ref') || result?.reservation?.booking_ref || result?.booking_ref || '';
-  const initialRes = (result?.reservation && result.reservation.session_date) ? result.reservation : null;
+  const initialRes = useMemo(() => {
+    if (result?.reservation && result.reservation.session_date) {
+      return {
+        ...result.reservation,
+        prepay: result.prepay ?? result.reservation.prepay ?? null,
+        self_info: result.self_info ?? result.reservation.self_info ?? null,
+        is_self_service: Boolean(
+          result.reservation.is_self_service || result.prepay || result.self_info
+        ),
+      };
+    }
+    return null;
+  }, [result]);
 
   const [reservation, setReservation] = useState(initialRes);
   const [loading, setLoading] = useState(!initialRes);
   const [notFound, setNotFound] = useState(false);
+
+  const reloadReservation = useCallback(async () => {
+    if (!refParam) return;
+    const res = await api.get('/reservations/my');
+    const list = Array.isArray(res.data) ? res.data : (res.data?.reservations || []);
+    const found = list.find((r) => r.booking_ref === refParam);
+    if (found) {
+      setReservation(found);
+      setNotFound(false);
+    }
+  }, [refParam]);
 
   useEffect(() => {
     let isMounted = true;
@@ -34,7 +60,7 @@ export default function StepDone({ result }) {
       return;
     }
 
-    setLoading(true);
+    setLoading(!initialRes);
     api.get('/reservations/my')
       .then((res) => {
         if (!isMounted) return;
@@ -166,16 +192,53 @@ export default function StepDone({ result }) {
     booking_ref: bookingRef,
   };
 
+  const isSelfService = Boolean(reservation.is_self_service || reservation.prepay);
+  const prepay = reservation.prepay || null;
+  const selfInfo = reservation.self_info || null;
+  const prepayStatus = prepay?.status || (reservation.status === 'confirmed' ? 'verified' : 'pending_payment');
+  const isPrepayPending = isSelfService && (prepayStatus === 'pending_payment' || prepayStatus === 'mismatch');
+  const isPrepayReported = isSelfService && prepayStatus === 'reported_pending_verify';
+  const isPrepayVerified = isSelfService && prepayStatus === 'verified';
+  const openAt = selfInfo?.earliest_entry || earliestEntry(startTime, selfInfo?.early_minutes ?? 30);
+  const holds = Array.isArray(prepay?.pass_holds) ? prepay.pass_holds : [];
+  const totalPassUnits = holds.reduce((s, h) => s + (Number(h.units) || 0), 0) || prepay?.pass_persons || 0;
+
   return (
     <div className="flex flex-col flex-1">
-      {/* 1. Hero checkmark */}
+      {/* 1. Hero status */}
       <div className="flex flex-col items-center justify-center py-4 text-center">
-        <div className="h-14 w-14 rounded-full bg-sg-sage text-white grid place-items-center shadow-sg-pop mb-1">
-          <Check className="w-[30px] h-[30px]" strokeWidth={2.4} />
-        </div>
-        <p className="text-[13px] text-sg-muted">
-          感謝預約，我們期待您的到來！
-        </p>
+        {isPrepayPending ? (
+          <>
+            <div className="h-14 w-14 rounded-full bg-sg-orange text-white grid place-items-center shadow-sg-pop mb-1">
+              <Clock className="w-[28px] h-[28px]" strokeWidth={2.2} />
+            </div>
+            <div className="text-[17px] font-bold text-sg-ink mt-1">預約已保留，付款後才成立</div>
+          </>
+        ) : isPrepayReported ? (
+          <>
+            <div className="h-14 w-14 rounded-full bg-sg-honey text-white grid place-items-center shadow-sg-pop mb-1">
+              <Clock className="w-[28px] h-[28px]" strokeWidth={2.2} />
+            </div>
+            <div className="text-[17px] font-bold text-sg-ink mt-1">已回報，等店員對帳</div>
+          </>
+        ) : isPrepayVerified ? (
+          <>
+            <div className="h-14 w-14 rounded-full bg-sg-sage text-white grid place-items-center shadow-sg-pop mb-1">
+              <Check className="w-[30px] h-[30px]" strokeWidth={2.4} />
+            </div>
+            <div className="text-[17px] font-bold text-sg-ink mt-1">預約成立</div>
+            <p className="text-[13px] text-sg-muted">當天 {openAt} 起可進場</p>
+          </>
+        ) : (
+          <>
+            <div className="h-14 w-14 rounded-full bg-sg-sage text-white grid place-items-center shadow-sg-pop mb-1">
+              <Check className="w-[30px] h-[30px]" strokeWidth={2.4} />
+            </div>
+            <p className="text-[13px] text-sg-muted">
+              感謝預約，我們期待您的到來！
+            </p>
+          </>
+        )}
       </div>
 
       {/* 2. Content */}
@@ -218,9 +281,66 @@ export default function StepDone({ result }) {
           </div>
         </Card>
 
+        {isPrepayPending && prepay && (
+          <PrepayTransferCard reservation={reservation} onReported={reloadReservation} />
+        )}
+
+        {isPrepayReported && (
+          <div
+            data-testid="self-reported-card"
+            className="rounded-[16px] border border-sg-honey bg-sg-honey-soft p-3.5 grid gap-1.5 text-sg-ink"
+          >
+            <div className="text-[15px] font-bold">已回報，等店員對帳</div>
+            <div className="text-[13.5px]">
+              帳號末五碼：<span className="font-num font-bold">{prepay?.remittance_last5 || '—'}</span>
+            </div>
+            <div className="text-[12.5px] text-sg-muted">
+              對帳完成後，這裡會變成「已確認」，也會用 LINE 通知你。對帳沒完成前，報到機不會開門。
+            </div>
+          </div>
+        )}
+
+        {isPrepayVerified && (
+          <div
+            data-testid="self-verified-card"
+            className="rounded-[16px] border border-sg-sage/50 bg-sg-sage-soft p-3.5 grid gap-1.5 text-sg-ink"
+          >
+            {prepay?.amount_due === 0 && (prepay?.pass_persons ?? 0) > 0 ? (
+              <>
+                <div className="text-[14.5px] font-bold text-sg-sage-ink">
+                  已用計次不限時卡付款，扣 {totalPassUnits} 次
+                </div>
+                <div className="text-[13px]">
+                  當天 <span className="font-num font-bold">{openAt}</span> 起可進場；取消預約會把次數退回卡片。
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-[14.5px] font-bold text-sg-sage-ink">付款已確認</div>
+                <div className="text-[13px]">
+                  當天 <span className="font-num font-bold">{openAt}</span> 起可進場
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {isSelfService && (
+          <SelfServiceInfoCard
+            title="半自助時段提醒"
+            ironText={selfInfo?.iron_text}
+            earlyMinutes={selfInfo?.early_minutes ?? 30}
+            showPaymentLine={false}
+          />
+        )}
+
         {/* Small Notice */}
         <div className="sg-small px-1 text-sg-muted">
-          到店時出示條碼就能報到。要改時間的話，先取消再重新預約。
+          {isSelfService
+            ? isPrepayVerified
+              ? `到店時在門口報到機出示條碼或電話就能報到，最早可提前 ${selfInfo?.early_minutes ?? 30} 分鐘進場。`
+              : '對帳沒完成前，報到機不會開門。'
+            : '到店時出示條碼就能報到。要改時間的話，先取消再重新預約。'}
         </div>
 
         {/* Add to Calendar */}

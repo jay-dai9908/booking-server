@@ -22,6 +22,7 @@ const DateStrip = React.forwardRef(function DateStrip({
   onSelectDate,
   onVisibleMonthChange,
   sessionsByDate,
+  selfServiceDates = {},
   allowClosed = false,
   className = '',
 }, ref) {
@@ -120,7 +121,8 @@ const DateStrip = React.forwardRef(function DateStrip({
         }
 
         const stateName = STATE_NAMES[item.state] || '';
-        const ariaLabel = `${m} 月 ${d} 日 週${wk}，${stateName}`;
+        const isSelfService = Boolean(item.isSelfService || selfServiceDates?.[cleanItemDate]);
+        const ariaLabel = `${m} 月 ${d} 日 週${wk}，${stateName}${isSelfService ? '，半自助' : ''}`;
 
         return (
           <button
@@ -145,6 +147,17 @@ const DateStrip = React.forwardRef(function DateStrip({
               className={`w-[22px] h-[4px] rounded-[2px] ${barColor}`}
               aria-hidden="true"
             />
+            {isSelfService && (
+              <span
+                className={`mt-[1px] px-[4px] rounded-full text-[9px] font-bold leading-[1.3] whitespace-nowrap ${
+                  isSelected
+                    ? 'bg-white/25 text-white'
+                    : 'bg-sg-honey-soft text-sg-honey-ink'
+                }`}
+              >
+                半自助
+              </span>
+            )}
           </button>
         );
       })}

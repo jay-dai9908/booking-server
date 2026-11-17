@@ -5,6 +5,8 @@ import MonthBar from '../../../components/customer/MonthBar';
 import DateStrip from '../../../components/customer/DateStrip';
 import MonthCalendar from '../../../components/customer/MonthCalendar';
 import PlanCards from '../../../components/customer/PlanCards';
+import SelfServiceInfoCard from '../../../components/customer/SelfServiceInfoCard';
+import { earliestEntry } from '../../../../../shared/selfService.js';
 import SlotGrid, { SlotCell } from '../../../components/customer/SlotGrid';
 import HourChips from '../../../components/customer/HourChips';
 import Button from '../../../components/customer/Button';
@@ -51,6 +53,8 @@ export default function StepSelectTime({
   sessions = [],
   sessionsLoading = false,
   sessionsByDate = {},
+  selfServiceDates = {},
+  daily = null,
   equipmentConfigs = [],
   onNext,
   userRole = 'customer',
@@ -69,19 +73,25 @@ export default function StepSelectTime({
   }, [date]);
 
   // Pricing values
+  const isSelfService = Boolean(daily?.is_self_service);
+  const allowHourly = isSelfService ? Boolean(daily?.self_allow_hourly) : true;
   const hourly = dayPricing?.hourly;
   const cap = dayPricing?.cap;
-  const allowUnlimited = dayPricing?.allowUnlimited ?? true;
+  const allowUnlimited = isSelfService ? true : (dayPricing?.allowUnlimited ?? true);
   const dayType = dayPricing?.dayType ?? 'weekday';
   const N = useMemo(() => unlimitedThresholdHours({ hourly, cap }), [hourly, cap]);
 
-  // If selected date does not allow unlimited mode, fallback to timed
+  // If selected date does not allow unlimited mode, fallback to timed;
+  // if self-service date does not allow hourly mode, fallback to unlimited
   useEffect(() => {
     if (!allowUnlimited && mode === 'unlimited') {
       onChangeMode('timed');
       toast.show('這天不開放當日不限時暢玩，已改成計時', { type: 'info' });
+    } else if (isSelfService && !allowHourly && mode === 'timed') {
+      onChangeSel(null);
+      onChangeMode('unlimited');
     }
-  }, [allowUnlimited, mode, onChangeMode, toast]);
+  }, [allowUnlimited, isSelfService, allowHourly, mode, onChangeMode, onChangeSel, toast]);
 
   // Today string
   const todayStr = useMemo(() => {
@@ -187,6 +197,10 @@ export default function StepSelectTime({
 
   // Switch mode handler
   const handleModeChange = (newMode) => {
+    if (newMode === 'timed' && !allowHourly) {
+      toast.show('這天僅開放當日不限時暢玩', { type: 'info' });
+      return;
+    }
     if (newMode === 'unlimited' && !allowUnlimited) {
       toast.show('這天不開放當日不限時暢玩', { type: 'info' });
       return;
@@ -321,6 +335,7 @@ export default function StepSelectTime({
           selectedDate={date}
           currentMonth={calendarMonth}
           sessionsByDate={sessionsByDate}
+          selfServiceDates={selfServiceDates}
           onSelectDate={(newDate) => {
             onChangeDate(newDate);
             setIsMonthExpanded(false);
@@ -331,6 +346,7 @@ export default function StepSelectTime({
           ref={dateStripRef}
           selectedDate={date}
           sessionsByDate={sessionsByDate}
+          selfServiceDates={selfServiceDates}
           onSelectDate={onChangeDate}
         />
       )}
@@ -343,6 +359,17 @@ export default function StepSelectTime({
         />
       ) : (
         <>
+          {isSelfService && (
+            <SelfServiceInfoCard
+              ironText={daily?.self_service?.iron_text}
+              ironMode={daily?.iron_mode}
+              ironDate={daily?.iron_date}
+              date={date}
+              earlyMinutes={daily?.self_service?.early_minutes ?? 30}
+              deadlineHour={daily?.self_service?.prepay_deadline_hour ?? 12}
+              showPaymentLine
+            />
+          )}
           {globalError && !hasPricing ? (
             <EmptyState
               title="暫時抓不到價格"
@@ -366,6 +393,7 @@ export default function StepSelectTime({
               onChangeMode={handleModeChange}
               hourlyPrice={hourly}
               unlimitedPrice={cap}
+              allowHourly={allowHourly}
               allowUnlimited={allowUnlimited}
               dateStr={date}
               dayPricing={dayPricing}
@@ -488,6 +516,24 @@ export default function StepSelectTime({
                   )}
                 </>
               )}
+            </div>
+          )}
+
+          {isSelfService && (
+            (mode === 'timed' && sel && sortedSessions[sel.start]?.start_time) ||
+            (mode === 'unlimited' && arrival != null && leave != null && sortedSessions[arrival]?.start_time)
+          ) && (
+            <div data-testid="self-earliest-entry-hint" className="text-[13px] font-bold text-sg-brown px-1">
+              最早可在{' '}
+              <span className="font-num">
+                {earliestEntry(
+                  mode === 'timed'
+                    ? sortedSessions[sel.start]?.start_time
+                    : sortedSessions[arrival]?.start_time,
+                  daily?.self_service?.early_minutes ?? 30
+                )}
+              </span>{' '}
+              進場
             </div>
           )}
         </>

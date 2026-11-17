@@ -141,3 +141,34 @@ export function useSessionRange(startDate, endDate) {
 
   return { sessionsByDate, loading, error, reload: fetchRange };
 }
+
+export function useSelfServiceRange(startDate, endDate) {
+  const [selfServiceDates, setSelfServiceDates] = useState({});
+  const [loading, setLoading] = useState(false);
+
+  const fetchSelfRange = useCallback(async () => {
+    if (!startDate || !endDate) return;
+    try {
+      setLoading(true);
+      const res = await api.get(`/daily-settings/range?start=${startDate}&end=${endDate}`);
+      const list = Array.isArray(res.data) ? res.data : [];
+      const map = {};
+      for (const item of list) {
+        if (item?.is_self_service && item?.date) {
+          map[String(item.date).slice(0, 10)] = true;
+        }
+      }
+      setSelfServiceDates(map);
+    } catch (err) {
+      console.error('Failed to fetch self-service range', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [startDate, endDate]);
+
+  useEffect(() => {
+    fetchSelfRange();
+  }, [fetchSelfRange]);
+
+  return { selfServiceDates, loading, reload: fetchSelfRange };
+}

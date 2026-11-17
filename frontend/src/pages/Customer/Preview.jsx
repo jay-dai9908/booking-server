@@ -17,7 +17,7 @@ import PriceInfoSheet from '../../components/customer/sheets/PriceInfoSheet';
 import GuestLineLoginButton from '../../components/customer/GuestLineLoginButton';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useDayPricing } from '../../hooks/customer/useDayPricing';
-import { useSessions, useSessionRange, BOOKING_LOOKAHEAD_DAYS } from '../../hooks/customer/useSessions';
+import { useSessions, useSessionRange, useSelfServiceRange, BOOKING_LOOKAHEAD_DAYS } from '../../hooks/customer/useSessions';
 import { slotState, meterBeads, dayState } from '../../utils/customer/availability';
 import { parseYMD, buildDiscountConfig } from '../../utils/customer/pricing';
 import { boardDiscountTexts } from '../../utils/customer/discountText';
@@ -67,6 +67,7 @@ export default function Preview() {
   const { dayPricing: selectedDayPricing } = useDayPricing(date, globalSettings);
   const { sessions, loading: sessionsLoading } = useSessions(date, { autoRefresh: true });
   const { sessionsByDate } = useSessionRange(todayStr, lookaheadEndStr);
+  const { selfServiceDates } = useSelfServiceRange(todayStr, lookaheadEndStr);
 
   useEffect(() => {
     api.get(`/equipment/availability?date=${date}`)
@@ -241,6 +242,7 @@ export default function Preview() {
                     selectedDate={date}
                     currentMonth={calendarMonth}
                     sessionsByDate={sessionsByDate}
+                    selfServiceDates={selfServiceDates}
                     onSelectDate={(newDate) => {
                       setDate(newDate);
                       setIsMonthExpanded(false);
@@ -250,6 +252,7 @@ export default function Preview() {
                   <DateStrip
                     selectedDate={date}
                     sessionsByDate={sessionsByDate}
+                    selfServiceDates={selfServiceDates}
                     onSelectDate={setDate}
                   />
                 )}

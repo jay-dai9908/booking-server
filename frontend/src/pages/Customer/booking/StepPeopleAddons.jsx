@@ -36,6 +36,7 @@ export default function StepPeopleAddons({
   onChangeUnits,
   globalSettings,
   dayPricing,
+  daily = null,
   hasPricing = true,
   globalLoading = false,
   globalError = null,
@@ -362,7 +363,7 @@ export default function StepPeopleAddons({
       </Card>
 
       {/* 4. Smart Board Card */}
-      {sortedEquipmentConfigs.length > 0 && (
+      {sortedEquipmentConfigs.length > 0 ? (
         <Card gap={12}>
           <div>
             <div className="text-[15px] font-bold">智能拼豆板（選租）</div>
@@ -492,7 +493,12 @@ export default function StepPeopleAddons({
             </SoftBox>
           )}
         </Card>
-      )}
+      ) : daily?.is_self_service ? (
+        <Card data-testid="self-no-equipment-notice" gap={4}>
+          <div className="text-[15px] font-bold">智能拼豆板（選租）</div>
+          <div className="sg-small text-sg-muted">半自助時段這天不提供智能板租借</div>
+        </Card>
+      ) : null}
         </>
       )}
 

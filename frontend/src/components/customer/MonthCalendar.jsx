@@ -15,6 +15,7 @@ export default function MonthCalendar({
   currentMonth, // 'YYYY-MM'
   dayStateMap: dayStateMapProp,
   sessionsByDate,
+  selfServiceDates = {},
   selectedDate = '',
   onSelectDate,
   allowPast = false,
@@ -51,7 +52,7 @@ export default function MonthCalendar({
 
   return (
     <div
-      className={`grid grid-cols-7 gap-x-[2px] gap-y-1 rounded-[14px] border border-sg-line bg-sg-paper px-2 py-[10px] text-center select-none ${className}`}
+      className={`grid grid-cols-[repeat(7,minmax(0,1fr))] gap-x-[2px] gap-y-1 rounded-[14px] border border-sg-line bg-sg-paper px-2 py-[10px] text-center select-none min-w-0 ${className}`}
     >
       {WEEKDAY_HEADERS.map((h, i) => (
         <span key={i} className="text-[12px] text-sg-muted font-bold py-1">
@@ -66,6 +67,7 @@ export default function MonthCalendar({
 
         const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const state = dayStateMap[dateStr] || 'closed';
+        const isSelfService = Boolean(selfServiceDates?.[dateStr]);
         const isSelected = dateStr === selectedDate;
         const isDisabled = (!allowPast && state === 'past') || (!allowClosed && state === 'closed');
         const isMuted = state === 'past' || state === 'closed' || state === 'full';
@@ -96,7 +98,7 @@ export default function MonthCalendar({
                 onSelectDate(dateStr);
               }
             }}
-            className={`grid justify-items-center content-center gap-[2px] min-h-[44px] rounded-[8px] transition-colors ${btnBg} ${
+            className={`grid justify-items-center content-center gap-[2px] min-h-[44px] min-w-0 rounded-[8px] transition-colors ${btnBg} ${
               isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer active:scale-[0.96]'
             }`}
           >
@@ -107,6 +109,17 @@ export default function MonthCalendar({
               className={`w-[12px] h-[3px] rounded-[2px] ${barClass ? barClass : 'bg-transparent'}`}
               aria-hidden="true"
             />
+            {isSelfService && (
+              <span
+                className={`text-[8.5px] leading-none font-bold whitespace-nowrap px-0.5 rounded ${
+                  isSelected
+                    ? 'text-white/95'
+                    : 'text-sg-honey-ink bg-sg-honey-soft'
+                }`}
+              >
+                半自助
+              </span>
+            )}
           </button>
         );
       })}
