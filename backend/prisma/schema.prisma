@@ -777,8 +777,8 @@ model KioskAccessLog {
   device_id   Int?
   at          DateTime
   at_unknown  Boolean  @default(false)
-  method      String   // qr | phone | backup_code
-  result      String   // FIRST_CHECKIN | RE_ENTRY | TOO_EARLY | UNVERIFIED | QR_EXPIRED | NOT_FOUND | ENDED | NORMAL_DAY | BACKUP_OPEN
+  method      String   // qr | phone | backup_code | keypad
+  result      String   // FIRST_CHECKIN | RE_ENTRY | TOO_EARLY | UNVERIFIED | QR_EXPIRED | NOT_FOUND | ENDED | NORMAL_DAY | BACKUP_OPEN | PAD_LOCKED
   open_door   Boolean  @default(false)
   booking_ref String?
   user_id     Int?

@@ -120,11 +120,13 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     if (!ev || typeof ev.id !== 'string' || !ev.id.trim()) continue;
     const eventId = ev.id.trim();
 
-    if (ev.type === 'backup_open') {
+    if (ev.type === 'backup_open' || ev.type === 'pad_locked') {
       const evAtSec = ev.at === null || ev.at === undefined ? null : Number(ev.at);
       const hasValidTime = evAtSec !== null && Number.isFinite(evAtSec) && evAtSec > 0;
       const evAt = hasValidTime ? new Date(evAtSec * 1000) : now;
       const atUnknown = !hasValidTime;
+      const isBackup = ev.type === 'backup_open';
+
       await db.kioskAccessLog.upsert({
         where: {
           device_id_event_id: {
@@ -137,9 +139,9 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
           device_id: device.id,
           at: evAt,
           at_unknown: atUnknown,
-          method: 'backup_code',
-          result: 'BACKUP_OPEN',
-          open_door: true,
+          method: isBackup ? 'backup_code' : 'keypad',
+          result: isBackup ? 'BACKUP_OPEN' : 'PAD_LOCKED',
+          open_door: isBackup ? true : false,
           booking_ref: null,
           user_id: null,
           hint: null,

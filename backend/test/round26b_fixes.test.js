@@ -109,3 +109,81 @@ test('Round 26b Item 1: backup_open events handle unknown at (null, 0, negative,
     }
   }
 });
+
+test('Round 26b Item 2: pad_locked events record PAD_LOCKED in KioskAccessLog with keypad method and dedup', async () => {
+  const fixedNow = new Date('2099-10-20T15:00:00.000+08:00');
+  let device = null;
+  let savedKiosk = null;
+
+  try {
+    savedKiosk = await prisma.kioskSetting.findUnique({ where: { id: 1 } });
+    await prisma.kioskSetting.upsert({
+      where: { id: 1 },
+      update: { early_minutes: 30, after_close_minutes: 60, prepay_deadline_hour: 12, max_unpaid_self_bookings: 2 },
+      create: { id: 1, early_minutes: 30, after_close_minutes: 60, prepay_deadline_hour: 12, max_unpaid_self_bookings: 2 }
+    });
+
+    device = await prisma.kioskDevice.create({
+      data: {
+        name: 'R26b Test PadLocked Device',
+        key_wrapped: wrapPairKey(crypto.randomBytes(32), process.env.JWT_SECRET),
+        is_active: true,
+        paired_at: fixedNow
+      }
+    });
+
+    const lockEvent = [{ id: 'ev-pad-lock-1', type: 'pad_locked', at: null, offline: false }];
+
+    // 送一筆 pad_locked
+    const syncRes1 = await processKioskSync(prisma, {
+      device,
+      body: { events: lockEvent },
+      clientIp: '127.0.0.1',
+      now: fixedNow
+    });
+
+    assert.ok(syncRes1.ack_event_ids.includes('ev-pad-lock-1'), 'ack_event_ids must include ev-pad-lock-1');
+
+    const log = await prisma.kioskAccessLog.findUnique({
+      where: { device_id_event_id: { device_id: device.id, event_id: 'ev-pad-lock-1' } }
+    });
+    assert.ok(log, 'Access log must exist for pad_locked');
+    assert.equal(log.method, 'keypad');
+    assert.equal(log.result, 'PAD_LOCKED');
+    assert.equal(log.open_door, false);
+    assert.equal(log.at_unknown, true);
+    assert.equal(log.at.getTime(), fixedNow.getTime());
+
+    // 同一個事件編號再送一次不會多一筆
+    const syncRes2 = await processKioskSync(prisma, {
+      device,
+      body: { events: lockEvent },
+      clientIp: '127.0.0.1',
+      now: new Date(fixedNow.getTime() + 5000)
+    });
+    assert.ok(syncRes2.ack_event_ids.includes('ev-pad-lock-1'), 'ack_event_ids must include ev-pad-lock-1 on resend');
+
+    const count = await prisma.kioskAccessLog.count({
+      where: { device_id: device.id, event_id: 'ev-pad-lock-1' }
+    });
+    assert.equal(count, 1, 'Duplicate event must not create extra rows');
+  } finally {
+    if (device) {
+      await prisma.kioskAccessLog.deleteMany({ where: { device_id: device.id } });
+      await prisma.kioskDevice.delete({ where: { id: device.id } }).catch(() => {});
+    }
+    if (savedKiosk) {
+      await prisma.kioskSetting.update({
+        where: { id: 1 },
+        data: {
+          early_minutes: savedKiosk.early_minutes,
+          after_close_minutes: savedKiosk.after_close_minutes,
+          prepay_deadline_hour: savedKiosk.prepay_deadline_hour,
+          max_unpaid_self_bookings: savedKiosk.max_unpaid_self_bookings
+        }
+      }).catch(() => {});
+    } else {
+      await prisma.kioskSetting.delete({ where: { id: 1 } }).catch(() => {});
+    }
+  }
+});

@@ -18,7 +18,8 @@ import { toTaipeiDateString } from '@shared/time.js';
 const METHOD_LABELS = {
   qr: '條碼',
   phone: '電話',
-  backup_code: '備用密碼'
+  backup_code: '備用密碼',
+  keypad: '鍵盤'
 };
 
 const RESULT_LABELS = {
@@ -30,7 +31,8 @@ const RESULT_LABELS = {
   NOT_FOUND: '查無預約',
   ENDED: '已結束',
   NORMAL_DAY: '一般營業日',
-  BACKUP_OPEN: '備用密碼開門'
+  BACKUP_OPEN: '備用密碼開門',
+  PAD_LOCKED: '鍵盤連續輸錯，已鎖定'
 };
 
 const RESULT_STYLES = {
@@ -42,7 +44,8 @@ const RESULT_STYLES = {
   QR_EXPIRED: 'bg-rose-50 text-rose-700 border-rose-200',
   NOT_FOUND: 'bg-stone-100 text-stone-600 border-stone-200',
   ENDED: 'bg-stone-100 text-stone-600 border-stone-200',
-  NORMAL_DAY: 'bg-stone-100 text-stone-600 border-stone-200'
+  NORMAL_DAY: 'bg-stone-100 text-stone-600 border-stone-200',
+  PAD_LOCKED: 'bg-rose-50 text-rose-700 border-rose-200'
 };
 
 const MODE_LABELS = {
