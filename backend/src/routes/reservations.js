@@ -6,17 +6,27 @@ import { modifyBookingEquipment } from '../controllers/equipmentController.js';
 import {
   getPrepayOptionsHandler,
   postPrepayQuoteHandler,
-  patchRemittanceLast5Handler
+  patchRemittanceLast5Handler,
+  getAdminPrepaysHandler,
+  verifyAdminPrepayHandler,
+  mismatchAdminPrepayHandler,
+  remindAdminPrepayHandler
 } from '../controllers/prepayController.js';
 import { prepayQuoteLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
 const reservationStaffAuth = [verifyToken, requireAnyPermission(['reservations', 'seating', 'weekly'])];
+const prepayStaffAuth = [verifyToken, requireAnyPermission(['reservations', 'shop'])];
 
 router.get('/prepay-options', verifyToken, requireRegisteredUser, getPrepayOptionsHandler);
 router.post('/prepay-quote', verifyToken, requireRegisteredUser, prepayQuoteLimiter, postPrepayQuoteHandler);
 router.patch('/:booking_ref/prepay/remittance', verifyToken, requireRegisteredUser, patchRemittanceLast5Handler);
+
+router.get('/admin/prepays', ...prepayStaffAuth, getAdminPrepaysHandler);
+router.post('/admin/prepays/:booking_ref/verify', ...prepayStaffAuth, verifyAdminPrepayHandler);
+router.post('/admin/prepays/:booking_ref/mismatch', ...prepayStaffAuth, mismatchAdminPrepayHandler);
+router.post('/admin/prepays/:booking_ref/remind', ...prepayStaffAuth, remindAdminPrepayHandler);
 
 router.post('/', verifyToken, requireRegisteredUser, createReservation);
 router.get('/my', verifyToken, requireRegisteredUser, getMyReservations);

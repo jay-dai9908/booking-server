@@ -42,7 +42,7 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
   }
 
   for (const eq of equipments) {
-    const unitRate = eq.equipment?.hourly_rate || (eq.rental_hours > 0 ? Math.round(eq.subtotal_price / (eq.quantity * eq.rental_hours)) : 60);
+    const unitRate = eq.unit_rate || eq.equipment?.hourly_rate || (eq.rental_hours > 0 ? Math.round(eq.subtotal_price / (eq.quantity * eq.rental_hours)) : 60);
 
     let eqStartAt = eq.start_at || null;
     let eqPlannedEndAt = null;
@@ -440,6 +440,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
       start_at: startAtStr,
       end_at: endAtStr,
       is_walk_in: Boolean(firstRes.is_walk_in),
+      is_self_service: Boolean(firstRes.is_self_service),
       is_paid: Boolean(firstRes.is_paid),
       attendance: resolvedAttendance,
       unseated_count: unseatedCount,

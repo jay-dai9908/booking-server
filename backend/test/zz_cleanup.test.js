@@ -9,6 +9,7 @@ test('zz_cleanup: Operational tables must have 0 rows remaining after test suite
     { name: 'BookingEquipment', model: prisma.bookingEquipment },
     { name: 'TimerPause', model: prisma.timerPause },
     { name: 'Payment', model: prisma.payment },
+    { name: 'BookingPrepay', model: prisma.bookingPrepay },
     { name: 'PrintJob', model: prisma.printJob },
     { name: 'ProductOrder', model: prisma.productOrder },
     { name: 'ProductOrderItem', model: prisma.productOrderItem },

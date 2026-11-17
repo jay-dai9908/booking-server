@@ -25,6 +25,7 @@ import { BeadLoader } from '../../components/customer/Bead';
 import BarcodeSheet from '../../components/customer/sheets/BarcodeSheet';
 import EquipmentAddonSheet from '../../components/customer/sheets/EquipmentAddonSheet';
 import ConfirmSheet from '../../components/customer/sheets/ConfirmSheet';
+import PrepayTransferCard from '../../components/customer/PrepayTransferCard';
 import { useToast } from '../../components/customer/Toast';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
@@ -340,6 +341,7 @@ export default function HistoryPage() {
   const canModifyAddon = useMemo(() => {
     if (!currentDetailRes) return false;
     if (currentDetailRes.status === 'cancelled') return false;
+    if (currentDetailRes.is_self_service) return false;
     const now = new Date();
     const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
     const [y, m, d] = parseReservationDate(datePart);
@@ -364,8 +366,14 @@ export default function HistoryPage() {
   const canCancel = useMemo(() => {
     if (!currentDetailRes) return false;
     if (currentDetailRes.status === 'cancelled') return false;
-    if (currentDetailRes.is_paid) return false;
     if (currentDetailRes.attendance === 'checked_in') return false;
+    if (currentDetailRes.is_self_service && currentDetailRes.prepay) {
+      const pSt = currentDetailRes.prepay.status;
+      if (pSt === 'reported_pending_verify' || pSt === 'mismatch') return false;
+      if (pSt === 'verified' && (currentDetailRes.prepay.amount_due ?? 0) > 0) return false;
+    } else if (currentDetailRes.is_paid) {
+      return false;
+    }
     const now = new Date();
     const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
     const [y, m, d] = parseReservationDate(datePart);
@@ -522,6 +530,53 @@ export default function HistoryPage() {
             <KV label="聯絡人" value={contactInfo} />
           </Card>
 
+          {/* 1b. Self-service prepay state */}
+          {r.is_self_service && r.status !== 'cancelled' && r.prepay && (
+            <>
+              {r.prepay.status === 'pending_payment' && (
+                <PrepayTransferCard reservation={r} onReported={fetchReservations} />
+              )}
+              {r.prepay.status === 'reported_pending_verify' && (
+                <Card data-testid="history-prepay-reported" className="bg-sg-honey-soft border border-sg-honey" gap={6}>
+                  <div className="text-[15px] font-bold text-sg-ink">已回報，等店員對帳</div>
+                  <div className="text-[13.5px] text-sg-ink">
+                    帳號末五碼：<span className="font-num font-bold">{r.prepay.remittance_last5 || '—'}</span>
+                  </div>
+                  <div className="text-[12.5px] text-sg-muted">
+                    對帳完成後會變成「已確認」，也會用 LINE 通知你。
+                  </div>
+                </Card>
+              )}
+              {r.prepay.status === 'mismatch' && (
+                <Card data-testid="history-prepay-mismatch" className="bg-sg-danger-soft border border-sg-danger/40" gap={8}>
+                  <div className="text-[15px] font-bold text-sg-danger">
+                    匯款金額和預約金額不同，請用 LINE 聯絡我們
+                  </div>
+                  <a
+                    href={globalSettings?.line_button_url || globalSettings?.official_line_url || 'https://lin.ee/vsZhRW5'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-[#06C755] text-white font-bold text-[14px] py-2.5 px-4"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    透過 LINE 聯絡我們
+                  </a>
+                </Card>
+              )}
+              {r.prepay.status === 'verified' && (
+                <Card data-testid="history-prepay-verified" className="bg-sg-sage-soft border border-sg-sage/50" gap={6}>
+                  <div className="text-[15px] font-bold text-sg-sage-ink">付款已確認</div>
+                  <div className="text-[14px] font-bold text-sg-ink">
+                    當天 {r.self_info?.open_at || ''} 起可進場
+                  </div>
+                  <div className="text-[12.5px] text-sg-muted">
+                    預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場條碼到時候會出現在這裡。
+                  </div>
+                </Card>
+              )}
+            </>
+          )}
+
           {/* 2. Note Card */}
           <Card gap={6}>
             <div className="flex justify-between items-center">
@@ -618,7 +673,7 @@ export default function HistoryPage() {
               {hasBoards ? '修改智能拼豆板' : '加租智能拼豆板'}
             </Button>
           )}
-          {!isDetailEnded && !canModifyAddon && (
+          {!isDetailEnded && !canModifyAddon && !r.is_self_service && (
             <div className="sg-small text-center">
               距離結束不到 2 小時，智能板請洽現場
             </div>
@@ -778,7 +833,7 @@ export default function HistoryPage() {
                   const [y, m, d] = parseReservationDate(r.session_date || r.session?.session_date);
                   const [eH, eM] = (r.end_time || '23:59').split(':').map(Number);
                   const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
-                  const canAddon = now.getTime() < endDt.getTime() - 120 * 60 * 1000;
+                  const canAddon = !r.is_self_service && now.getTime() < endDt.getTime() - 120 * 60 * 1000;
 
                   const isNearest = idx === 0;
 
@@ -791,7 +846,14 @@ export default function HistoryPage() {
                     >
                       {/* Top row */}
                       <div className="flex justify-between items-center">
-                        <Pill variant={pill.variant}>{pill.text}</Pill>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Pill variant={pill.variant}>{pill.text}</Pill>
+                          {r.is_self_service && (
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-sg-honey-soft text-sg-honey-ink border border-sg-honey">
+                              半自助
+                            </span>
+                          )}
+                        </div>
                         <span className="font-num sg-small">{formatShortRef(r.booking_ref)}</span>
                       </div>
 
@@ -850,6 +912,54 @@ export default function HistoryPage() {
                           >
                             {hasBoards ? '修改' : '加租'}
                           </Button>
+                        </div>
+                      )}
+
+                      {/* Self-service prepay state (P4a / P4b / P4c / verified) */}
+                      {r.is_self_service && r.prepay && (
+                        <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
+                          {r.prepay.status === 'pending_payment' && (
+                            <PrepayTransferCard reservation={r} onReported={fetchReservations} />
+                          )}
+                          {r.prepay.status === 'reported_pending_verify' && (
+                            <div
+                              data-testid={`list-prepay-reported-${r.booking_ref}`}
+                              className="rounded-[12px] border border-sg-honey bg-sg-honey-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-0.5"
+                            >
+                              <div className="font-bold">已回報，等店員對帳</div>
+                              <div className="text-[12px] text-sg-muted">
+                                帳號末五碼 <span className="font-num font-bold text-sg-ink">{r.prepay.remittance_last5}</span> · 對帳沒完成前，報到機不會開門
+                              </div>
+                            </div>
+                          )}
+                          {r.prepay.status === 'mismatch' && (
+                            <div
+                              data-testid={`list-prepay-mismatch-${r.booking_ref}`}
+                              className="rounded-[12px] border border-sg-danger/40 bg-sg-danger-soft px-3 py-2.5 text-[13px] text-sg-danger grid gap-2"
+                            >
+                              <div className="font-bold">匯款金額和預約金額不同，請用 LINE 聯絡我們</div>
+                              <a
+                                href={globalSettings?.line_button_url || globalSettings?.official_line_url || 'https://lin.ee/vsZhRW5'}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#06C755] text-white font-bold text-[13px] py-2 px-3"
+                              >
+                                <MessageCircle className="w-4 h-4" />
+                                透過 LINE 聯絡我們
+                              </a>
+                            </div>
+                          )}
+                          {r.prepay.status === 'verified' && (
+                            <div
+                              data-testid={`list-prepay-verified-${r.booking_ref}`}
+                              className="rounded-[12px] border border-sg-sage/50 bg-sg-sage-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-0.5"
+                            >
+                              <div className="font-bold text-sg-sage-ink">付款已確認 · 當天 {r.self_info?.open_at || ''} 起可進場</div>
+                              <div className="text-[12px] text-sg-muted">
+                                預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場條碼到時候會出現在這裡。
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 

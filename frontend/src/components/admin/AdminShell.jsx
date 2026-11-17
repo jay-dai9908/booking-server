@@ -41,7 +41,8 @@ export default function AdminShell({ children, title = '拾光製所', subtitle 
     today_pending_checkin: 0,
     today_unpaid: 0,
     shop_pending_verify: 0,
-    shop_arrived_unpicked: 0
+    shop_arrived_unpicked: 0,
+    self_prepay_pending_verify: 0
   });
 
   const navigate = useNavigate();
@@ -108,7 +109,7 @@ export default function AdminShell({ children, title = '拾光製所', subtitle 
   const allNavLinks = [
     { to: '/admin/seating', perm: 'seating', group: '現場櫃檯營運', icon: Grid, label: '今日帶位', badge: navBadges.today_pending_checkin },
     { to: '/admin/seat-layout', perm: 'seating', group: '現場櫃檯營運', icon: Layers, label: '座位設定' },
-    { to: '/admin/reservations', perm: 'reservations', group: '現場櫃檯營運', icon: Users, label: '預約訂單總覽', badge: navBadges.today_unpaid },
+    { to: '/admin/reservations', perm: 'reservations', group: '現場櫃檯營運', icon: Users, label: '預約訂單總覽', badge: (navBadges.today_unpaid || 0) + (navBadges.self_prepay_pending_verify || 0) },
     { to: '/admin/shop', perm: 'shop', fallbackPerm: 'reservations', group: '現場櫃檯營運', icon: ShoppingBag, label: '商品預購與對帳', badge: navBadges.shop_pending_verify },
     { to: '/admin/print-station', perm: 'reservations', fallbackPerm: 'settings', group: '現場櫃檯營運', icon: Printer, label: '商米出單機' },
 

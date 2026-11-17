@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Search, Plus, XCircle, CheckCircle2, Cpu, Minus, CreditCard } from 'lucide-react';
 import api from '../../api/axios';
@@ -6,6 +7,7 @@ import ReservationDetailsModal, { getReservationStatusUI } from '../../component
 import StatusPill from '../../components/admin/StatusPill';
 import CheckInPanel from '../../components/admin/floor/CheckInPanel';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
+import SelfServicePrepaysPanel from '../../components/admin/SelfServicePrepaysPanel';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
 import { safeFormatDate, formatDateTime } from '../../utils/format';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
@@ -65,6 +67,11 @@ function getBillingStatusPillProps(r) {
 }
 
 export default function ReservationsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeView, setActiveView] = useState(() =>
+    searchParams.get('tab') === 'prepays' ? 'prepays' : 'overview'
+  );
+  const [prepayPendingCount, setPrepayPendingCount] = useState(0);
   const [reservations, setReservations] = useState([]);
   const [selectedReservation, setSelectedReservation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -75,6 +82,25 @@ export default function ReservationsPage() {
   const [toastMsg, setToastMsg] = useState(null);
   const [deleteRecordTarget, setDeleteRecordTarget] = useState(null);
   const [isDeletingRecord, setIsDeletingRecord] = useState(false);
+
+  useEffect(() => {
+    api.get('/reservations/admin/nav-badges')
+      .then((res) => {
+        if (res.data?.self_prepay_pending_verify != null) {
+          setPrepayPendingCount(res.data.self_prepay_pending_verify);
+        }
+      })
+      .catch(() => {});
+  }, [activeView]);
+
+  const handleSwitchView = (next) => {
+    setActiveView(next);
+    if (next === 'prepays') {
+      setSearchParams({ tab: 'prepays' });
+    } else {
+      setSearchParams({});
+    }
+  };
 
   const showToast = (msg) => {
     setToastMsg(msg);
@@ -357,6 +383,52 @@ export default function ReservationsPage() {
   return (
     <>
       <div className="space-y-6 animate-fade-in max-w-full">
+      {/* Top View Tabs: Overview vs Self-Service Prepays */}
+      <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+        <button
+          type="button"
+          data-testid="reservations-tab-overview"
+          onClick={() => handleSwitchView('overview')}
+          className={`px-4 py-2 rounded-xl text-sm font-bold transition ${
+            activeView === 'overview'
+              ? 'bg-sg-brown text-white shadow-xs'
+              : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          預約總覽
+        </button>
+        <button
+          type="button"
+          data-testid="reservations-tab-prepays"
+          onClick={() => handleSwitchView('prepays')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition ${
+            activeView === 'prepays'
+              ? 'bg-sg-brown text-white shadow-xs'
+              : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          <span>半自助付款</span>
+          <span
+            className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+              prepayPendingCount > 0
+                ? 'bg-orange-100 text-orange-800'
+                : activeView === 'prepays'
+                ? 'bg-white/20 text-white'
+                : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            {prepayPendingCount} 筆待對帳
+          </span>
+        </button>
+      </div>
+
+      {activeView === 'prepays' ? (
+        <SelfServicePrepaysPanel
+          onCountsChange={(c) => setPrepayPendingCount(c?.reported_pending_verify || 0)}
+          onToast={showToast}
+        />
+      ) : (
+        <>
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full md:w-auto">
           <div className="relative flex-1 min-w-[160px] sm:min-w-[200px]">
@@ -457,6 +529,11 @@ export default function ReservationsPage() {
                           <span className={`font-bold text-[15px] truncate ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
                             {r.user?.name || '未設定'}
                           </span>
+                          {r.is_self_service && (
+                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
+                              半自助
+                            </span>
+                          )}
                           <span className="text-xs font-medium text-gray-500 shrink-0">· {r.pax} 位</span>
                           {r.user?.phone && (
                             <span className="text-xs text-gray-400 truncate hidden xs:inline">· {r.user.phone}</span>
@@ -553,7 +630,14 @@ export default function ReservationsPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col gap-0.5">
-                          <span className={`font-medium ${isCancelled ? 'text-gray-400' : 'text-gray-800'}`}>{r.user?.name || '未設定'}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`font-medium ${isCancelled ? 'text-gray-400' : 'text-gray-800'}`}>{r.user?.name || '未設定'}</span>
+                            {r.is_self_service && (
+                              <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                半自助
+                              </span>
+                            )}
+                          </div>
                           <span className="text-sm text-gray-500">{r.user?.phone || '未提供'}</span>
                           {(r.customer_note || r.admin_note) && (
                             <div className="flex flex-wrap gap-1 mt-1 max-w-[240px]">
@@ -687,6 +771,8 @@ export default function ReservationsPage() {
           </div>
         )}
       </div>
+        </>
+      )}
 
       </div>
 

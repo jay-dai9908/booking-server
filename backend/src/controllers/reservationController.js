@@ -1209,6 +1209,25 @@ export const getAdminReservations = async (req, res) => {
 
     // Group them
     let grouped = groupReservations(reservations, equipmentsMap);
+
+    const prepays = bookingRefs.length
+      ? await prisma.bookingPrepay.findMany({
+          where: { booking_ref: { in: bookingRefs } },
+          select: {
+            booking_ref: true,
+            status: true,
+            amount_due: true,
+            pass_persons: true,
+            remittance_last5: true,
+            deadline_at: true
+          }
+        })
+      : [];
+    const prepayByRef = new Map(prepays.map((p) => [p.booking_ref, p]));
+    grouped = grouped.map((g) => ({
+      ...g,
+      prepay: prepayByRef.get(g.booking_ref) || null
+    }));
     
     // Sort grouped reservations by session_date ascending, then start_time ascending
     grouped.sort((a, b) => {
@@ -1280,10 +1299,13 @@ export const getAdminReservationDetails = async (req, res) => {
     const sessionDate = refreshedReservations[0].session.session_date;
     const pricingInfo = await getEffectiveDailyRates(prisma, sessionDate);
 
+    const prepay = await prisma.bookingPrepay.findUnique({ where: { booking_ref } });
+
     const equipmentsMap = { [booking_ref]: eqRecords };
     const grouped = groupReservations(refreshedReservations, equipmentsMap);
     const result = {
       ...grouped[0],
+      prepay: prepay || null,
       pricing_info: pricingInfo
     };
 
@@ -2659,7 +2681,7 @@ export const getAdminNavBadges = async (req, res) => {
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + 1);
 
-    const [todayReservations, pendingShopVerifyCount, arrivedShopCount] = await Promise.all([
+    const [todayReservations, pendingShopVerifyCount, arrivedShopCount, selfPrepayPendingVerifyCount] = await Promise.all([
       prisma.reservation.findMany({
         where: {
           status: 'confirmed',
@@ -2686,6 +2708,12 @@ export const getAdminNavBadges = async (req, res) => {
         where: {
           order_status: 'arrived'
         }
+      }).catch(() => 0) : Promise.resolve(0),
+      prisma.bookingPrepay ? prisma.bookingPrepay.count({
+        where: {
+          status: { in: ['reported_pending_verify', 'mismatch'] },
+          amount_due: { gt: 0 }
+        }
       }).catch(() => 0) : Promise.resolve(0)
     ]);
 
@@ -2710,7 +2738,8 @@ export const getAdminNavBadges = async (req, res) => {
       today_pending_checkin: todayPendingCheckin,
       today_unpaid: todayUnpaid,
       shop_pending_verify: pendingShopVerifyCount,
-      shop_arrived_unpicked: arrivedShopCount
+      shop_arrived_unpicked: arrivedShopCount,
+      self_prepay_pending_verify: selfPrepayPendingVerifyCount
     });
   } catch (error) {
     console.error('getAdminNavBadges error:', error);
@@ -2719,7 +2748,8 @@ export const getAdminNavBadges = async (req, res) => {
       today_pending_checkin: 0,
       today_unpaid: 0,
       shop_pending_verify: 0,
-      shop_arrived_unpicked: 0
+      shop_arrived_unpicked: 0,
+      self_prepay_pending_verify: 0
     });
   }
 };

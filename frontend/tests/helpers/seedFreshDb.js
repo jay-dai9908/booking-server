@@ -20,6 +20,7 @@ export async function cleanOperationalData(customPrisma) {
   await prisma.boardPause.deleteMany({}).catch(() => {});
   await prisma.timerPause.deleteMany({}).catch(() => {});
   await prisma.payment.deleteMany({}).catch(() => {});
+  await prisma.bookingPrepay.deleteMany({}).catch(() => {});
   await prisma.bookingEquipment.deleteMany({}).catch(() => {});
   await prisma.bookingPerson.deleteMany({}).catch(() => {});
   await prisma.reservation.deleteMany({}).catch(() => {});

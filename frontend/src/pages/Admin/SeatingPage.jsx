@@ -1025,6 +1025,11 @@ export default function SeatingPage() {
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-[15px] text-sg-ink">{b.name}</span>
                             <span className="text-[13px] text-sg-muted">· {b.pax} 位</span>
+                            {b.is_self_service && (
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-sg-honey-soft text-sg-honey-ink font-bold">
+                                半自助
+                              </span>
+                            )}
                             {isWaitOnly && (
                               <span className="text-[11px] px-1.5 py-0.5 rounded bg-sg-brown-soft text-sg-brown font-bold">
                                 等待區
@@ -1173,6 +1178,11 @@ export default function SeatingPage() {
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-[15px] text-sg-ink">{b.name}</span>
                             <span className="text-[13px] text-sg-muted">· {b.pax} 位</span>
+                            {b.is_self_service && (
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-sg-honey-soft text-sg-honey-ink font-bold">
+                                半自助
+                              </span>
+                            )}
                             {b.unseated_count > 0 && (
                               <span className="text-[11px] px-1.5 py-0.5 rounded bg-sg-danger-soft text-sg-danger font-bold">
                                 {b.unseated_count} 位未帶位

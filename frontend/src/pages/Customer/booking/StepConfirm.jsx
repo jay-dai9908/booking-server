@@ -116,17 +116,6 @@ export default function StepConfirm({
     });
   }, [pax, H, startTime, endTime, dayPricing, mode, units, configsMap, discountCfg, promo, bookingSessions]);
 
-  // Auto-cancel promo if pax requirement not met (Round 18 Item 2)
-  useEffect(() => {
-    if (promo) {
-      const check = validateCouponPax(promo, pax);
-      if (check.cancelled) {
-        onChangePromo(null);
-        toast.show(check.message, { type: 'info' });
-      }
-    }
-  }, [pax, promo]);
-
   const passUsesList = useMemo(() => {
     return Object.entries(selfPassUses || {})
       .map(([id, count]) => ({ user_pass_id: Number(id), units: Number(count) || 0 }))
@@ -137,6 +126,18 @@ export default function StepConfirm({
     () => passUsesList.reduce((sum, item) => sum + item.units, 0),
     [passUsesList]
   );
+
+  // Auto-cancel promo if pax (or unpaid pax on self-service day) requirement not met (Round 18 & 25)
+  useEffect(() => {
+    if (promo) {
+      const checkPax = isSelfService ? Math.max(0, pax - totalPassPersons) : pax;
+      const check = validateCouponPax(promo, checkPax);
+      if (check.cancelled) {
+        onChangePromo(null);
+        toast.show(check.message, { type: 'info' });
+      }
+    }
+  }, [pax, totalPassPersons, isSelfService, promo]);
 
   const allUsingPass = isSelfService && totalPassPersons >= pax;
 
@@ -284,22 +285,28 @@ export default function StepConfirm({
     setPromoError('');
 
     try {
-      const effectivePax = isSelfService ? Math.max(1, pax - totalPassPersons) : pax;
+      const effectivePax = isSelfService ? Math.max(0, pax - totalPassPersons) : pax;
+      const effectiveSeating = isSelfService
+        ? (prepayQuote?.entry_amount ?? Math.round((priceCalculation.seat.total * effectivePax) / Math.max(1, pax)))
+        : priceCalculation.seat.total;
+      const effectiveEquip = isSelfService
+        ? (prepayQuote?.board_amount ?? priceCalculation.equipmentTotal)
+        : priceCalculation.equipmentTotal;
       const payload = {
         code: cleanCode,
         session_date: date,
         pax: effectivePax,
         hours: H,
         is_unlimited: mode === 'unlimited' || priceCalculation.seat.isCapped,
-        base_amount: priceCalculation.seat.raw,
-        seating_amount: priceCalculation.seat.total,
-        equipment_amount: priceCalculation.equipmentTotal,
+        base_amount: effectiveSeating + effectiveEquip,
+        seating_amount: effectiveSeating,
+        equipment_amount: effectiveEquip,
         hourly_price: dayPricing?.hourly,
       };
 
       const res = await api.post('/checkout/promo-codes/validate', payload);
-      const promoData = res.data?.promo_code || res.data;
-      const check = validateCouponPax(promoData, pax);
+      const promoData = res.data?.promo || res.data?.promo_code || res.data;
+      const check = validateCouponPax(promoData, effectivePax);
       if (check.cancelled) {
         setPromoError(check.message);
         toast.show(check.message, { type: 'error' });

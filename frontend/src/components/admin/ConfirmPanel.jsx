@@ -25,7 +25,7 @@ export default function ConfirmPanel({
     >
       <div className="w-full max-w-sm bg-white rounded-2xl p-5 shadow-2xl border border-sg-line animate-in zoom-in-95 duration-150">
         <h4 className="text-[17px] font-bold text-sg-ink">{title}</h4>
-        {message && <p className="text-[13px] text-sg-muted mt-2 leading-relaxed">{message}</p>}
+        {message && <p className="text-[13px] text-sg-muted mt-2 leading-relaxed whitespace-pre-line">{message}</p>}
         {children && <div className="mt-3">{children}</div>}
 
         <div className="mt-6 flex items-center justify-end gap-2.5">

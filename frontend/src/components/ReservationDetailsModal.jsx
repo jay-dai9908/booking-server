@@ -565,6 +565,11 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                 <h3 className="text-sm font-medium text-gray-500 mb-1">人數</h3>
                 <div className="flex items-center gap-2">
                   <p className="text-lg font-bold text-gray-900">{reservation.pax} 人</p>
+                  {reservation.is_self_service && (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md">
+                      半自助
+                    </span>
+                  )}
                   {reservation.is_unlimited && (
                     <span className="inline-flex items-center gap-1 text-xs font-bold text-sg-brown bg-sg-brown-soft border border-sg-line px-2 py-0.5 rounded-md">
                       不限時
@@ -576,6 +581,29 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                     </span>
                   )}
                 </div>
+                {reservation.is_self_service && reservation.prepay && (
+                  <div className="mt-1.5 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 inline-flex flex-wrap items-center gap-2">
+                    <span>
+                      預付狀態：
+                      <b>
+                        {{
+                          pending_payment: '待付款',
+                          reported_pending_verify: '已回報待對帳',
+                          mismatch: '金額不符',
+                          verified: '已確認',
+                          expired: '逾期已取消',
+                          cancelled: '已取消'
+                        }[reservation.prepay.status] || reservation.prepay.status}
+                      </b>
+                    </span>
+                    {reservation.prepay.pass_persons > 0 && (
+                      <span>· 用卡 {reservation.prepay.pass_persons} 位</span>
+                    )}
+                    {reservation.prepay.remittance_last5 && (
+                      <span className="font-mono">· 末五碼 {reservation.prepay.remittance_last5}</span>
+                    )}
+                  </div>
+                )}
               </div>
               {reservation.total_amount != null && (
                 <div>
