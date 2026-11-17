@@ -52,7 +52,8 @@ export default function MonthCalendar({
 
   return (
     <div
-      className={`grid grid-cols-[repeat(7,minmax(0,1fr))] gap-x-[2px] gap-y-1 rounded-[14px] border border-sg-line bg-sg-paper px-2 py-[10px] text-center select-none min-w-0 ${className}`}
+      style={{ gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}
+      className={`grid grid-cols-7 gap-x-[2px] gap-y-1 rounded-[14px] border border-sg-line bg-sg-paper px-2 py-[10px] text-center select-none min-w-0 ${className}`}
     >
       {WEEKDAY_HEADERS.map((h, i) => (
         <span key={i} className="text-[12px] text-sg-muted font-bold py-1">
