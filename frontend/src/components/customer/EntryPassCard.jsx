@@ -5,6 +5,9 @@ import Button from './Button';
 import { showCustomerToast } from './Toast';
 import { formatPhone } from '../../utils/customer/format';
 import api from '../../api/axios';
+import FloorGuideMap from '../common/FloorGuideMap';
+
+const floorMapCache = new Map();
 
 function formatCountdown(sec) {
   const s = Math.max(0, Number(sec) || 0);
@@ -60,11 +63,40 @@ export default function EntryPassCard({
   const [loading, setLoading] = useState(true);
   const [showQr, setShowQr] = useState(false);
   const [countdownSec, setCountdownSec] = useState(300);
+  const [floorMapData, setFloorMapData] = useState(null);
 
   const canvasRef = useRef(null);
   const isMountedRef = useRef(true);
   const prevStateRef = useRef(null);
   const refreshingRef = useRef(false);
+
+  // 地圖資料依版本快取在記憶體，避免 60 秒輪詢時重複下載
+  useEffect(() => {
+    const url = entryData?.floor_map_url;
+    if (!url || entryData?.state !== 'in') {
+      if (entryData?.state !== 'in') setFloorMapData(null);
+      return;
+    }
+    if (floorMapCache.has(url)) {
+      setFloorMapData(floorMapCache.get(url));
+      return;
+    }
+    let cancelled = false;
+    const reqUrl = url.startsWith('/api/') ? url.replace(/^\/api/, '') : url;
+    api.get(reqUrl)
+      .then((res) => {
+        if (!cancelled && res.data) {
+          floorMapCache.set(url, res.data);
+          setFloorMapData(res.data);
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to fetch floor map for entry pass:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entryData?.floor_map_url, entryData?.state]);
 
   // 1. 抓取進場資訊 API
   const fetchPass = async ({ silent = false } = {}) => {
@@ -297,6 +329,35 @@ export default function EntryPassCard({
             {seatText}
           </div>
         </div>
+
+        {hasSeats && floorMapData && (
+          <div
+            data-testid="entry-pass-floor-map"
+            className="rounded-[12px] bg-white/75 border border-sg-sage/40 p-3.5 grid gap-2"
+          >
+            <div className="flex items-center justify-between text-[13px] font-bold text-sg-ink">
+              <span>你的座位在這裡</span>
+              <span className="text-[12px] text-sg-muted font-normal">綠色閃動的是你的座位</span>
+            </div>
+            <div className="rounded-[10px] bg-sg-bg p-2 overflow-hidden flex items-center justify-center">
+              <FloorGuideMap floor={floorMapData} seatCodes={entryData.seats} />
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-sg-muted pt-1 border-t border-sg-sage/20">
+              <span className="inline-flex items-center gap-1.5">
+                <i className="w-2.5 h-2.5 rounded-full bg-[#5F7A55] inline-block" />
+                你的座位
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <i className="w-2.5 h-2.5 rounded-full bg-[#8B5B43] inline-block" />
+                入口
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <i className="w-2.5 h-2.5 rounded-full bg-[#D3CAC0] inline-block" />
+                其他座位
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-2 text-[13.5px]">
           <div className="flex items-baseline gap-2">

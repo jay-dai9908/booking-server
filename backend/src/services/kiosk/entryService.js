@@ -4,6 +4,8 @@ import { earliestEntry, ironText } from '../../../../shared/selfService.js';
 import { qrKeyFrom, qrCodeFor } from './sgk1.js';
 import { ensureKioskSetting } from '../selfService/prepayService.js';
 import { isBookingClearedForEntry, resolveZoneForSeats, summarizeBookingBoards } from './accessService.js';
+import { getActiveLayoutForDate } from '../seating/layoutService.js';
+import { buildFloorMap } from '../../../../shared/floorMap.js';
 
 /**
  * 取得顧客半自助預約之進場資訊（狀態、可進場時間、動態 QR 等）
@@ -138,6 +140,19 @@ export async function getReservationEntryPass(db = prisma, {
     today: toTaipeiDateString(now)
   });
 
+  const globalSetting = await db.globalSetting.findUnique({
+    where: { id: 1 },
+    select: { seat_layout_enabled: true }
+  });
+  let floorMapUrl = null;
+  if (globalSetting?.seat_layout_enabled) {
+    const activeLayout = await getActiveLayoutForDate(db, sessionDate || now);
+    if (activeLayout && activeLayout.id && activeLayout.status === 'published') {
+      const map = buildFloorMap(activeLayout);
+      floorMapUrl = `/api/kiosk/files/floor-map/${map.version}.json`;
+    }
+  }
+
   return {
     state,
     start,
@@ -150,6 +165,7 @@ export async function getReservationEntryPass(db = prisma, {
     boards,
     code,
     code_expires_at: codeExpiresAt,
+    floor_map_url: floorMapUrl,
     server_now: now.toISOString()
   };
 }
