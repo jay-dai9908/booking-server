@@ -13,31 +13,40 @@ const ADMIN_PORT = 3001;
 const BASE_URL = `http://localhost:${ADMIN_PORT}`;
 
 test('Round 27 Item 5: Kiosk offline and backup code LINE notifications', async (t) => {
-  // 1. Setup admin staff user and login
-  const staffPass = `test_alert_pwd_${Date.now()}`;
-  const admin = await prisma.adminUser.create({
-    data: {
-      name: 'Alert Admin',
-      password: staffPass,
-      role: 'staff',
-      permissions: ['settings'],
-      is_active: true
-    }
-  });
+  let admin = null;
+  let testUser = null;
+  let fullDaySession = null;
+  let origDailySetting = null;
+  const now = new Date();
+  const todayStr = toTaipeiDateString(now);
+  const todayDateObj = dateOnly(todayStr);
 
-  const loginRes = await fetch(`${BASE_URL}/api/auth/admin/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: staffPass })
-  });
-  assert.equal(loginRes.status, 200);
-  const { token } = await loginRes.json();
-  assert.ok(token);
+  try {
+    // 1. Setup admin staff user and login
+    const staffPass = `test_alert_pwd_${Date.now()}`;
+    admin = await prisma.adminUser.create({
+      data: {
+        name: 'Alert Admin',
+        password: staffPass,
+        role: 'staff',
+        permissions: ['settings'],
+        is_active: true
+      }
+    });
 
-  // Setup candidate User with LINE ID
-  const testUser = await prisma.user.create({
-    data: {
-      name: 'Test Alert Recipient',
+    const loginRes = await fetch(`${BASE_URL}/api/auth/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: staffPass })
+    });
+    assert.equal(loginRes.status, 200);
+    const { token } = await loginRes.json();
+    assert.ok(token);
+
+    // Setup candidate User with LINE ID
+    testUser = await prisma.user.create({
+      data: {
+        name: 'Test Alert Recipient',
       phone: `0987${String(Date.now()).slice(-6)}`,
       line_user_id: `U_alert_test_${Date.now()}`
     }
@@ -66,9 +75,9 @@ test('Round 27 Item 5: Kiosk offline and backup code LINE notifications', async 
   assert.deepEqual(dataPutRecipients.alert_user_ids, [testUser.id]);
 
   // 3. Test isWithinSelfServiceBusinessHours logic
-  const now = new Date();
-  const todayStr = toTaipeiDateString(now);
-  const todayDateObj = dateOnly(todayStr);
+  origDailySetting = await prisma.dailySetting.findUnique({
+    where: { date: todayDateObj }
+  });
 
   // Ensure daily setting has is_self_service = true
   await prisma.dailySetting.upsert({
@@ -77,20 +86,15 @@ test('Round 27 Item 5: Kiosk offline and backup code LINE notifications', async 
     create: { date: todayDateObj, is_self_service: true }
   });
 
-  // Ensure session exists for today: 00:00 - 23:59 so current time is guaranteed within business hours
-  let testSession = await prisma.session.findFirst({
-    where: { session_date: todayDateObj }
+  // Ensure a session exists covering 00:00 - 23:59 so current time is guaranteed within business hours
+  fullDaySession = await prisma.session.create({
+    data: {
+      session_date: todayDateObj,
+      start_time: '00:00',
+      end_time: '23:59',
+      max_capacity: 16
+    }
   });
-  if (!testSession) {
-    testSession = await prisma.session.create({
-      data: {
-        session_date: todayDateObj,
-        start_time: '00:00',
-        end_time: '23:59',
-        price: 200
-      }
-    });
-  }
 
   const inHours = await isWithinSelfServiceBusinessHours(prisma, now);
   assert.equal(inHours, true);
@@ -165,7 +169,24 @@ test('Round 27 Item 5: Kiosk offline and backup code LINE notifications', async 
   const notifyResult = await notifyBackupCodeUsed(prisma, now);
   assert.ok(notifyResult);
 
-  // Cleanup
-  await prisma.adminUser.delete({ where: { id: admin.id } }).catch(() => {});
-  await prisma.user.delete({ where: { id: testUser.id } }).catch(() => {});
+  } finally {
+    // Cleanup
+    if (fullDaySession?.id) {
+      await prisma.session.delete({ where: { id: fullDaySession.id } }).catch(() => {});
+    }
+    if (origDailySetting) {
+      await prisma.dailySetting.update({
+        where: { date: todayDateObj },
+        data: { is_self_service: origDailySetting.is_self_service }
+      });
+    } else {
+      await prisma.dailySetting.deleteMany({ where: { date: todayDateObj } }).catch(() => {});
+    }
+    if (admin?.id) {
+      await prisma.adminUser.delete({ where: { id: admin.id } }).catch(() => {});
+    }
+    if (testUser?.id) {
+      await prisma.user.delete({ where: { id: testUser.id } }).catch(() => {});
+    }
+  }
 });

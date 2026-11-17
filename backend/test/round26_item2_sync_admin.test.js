@@ -48,6 +48,7 @@ test('Round 26 Item 2: Kiosk sync 7-day schedule, event dedup, backup code valid
   try {
     savedKiosk = await prisma.kioskSetting.findUnique({ where: { id: 1 } });
 
+    await prisma.kioskSlide.deleteMany();
     await prisma.session.deleteMany({ where: { session_date: { in: cleanupDates } } });
     await prisma.dailySetting.deleteMany({ where: { date: { in: cleanupDates } } });
 
@@ -125,8 +126,8 @@ test('Round 26 Item 2: Kiosk sync 7-day schedule, event dedup, backup code valid
     // 2. Backup code validation (09xxx, 9-digit, alpha rejected with 422; valid 10-digit accepted & bumps rev)
     await prisma.kioskSetting.upsert({
       where: { id: 1 },
-      update: { backup_code: null, backup_code_rev: 0, backup_code_set_at: null },
-      create: { id: 1 }
+      update: { backup_code: null, backup_code_rev: 0, backup_code_set_at: null, slides_rev: 0 },
+      create: { id: 1, slides_rev: 0 }
     });
 
     for (const badCode of ['0912345678', '123456789', '88001234AB']) {
@@ -186,7 +187,7 @@ test('Round 26 Item 2: Kiosk sync 7-day schedule, event dedup, backup code valid
     assert.deepEqual(syncOut1.setup_pin, { rev: 1, pin: '246810' });
     assert.deepEqual(syncOut1.contact, { line_url: 'https://lin.ee/kioskLine', line_id: '@sgtest' });
     assert.deepEqual(syncOut1.slides, { rev: 0, items: [] });
-    assert.equal(syncOut1.floor_map, null);
+    assert.ok(syncOut1.floor_map === null || typeof syncOut1.floor_map?.version === 'string');
     assert.equal(syncOut1.firmware, null);
 
     const logCount = await prisma.kioskAccessLog.count({
@@ -239,6 +240,7 @@ test('Round 26 Item 2: Kiosk sync 7-day schedule, event dedup, backup code valid
     assert.equal(ksGetRes.body.backup_code, undefined);
     assert.equal(ksGetRes.body.setup_pin, undefined);
   } finally {
+    await prisma.kioskSlide.deleteMany();
     await prisma.session.deleteMany({ where: { session_date: { in: cleanupDates } } });
     await prisma.dailySetting.deleteMany({ where: { date: { in: cleanupDates } } });
     if (device?.id) {

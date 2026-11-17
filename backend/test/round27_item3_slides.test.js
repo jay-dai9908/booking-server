@@ -211,5 +211,9 @@ test('Round 27 Item 3: Carousel Slides RGB565 management and kiosk sync', async 
 
   // Cleanup
   await prisma.kioskSlide.deleteMany();
+  await prisma.kioskSetting.updateMany({
+    where: { id: 1 },
+    data: { slides_rev: 0 }
+  });
   await prisma.adminUser.delete({ where: { id: admin.id } }).catch(() => {});
 });
