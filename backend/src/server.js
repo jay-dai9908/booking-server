@@ -692,6 +692,7 @@ const ensureDatabaseSchema = async () => {
       "id" SERIAL NOT NULL,
       "device_id" INTEGER,
       "at" TIMESTAMP(3) NOT NULL,
+      "at_unknown" BOOLEAN NOT NULL DEFAULT false,
       "method" TEXT NOT NULL,
       "result" TEXT NOT NULL,
       "open_door" BOOLEAN NOT NULL DEFAULT false,
@@ -703,6 +704,7 @@ const ensureDatabaseSchema = async () => {
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "KioskAccessLog_pkey" PRIMARY KEY ("id")
     )`,
+    `ALTER TABLE "KioskAccessLog" ADD COLUMN IF NOT EXISTS "at_unknown" BOOLEAN NOT NULL DEFAULT false`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "KioskAccessLog_device_id_event_id_key" ON "KioskAccessLog"("device_id", "event_id")`,
     `CREATE INDEX IF NOT EXISTS "KioskAccessLog_at_idx" ON "KioskAccessLog"("at")`,
     `CREATE INDEX IF NOT EXISTS "KioskAccessLog_booking_ref_idx" ON "KioskAccessLog"("booking_ref")`

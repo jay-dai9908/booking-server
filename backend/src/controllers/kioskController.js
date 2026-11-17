@@ -301,6 +301,7 @@ export const getKioskAccessLogsHandler = async (req, res) => {
         id: l.id,
         device_id: l.device_id,
         at: l.at,
+        at_unknown: Boolean(l.at_unknown),
         method: l.method,
         result: l.result,
         open_door: l.open_door,

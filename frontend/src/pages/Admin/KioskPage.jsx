@@ -646,7 +646,9 @@ export default function KioskPage() {
                     className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 items-center px-3 py-2.5 text-sm bg-white"
                   >
                     <div className="font-mono text-xs sm:text-sm text-stone-700">
-                      {formatTaipeiDateTime(item.at, false)}
+                      {item.at_unknown
+                        ? `發生時間不明，補報於 ${formatTaipeiDateTime(item.at, false)}`
+                        : formatTaipeiDateTime(item.at, false)}
                     </div>
                     <div className="text-stone-800 font-medium truncate">
                       {item.user_name || (item.hint ? `末碼 ${item.hint}` : '—')}
