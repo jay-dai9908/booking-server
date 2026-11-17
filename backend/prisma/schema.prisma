@@ -748,5 +748,22 @@ model BookingPrepay {
   @@index([status, deadline_at])
 }
 
+model KioskDevice {
+  id           Int       @id @default(autoincrement())
+  name         String    @default("門口報到機")
+  key_wrapped  String
+  is_active    Boolean   @default(true)
+  paired_at    DateTime?
+  last_seen_at DateTime?
+  last_ip      String?
+  fw_version   String?
+  status_json  Json?
+  have_json    Json?
+  created_at   DateTime  @default(now())
+
+  @@index([is_active])
+}
+
+
 
 

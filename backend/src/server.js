@@ -654,7 +654,23 @@ const ensureDatabaseSchema = async () => {
     `CREATE UNIQUE INDEX IF NOT EXISTS "BookingPrepay_booking_ref_key" ON "BookingPrepay"("booking_ref")`,
     `CREATE INDEX IF NOT EXISTS "BookingPrepay_user_id_status_idx" ON "BookingPrepay"("user_id", "status")`,
     `CREATE INDEX IF NOT EXISTS "BookingPrepay_status_deadline_at_idx" ON "BookingPrepay"("status", "deadline_at")`,
-    `ALTER TABLE "BookingPrepay" ADD COLUMN IF NOT EXISTS "pricing_snapshot" JSONB`
+    `ALTER TABLE "BookingPrepay" ADD COLUMN IF NOT EXISTS "pricing_snapshot" JSONB`,
+
+    `CREATE TABLE IF NOT EXISTS "KioskDevice" (
+      "id" SERIAL NOT NULL,
+      "name" TEXT NOT NULL DEFAULT '門口報到機',
+      "key_wrapped" TEXT NOT NULL,
+      "is_active" BOOLEAN NOT NULL DEFAULT true,
+      "paired_at" TIMESTAMP(3),
+      "last_seen_at" TIMESTAMP(3),
+      "last_ip" TEXT,
+      "fw_version" TEXT,
+      "status_json" JSONB,
+      "have_json" JSONB,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "KioskDevice_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE INDEX IF NOT EXISTS "KioskDevice_is_active_idx" ON "KioskDevice"("is_active")`
   ];
 
   for (const sql of statements) {
@@ -678,6 +694,7 @@ app.use(cors({
   credentials: true, // Allow cookies to be sent
 }));
 app.use(checkBannedIP);
+app.use('/api/kiosk/v1', express.json({ limit: '16kb' }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 app.use(cookieParser());
@@ -706,6 +723,15 @@ app.use('/api/kiosk', kioskRoutes);
 
 // Basic error handler
 app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({ error: 'Payload too large' });
+  }
+  if (err instanceof SyntaxError && err?.status === 400 && 'body' in err) {
+    if (req.originalUrl?.startsWith('/api/kiosk/v1')) {
+      return res.status(401).json({ error: 'KIOSK_AUTH' });
+    }
+    return res.status(400).json({ error: 'Invalid JSON' });
+  }
   console.error(err.stack);
   res.status(500).json({ error: 'Something went wrong on the server!' });
 });
