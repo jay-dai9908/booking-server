@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { getLiveFloorData, splitBoardUnits } from '../services/floor/liveService.js';
+import { applyCheckInRecords } from '../services/floor/checkInService.js';
 import { reseatBookings, assertNoSeatCollisions } from '../services/seating/allocator.js';
 import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
@@ -119,116 +120,19 @@ export async function checkIn(req, res) {
         primaryBookingRef: booking_ref
       });
 
-      // Split equipment units
-      await splitBoardUnits(tx, booking_ref);
-
-      // Create or update BookingPerson
-      const existingPersons = await tx.bookingPerson.findMany({
-        where: { booking_ref },
-        orderBy: { person_no: 'asc' }
-      });
-
       const now = new Date();
-      const dStr = typeof firstRes.session.session_date === 'string'
-        ? firstRes.session.session_date.slice(0, 10)
-        : firstRes.session.session_date.toISOString().slice(0, 10);
-      const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
-
-      // Query valid payments to check coverage (Spec 2.2 item 2)
-      const validPayments = await tx.payment.findMany({
-        where: {
-          booking_ref,
-          status: 'valid',
-          kind: { in: ['charge', 'waive'] }
-        }
+      await applyCheckInRecords(tx, {
+        booking_ref,
+        reservations,
+        seats,
+        board_assignments,
+        start_timer,
+        staffName,
+        seat_source: 'staff',
+        is_seat_locked: true,
+        now,
+        touchedSessionIds: displaced?.touchedSessionIds || []
       });
-
-      const isBookingPaid =
-        firstRes.is_paid === true ||
-        firstRes.billing_status === 'paid' ||
-        firstRes.billing_status === 'waived' ||
-        validPayments.some(pay => !pay.person_nos || pay.person_nos.length === 0);
-
-      const targetCount = Math.max(pax, seats.length);
-      let allPersonsCovered = true;
-
-      for (let i = 0; i < targetCount; i++) {
-        const personNo = i + 1;
-        const seatCode = seats[i] || null;
-        const exPerson = existingPersons.find(p => p.person_no === personNo);
-
-        const isPersonPaid =
-          isBookingPaid ||
-          validPayments.some(pay => Array.isArray(pay.person_nos) && pay.person_nos.includes(personNo));
-
-        if (!isPersonPaid) {
-          allPersonsCovered = false;
-        }
-
-        const personData = {
-          seat_code: seatCode,
-          status: 'active'
-        };
-
-        // If person is already covered by payment, do NOT start timer (Spec 2.2 item 2)
-        if (start_timer && !isPersonPaid) {
-          if (!exPerson?.timer_started_at) {
-            personData.timer_started_at = now;
-          }
-          if (!exPerson?.billing_start_at) {
-            personData.billing_start_at = firstRes.is_walk_in ? now : bookingStartDt;
-          }
-        }
-
-        if (exPerson) {
-          await tx.bookingPerson.update({
-            where: { id: exPerson.id },
-            data: personData
-          });
-        } else {
-          await tx.bookingPerson.create({
-            data: {
-              booking_ref,
-              person_no: personNo,
-              ...personData,
-              created_by_name: staffName
-            }
-          });
-        }
-      }
-
-      // Assign boards to persons
-      if (Array.isArray(board_assignments) && board_assignments.length) {
-        const currentPersons = await tx.bookingPerson.findMany({ where: { booking_ref } });
-        for (const ba of board_assignments) {
-          if (!ba.unit_group) continue;
-          const targetPerson = currentPersons.find(p => p.person_no === Number(ba.person_no));
-          await tx.bookingEquipment.updateMany({
-            where: { booking_ref, unit_group: ba.unit_group },
-            data: { person_id: targetPerson ? targetPerson.id : null }
-          });
-        }
-      }
-
-      // Prompt 10: 整組都已付款時，attendance 仍然是 checked_in，只更新座位，不開始計時
-      const finalAttendance = 'checked_in';
-
-      // Update reservation rows
-      await tx.reservation.updateMany({
-        where: { booking_ref },
-        data: {
-          assigned_seats: seats,
-          seat_source: 'staff',
-          is_seat_locked: true,
-          attendance: finalAttendance,
-          checked_in_at: firstRes.checked_in_at || now,
-          checked_in_by: staffName
-        }
-      });
-
-      // Assert no collisions across all touched sessions (primary + displaced)
-      const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
-      await assertNoSeatCollisions(tx, allSessionsToCheck);
 
       return {
         booking_ref,

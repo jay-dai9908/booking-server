@@ -106,12 +106,14 @@ export const buildBrandFlexMessage = ({
   infoRows = [],
   buttonLabel,
   buttonUrl,
-  tagText
+  tagText,
+  allowSeatRow = false
 }) => {
-  // Filter out any accidental seat-related keys or text
+  // Filter out any accidental seat-related keys or text unless explicitly permitted (e.g. kiosk post-checkin card)
   const safeInfoRows = infoRows
     .filter(row => {
       if (!row || !row.label) return false;
+      if (allowSeatRow) return true;
       const lowerLabel = String(row.label).toLowerCase();
       if (lowerLabel.includes('座位') || lowerLabel.includes('桌號') || lowerLabel.includes('seat')) {
         return false;
@@ -589,6 +591,42 @@ export const sendSelfServiceRemindNotification = async (info, user) => {
     buttonLabel: '前往回報末五碼',
     buttonUrl: `${frontendUrl}/history?tab=bookings`,
     tagText: '🔔 匯款提醒'
+  });
+
+  return sendLinePushMessage(user.line_user_id, [flexMessage]);
+};
+
+/**
+ * 報到機首次成功進門推播通知（示意圖 P5）
+ */
+export const sendSelfServiceFirstCheckinNotification = async (info, user) => {
+  if (!user?.line_user_id || user.line_user_id.startsWith('manual_')) return;
+  const frontendUrl = process.env.FRONTEND_URL || 'https://shiguangstudio.com';
+
+  const seatText = Array.isArray(info.seats) && info.seats.length > 0
+    ? `${info.seats.join('、')}${info.zone ? `（${info.zone}）` : ''}`
+    : '請自由選擇空位';
+
+  const infoRows = [
+    { label: '座位', value: seatText, color: '#8B5B43' },
+    { label: '可使用到', value: `今天 ${info.until || ''}` },
+    { label: '進出', value: '憑條碼或電話可自由進出' }
+  ];
+
+  if (Array.isArray(info.boards) && info.boards.length > 0) {
+    const boardSummary = info.boards.map((b) => `${b.name} ×${b.quantity}`).join('、');
+    infoRows.push({ label: '智能板', value: boardSummary });
+  }
+
+  const flexMessage = buildBrandFlexMessage({
+    title: '報到成功',
+    subtitle: `今天可使用到 ${info.until || ''}`,
+    bodyText: `${info.iron_text || '店員會在今天下午到店協助熨燙'}。作品完成後請放在熨燙區的托盤上。`,
+    infoRows,
+    buttonLabel: '查看我的預約',
+    buttonUrl: `${frontendUrl}/history?tab=bookings`,
+    tagText: '🎉 歡迎進場',
+    allowSeatRow: true
   });
 
   return sendLinePushMessage(user.line_user_id, [flexMessage]);

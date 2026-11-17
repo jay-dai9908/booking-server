@@ -5,6 +5,7 @@ import { toTaipeiDateString } from '../../../shared/time.js';
 import { sanitizeKioskSetting } from './kioskSettingController.js';
 import { ensureKioskSetting as ensureKioskSettingRow } from '../services/selfService/prepayService.js';
 import { processKioskSync, buildSevenDaysSchedule } from '../services/kiosk/syncService.js';
+import { processKioskAccess } from '../services/kiosk/accessService.js';
 
 const ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -29,13 +30,17 @@ export const postKioskSyncHandler = async (req, res) => {
 
 export const postKioskAccessHandler = async (req, res) => {
   try {
+    const { method, payload } = req.kiosk.body || {};
+    const accessBody = await processKioskAccess(prisma, {
+      device: req.kiosk.device,
+      method,
+      payload,
+      now: new Date()
+    });
     return res.kioskReply({
       ok: true,
       code: 'OK',
-      body: {
-        result: 'NOT_FOUND',
-        open_door: false
-      }
+      body: accessBody
     });
   } catch (err) {
     console.error('[kioskController] access error:', err);
