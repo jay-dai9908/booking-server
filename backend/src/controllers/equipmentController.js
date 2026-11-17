@@ -2,6 +2,8 @@ import prisma from '../prismaClient.js';
 import { calculateTotalAmount, recalculateReservationTotal } from './reservationController.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
+import { dateOnly } from '../../../shared/time.js';
+import { selfEquipmentTerms } from '../../../shared/selfService.js';
 
 export const DEFAULT_EQUIPMENT_CONFIGS = [
   {
@@ -95,10 +97,51 @@ export const getAvailableEquipment = async (req, res) => {
     const equipment_discount2_buy_hours = globalSetting?.equipment_discount2_buy_hours ?? 8;
     const equipment_discount2_free_hours = globalSetting?.equipment_discount2_free_hours ?? 4;
 
-    if (configs.length === 0) {
-      return res.json({ 
-        equipments: [], 
-        allow_exceed_pax, 
+    const dailySetting = date
+      ? await prisma.dailySetting.findUnique({ where: { date: dateOnly(date) } })
+      : null;
+    const isSelfServiceDay = Boolean(dailySetting?.is_self_service);
+    const selfAllowEquipment = Boolean(dailySetting?.self_allow_equipment);
+
+    const selfExtraFields = isSelfServiceDay
+      ? { self_service: true, self_allow_equipment: selfAllowEquipment }
+      : {};
+
+    if (isSelfServiceDay && !selfAllowEquipment) {
+      return res.json({
+        equipments: [],
+        ...selfExtraFields,
+        allow_exceed_pax,
+        show_equipment_live_stock,
+        equipment_discount_enabled,
+        equipment_discount_buy_hours,
+        equipment_discount_free_hours,
+        equipment_discount_stackable,
+        equipment_discount2_enabled,
+        equipment_discount2_buy_hours,
+        equipment_discount2_free_hours
+      });
+    }
+
+    const effectiveConfigs = isSelfServiceDay
+      ? configs
+          .filter(c => Boolean(c.self_enabled))
+          .map(c => {
+            const terms = selfEquipmentTerms(c);
+            return {
+              ...c,
+              hourly_rate: terms.hourly_rate,
+              daily_cap: terms.daily_cap,
+              total_stock: terms.stock
+            };
+          })
+      : configs;
+
+    if (effectiveConfigs.length === 0) {
+      return res.json({
+        equipments: [],
+        ...selfExtraFields,
+        allow_exceed_pax,
         show_equipment_live_stock,
         equipment_discount_enabled,
         equipment_discount_buy_hours,
@@ -112,10 +155,11 @@ export const getAvailableEquipment = async (req, res) => {
 
     if (!date || !sessions) {
       return res.json({
-        equipments: configs.map(c => ({
+        equipments: effectiveConfigs.map(c => ({
           ...c,
           available_qty: c.id === 'bring_own' ? 9999 : (c.visibility_status === 'MAINTENANCE' ? 0 : (c.total_stock || 0))
         })),
+        ...selfExtraFields,
         allow_exceed_pax,
         show_equipment_live_stock,
         equipment_discount_enabled,
@@ -128,12 +172,12 @@ export const getAvailableEquipment = async (req, res) => {
       });
     }
 
-    const requestedSessions = Array.isArray(sessions) 
-      ? sessions 
+    const requestedSessions = Array.isArray(sessions)
+      ? sessions
       : sessions.split(',').map(s => s.trim()).filter(Boolean);
 
     // Find all confirmed reservations on this date
-    const targetDate = new Date(date);
+    const targetDate = dateOnly(date);
     const reservations = await prisma.reservation.findMany({
       where: {
         status: { not: 'cancelled' },
@@ -172,7 +216,7 @@ export const getAvailableEquipment = async (req, res) => {
 
     const isPerSession = per_session === '1' || per_session === 1 || per_session === true;
 
-    const results = configs.map(config => {
+    const results = effectiveConfigs.map(config => {
       if (config.id === 'bring_own') {
         const item = {
           ...config,
@@ -248,6 +292,7 @@ export const getAvailableEquipment = async (req, res) => {
 
     res.json({
       equipments: results,
+      ...selfExtraFields,
       allow_exceed_pax,
       show_equipment_live_stock,
       equipment_discount_enabled,
@@ -306,7 +351,11 @@ export const updateEquipmentConfig = async (req, res) => {
     hourly_rate, 
     daily_cap, 
     min_contiguous_hours,
-    sort_order 
+    sort_order,
+    self_enabled,
+    self_hourly_rate,
+    self_daily_cap,
+    self_stock
   } = req.body;
 
   try {
@@ -317,8 +366,47 @@ export const updateEquipmentConfig = async (req, res) => {
 
     // Check future conflicts if stock is decreased or status is set to MAINTENANCE/HIDDEN
     const warnings = [];
-    const newStock = total_stock !== undefined ? parseInt(total_stock, 10) : existing.total_stock;
+    const newStock = total_stock !== undefined
+      ? (total_stock === null || total_stock === '' ? null : parseInt(total_stock, 10))
+      : existing.total_stock;
     const newStatus = visibility_status || existing.visibility_status;
+
+    let parsedSelfHourlyRate = existing.self_hourly_rate;
+    if (self_hourly_rate !== undefined) {
+      if (self_hourly_rate === null || self_hourly_rate === '') {
+        parsedSelfHourlyRate = null;
+      } else {
+        parsedSelfHourlyRate = parseInt(self_hourly_rate, 10);
+        if (isNaN(parsedSelfHourlyRate) || parsedSelfHourlyRate < 0) {
+          return res.status(422).json({ error: '半自助日每小時價格必須為非負整數' });
+        }
+      }
+    }
+
+    let parsedSelfDailyCap = existing.self_daily_cap;
+    if (self_daily_cap !== undefined) {
+      if (self_daily_cap === null || self_daily_cap === '' || isNaN(parseInt(self_daily_cap, 10)) || parseInt(self_daily_cap, 10) <= 0) {
+        parsedSelfDailyCap = null;
+      } else {
+        parsedSelfDailyCap = parseInt(self_daily_cap, 10);
+      }
+    }
+
+    let parsedSelfStock = existing.self_stock;
+    if (self_stock !== undefined) {
+      if (self_stock === null || self_stock === '') {
+        parsedSelfStock = null;
+      } else {
+        parsedSelfStock = parseInt(self_stock, 10);
+        if (isNaN(parsedSelfStock) || parsedSelfStock < 0) {
+          return res.status(422).json({ error: '半自助日可租數量必須為非負整數' });
+        }
+      }
+    }
+
+    if (id !== 'bring_own' && parsedSelfStock !== null && newStock !== null && parsedSelfStock > newStock) {
+      return res.status(422).json({ error: `半自助日可租數量（${parsedSelfStock}）不可大於總庫存（${newStock} 台）` });
+    }
 
     if (id !== 'bring_own' && (newStock < existing.total_stock || newStatus !== 'ACTIVE')) {
       const today = new Date();
@@ -417,7 +505,11 @@ export const updateEquipmentConfig = async (req, res) => {
         ...(hourly_rate !== undefined && { hourly_rate: parseInt(hourly_rate, 10) }),
         ...(daily_cap !== undefined && { daily_cap: (daily_cap === null || daily_cap === '' || isNaN(parseInt(daily_cap, 10)) || parseInt(daily_cap, 10) <= 0) ? null : parseInt(daily_cap, 10) }),
         ...(min_contiguous_hours !== undefined && { min_contiguous_hours: parseInt(min_contiguous_hours, 10) }),
-        ...(sort_order !== undefined && { sort_order: parseInt(sort_order, 10) })
+        ...(sort_order !== undefined && { sort_order: parseInt(sort_order, 10) }),
+        ...(self_enabled !== undefined && { self_enabled: Boolean(self_enabled) }),
+        ...(self_hourly_rate !== undefined && { self_hourly_rate: parsedSelfHourlyRate }),
+        ...(self_daily_cap !== undefined && { self_daily_cap: parsedSelfDailyCap }),
+        ...(self_stock !== undefined && { self_stock: parsedSelfStock })
       }
     });
 
@@ -433,11 +525,43 @@ export const updateEquipmentConfig = async (req, res) => {
 
 // POST /api/admin/equipment
 export const createEquipmentConfig = async (req, res) => {
-  const { id, name, visibility_status, status_note, total_stock, hourly_rate, daily_cap, min_contiguous_hours, sort_order } = req.body;
+  const {
+    id,
+    name,
+    visibility_status,
+    status_note,
+    total_stock,
+    hourly_rate,
+    daily_cap,
+    min_contiguous_hours,
+    sort_order,
+    self_enabled,
+    self_hourly_rate,
+    self_daily_cap,
+    self_stock
+  } = req.body;
 
   if (!id || !name || hourly_rate === undefined) {
     return res.status(400).json({ error: '請提供完整的規格資料 (代碼、名稱與費率)' });
   }
+
+  const parsedTotalStock = (total_stock !== null && total_stock !== undefined && total_stock !== '') ? parseInt(total_stock, 10) : null;
+  const parsedSelfStock = (self_stock !== null && self_stock !== undefined && self_stock !== '') ? parseInt(self_stock, 10) : null;
+  if (parsedSelfStock !== null) {
+    if (isNaN(parsedSelfStock) || parsedSelfStock < 0) {
+      return res.status(422).json({ error: '半自助日可租數量必須為非負整數' });
+    }
+    if (id !== 'bring_own' && parsedTotalStock !== null && parsedSelfStock > parsedTotalStock) {
+      return res.status(422).json({ error: `半自助日可租數量（${parsedSelfStock}）不可大於總庫存（${parsedTotalStock} 台）` });
+    }
+  }
+  const parsedSelfRate = (self_hourly_rate !== null && self_hourly_rate !== undefined && self_hourly_rate !== '') ? parseInt(self_hourly_rate, 10) : null;
+  if (parsedSelfRate !== null && (isNaN(parsedSelfRate) || parsedSelfRate < 0)) {
+    return res.status(422).json({ error: '半自助日每小時價格必須為非負整數' });
+  }
+  const parsedSelfCap = (self_daily_cap === null || self_daily_cap === undefined || self_daily_cap === '' || isNaN(parseInt(self_daily_cap, 10)) || parseInt(self_daily_cap, 10) <= 0)
+    ? null
+    : parseInt(self_daily_cap, 10);
 
   try {
     const existing = await prisma.equipmentConfig.findUnique({ where: { id } });
@@ -451,11 +575,15 @@ export const createEquipmentConfig = async (req, res) => {
         name,
         visibility_status: visibility_status || 'ACTIVE',
         status_note,
-        total_stock: total_stock !== null && total_stock !== undefined ? parseInt(total_stock, 10) : null,
+        total_stock: parsedTotalStock,
         hourly_rate: parseInt(hourly_rate, 10),
         daily_cap: (daily_cap === null || daily_cap === '' || isNaN(parseInt(daily_cap, 10)) || parseInt(daily_cap, 10) <= 0) ? null : parseInt(daily_cap, 10),
         min_contiguous_hours: parseInt(min_contiguous_hours || 2, 10),
-        sort_order: parseInt(sort_order || 0, 10)
+        sort_order: parseInt(sort_order || 0, 10),
+        self_enabled: Boolean(self_enabled),
+        self_hourly_rate: parsedSelfRate,
+        self_daily_cap: parsedSelfCap,
+        self_stock: parsedSelfStock
       }
     });
 

@@ -142,7 +142,11 @@ export default function EquipmentPage() {
         total_stock: config.id === 'bring_own' ? null : parseInt(config.total_stock, 10),
         hourly_rate: parseInt(config.hourly_rate, 10),
         daily_cap: (config.daily_cap === null || config.daily_cap === '' || isNaN(parseInt(config.daily_cap, 10)) || parseInt(config.daily_cap, 10) <= 0) ? null : parseInt(config.daily_cap, 10),
-        min_contiguous_hours: parseInt(config.min_contiguous_hours, 10)
+        min_contiguous_hours: parseInt(config.min_contiguous_hours, 10),
+        self_enabled: Boolean(config.self_enabled),
+        self_hourly_rate: (config.self_hourly_rate === '' || config.self_hourly_rate === null || config.self_hourly_rate === undefined) ? null : parseInt(config.self_hourly_rate, 10),
+        self_daily_cap: (config.self_daily_cap === '' || config.self_daily_cap === null || config.self_daily_cap === undefined || parseInt(config.self_daily_cap, 10) <= 0) ? null : parseInt(config.self_daily_cap, 10),
+        self_stock: (config.self_stock === '' || config.self_stock === null || config.self_stock === undefined) ? null : parseInt(config.self_stock, 10)
       };
 
       const res = await api.put(`/equipment/admin/${config.id}`, payload);
@@ -679,6 +683,79 @@ export default function EquipmentPage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Self-Service Day Section */}
+                  {!isBringOwn && (
+                    <div
+                      data-testid={`equipment-self-section-${config.id}`}
+                      className="bg-[#FAF4EB]/70 border border-[#E8DEC8] rounded-xl p-3.5 space-y-3 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-[#3E332B] text-sm">半自助日設定</span>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            data-testid={`equipment-self-enabled-${config.id}`}
+                            checked={Boolean(config.self_enabled)}
+                            onChange={(e) => handleConfigChange(config.id, 'self_enabled', e.target.checked)}
+                            className="w-4 h-4 accent-[#8B5B43]"
+                          />
+                          <span className="font-bold text-[#8B5B43]">半自助日開放租借</span>
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="text-gray-600 font-medium block mb-1">每小時價格</label>
+                          <input
+                            type="number"
+                            min="0"
+                            data-testid={`equipment-self-rate-${config.id}`}
+                            value={config.self_hourly_rate ?? ''}
+                            onChange={(e) => handleConfigChange(config.id, 'self_hourly_rate', e.target.value)}
+                            placeholder={`和平常相同（NT$ ${config.hourly_rate ?? 0}）`}
+                            className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg font-bold text-xs text-gray-800 bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-gray-600 font-medium block mb-1">單日上限</label>
+                          <input
+                            type="number"
+                            min="1"
+                            data-testid={`equipment-self-cap-${config.id}`}
+                            value={config.self_daily_cap ?? ''}
+                            onChange={(e) => handleConfigChange(config.id, 'self_daily_cap', e.target.value)}
+                            placeholder={config.daily_cap > 0 ? `和平常相同（NT$ ${config.daily_cap}）` : '和平常相同（無上限）'}
+                            className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg font-bold text-xs text-gray-800 bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-gray-600 font-medium block mb-1">可租數量</label>
+                          <input
+                            type="number"
+                            min="0"
+                            data-testid={`equipment-self-stock-${config.id}`}
+                            value={config.self_stock ?? ''}
+                            onChange={(e) => handleConfigChange(config.id, 'self_stock', e.target.value)}
+                            placeholder={`和庫存相同（${config.total_stock ?? 0} 台）`}
+                            className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg font-bold text-xs text-gray-800 bg-white"
+                          />
+                          {config.self_stock !== null &&
+                            config.self_stock !== '' &&
+                            config.total_stock != null &&
+                            Number(config.self_stock) > Number(config.total_stock) && (
+                              <p className="mt-1 text-[11px] font-bold text-red-600">
+                                不可超過店內可用總庫存（{config.total_stock} 台）
+                              </p>
+                            )}
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-[#6D5D52] leading-relaxed">
+                        這裡的設定只在半自助日生效。還要在「營業時段設定」把那一天的「開放加租智能板」打開。
+                      </p>
+                    </div>
+                  )}
 
                   {/* Card Actions */}
                   <div className="flex items-center justify-between pt-2 border-t border-gray-100">

@@ -1,5 +1,48 @@
 import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
+import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
+import { prepayDeadline, ironText } from '../../../shared/selfService.js';
+
+export async function ensureKioskSetting(txOrPrisma = prisma) {
+  let ks = await txOrPrisma.kioskSetting.findUnique({ where: { id: 1 } });
+  if (!ks) {
+    ks = await txOrPrisma.kioskSetting.create({
+      data: {
+        id: 1,
+        early_minutes: 30,
+        after_close_minutes: 60,
+        prepay_deadline_hour: 12,
+        max_unpaid_self_bookings: 2
+      }
+    });
+  }
+  return ks;
+}
+
+const VALID_IRON_MODES = new Set(['today', 'next', 'date']);
+
+function buildSelfServiceMeta(setting, kioskSetting, dateStr, nowMs = Date.now()) {
+  if (!setting?.is_self_service) return null;
+  const deadlineHour = kioskSetting?.prepay_deadline_hour ?? 12;
+  const earlyMinutes = kioskSetting?.early_minutes ?? 30;
+  const deadlineAt = prepayDeadline(dateStr, deadlineHour);
+  return {
+    early_minutes: earlyMinutes,
+    prepay_deadline_hour: deadlineHour,
+    prepay_deadline_at: deadlineAt.toISOString(),
+    transfer_open: nowMs <= deadlineAt.getTime(),
+    iron_mode: setting.iron_mode || 'today',
+    iron_date: setting.iron_date ? toTaipeiDateString(setting.iron_date) : null,
+    iron_text: ironText({
+      iron_mode: setting.iron_mode || 'today',
+      iron_date: setting.iron_date,
+      date: dateStr,
+      today: toTaipeiDateString(new Date(nowMs))
+    }),
+    allow_hourly: Boolean(setting.self_allow_hourly),
+    allow_equipment: Boolean(setting.self_allow_equipment)
+  };
+}
 
 const DEFAULT_BUSINESS_HOURS = {
   weekday: { start: '10:00', end: '21:00' },
@@ -15,49 +58,187 @@ export const DEFAULT_PAYMENT_METHODS = [
 ];
 
 export const getDailySetting = async (req, res) => {
-  const { date } = req.query;
-  
+  const { date, now } = req.query;
+
   if (!date) {
     return res.status(400).json({ error: 'Date query parameter is required' });
   }
 
   try {
+    const dOnly = dateOnly(date);
+    const dateStr = toTaipeiDateString(dOnly);
+    const nowMs = (process.env.NODE_ENV === 'test' && now) ? new Date(now).getTime() : Date.now();
     const setting = await prisma.dailySetting.findUnique({
-      where: { date: new Date(date) }
+      where: { date: dOnly }
     });
 
     if (!setting) {
-      // Default behavior: allow unlimited
-      return res.json({ date, allow_unlimited: true });
+      return res.json({
+        date,
+        allow_unlimited: true,
+        is_self_service: false,
+        self_allow_hourly: false,
+        self_allow_equipment: false,
+        iron_mode: 'today',
+        iron_date: null,
+        self_service: null
+      });
     }
 
-    res.json(setting);
+    let self_service = null;
+    if (setting.is_self_service) {
+      const kioskSetting = await ensureKioskSetting(prisma);
+      self_service = buildSelfServiceMeta(setting, kioskSetting, dateStr, nowMs);
+    }
+
+    res.json({
+      ...setting,
+      iron_date: setting.iron_date ? toTaipeiDateString(setting.iron_date) : null,
+      self_service
+    });
   } catch (error) {
     console.error('Error fetching daily setting:', error);
     res.status(500).json({ error: 'Failed to fetch daily setting' });
   }
 };
 
+export const getDailySettingsRange = async (req, res) => {
+  const { start, end } = req.query;
+  if (!start || !end || !/^\d{4}-\d{2}-\d{2}$/.test(String(start)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(end))) {
+    return res.status(400).json({ error: '請提供有效的起訖日期 (start, end YYYY-MM-DD)' });
+  }
+
+  const startDate = dateOnly(start);
+  const endDate = dateOnly(end);
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate < startDate) {
+    return res.status(400).json({ error: '起訖日期範圍無效' });
+  }
+
+  const diffDays = Math.round((endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+  if (diffDays > 120) {
+    return res.status(400).json({ error: '查詢範圍最多 120 天' });
+  }
+
+  try {
+    const rows = await prisma.dailySetting.findMany({
+      where: {
+        date: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      orderBy: { date: 'asc' },
+      select: {
+        date: true,
+        is_self_service: true
+      }
+    });
+
+    res.json(
+      rows.map(r => ({
+        date: toTaipeiDateString(r.date),
+        is_self_service: Boolean(r.is_self_service)
+      }))
+    );
+  } catch (error) {
+    console.error('Error fetching daily settings range:', error);
+    res.status(500).json({ error: 'Failed to fetch daily settings range' });
+  }
+};
+
+async function countConfirmedBookingsForDate(targetDate) {
+  const rows = await prisma.reservation.findMany({
+    where: {
+      status: 'confirmed',
+      session: { session_date: targetDate }
+    },
+    select: { booking_ref: true }
+  });
+  return new Set(rows.map(r => r.booking_ref)).size;
+}
+
 export const updateDailySetting = async (req, res) => {
-  const { date, allow_unlimited, hourly_price, unlimited_price } = req.body;
+  const {
+    date,
+    allow_unlimited,
+    hourly_price,
+    unlimited_price,
+    is_self_service,
+    self_allow_hourly,
+    self_allow_equipment,
+    iron_mode,
+    iron_date
+  } = req.body;
 
   if (!date) {
     return res.status(400).json({ error: 'Date is required' });
   }
 
   try {
+    const targetDate = dateOnly(date);
+    const targetDateStr = toTaipeiDateString(targetDate);
+    const existing = await prisma.dailySetting.findUnique({ where: { date: targetDate } });
+
+    const prevIsSelf = Boolean(existing?.is_self_service);
+    if (typeof is_self_service === 'boolean' && is_self_service !== prevIsSelf) {
+      const bookingCount = await countConfirmedBookingsForDate(targetDate);
+      if (bookingCount > 0) {
+        return res.status(422).json({
+          error: `這天已經有 ${bookingCount} 筆預約，請先處理後再切換`,
+          booking_count: bookingCount
+        });
+      }
+    }
+
+    const effectiveIronMode = iron_mode !== undefined ? String(iron_mode) : (existing?.iron_mode || 'today');
+    if (!VALID_IRON_MODES.has(effectiveIronMode)) {
+      return res.status(422).json({ error: '熨燙時間模式必須為 today、next 或 date' });
+    }
+
+    let parsedIronDate = existing?.iron_date ?? null;
+    if (effectiveIronMode === 'date') {
+      const rawIronDate = iron_date !== undefined ? iron_date : existing?.iron_date;
+      if (!rawIronDate) {
+        return res.status(422).json({ error: '選擇指定日期時，請填寫熨燙日期' });
+      }
+      const d = dateOnly(rawIronDate);
+      if (isNaN(d.getTime())) {
+        return res.status(422).json({ error: '熨燙日期格式無效' });
+      }
+      if (d < targetDate) {
+        return res.status(422).json({ error: `指定熨燙日期（${toTaipeiDateString(d)}）不可早於使用日（${targetDateStr}）` });
+      }
+      parsedIronDate = d;
+    } else if (iron_mode !== undefined) {
+      parsedIronDate = null;
+    }
+
     const dataToUpdate = {};
     if (typeof allow_unlimited === 'boolean') dataToUpdate.allow_unlimited = allow_unlimited;
-    if (hourly_price !== undefined) dataToUpdate.hourly_price = hourly_price === null ? null : parseInt(hourly_price);
-    if (unlimited_price !== undefined) dataToUpdate.unlimited_price = unlimited_price === null ? null : parseInt(unlimited_price);
+    if (hourly_price !== undefined) dataToUpdate.hourly_price = (hourly_price === null || hourly_price === '') ? null : parseInt(hourly_price, 10);
+    if (unlimited_price !== undefined) dataToUpdate.unlimited_price = (unlimited_price === null || unlimited_price === '') ? null : parseInt(unlimited_price, 10);
+    if (typeof is_self_service === 'boolean') dataToUpdate.is_self_service = is_self_service;
+    if (typeof self_allow_hourly === 'boolean') dataToUpdate.self_allow_hourly = self_allow_hourly;
+    if (typeof self_allow_equipment === 'boolean') dataToUpdate.self_allow_equipment = self_allow_equipment;
+    if (iron_mode !== undefined) {
+      dataToUpdate.iron_mode = effectiveIronMode;
+      dataToUpdate.iron_date = parsedIronDate;
+    } else if (iron_date !== undefined && effectiveIronMode === 'date') {
+      dataToUpdate.iron_date = parsedIronDate;
+    }
 
     const setting = await prisma.dailySetting.upsert({
-      where: { date: new Date(date) },
+      where: { date: targetDate },
       update: dataToUpdate,
       create: {
-        date: new Date(date),
+        date: targetDate,
         ...dataToUpdate,
-        allow_unlimited: allow_unlimited !== undefined ? allow_unlimited : true
+        allow_unlimited: allow_unlimited !== undefined ? allow_unlimited : true,
+        is_self_service: is_self_service !== undefined ? Boolean(is_self_service) : false,
+        self_allow_hourly: self_allow_hourly !== undefined ? Boolean(self_allow_hourly) : false,
+        self_allow_equipment: self_allow_equipment !== undefined ? Boolean(self_allow_equipment) : false,
+        iron_mode: effectiveIronMode,
+        iron_date: parsedIronDate
       }
     });
 
@@ -69,25 +250,37 @@ export const updateDailySetting = async (req, res) => {
 };
 
 export const batchUpdateDailySettings = async (req, res) => {
-  const { start_date, end_date, days_of_week, hourly_price, unlimited_price, allow_unlimited, dates } = req.body;
+  const {
+    start_date,
+    end_date,
+    days_of_week,
+    hourly_price,
+    unlimited_price,
+    allow_unlimited,
+    dates,
+    is_self_service,
+    self_allow_hourly,
+    self_allow_equipment,
+    iron_mode,
+    iron_date
+  } = req.body;
 
   let datesToUpdate = [];
 
   if (dates && Array.isArray(dates) && dates.length > 0) {
-    datesToUpdate = dates.map(d => new Date(d));
+    datesToUpdate = dates.map(d => dateOnly(d));
   } else if (start_date && end_date) {
-    const startDate = new Date(start_date);
-    const endDate = new Date(end_date);
-    
+    const startDate = dateOnly(start_date);
+    const endDate = dateOnly(end_date);
+
     let currentDate = new Date(startDate);
     while (currentDate <= endDate) {
-      const day = currentDate.getDay(); // 0 (Sun) to 6 (Sat)
-      
-      // If days_of_week is provided (e.g. [0, 6] for weekends), check if matches
+      const day = currentDate.getUTCDay(); // 0 (Sun) to 6 (Sat)
+
       if (!days_of_week || days_of_week.includes(day)) {
         datesToUpdate.push(new Date(currentDate));
       }
-      currentDate.setDate(currentDate.getDate() + 1);
+      currentDate.setUTCDate(currentDate.getUTCDate() + 1);
     }
   } else {
     return res.status(400).json({ error: '請提供日期陣列 (dates) 或起訖日期 (start_date, end_date)' });
@@ -98,20 +291,94 @@ export const batchUpdateDailySettings = async (req, res) => {
   }
 
   try {
+    if (iron_mode !== undefined && !VALID_IRON_MODES.has(String(iron_mode))) {
+      return res.status(422).json({ error: '熨燙時間模式必須為 today、next 或 date' });
+    }
+
+    let parsedIronDate = null;
+    if (iron_mode === 'date') {
+      if (!iron_date) {
+        return res.status(422).json({ error: '選擇指定日期時，請填寫熨燙日期' });
+      }
+      parsedIronDate = dateOnly(iron_date);
+      if (isNaN(parsedIronDate.getTime())) {
+        return res.status(422).json({ error: '熨燙日期格式無效' });
+      }
+      const earlierDates = datesToUpdate.filter(d => parsedIronDate < d);
+      if (earlierDates.length > 0) {
+        return res.status(422).json({
+          error: `指定熨燙日期不可早於使用日（${earlierDates.map(d => toTaipeiDateString(d)).join('、')}）`
+        });
+      }
+    }
+
+    if (typeof is_self_service === 'boolean') {
+      const existingRows = await prisma.dailySetting.findMany({
+        where: { date: { in: datesToUpdate } },
+        select: { date: true, is_self_service: true }
+      });
+      const existingByDate = new Map(existingRows.map(r => [toTaipeiDateString(r.date), Boolean(r.is_self_service)]));
+
+      const confirmedRows = await prisma.reservation.findMany({
+        where: {
+          status: 'confirmed',
+          session: { session_date: { in: datesToUpdate } }
+        },
+        include: { session: { select: { session_date: true } } }
+      });
+      const refsByDate = new Map();
+      for (const r of confirmedRows) {
+        const dStr = toTaipeiDateString(r.session.session_date);
+        if (!refsByDate.has(dStr)) refsByDate.set(dStr, new Set());
+        refsByDate.get(dStr).add(r.booking_ref);
+      }
+
+      const conflicts = [];
+      for (const dt of datesToUpdate) {
+        const dStr = toTaipeiDateString(dt);
+        const prev = existingByDate.get(dStr) ?? false;
+        if (is_self_service !== prev) {
+          const cnt = refsByDate.get(dStr)?.size || 0;
+          if (cnt > 0) {
+            conflicts.push({ date: dStr, count: cnt });
+          }
+        }
+      }
+
+      if (conflicts.length > 0) {
+        const detail = conflicts.map(c => `${c.date}（${c.count} 筆）`).join('、');
+        return res.status(422).json({
+          error: `以下日期已有確認預約，整批未修改，請先處理後再切換：${detail}`,
+          conflict_dates: conflicts
+        });
+      }
+    }
+
     const dataToUpdate = {};
     if (typeof allow_unlimited === 'boolean') dataToUpdate.allow_unlimited = allow_unlimited;
-    if (hourly_price !== undefined) dataToUpdate.hourly_price = (hourly_price === null || hourly_price === '') ? null : parseInt(hourly_price);
-    if (unlimited_price !== undefined) dataToUpdate.unlimited_price = (unlimited_price === null || unlimited_price === '') ? null : parseInt(unlimited_price);
+    if (hourly_price !== undefined) dataToUpdate.hourly_price = (hourly_price === null || hourly_price === '') ? null : parseInt(hourly_price, 10);
+    if (unlimited_price !== undefined) dataToUpdate.unlimited_price = (unlimited_price === null || unlimited_price === '') ? null : parseInt(unlimited_price, 10);
+    if (typeof is_self_service === 'boolean') dataToUpdate.is_self_service = is_self_service;
+    if (typeof self_allow_hourly === 'boolean') dataToUpdate.self_allow_hourly = self_allow_hourly;
+    if (typeof self_allow_equipment === 'boolean') dataToUpdate.self_allow_equipment = self_allow_equipment;
+    if (iron_mode !== undefined) {
+      dataToUpdate.iron_mode = String(iron_mode);
+      dataToUpdate.iron_date = iron_mode === 'date' ? parsedIronDate : null;
+    }
 
-    // Prisma doesn't support upsertMany, so we use a transaction
-    const upserts = datesToUpdate.map(date => 
+    const upserts = datesToUpdate.map(date =>
       prisma.dailySetting.upsert({
         where: { date },
         update: dataToUpdate,
         create: {
           date,
           ...dataToUpdate,
-          allow_unlimited: allow_unlimited !== undefined ? allow_unlimited : true
+          allow_unlimited: allow_unlimited !== undefined ? allow_unlimited : true,
+          is_self_service: is_self_service !== undefined ? Boolean(is_self_service) : false,
+          self_allow_hourly: self_allow_hourly !== undefined ? Boolean(self_allow_hourly) : false,
+          self_allow_equipment: self_allow_equipment !== undefined ? Boolean(self_allow_equipment) : false,
+          iron_mode: iron_mode !== undefined ? String(iron_mode) : 'today',
+          iron_date: iron_mode === 'date' ? parsedIronDate : null
         }
       })
     );

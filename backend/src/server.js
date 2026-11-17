@@ -21,6 +21,7 @@ import seatLayoutRoutes from './routes/seatLayouts.js';
 import floorRoutes from './routes/floor.js';
 import billingRoutes from './routes/billing.js';
 import printRoutes from './routes/print.js';
+import kioskRoutes from './routes/kiosk.js';
 import { ensureDefaultEquipmentConfigs } from './controllers/equipmentController.js';
 import { ensureDefaultCheckoutConfigs } from './controllers/checkoutController.js';
 import { ensureDefaultPaymentMethods, ensureDefaultProducts, ensureDefaultPassPlans } from './utils/shopDefaults.js';
@@ -699,6 +700,7 @@ app.use('/api/seat-layouts', seatLayoutRoutes);
 app.use('/api/floor', floorRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/print', printRoutes);
+app.use('/api/kiosk', kioskRoutes);
 
 // Basic error handler
 app.use((err, req, res, next) => {

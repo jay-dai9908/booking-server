@@ -33,6 +33,8 @@ import {
 import api from '../../api/axios';
 import HourRangeScrollPicker from '../../components/HourRangeScrollPicker';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
+import SelfServiceInfoCard from '../../components/customer/SelfServiceInfoCard';
+import { ironText as buildIronText } from '../../../../shared/selfService.js';
 
 export default function SessionsPage() {
   const [toastMsg, setToastMsg] = useState(null);
@@ -85,10 +87,35 @@ export default function SessionsPage() {
   const [batchEndDate, setBatchEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [batchHourly, setBatchHourly] = useState('');
   const [batchUnlimited, setBatchUnlimited] = useState('');
+  const [batchSetSelfService, setBatchSetSelfService] = useState(false);
+  const [batchSelfAllowEquipment, setBatchSelfAllowEquipment] = useState(false);
+  const [batchIronMode, setBatchIronMode] = useState('today');
+  const [batchIronDate, setBatchIronDate] = useState('');
   const [isBatching, setIsBatching] = useState(false);
+
+  // Daily Self-Service States (for listDate)
+  const [isSelfService, setIsSelfService] = useState(false);
+  const [selfAllowHourly, setSelfAllowHourly] = useState(false);
+  const [selfAllowEquipment, setSelfAllowEquipment] = useState(false);
+  const [ironMode, setIronMode] = useState('today');
+  const [ironDate, setIronDate] = useState('');
+  const [savingDailySelf, setSavingDailySelf] = useState(false);
+  const [dailySelfError, setDailySelfError] = useState('');
+
+  // Shared Kiosk/Self-Service Settings
+  const [kioskSettings, setKioskSettings] = useState({
+    prepay_deadline_hour: 12,
+    early_minutes: 30,
+    after_close_minutes: 60,
+    max_unpaid_self_bookings: 2
+  });
+  const [savingKioskSettings, setSavingKioskSettings] = useState(false);
+  const [anySelfEquipmentEnabled, setAnySelfEquipmentEnabled] = useState(false);
 
   useEffect(() => {
     fetchGlobalSetting();
+    fetchKioskSettings();
+    fetchEquipmentSelfStatus();
   }, []);
 
   useEffect(() => {
@@ -182,8 +209,90 @@ export default function SessionsPage() {
       setAllowUnlimited(res.data.allow_unlimited);
       setDailyHourly(res.data.hourly_price || '');
       setDailyUnlimited(res.data.unlimited_price || '');
+      setIsSelfService(Boolean(res.data.is_self_service));
+      setSelfAllowHourly(Boolean(res.data.self_allow_hourly));
+      setSelfAllowEquipment(Boolean(res.data.self_allow_equipment));
+      setIronMode(res.data.iron_mode || 'today');
+      setIronDate(res.data.iron_date ? String(res.data.iron_date).slice(0, 10) : '');
+      setDailySelfError('');
     } catch (err) {
       console.error('Error fetching daily setting:', err);
+    }
+  };
+
+  const fetchKioskSettings = async () => {
+    try {
+      const res = await api.get('/kiosk/settings');
+      if (res.data) {
+        setKioskSettings({
+          prepay_deadline_hour: res.data.prepay_deadline_hour ?? 12,
+          early_minutes: res.data.early_minutes ?? 30,
+          after_close_minutes: res.data.after_close_minutes ?? 60,
+          max_unpaid_self_bookings: res.data.max_unpaid_self_bookings ?? 2
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching kiosk settings:', err);
+    }
+  };
+
+  const fetchEquipmentSelfStatus = async () => {
+    try {
+      const res = await api.get('/equipment/admin');
+      const list = res.data?.configs || (Array.isArray(res.data) ? res.data : []);
+      setAnySelfEquipmentEnabled(list.some(c => Boolean(c.self_enabled) && c.visibility_status !== 'HIDDEN'));
+    } catch (err) {
+      console.error('Error fetching equipment status:', err);
+    }
+  };
+
+  const handleSaveDailySelfService = async (e) => {
+    if (e) e.preventDefault();
+    setSavingDailySelf(true);
+    setDailySelfError('');
+    try {
+      await api.put('/daily-settings', {
+        date: listDate,
+        allow_unlimited: isSelfService ? true : allowUnlimited,
+        hourly_price: dailyHourly || null,
+        unlimited_price: dailyUnlimited || null,
+        is_self_service: isSelfService,
+        self_allow_hourly: selfAllowHourly,
+        self_allow_equipment: selfAllowEquipment,
+        iron_mode: ironMode,
+        iron_date: ironMode === 'date' ? ironDate : null
+      });
+      if (isSelfService) setAllowUnlimited(true);
+      showToast(`已儲存 ${listDate} 的半自助日設定`);
+      fetchDailySetting(listDate);
+    } catch (err) {
+      const msg = err.response?.data?.error || '儲存半自助日設定失敗';
+      setDailySelfError(msg);
+      showToast(msg);
+      fetchDailySetting(listDate);
+    } finally {
+      setSavingDailySelf(false);
+    }
+  };
+
+  const handleSaveKioskSettings = async (e) => {
+    e.preventDefault();
+    setSavingKioskSettings(true);
+    try {
+      const res = await api.put('/kiosk/settings', {
+        prepay_deadline_hour: parseInt(kioskSettings.prepay_deadline_hour, 10),
+        early_minutes: parseInt(kioskSettings.early_minutes, 10),
+        after_close_minutes: parseInt(kioskSettings.after_close_minutes, 10),
+        max_unpaid_self_bookings: parseInt(kioskSettings.max_unpaid_self_bookings, 10)
+      });
+      if (res.data?.setting) {
+        setKioskSettings(res.data.setting);
+      }
+      showToast('已儲存半自助日共用設定');
+    } catch (err) {
+      showToast(err.response?.data?.error || '儲存共用設定失敗');
+    } finally {
+      setSavingKioskSettings(false);
     }
   };
 
@@ -255,6 +364,13 @@ export default function SessionsPage() {
         hourly_price: batchHourly || null,
         unlimited_price: batchUnlimited || null
       };
+
+      if (batchSetSelfService) {
+        payload.is_self_service = true;
+        payload.self_allow_equipment = batchSelfAllowEquipment;
+        payload.iron_mode = batchIronMode;
+        payload.iron_date = batchIronMode === 'date' ? batchIronDate : null;
+      }
 
       if (batchMode === 'selected') {
         if (selectedDates.length === 0) {
@@ -1031,6 +1147,62 @@ export default function SessionsPage() {
               </div>
             </div>
 
+            <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 space-y-2.5">
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-gray-800">
+                <input
+                  type="checkbox"
+                  checked={batchSetSelfService}
+                  onChange={(e) => setBatchSetSelfService(e.target.checked)}
+                  className="w-4 h-4 accent-[#8B5B43]"
+                />
+                <span>把這些日期設成半自助日</span>
+              </label>
+              {batchSetSelfService && (
+                <div className="space-y-2.5 pl-6 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer font-semibold text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={batchSelfAllowEquipment}
+                      onChange={(e) => setBatchSelfAllowEquipment(e.target.checked)}
+                      className="w-4 h-4 accent-[#8B5B43]"
+                    />
+                    <span>開放加租智能板</span>
+                  </label>
+                  <div className="space-y-1.5">
+                    <div className="font-semibold text-gray-700">熨燙時間</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { id: 'today', label: '當日下午' },
+                        { id: 'next', label: '隔日' },
+                        { id: 'date', label: '指定日期' }
+                      ].map(opt => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setBatchIronMode(opt.id)}
+                          className={`px-2.5 py-1 rounded-lg border font-bold ${
+                            batchIronMode === opt.id
+                              ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                              : 'bg-white text-gray-700 border-gray-200'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {batchIronMode === 'date' && (
+                      <input
+                        type="date"
+                        value={batchIronDate}
+                        onChange={(e) => setBatchIronDate(e.target.value)}
+                        className="mt-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
               disabled={isBatching || (batchMode === 'selected' && selectedDates.length === 0)}
@@ -1044,6 +1216,242 @@ export default function SessionsPage() {
             </button>
           </form>
         </div>
+      </div>
+
+      {/* Self-Service Settings Grid (Single Day + Global Kiosk Rules) */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-8">
+        {/* Daily Self-Service Card */}
+        <form onSubmit={handleSaveDailySelfService} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">
+                {listDate} 半自助日設定
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                顧客要先付款，當天憑門口報到機進場
+              </p>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer shrink-0">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  data-testid="daily-self-service-toggle"
+                  className="sr-only"
+                  checked={isSelfService}
+                  onChange={(e) => {
+                    setIsSelfService(e.target.checked);
+                    setDailySelfError('');
+                  }}
+                />
+                <div className={`block w-11 h-6 rounded-full transition-colors ${isSelfService ? 'bg-[#8B5B43]' : 'bg-gray-300'}`} />
+                <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${isSelfService ? 'translate-x-5' : ''}`} />
+              </div>
+              <span className="text-sm font-bold text-gray-800">半自助日</span>
+            </label>
+          </div>
+
+          {dailySelfError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-medium rounded-xl px-3 py-2">
+              {dailySelfError}
+            </div>
+          )}
+
+          {isSelfService ? (
+            <div className="space-y-4 pt-2 border-t border-gray-100">
+              {/* Plans */}
+              <div className="space-y-2 text-sm">
+                <div className="font-semibold text-gray-700">開放方案</div>
+                <div className="flex flex-wrap items-center gap-4">
+                  <label className="flex items-center gap-2 text-gray-800 font-medium">
+                    <input type="checkbox" checked readOnly className="w-4 h-4 accent-[#8B5B43]" />
+                    <span>不限時（沿用上方價格）</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-gray-800 font-medium">
+                    <input
+                      type="checkbox"
+                      data-testid="daily-self-allow-hourly-toggle"
+                      checked={selfAllowHourly}
+                      onChange={(e) => setSelfAllowHourly(e.target.checked)}
+                      className="w-4 h-4 accent-[#8B5B43]"
+                    />
+                    <span>一般計時</span>
+                    <span className="text-xs text-gray-400">前期先不開放</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Equipment toggle */}
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="font-semibold text-gray-700">開放加租智能板</div>
+                    <div className="text-xs text-gray-400">價格和數量在「智能板庫存管理」設定。</div>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      data-testid="daily-self-allow-equipment-toggle"
+                      checked={selfAllowEquipment}
+                      onChange={(e) => setSelfAllowEquipment(e.target.checked)}
+                      className="w-4 h-4 accent-[#8B5B43]"
+                    />
+                    <span className="text-xs font-bold text-gray-700">{selfAllowEquipment ? '已開放' : '未開放'}</span>
+                  </label>
+                </div>
+                {selfAllowEquipment && !anySelfEquipmentEnabled && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl px-3 py-2 flex items-center justify-between gap-2">
+                    <span>目前沒有任何一款智能板在半自助日開放租借，顧客端仍看不到板子。</span>
+                    <a href="/admin/equipment" className="font-bold text-[#8B5B43] underline shrink-0">
+                      前往智能板庫存管理 →
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Iron mode */}
+              <div className="space-y-2 text-sm">
+                <div className="font-semibold text-gray-700">熨燙時間</div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'today', label: '當日下午' },
+                    { id: 'next', label: '隔日' },
+                    { id: 'date', label: '指定日期' }
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      data-testid={`iron-mode-${opt.id}`}
+                      onClick={() => setIronMode(opt.id)}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition ${
+                        ironMode === opt.id
+                          ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                          : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {ironMode === 'date' && (
+                  <input
+                    type="date"
+                    min={listDate}
+                    value={ironDate}
+                    onChange={(e) => setIronDate(e.target.value)}
+                    className="mt-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm"
+                  />
+                )}
+              </div>
+
+              {/* Preview InfoCard */}
+              <div className="space-y-1.5">
+                <div className="text-xs font-semibold text-gray-500">預覽：顧客在預約頁會看到的說明卡</div>
+                <div className="max-w-sm">
+                  <SelfServiceInfoCard
+                    ironText={buildIronText({ iron_mode: ironMode, iron_date: ironDate, date: listDate })}
+                    earlyMinutes={kioskSettings.early_minutes}
+                    deadlineHour={kioskSettings.prepay_deadline_hour}
+                    showPaymentLine
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl p-3">
+              一般營業日：照原本價格和不限時開關運作，顧客現場報到、離場結帳。
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={savingDailySelf}
+            data-testid="save-daily-self-service-btn"
+            className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
+          >
+            {savingDailySelf ? '儲存中...' : `儲存 ${listDate} 半自助日設定`}
+          </button>
+        </form>
+
+        {/* Shared Kiosk / Self-Service Settings */}
+        <form onSubmit={handleSaveKioskSettings} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4 flex flex-col justify-between">
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">半自助日共用設定</h2>
+              <p className="text-xs text-gray-500 mt-0.5">全店共用，不分日期</p>
+            </div>
+
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                <span className="font-semibold text-gray-700">付款期限：前一日</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    max="23"
+                    value={kioskSettings.prepay_deadline_hour}
+                    onChange={(e) => setKioskSettings(prev => ({ ...prev, prepay_deadline_hour: e.target.value }))}
+                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right"
+                  />
+                  <span className="text-gray-600 font-bold">:00</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                <span className="font-semibold text-gray-700">最早提前進場</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    value={kioskSettings.early_minutes}
+                    onChange={(e) => setKioskSettings(prev => ({ ...prev, early_minutes: e.target.value }))}
+                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right"
+                  />
+                  <span className="text-gray-600">分鐘進場</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                <span className="font-semibold text-gray-700">打烊後仍可進門</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    max="240"
+                    value={kioskSettings.after_close_minutes}
+                    onChange={(e) => setKioskSettings(prev => ({ ...prev, after_close_minutes: e.target.value }))}
+                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right"
+                  />
+                  <span className="text-gray-600">分鐘內</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                <span className="font-semibold text-gray-700">同一位會員最多同時待付款預約</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={kioskSettings.max_unpaid_self_bookings}
+                    onChange={(e) => setKioskSettings(prev => ({ ...prev, max_unpaid_self_bookings: e.target.value }))}
+                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right"
+                  />
+                  <span className="text-gray-600">筆</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={savingKioskSettings}
+            data-testid="save-kiosk-settings-btn"
+            className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
+          >
+            {savingKioskSettings ? '儲存中...' : '儲存半自助日共用設定'}
+          </button>
+        </form>
       </div>
 
       {/* Shortcut Banner to Dedicated System Settings Page */}
