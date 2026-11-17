@@ -407,7 +407,30 @@ export const recalculateReservationTotal = async (txOrPrisma, booking_ref) => {
   return finalTotal;
 };
 
-export const createReservation = async (req, res) => {
+function buildPrepayQuoteResponse(quote, overrides = {}) {
+  return {
+    total_amount: quote.total_amount,
+    persons: quote.persons,
+    pass_persons: quote.pass_persons,
+    unpaid_entry_persons: quote.unpaid_entry_persons,
+    entry_amount: quote.entry_amount,
+    board_amount: quote.board_amount,
+    promo: quote.promo
+      ? {
+          code: quote.promo.code,
+          discount: quote.promo.discount,
+          applies_to_persons: quote.promo.applies_to_persons
+        }
+      : null,
+    pass_units: quote.pass_units,
+    transfer_amount: quote.transfer_amount,
+    transfer_open: quote.transfer_open,
+    ...overrides
+  };
+}
+
+export const createReservationHandler = (deps = {}) => async (req, res) => {
+  const getBillFn = deps.getBookingBill || getBookingBill;
   const { session_ids, pax, forceSplit } = req.body;
   const userId = req.user.id;
 
@@ -542,24 +565,7 @@ export const createReservation = async (req, res) => {
           Number(prepayPayload.expected_transfer_amount) !== quote.transfer_amount
         ) {
           throw makePrepayError('AMOUNT_CHANGED', '預約金額已變動，請確認最新金額後再送出', 409, {
-            quote: {
-              total_amount: quote.total_amount,
-              persons: quote.persons,
-              pass_persons: quote.pass_persons,
-              unpaid_entry_persons: quote.unpaid_entry_persons,
-              entry_amount: quote.entry_amount,
-              board_amount: quote.board_amount,
-              promo: quote.promo
-                ? {
-                    code: quote.promo.code,
-                    discount: quote.promo.discount,
-                    applies_to_persons: quote.promo.applies_to_persons
-                  }
-                : null,
-              pass_units: quote.pass_units,
-              transfer_amount: quote.transfer_amount,
-              transfer_open: quote.transfer_open
-            }
+            quote: buildPrepayQuoteResponse(quote)
           });
         }
 
@@ -697,23 +703,22 @@ export const createReservation = async (req, res) => {
         }
 
         // Authoritative amount verification against persisted getBookingBill
-        const authoritativeBillData = await getBookingBill(booking_ref, tx);
+        const authoritativeBillData = await getBillFn(booking_ref, tx);
         const authoritativeTotal = authoritativeBillData.bill?.summary?.amount_due ?? quote.total_amount;
-        let finalTotalAmount = quote.total_amount;
-        let finalTransferAmount = quote.transfer_amount;
 
         if (authoritativeTotal !== quote.total_amount) {
-          console.warn('[createReservation] Self-service total differed from getBookingBill; using bill total:', {
+          console.error('[createReservation] Self-service quote differed from getBookingBill; aborting:', {
             booking_ref,
             quoteTotal: quote.total_amount,
             billTotal: authoritativeTotal
           });
-          finalTotalAmount = authoritativeTotal;
           const passCover = quote.total_amount - quote.transfer_amount;
-          finalTransferAmount = Math.max(0, authoritativeTotal - passCover);
-          await tx.reservation.updateMany({
-            where: { booking_ref },
-            data: { total_amount: finalTotalAmount }
+          const recalculatedTransfer = Math.max(0, authoritativeTotal - passCover);
+          throw makePrepayError('AMOUNT_CHANGED', '預約金額已變動，請確認最新金額後再送出', 409, {
+            quote: buildPrepayQuoteResponse(quote, {
+              total_amount: authoritativeTotal,
+              transfer_amount: recalculatedTransfer
+            })
           });
         }
 
@@ -721,7 +726,7 @@ export const createReservation = async (req, res) => {
           data: {
             booking_ref,
             user_id: userId,
-            total_amount: finalTotalAmount,
+            total_amount: quote.total_amount,
             pass_persons: quote.pass_persons,
             pass_holds: passHolds,
             pricing_snapshot: {
@@ -730,7 +735,7 @@ export const createReservation = async (req, res) => {
               allow_unlimited: dailyRates.allow_unlimited,
               is_weekend: dailyRates.is_weekend
             },
-            amount_due: finalTransferAmount,
+            amount_due: quote.transfer_amount,
             status: 'pending_payment',
             deadline_at: quote.deadline_at,
             payment_method_code: paymentMethodCode,
@@ -741,7 +746,7 @@ export const createReservation = async (req, res) => {
           }
         });
 
-        if (finalTransferAmount === 0) {
+        if (quote.transfer_amount === 0) {
           const settleResult = await settleSelfServiceBooking(tx, {
             booking_ref,
             staffName: '系統'
@@ -775,7 +780,7 @@ export const createReservation = async (req, res) => {
           end_time: sortedRequestedSessions[sortedRequestedSessions.length - 1].end_time,
           sessions: sortedRequestedSessions,
           assigned_seats: mySeats,
-          total_amount: finalTotalAmount,
+          total_amount: quote.total_amount,
           promo_code: appliedPromoCode,
           discount_amount: appliedDiscountAmount,
           requested_sessions: sortedRequestedSessions,
@@ -1132,6 +1137,8 @@ export const createReservation = async (req, res) => {
     res.status(500).json({ error: 'Failed to create reservation.' });
   }
 };
+
+export const createReservation = createReservationHandler();
 
 export const getAdminReservations = async (req, res) => {
   try {
