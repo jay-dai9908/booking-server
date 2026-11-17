@@ -1,7 +1,10 @@
+import crypto from 'crypto';
 import prisma from '../../prismaClient.js';
 import { dateOnly, toTaipeiDateString } from '../../../../shared/time.js';
 import { ironText } from '../../../../shared/selfService.js';
 import { ensureKioskSetting } from '../selfService/prepayService.js';
+import { getActiveLayoutForDate } from '../seating/layoutService.js';
+import { buildFloorMap } from '../../../../shared/floorMap.js';
 
 export function addDaysYmd(ymd, offsetDays) {
   const [y, m, d] = String(ymd).split('-').map(Number);
@@ -154,13 +157,14 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     ackEventIds.push(eventId);
   }
 
-  const [kioskSetting, globalSetting, days] = await Promise.all([
+  const [kioskSetting, globalSetting, days, activeLayout] = await Promise.all([
     ensureKioskSetting(db),
     db.globalSetting.findUnique({
       where: { id: 1 },
-      select: { official_line_url: true, line_button_url: true }
+      select: { official_line_url: true, line_button_url: true, seat_layout_enabled: true }
     }),
-    buildSevenDaysSchedule(db, now)
+    buildSevenDaysSchedule(db, now),
+    getActiveLayoutForDate(db, now)
   ]);
 
   const effectiveLineUrl =
@@ -168,6 +172,19 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     globalSetting?.official_line_url ||
     globalSetting?.line_button_url ||
     '';
+
+  let floorMapPayload = null;
+  if (globalSetting?.seat_layout_enabled && activeLayout && activeLayout.id && activeLayout.status === 'published') {
+    const map = buildFloorMap(activeLayout);
+    const jsonBuf = Buffer.from(JSON.stringify(map), 'utf8');
+    const sha256 = crypto.createHash('sha256').update(jsonBuf).digest('hex');
+    floorMapPayload = {
+      version: map.version,
+      url: `/api/kiosk/files/floor-map/${map.version}.json`,
+      sha256,
+      size: jsonBuf.length
+    };
+  }
 
   return {
     sync_interval_s: 180,
@@ -193,7 +210,7 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
       ? { rev: kioskSetting.setup_pin_rev ?? 0, pin: kioskSetting.setup_pin }
       : null,
     slides: { rev: 0, items: [] },
-    floor_map: null,
+    floor_map: floorMapPayload,
     firmware: null,
     ack_event_ids: ackEventIds
   };

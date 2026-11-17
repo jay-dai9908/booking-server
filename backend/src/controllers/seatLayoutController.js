@@ -7,6 +7,7 @@ import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
 import { allocateWithLayout, reseatBookings, assertNoSeatCollisions } from '../services/seating/allocator.js';
 import { isBookingCompleted } from '../../../shared/floorSelectors.js';
 import { log as auditLog } from '../services/audit/auditService.js';
+import { VALID_SHOWS, VALID_ICONS, VALID_COLORS, VALID_PATTERNS, VALID_ROTATIONS } from '../../../shared/floorMap.js';
 
 export async function getActiveLayout(req, res) {
   try {
@@ -222,10 +223,84 @@ export async function updateLayoutDraft(req, res) {
       background_rect,
       elements_json,
       rules_json,
+      kiosk_map_rotation,
       zones = [],
       tables = [],
       seats = []
     } = req.body;
+
+    // Kiosk validation (Section 8 & Round 27)
+    if (kiosk_map_rotation !== undefined && kiosk_map_rotation !== null) {
+      const rot = Number(kiosk_map_rotation);
+      if (!VALID_ROTATIONS.includes(rot)) {
+        return res.status(422).json({
+          error: '報到機地圖方向只能是 0、90、180 或 270',
+          code: 'INVALID_KIOSK_ROTATION'
+        });
+      }
+    }
+
+    if (elements_json !== undefined) {
+      let elems = elements_json;
+      if (typeof elems === 'string') {
+        try {
+          elems = JSON.parse(elems);
+        } catch {
+          return res.status(422).json({
+            error: 'elements_json 格式錯誤',
+            code: 'INVALID_ELEMENTS_JSON'
+          });
+        }
+      }
+      if (Array.isArray(elems)) {
+        let entranceCount = 0;
+        for (const el of elems) {
+          const elType = el.type || el.kind;
+          const isDoor = elType === 'door';
+          if (el.kiosk) {
+            if (typeof el.kiosk !== 'object' || el.kiosk === null) {
+              return res.status(422).json({
+                error: 'kiosk 設定格式錯誤',
+                code: 'INVALID_KIOSK_CONFIG'
+              });
+            }
+            if (el.kiosk.show !== undefined && !VALID_SHOWS.includes(el.kiosk.show)) {
+              return res.status(422).json({
+                error: `無效的顯示設定：${el.kiosk.show}`,
+                code: 'INVALID_KIOSK_SHOW'
+              });
+            }
+            if (el.kiosk.icon !== undefined && !VALID_ICONS.includes(el.kiosk.icon)) {
+              return res.status(422).json({
+                error: `無效的圖示：${el.kiosk.icon}`,
+                code: 'INVALID_KIOSK_ICON'
+              });
+            }
+            if (el.kiosk.color !== undefined && !VALID_COLORS.includes(el.kiosk.color)) {
+              return res.status(422).json({
+                error: `無效的顏色：${el.kiosk.color}`,
+                code: 'INVALID_KIOSK_COLOR'
+              });
+            }
+            if (el.kiosk.pattern !== undefined && !VALID_PATTERNS.includes(el.kiosk.pattern)) {
+              return res.status(422).json({
+                error: `無效的圖案：${el.kiosk.pattern}`,
+                code: 'INVALID_KIOSK_PATTERN'
+              });
+            }
+            if (isDoor && el.kiosk.entrance === true) {
+              entranceCount++;
+            }
+          }
+        }
+        if (entranceCount > 1) {
+          return res.status(422).json({
+            error: '一份版面只能有一個入口',
+            code: 'MULTIPLE_ENTRANCES'
+          });
+        }
+      }
+    }
 
     // Validation (Section 5.1)
     if (!zones || zones.length === 0) {
@@ -317,8 +392,9 @@ export async function updateLayoutDraft(req, res) {
           background_image: background_image !== undefined ? background_image : existing.background_image,
           background_opacity: background_opacity !== undefined ? Number(background_opacity) : existing.background_opacity,
           background_rect: background_rect !== undefined ? background_rect : existing.background_rect,
-          elements_json: elements_json || existing.elements_json,
-          rules_json: rules_json || existing.rules_json,
+          elements_json: elements_json !== undefined ? elements_json : existing.elements_json,
+          rules_json: rules_json !== undefined ? rules_json : existing.rules_json,
+          kiosk_map_rotation: kiosk_map_rotation !== undefined ? Number(kiosk_map_rotation) : existing.kiosk_map_rotation,
           capacity
         }
       });

@@ -7,7 +7,8 @@ import {
   updateKioskBackupCodeHandler,
   getKioskBackupCodeHandler,
   updateKioskSetupPinHandler,
-  getKioskAccessLogsHandler
+  getKioskAccessLogsHandler,
+  getFloorMapFileHandler
 } from '../controllers/kioskController.js';
 import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
 import { kioskEnvelope } from '../middlewares/kioskEnvelope.js';
@@ -24,6 +25,9 @@ router.put('/admin/backup-code', verifyToken, requireAnyPermission(['settings'])
 router.get('/admin/backup-code', verifyToken, requireAnyPermission(['settings']), getKioskBackupCodeHandler);
 router.put('/admin/setup-pin', verifyToken, requireAnyPermission(['settings']), updateKioskSetupPinHandler);
 router.get('/admin/access-logs', verifyToken, requireAnyPermission(['settings']), getKioskAccessLogsHandler);
+
+// 檔案下載（公開，靠檢查碼）
+router.get('/files/floor-map/:version.json', getFloorMapFileHandler);
 
 // 報到機 SGK1 v1 加密通訊端點
 router.post('/v1/sync', kioskEnvelope('sync'), postKioskSyncHandler);

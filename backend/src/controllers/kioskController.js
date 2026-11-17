@@ -6,6 +6,8 @@ import { sanitizeKioskSetting } from './kioskSettingController.js';
 import { ensureKioskSetting as ensureKioskSettingRow } from '../services/selfService/prepayService.js';
 import { processKioskSync, buildSevenDaysSchedule } from '../services/kiosk/syncService.js';
 import { processKioskAccess } from '../services/kiosk/accessService.js';
+import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
+import { buildFloorMap } from '../../../shared/floorMap.js';
 
 const ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -315,5 +317,37 @@ export const getKioskAccessLogsHandler = async (req, res) => {
   } catch (err) {
     console.error('[kioskController] getAccessLogs error:', err);
     res.status(500).json({ error: '取得報到機進出紀錄失敗' });
+  }
+};
+
+export const getFloorMapFileHandler = async (req, res) => {
+  try {
+    const { version } = req.params;
+    const now = new Date();
+    const globalSetting = await prisma.globalSetting.findUnique({
+      where: { id: 1 },
+      select: { seat_layout_enabled: true }
+    });
+    if (!globalSetting?.seat_layout_enabled) {
+      return res.status(404).json({ error: 'FLOOR_MAP_NOT_ENABLED' });
+    }
+    const activeLayout = await getActiveLayoutForDate(prisma, now);
+    if (!activeLayout || !activeLayout.id || activeLayout.status !== 'published') {
+      return res.status(404).json({ error: 'FLOOR_MAP_NOT_FOUND' });
+    }
+    const floorMap = buildFloorMap(activeLayout);
+    if (floorMap.version !== version) {
+      return res.status(404).json({ error: 'FLOOR_MAP_VERSION_MISMATCH' });
+    }
+    const jsonBuf = Buffer.from(JSON.stringify(floorMap), 'utf8');
+    if (jsonBuf.length > 16384) {
+      console.warn(`[kiosk] Floor map size ${jsonBuf.length} bytes exceeds 16KB limit (version: ${version})`);
+    }
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Length', jsonBuf.length);
+    return res.end(jsonBuf);
+  } catch (err) {
+    console.error('[kioskController] getFloorMapFileHandler error:', err);
+    return res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 };

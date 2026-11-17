@@ -47,6 +47,9 @@ import SegmentedTabs from '../../components/admin/SegmentedTabs';
 import ResponsivePanel from '../../components/admin/ResponsivePanel';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import Button from '../../components/customer/Button';
+import FloorGuideMap from '../../components/common/FloorGuideMap';
+import { buildFloorMap } from '../../../../shared/floorMap';
+import { KIOSK_ICONS, KIOSK_PALETTE } from '../../assets/kiosk-icons/index';
 
 const DEFAULT_WEIGHTS = {
   zone: 1,
@@ -130,6 +133,7 @@ export default function SeatLayoutPage() {
 
   // Mobile sheet for seat property edit
   const [mobileEditingSeat, setMobileEditingSeat] = useState(null);
+  const [showKioskPreview, setShowKioskPreview] = useState(false);
 
   const svgRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -189,6 +193,7 @@ export default function SeatLayoutPage() {
       canvas_w: Number(layoutObj.canvas_w) || 1000,
       canvas_h: Number(layoutObj.canvas_h) || 625,
       grid_size: Number(layoutObj.grid_size) || 10,
+      kiosk_map_rotation: Number(layoutObj.kiosk_map_rotation) || 0,
       background_image: layoutObj.background_image || null,
       background_opacity: layoutObj.background_opacity ?? 40,
       background_rect: layoutObj.background_rect || null,
@@ -1303,6 +1308,41 @@ export default function SeatLayoutPage() {
     });
     setSelectedElementId(null);
     setMessage({ type: 'success', text: '已刪除環境物件' });
+  };
+
+  const updateSelectedElement = (updater) => {
+    if (!selectedElementId) return;
+    const nextElems = (layout?.elements_json || []).map(el => {
+      if (el.id === selectedElementId) {
+        return typeof updater === 'function' ? updater(el) : { ...el, ...updater };
+      }
+      return el;
+    });
+    commitLayoutChange({
+      ...layout,
+      elements_json: nextElems
+    });
+  };
+
+  const updateDoorEntrance = (isEntrance) => {
+    if (!selectedElementId) return;
+    const nextElems = (layout?.elements_json || []).map(el => {
+      const elType = el.type || el.kind;
+      if (elType === 'door') {
+        const k = el.kiosk ? { ...el.kiosk } : {};
+        if (el.id === selectedElementId) {
+          k.entrance = isEntrance;
+        } else if (isEntrance) {
+          k.entrance = false;
+        }
+        return { ...el, kiosk: k };
+      }
+      return el;
+    });
+    commitLayoutChange({
+      ...layout,
+      elements_json: nextElems
+    });
   };
 
   // Multi-selection Batch Operations
@@ -2905,6 +2945,244 @@ export default function SeatLayoutPage() {
                 </div>
               )}
 
+              {/* Properties for Selected Element (環境設施 / 門 / 柱子) */}
+              {selectedElement && (
+                <div className="space-y-4 pt-2 border-t border-sg-line" data-testid="element-properties-panel">
+                  <div className="flex items-center justify-between pb-2 border-b border-sg-line">
+                    <h3 className="text-[15px] font-bold text-sg-ink">
+                      {selectedElement.type === 'counter'
+                        ? `設施設定 (${selectedElement.label || '設施'})`
+                        : selectedElement.type === 'door'
+                        ? `門設定 (${selectedElement.label || '門'})`
+                        : `環境物件 (${selectedElement.label || selectedElement.type})`}
+                    </h3>
+                    <button
+                      type="button"
+                      data-testid="delete-element-btn"
+                      onClick={() => handleDeleteElement(selectedElement.id)}
+                      title="刪除物件"
+                      className="p-1 hover:bg-sg-danger-soft rounded text-sg-danger"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 text-[13px]">
+                    <div>
+                      <label className="block text-sg-muted mb-1 font-medium">
+                        名稱 {selectedElement.type === 'counter' && '（可按 Enter 換行）'}
+                      </label>
+                      {selectedElement.type === 'counter' ? (
+                        <textarea
+                          data-testid="element-label-textarea"
+                          rows={2}
+                          value={selectedElement.label || ''}
+                          onChange={(e) => updateSelectedElement({ label: e.target.value })}
+                          className="w-full px-3 py-1.5 rounded-xl border border-sg-line font-bold text-sg-ink resize-none"
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={selectedElement.label || ''}
+                          onChange={(e) => updateSelectedElement({ label: e.target.value })}
+                          className="w-full px-3 py-1.5 rounded-xl border border-sg-line font-bold text-sg-ink"
+                        />
+                      )}
+                    </div>
+
+                    {selectedElement.type === 'door' && (
+                      <div className="pt-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            data-testid="door-entrance-checkbox"
+                            checked={Boolean(selectedElement.kiosk?.entrance)}
+                            onChange={(e) => updateDoorEntrance(e.target.checked)}
+                            className="rounded text-sg-brown"
+                          />
+                          <span className="font-bold text-sg-ink text-[13px]">設為入口</span>
+                        </label>
+                        <p className="text-[11px] text-sg-muted mt-1">一份版面只能標註一個入口門</p>
+                      </div>
+                    )}
+
+                    {(selectedElement.type === 'counter' || selectedElement.type === 'fixture') && (
+                      <div className="pt-3 border-t border-sg-line space-y-3" data-testid="kiosk-fixture-settings">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-[14px] text-sg-ink">報到機地圖</span>
+                          <span className="text-[10px] bg-sg-brown text-white font-bold px-1.5 py-0.5 rounded">新增</span>
+                        </div>
+
+                        <div>
+                          <label className="block text-sg-muted mb-1 text-[12px] font-medium">顯示方式</label>
+                          <select
+                            data-testid="fixture-show-select"
+                            value={selectedElement.kiosk?.show || 'icon_name'}
+                            onChange={(e) => {
+                              const show = e.target.value;
+                              updateSelectedElement(prev => ({
+                                ...prev,
+                                kiosk: { ...(prev.kiosk || {}), show }
+                              }));
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-sg-line font-bold bg-white text-[13px]"
+                          >
+                            <option value="shape">只畫形狀</option>
+                            <option value="name">名稱</option>
+                            <option value="icon">圖示</option>
+                            <option value="icon_name">圖示＋名稱</option>
+                            <option value="hidden">不顯示</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sg-muted mb-1 text-[12px] font-medium">圖示</label>
+                          <div className="grid grid-cols-5 gap-1.5" data-testid="fixture-icon-grid">
+                            {Object.entries(KIOSK_ICONS).map(([key, item]) => {
+                              const isSelected = (selectedElement.kiosk?.icon === key) || (!selectedElement.kiosk?.icon && key === 'counter');
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  data-testid={`icon-btn-${key}`}
+                                  onClick={() => {
+                                    updateSelectedElement(prev => ({
+                                      ...prev,
+                                      kiosk: { ...(prev.kiosk || {}), icon: key }
+                                    }));
+                                  }}
+                                  className={`flex flex-col items-center justify-center p-1 rounded-lg border text-center transition ${
+                                    isSelected
+                                      ? 'border-2 border-sg-brown bg-[#FBF4EE]'
+                                      : 'border-sg-line bg-white hover:bg-sg-paper'
+                                  }`}
+                                >
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    className="w-5 h-5 text-sg-ink"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    dangerouslySetInnerHTML={{ __html: item.inner }}
+                                  />
+                                  <span className="text-[10px] text-sg-muted mt-0.5 leading-none">{item.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sg-muted mb-1 text-[12px] font-medium">顏色</label>
+                          <div className="flex flex-wrap gap-2" data-testid="fixture-color-swatches">
+                            {Object.entries(KIOSK_PALETTE).map(([colKey, col]) => {
+                              const isSelected = (selectedElement.kiosk?.color === colKey) || (!selectedElement.kiosk?.color && colKey === 'brown');
+                              return (
+                                <button
+                                  key={colKey}
+                                  type="button"
+                                  data-testid={`color-btn-${colKey}`}
+                                  title={col.label}
+                                  onClick={() => {
+                                    updateSelectedElement(prev => ({
+                                      ...prev,
+                                      kiosk: { ...(prev.kiosk || {}), color: colKey }
+                                    }));
+                                  }}
+                                  className={`w-7 h-7 rounded-full border border-sg-line flex items-center justify-center transition ${
+                                    isSelected ? 'outline-2 outline-sg-brown outline-offset-1' : ''
+                                  }`}
+                                  style={{ backgroundColor: col.bg }}
+                                >
+                                  <i className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: col.text }} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sg-muted mb-1 text-[12px] font-medium">圖案</label>
+                          <div className="inline-flex rounded-xl border border-sg-line overflow-hidden text-[12px]">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateSelectedElement(prev => ({
+                                  ...prev,
+                                  kiosk: { ...(prev.kiosk || {}), pattern: 'none' }
+                                }));
+                              }}
+                              className={`px-3 py-1 font-bold ${
+                                (selectedElement.kiosk?.pattern || 'none') === 'none'
+                                  ? 'bg-sg-brown text-white'
+                                  : 'bg-white text-sg-ink'
+                              }`}
+                            >
+                              無
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateSelectedElement(prev => ({
+                                  ...prev,
+                                  kiosk: { ...(prev.kiosk || {}), pattern: 'beads' }
+                                }));
+                              }}
+                              className={`px-3 py-1 font-bold ${
+                                selectedElement.kiosk?.pattern === 'beads'
+                                  ? 'bg-sg-brown text-white'
+                                  : 'bg-white text-sg-ink'
+                              }`}
+                            >
+                              彩色豆子
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sg-muted mb-1 text-[12px] font-medium">報到機上的樣子（實際大小）</label>
+                          {(() => {
+                            const curColorKey = selectedElement.kiosk?.color || 'brown';
+                            const curPal = KIOSK_PALETTE[curColorKey] || KIOSK_PALETTE.grey;
+                            const curIconKey = selectedElement.kiosk?.icon || 'counter';
+                            const curIcon = KIOSK_ICONS[curIconKey];
+                            const curShow = selectedElement.kiosk?.show || 'icon_name';
+                            return (
+                              <div className="bg-[#F6F1EA] rounded-xl p-3 flex flex-col gap-2">
+                                <div
+                                  className="h-8 px-3 rounded flex items-center justify-center gap-1.5 text-[12px] font-bold self-start"
+                                  style={{ backgroundColor: curPal.bg, color: curPal.text }}
+                                >
+                                  {(curShow === 'icon' || curShow === 'icon_name') && curIcon && (
+                                    <svg
+                                      viewBox="0 0 24 24"
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      dangerouslySetInnerHTML={{ __html: curIcon.inner }}
+                                    />
+                                  )}
+                                  {(curShow === 'name' || curShow === 'icon_name') && (
+                                    <span>{selectedElement.label || '設施'}</span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-sg-muted m-0">色塊太小時，圖示和名稱會自動移到色塊旁邊。</p>
+                                <p className="text-[11px] text-sg-muted m-0">這些設定發布版面後才會出現在報到機和顧客手機。</p>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Background Image Inspector */}
               <div className="pt-3 border-t border-sg-line space-y-3 text-[13px]">
                 <h4 className="font-bold text-sg-ink flex items-center justify-between">
@@ -2950,6 +3228,40 @@ export default function SeatLayoutPage() {
                 ) : (
                   <div className="text-[12px] text-sg-muted">尚未上傳底圖（可匯入店內建築設計圖做為對齊依據）</div>
                 )}
+              </div>
+
+              {/* Kiosk Map Direction & Preview */}
+              <div className="pt-3 border-t border-sg-line space-y-2 text-[13px]" data-testid="kiosk-layout-settings">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sg-ink">報到機地圖方向</span>
+                  <select
+                    data-testid="kiosk-map-rotation-select"
+                    value={layout.kiosk_map_rotation ?? 0}
+                    onChange={(e) => {
+                      const rot = Number(e.target.value);
+                      commitLayoutChange({
+                        ...layout,
+                        kiosk_map_rotation: rot
+                      });
+                    }}
+                    className="px-2.5 py-1 rounded-xl border border-sg-line font-bold bg-white text-[12px]"
+                  >
+                    <option value={0}>0°</option>
+                    <option value={90}>90°</option>
+                    <option value={180}>180°</option>
+                    <option value={270}>270°</option>
+                  </select>
+                </div>
+                <p className="text-[11px] text-sg-muted">站在報到機前看到的方向，入口應該在下方</p>
+                <button
+                  type="button"
+                  data-testid="preview-kiosk-map-btn"
+                  onClick={() => setShowKioskPreview(true)}
+                  className="w-full mt-2 py-2 px-3 rounded-xl border border-sg-brown/50 bg-sg-paper text-sg-brown font-bold text-[13px] hover:bg-sg-peach-soft flex items-center justify-center gap-1.5"
+                >
+                  <Eye className="w-4 h-4" />
+                  預覽報到機與手機地圖
+                </button>
               </div>
             </div>
           </div>
@@ -3793,6 +4105,56 @@ export default function SeatLayoutPage() {
           )}
         </div>
       </ConfirmPanel>
+
+      {/* Kiosk & Mobile Map Preview Modal */}
+      {showKioskPreview && layout && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-sg-line p-6 max-w-4xl w-full shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-sg-line pb-3">
+              <div>
+                <h3 className="font-bold text-[18px] text-sg-ink">地圖預覽（即時草稿）</h3>
+                <p className="text-[12px] text-sg-muted">左：報到機 250×370 實際大小；右：顧客手機 320 寬度</p>
+              </div>
+              <button
+                type="button"
+                data-testid="close-kiosk-preview-btn"
+                onClick={() => setShowKioskPreview(false)}
+                className="p-1 hover:bg-sg-paper rounded-full text-sg-muted hover:text-sg-ink"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {(() => {
+              const liveMap = buildFloorMap(layout);
+              const sampleSeat = (layout.seats || []).find(s => s.is_active !== false)?.code || 'A1-1';
+              return (
+                <div className="grid md:grid-cols-2 gap-6 items-start justify-items-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="text-[13px] font-bold text-sg-muted">報到機螢幕預覽 (250×370)</span>
+                    <div className="w-[250px] h-[370px] bg-sg-bg rounded-2xl border-4 border-[#17130F] p-2 overflow-hidden flex items-center justify-center">
+                      <FloorGuideMap floor={liveMap} seatCodes={[sampleSeat]} style={{ maxHeight: '350px' }} />
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="text-[13px] font-bold text-sg-muted">手機畫面預覽 (320 寬度)</span>
+                    <div className="w-[320px] bg-sg-bg rounded-[28px] border-4 border-[#2A231E] p-3 shadow-lg flex flex-col gap-2">
+                      <div className="text-[12px] font-bold text-sg-ink flex justify-between">
+                        <span>預約紀錄</span>
+                        <span className="text-sg-sage-ink font-mono font-bold">已進場</span>
+                      </div>
+                      <div className="rounded-xl bg-white/80 p-2.5 border border-sg-sage/40">
+                        <div className="text-[11px] text-sg-muted">你的座位</div>
+                        <div className="font-bold font-mono text-[20px] text-sg-ink">{sampleSeat}</div>
+                      </div>
+                      <FloorGuideMap floor={liveMap} seatCodes={[sampleSeat]} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

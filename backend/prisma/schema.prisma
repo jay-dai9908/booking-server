@@ -460,6 +460,7 @@ model SeatLayout {
   elements_json       Json       @default("[]")      // 牆面、門口、櫃檯、柱子、窗戶
   rules_json          Json       @default("{}")      // 排位規則
   capacity            Int        @default(0)         // 發布時算好：可自動排的啟用座位數
+  kiosk_map_rotation  Int        @default(0)         // 0 | 90 | 180 | 270
   created_by_name     String?
   published_by_name   String?
   published_at        DateTime?

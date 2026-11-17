@@ -707,7 +707,8 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "KioskAccessLog" ADD COLUMN IF NOT EXISTS "at_unknown" BOOLEAN NOT NULL DEFAULT false`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "KioskAccessLog_device_id_event_id_key" ON "KioskAccessLog"("device_id", "event_id")`,
     `CREATE INDEX IF NOT EXISTS "KioskAccessLog_at_idx" ON "KioskAccessLog"("at")`,
-    `CREATE INDEX IF NOT EXISTS "KioskAccessLog_booking_ref_idx" ON "KioskAccessLog"("booking_ref")`
+    `CREATE INDEX IF NOT EXISTS "KioskAccessLog_booking_ref_idx" ON "KioskAccessLog"("booking_ref")`,
+    `ALTER TABLE "SeatLayout" ADD COLUMN IF NOT EXISTS "kiosk_map_rotation" INTEGER NOT NULL DEFAULT 0`
   ];
 
   for (const sql of statements) {
