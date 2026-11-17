@@ -710,12 +710,20 @@ model DailyCounter {
 // -------------------------------------------------------------
 
 model KioskSetting {
-  id                       Int      @id @default(1)
-  early_minutes            Int      @default(30)
-  after_close_minutes      Int      @default(60)
-  prepay_deadline_hour     Int      @default(12)
-  max_unpaid_self_bookings Int      @default(2)
-  updated_at               DateTime @default(now()) @updatedAt
+  id                       Int       @id @default(1)
+  early_minutes            Int       @default(30)
+  after_close_minutes      Int       @default(60)
+  prepay_deadline_hour     Int       @default(12)
+  max_unpaid_self_bookings Int       @default(2)
+  line_url                 String?
+  line_id                  String?
+  backup_code              String?
+  backup_code_rev          Int       @default(0)
+  backup_code_set_at       DateTime?
+  setup_pin                String?
+  setup_pin_rev            Int       @default(0)
+  config_rev               Int       @default(1)
+  updated_at               DateTime  @default(now()) @updatedAt
 }
 
 model BookingPrepay {
@@ -762,6 +770,25 @@ model KioskDevice {
   created_at   DateTime  @default(now())
 
   @@index([is_active])
+}
+
+model KioskAccessLog {
+  id          Int      @id @default(autoincrement())
+  device_id   Int?
+  at          DateTime
+  method      String   // qr | phone | backup_code
+  result      String   // FIRST_CHECKIN | RE_ENTRY | TOO_EARLY | UNVERIFIED | QR_EXPIRED | NOT_FOUND | ENDED | NORMAL_DAY | BACKUP_OPEN
+  open_door   Boolean  @default(false)
+  booking_ref String?
+  user_id     Int?
+  hint        String?
+  offline     Boolean  @default(false)
+  event_id    String?
+  created_at  DateTime @default(now())
+
+  @@unique([device_id, event_id])
+  @@index([at])
+  @@index([booking_ref])
 }
 
 

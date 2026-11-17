@@ -620,9 +620,25 @@ const ensureDatabaseSchema = async () => {
       "after_close_minutes" INTEGER NOT NULL DEFAULT 60,
       "prepay_deadline_hour" INTEGER NOT NULL DEFAULT 12,
       "max_unpaid_self_bookings" INTEGER NOT NULL DEFAULT 2,
+      "line_url" TEXT,
+      "line_id" TEXT,
+      "backup_code" TEXT,
+      "backup_code_rev" INTEGER NOT NULL DEFAULT 0,
+      "backup_code_set_at" TIMESTAMP(3),
+      "setup_pin" TEXT,
+      "setup_pin_rev" INTEGER NOT NULL DEFAULT 0,
+      "config_rev" INTEGER NOT NULL DEFAULT 1,
       "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "KioskSetting_pkey" PRIMARY KEY ("id")
     )`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "line_url" TEXT`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "line_id" TEXT`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "backup_code" TEXT`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "backup_code_rev" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "backup_code_set_at" TIMESTAMP(3)`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "setup_pin" TEXT`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "setup_pin_rev" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "KioskSetting" ADD COLUMN IF NOT EXISTS "config_rev" INTEGER NOT NULL DEFAULT 1`,
 
     `CREATE TABLE IF NOT EXISTS "BookingPrepay" (
       "id" SERIAL NOT NULL,
@@ -670,7 +686,26 @@ const ensureDatabaseSchema = async () => {
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "KioskDevice_pkey" PRIMARY KEY ("id")
     )`,
-    `CREATE INDEX IF NOT EXISTS "KioskDevice_is_active_idx" ON "KioskDevice"("is_active")`
+    `CREATE INDEX IF NOT EXISTS "KioskDevice_is_active_idx" ON "KioskDevice"("is_active")`,
+
+    `CREATE TABLE IF NOT EXISTS "KioskAccessLog" (
+      "id" SERIAL NOT NULL,
+      "device_id" INTEGER,
+      "at" TIMESTAMP(3) NOT NULL,
+      "method" TEXT NOT NULL,
+      "result" TEXT NOT NULL,
+      "open_door" BOOLEAN NOT NULL DEFAULT false,
+      "booking_ref" TEXT,
+      "user_id" INTEGER,
+      "hint" TEXT,
+      "offline" BOOLEAN NOT NULL DEFAULT false,
+      "event_id" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "KioskAccessLog_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "KioskAccessLog_device_id_event_id_key" ON "KioskAccessLog"("device_id", "event_id")`,
+    `CREATE INDEX IF NOT EXISTS "KioskAccessLog_at_idx" ON "KioskAccessLog"("at")`,
+    `CREATE INDEX IF NOT EXISTS "KioskAccessLog_booking_ref_idx" ON "KioskAccessLog"("booking_ref")`
   ];
 
   for (const sql of statements) {

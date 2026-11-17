@@ -45,6 +45,7 @@ export default function AdminLayout({ initialAdminInfo = null }) {
     { to: '/admin/weekly', perm: 'weekly' },
     { to: '/admin/accounting', perm: 'accounting' },
     { to: '/admin/print-station', perm: 'settings', fallbackPerm: 'accounting' },
+    { to: '/admin/kiosk', perm: 'settings' },
     { to: '/admin/settings', perm: 'settings', fallbackPerm: 'sessions' },
     { to: '/admin/staff', perm: 'staff', superAdminOnly: true },
   ];

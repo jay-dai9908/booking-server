@@ -30,6 +30,7 @@ const CouponsPage = lazy(() => import('./pages/Admin/CouponsPage'));
 const SettingsPage = lazy(() => import('./pages/Admin/SettingsPage'));
 const SeatLayoutPage = lazy(() => import('./pages/Admin/SeatLayoutPage'));
 const PrintStationPage = lazy(() => import('./pages/Admin/PrintStationPage'));
+const KioskPage = lazy(() => import('./pages/Admin/KioskPage'));
 
 function App() {
   const [userRole, setUserRole] = useState(null); // 'customer', 'temp_customer', 'admin', or null
@@ -149,6 +150,7 @@ function App() {
             <Route path="coupons" element={<CouponsPage />} />
             <Route path="accounting" element={<AccountingPage />} />
             <Route path="print-station" element={<PrintStationPage />} />
+            <Route path="kiosk" element={<KioskPage />} />
             <Route path="staff" element={<StaffPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
