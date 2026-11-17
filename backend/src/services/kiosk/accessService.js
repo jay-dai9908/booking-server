@@ -114,7 +114,8 @@ export async function processKioskAccess(db = prisma, {
   method,
   payload,
   now = new Date(),
-  notifyFn = sendSelfServiceFirstCheckinNotification
+  notifyFn = sendSelfServiceFirstCheckinNotification,
+  reseatFn = reseatBookings
 }) {
   const cleanMethod = method === 'qr' ? 'qr' : (method === 'phone' ? 'phone' : String(method || 'qr'));
   const rawPayload = String(payload ?? '').trim();
@@ -353,12 +354,21 @@ export async function processKioskAccess(db = prisma, {
     let touchedSessionIds = [];
 
     if (needsPhysicalSeat) {
+      // 呼叫 reseatBookings 前先建立 SAVEPOINT：
+      // 1. reseatBookings (allocator.js) 是一邊計算一邊寫入資料庫；若在處理後續預約時拋出
+      //    CANNOT_DISPLACE 等業務異常，ROLLBACK TO SAVEPOINT 可確保前面已被修改的其他顧客座位
+      //    完全復原，絕不留下改了一半的狀態。
+      // 2. 若重排過程中發生任何資料庫異常（如唯一約束或 SQL 錯誤），PostgreSQL 會將整筆交易標記為
+      //    aborted；透過回滾至 SAVEPOINT 可清除錯誤狀態，使外層報到交易能順利提交並開門，
+      //    嚴格貫徹「排不到座位也照樣開門」的業務原則。
+      await tx.$executeRaw`SAVEPOINT kiosk_reseat`;
       try {
-        const displaced = await reseatBookings(tx, {
+        const displaced = await reseatFn(tx, {
           bookingRefs: [targetRef],
           reservedSeats: [],
           sessionIds
         });
+        await tx.$executeRaw`RELEASE SAVEPOINT kiosk_reseat`;
         touchedSessionIds = displaced?.touchedSessionIds || [];
         const updatedRow = await tx.reservation.findFirst({
           where: { booking_ref: targetRef, status: 'confirmed' },
@@ -366,7 +376,9 @@ export async function processKioskAccess(db = prisma, {
         });
         const candidateSeats = (updatedRow?.assigned_seats || []).filter(Boolean);
         finalSeats = candidateSeats.some((s) => String(s).startsWith('WAIT-')) ? [] : candidateSeats;
-      } catch {
+      } catch (err) {
+        // 重排失敗或資料庫異常：回滾到 SAVEPOINT，復原所有已被異動的座位並復原交易可用狀態
+        await tx.$executeRaw`ROLLBACK TO SAVEPOINT kiosk_reseat`;
         // 仍然排不到實體座位：照樣開門，seats 回空陣列
         finalSeats = [];
         touchedSessionIds = [];
