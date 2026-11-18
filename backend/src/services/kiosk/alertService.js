@@ -28,9 +28,10 @@ export function resolveEventTime(rawAt, now = new Date()) {
   const isNumericInput =
     typeof rawAt === 'number' || (typeof rawAt === 'string' && rawAt.trim() !== '');
   const sec = isNumericInput ? Number(rawAt) : NaN;
-  const isValid = Number.isFinite(sec) && sec > 0;
+  const candidate = Number.isFinite(sec) && sec > 0 ? new Date(sec * 1000) : null;
+  const isValid = candidate !== null && !Number.isNaN(candidate.getTime());
   return {
-    at: isValid ? new Date(sec * 1000) : now,
+    at: isValid ? candidate : now,
     unknown: !isValid
   };
 }

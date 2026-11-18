@@ -16,7 +16,7 @@ test('Round 27b Item 2: backup_open LINE notification aligns time resolution wit
   assert.equal(rValid.unknown, false);
   assert.equal(rValid.at.getTime(), validEventSec * 1000);
 
-  for (const badAt of [null, 0, -5, undefined, '']) {
+  for (const badAt of [null, 0, -5, undefined, '', '  ', 'abc', true, false, 1e20, Number.MAX_SAFE_INTEGER]) {
     const rBad = resolveEventTime(badAt, receivedNow);
     assert.equal(rBad.unknown, true, `Expected unknown=true for at=${String(badAt)}`);
     assert.equal(rBad.at.getTime(), receivedNow.getTime());
@@ -75,7 +75,8 @@ test('Round 27b Item 2: backup_open LINE notification aligns time resolution wit
       { id: 'r27b-ev-valid', type: 'backup_open', at: validEventSec, offline: false },
       { id: 'r27b-ev-null', type: 'backup_open', at: null, offline: true },
       { id: 'r27b-ev-zero', type: 'backup_open', at: 0, offline: true },
-      { id: 'r27b-ev-neg', type: 'backup_open', at: -5, offline: true }
+      { id: 'r27b-ev-neg', type: 'backup_open', at: -5, offline: true },
+      { id: 'r27b-ev-overflow', type: 'backup_open', at: 1e20, offline: true }
     ];
 
     await processKioskSync(prisma, {
@@ -86,11 +87,12 @@ test('Round 27b Item 2: backup_open LINE notification aligns time resolution wit
       pushFn: spyPush
     });
 
-    assert.equal(sent.length, 4);
+    assert.equal(sent.length, 5);
     assert.equal(sent[0].text, '備用開門密碼在 14:05 被使用，請到後台換一組新的');
     assert.equal(sent[1].text, '備用開門密碼被使用了（發生時間不明，補報於 14:30），請到後台換一組新的');
     assert.equal(sent[2].text, '備用開門密碼被使用了（發生時間不明，補報於 14:30），請到後台換一組新的');
     assert.equal(sent[3].text, '備用開門密碼被使用了（發生時間不明，補報於 14:30），請到後台換一組新的');
+    assert.equal(sent[4].text, '備用開門密碼被使用了（發生時間不明，補報於 14:30），請到後台換一組新的');
 
     // Re-send duplicate event_ids -> must NOT send any more LINE alerts
     await processKioskSync(prisma, {
@@ -101,7 +103,7 @@ test('Round 27b Item 2: backup_open LINE notification aligns time resolution wit
       pushFn: spyPush
     });
 
-    assert.equal(sent.length, 4, 'Duplicate event_ids must trigger LINE notification only once');
+    assert.equal(sent.length, 5, 'Duplicate event_ids must trigger LINE notification only once');
   } finally {
     if (device?.id) {
       await prisma.kioskAccessLog.deleteMany({ where: { device_id: device.id } }).catch(() => {});
