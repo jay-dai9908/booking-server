@@ -52,7 +52,7 @@ test('rotateFloorMap rotates door and shapes when rotation is 90', () => {
 });
 
 test('computeFloorLayout with floor-demo.json places labels without overlapping tables or each other', () => {
-  const demoPath = path.resolve(__dirname, '../../kiosk-handoff-web/1-shared/floor-demo.json');
+  const demoPath = path.resolve(__dirname, './fixtures/floor-demo.json');
   const demoFloor = JSON.parse(fs.readFileSync(demoPath, 'utf8'));
 
   // 每個字寬當成 13
