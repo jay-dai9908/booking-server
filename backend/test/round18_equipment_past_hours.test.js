@@ -132,4 +132,29 @@ test('Round 18 Item 3: Cannot add equipment for past hours during in-progress bo
     await modifyBookingEquipment(req, res);
     assert.notEqual(res.getStatusCode(), 422, 'Should not return 422 for current/future hour');
   });
+
+  await t.test('Non-test NODE_ENV ignores client-supplied req.body.now', async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const { req, res } = createMockReqRes({
+        user: testUser,
+        params: { booking_ref: bookingRef },
+        body: {
+          now: fixedNowIso,
+          equipments: [
+            { equipment_id: 'small', quantity: 1, rental_hours: 2, start_time: pastHourStr }
+          ]
+        }
+      });
+      await modifyBookingEquipment(req, res);
+      assert.equal(
+        res.getStatusCode(),
+        200,
+        'When NODE_ENV !== test, req.body.now (2099-06-15 14:30) must be ignored so 2099 booking is not treated as in-progress'
+      );
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+    }
+  });
 });
