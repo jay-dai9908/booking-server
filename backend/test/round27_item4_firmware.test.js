@@ -3,27 +3,40 @@ import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import prisma from '../src/prismaClient.js';
 import { processKioskSync } from '../src/services/kiosk/syncService.js';
+import { startTestServer } from './helpers/testServer.js';
 
-const ADMIN_PORT = 3001;
-const BASE_URL = `http://localhost:${ADMIN_PORT}`;
-
-function createEsp32Binary(versionStr, size = 1024) {
+function createEsp32Binary(versionStr, size = 1024, projectName = 'kiosk-firmware') {
   const buf = Buffer.alloc(size, 0xff);
   buf[0] = 0xe9; // ESP32 image magic byte
   buf[1] = 0x04; // segment count
   buf[2] = 0x00; // spi mode
   buf[3] = 0x20; // spi speed / size
 
+  // App desc magic word at offset 32: 32 54 cd ab
+  buf[32] = 0x32;
+  buf[33] = 0x54;
+  buf[34] = 0xcd;
+  buf[35] = 0xab;
+
   // Write version string at offset 48 (0x30)
   buf.fill(0, 48, 80);
   buf.write(versionStr, 48, 'ascii');
+
+  // Write project name at offset 80 (0x50)
+  buf.fill(0, 80, 112);
+  buf.write(projectName, 80, 'ascii');
   return buf;
 }
 
 test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async () => {
-  // 1. Setup admin staff user and login
-  const staffPass = `test_fw_pwd_${Date.now()}`;
-  const admin = await prisma.adminUser.create({
+  const testServer = await startTestServer();
+  const BASE_URL = testServer.baseUrl;
+
+  let admin = null;
+  try {
+    // 1. Setup admin staff user and login
+    const staffPass = `test_fw_pwd_${Date.now()}`;
+    admin = await prisma.adminUser.create({
     data: {
       name: 'FW Admin',
       password: staffPass,
@@ -50,7 +63,7 @@ test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async 
     create: { id: 1, fw_target_id: null, fw_policy: 'none' }
   });
 
-  // 2. Reject non-0xE9 magic byte
+  // 2. Reject invalid binaries with 422
   const badMagicBuf = Buffer.alloc(256, 0x00);
   const resBadMagic = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
     method: 'POST',
@@ -63,9 +76,32 @@ test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async 
       note: 'Bad magic'
     })
   });
-  assert.equal(resBadMagic.status, 400);
+  assert.equal(resBadMagic.status, 422);
   const dataBadMagic = await resBadMagic.json();
   assert.equal(dataBadMagic.error, 'INVALID_FIRMWARE_HEADER');
+
+  // Test bad app desc magic
+  const badDescBuf = createEsp32Binary('v0.9.0', 1024);
+  badDescBuf[32] = 0x00;
+  const resBadDesc = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw_base64: badDescBuf.toString('base64') })
+  });
+  assert.equal(resBadDesc.status, 422);
+  const dataBadDesc = await resBadDesc.json();
+  assert.equal(dataBadDesc.error, 'INVALID_APP_DESC_MAGIC');
+
+  // Test bad project name
+  const badProjBuf = createEsp32Binary('v0.9.1', 1024, 'wrong-project');
+  const resBadProj = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw_base64: badProjBuf.toString('base64') })
+  });
+  assert.equal(resBadProj.status, 422);
+  const dataBadProj = await resBadProj.json();
+  assert.equal(dataBadProj.error, 'INVALID_PROJECT_NAME');
 
   // 3. Upload valid ESP32 firmware v1.0.0
   const binV1 = createEsp32Binary('v1.0.0', 2048);
@@ -90,6 +126,16 @@ test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async 
   assert.equal(dataV1.firmware.sha256, sha256_v1);
   const fw1Id = dataV1.firmware.id;
 
+  // Test duplicate version upload -> returns 409
+  const resDup = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw_base64: binV1.toString('base64') })
+  });
+  assert.equal(resDup.status, 409);
+  const dataDup = await resDup.json();
+  assert.equal(dataDup.error, 'FIRMWARE_VERSION_EXISTS');
+
   // 4. Upload 4 more versions to test retention (v1.1, v1.2, v1.3, v1.4)
   const fwIds = [fw1Id];
   for (let i = 1; i <= 4; i++) {
@@ -110,17 +156,18 @@ test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async 
     fwIds.push(d.firmware.id);
   }
 
-  // Verify list: max 3 non-target versions retained
+  // Verify list: max 3 versions retained
   const resList = await fetch(`${BASE_URL}/api/kiosk/admin/firmware`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   assert.equal(resList.status, 200);
   const dataList = await resList.json();
   assert.equal(dataList.ok, true);
-  assert(dataList.firmwares.length <= 4);
+  assert(dataList.firmwares.length <= 3);
 
-  // 5. Set target version with policy "force"
+  // 5. Set target version with policy "now"
   const targetId = fwIds[fwIds.length - 1]; // newest
+  const targetFw = dataList.firmwares.find((f) => f.id === targetId);
   const resTarget = await fetch(`${BASE_URL}/api/kiosk/admin/firmware/target`, {
     method: 'PUT',
     headers: {
@@ -128,15 +175,15 @@ test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async 
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      target_id: targetId,
-      policy: 'force'
+      firmware_id: targetId,
+      policy: 'now'
     })
   });
   assert.equal(resTarget.status, 200);
   const dataTarget = await resTarget.json();
   assert.equal(dataTarget.ok, true);
   assert.equal(dataTarget.target_id, targetId);
-  assert.equal(dataTarget.policy, 'force');
+  assert.equal(dataTarget.policy, 'now');
 
   // 6. Attempt deleting target firmware -> must be rejected
   const resDelTarget = await fetch(`${BASE_URL}/api/kiosk/admin/firmware/${targetId}`, {
@@ -164,6 +211,7 @@ test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async 
   const syncPayload = await processKioskSync(prisma, {
     device,
     body: {
+      fw: 'v1.0.0', // older version
       status: { fw_state: 'downloading', ota_failed: null }
     },
     clientIp: '127.0.0.1',
@@ -171,14 +219,51 @@ test('Round 27 Item 4: Kiosk Firmware OTA management and sync reporting', async 
   });
 
   assert.ok(syncPayload.firmware);
-  assert.equal(syncPayload.firmware.policy, 'force');
+  assert.equal(syncPayload.firmware.policy, 'now');
   assert.equal(syncPayload.firmware.url, `/api/kiosk/files/firmware/${targetId}.bin`);
 
   // Device status_json updated
   const updatedDev = await prisma.kioskDevice.findUnique({ where: { id: device.id } });
   assert.equal(updatedDev.status_json.fw_state, 'downloading');
 
-  // Cleanup
-  await prisma.kioskFirmware.deleteMany();
-  await prisma.adminUser.delete({ where: { id: admin.id } }).catch(() => {});
+  // 9. When Kiosk reports updated version equal to target, policy auto resets to 'none'
+  const syncCompletePayload = await processKioskSync(prisma, {
+    device,
+    body: {
+      fw: targetFw.version,
+      status: { fw_state: 'idle', ota_failed: null }
+    },
+    clientIp: '127.0.0.1',
+    now: new Date()
+  });
+  assert.equal(syncCompletePayload.firmware, null);
+  const settingAfterComplete = await prisma.kioskSetting.findUnique({ where: { id: 1 } });
+  assert.equal(settingAfterComplete.fw_policy, 'none');
+
+  // 10. When Kiosk reports ota_failed event, policy auto resets to 'none'
+  await prisma.kioskSetting.update({
+    where: { id: 1 },
+    data: { fw_policy: 'now', fw_target_id: targetId }
+  });
+  const syncFailedPayload = await processKioskSync(prisma, {
+    device,
+    body: {
+      fw: 'v1.0.0',
+      events: [{ id: `ev_ota_fail_${Date.now()}`, type: 'ota_failed' }]
+    },
+    clientIp: '127.0.0.1',
+    now: new Date()
+  });
+  assert.equal(syncFailedPayload.firmware, null);
+  const settingAfterFail = await prisma.kioskSetting.findUnique({ where: { id: 1 } });
+  assert.equal(settingAfterFail.fw_policy, 'none');
+
+    // Cleanup
+    await prisma.kioskFirmware.deleteMany();
+    if (admin) {
+      await prisma.adminUser.delete({ where: { id: admin.id } }).catch(() => {});
+    }
+  } finally {
+    await testServer.close();
+  }
 });

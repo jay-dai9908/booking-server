@@ -4,10 +4,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { ensureFreshDbSeeded } from './helpers/seedFreshDb.js';
-import { toTaipeiDateString, dateOnly } from '../../shared/time.js';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const dotenv = require('../../backend/node_modules/dotenv/lib/main.js');
+dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') });
+
+const { ensureFreshDbSeeded } = await import('./helpers/seedFreshDb.js');
+const { toTaipeiDateString, dateOnly } = await import('../../shared/time.js');
+
 const jwt = require('../../backend/node_modules/jsonwebtoken/index.js');
 const { PrismaClient } = require('../../backend/node_modules/@prisma/client/index.js');
 
@@ -19,12 +27,20 @@ const prisma = new PrismaClient({ datasources: { db: { url: testDbUrl.trim() } }
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const API_BASE = process.env.API_BASE || 'http://localhost:3001/api';
 const HEADLESS = process.env.HEADLESS !== 'false';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD?.trim();
-const JWT_SECRET = process.env.JWT_SECRET?.trim() || 'test-secret';
+if (!process.env.ADMIN_PASSWORD?.trim()) {
+  console.error('請設定 ADMIN_PASSWORD 環境變數');
+  process.exit(1);
+}
+if (!process.env.JWT_SECRET?.trim()) {
+  console.error('請設定 JWT_SECRET 環境變數');
+  process.exit(1);
+}
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
+const JWT_SECRET = process.env.JWT_SECRET.trim();
 
 const SCREENSHOT_DIR = process.env.SCREENSHOT_DIR
   ? path.resolve(process.env.SCREENSHOT_DIR)
-  : path.resolve('tests/screenshots');
+  : path.resolve(__dirname, 'screenshots');
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 async function run() {
@@ -86,21 +102,25 @@ async function run() {
       create: { layout_id: layout.id, table_id: table.id, zone_id: zone.id, code: 'A1-1', is_active: true, lx: -30, ly: 0 }
     });
 
-    // Ensure session for today exists
-    sessionObj = await prisma.session.findFirst({
-      where: { session_date: todayDateObj },
-      orderBy: { start_time: 'asc' }
-    });
-    if (!sessionObj) {
-      sessionObj = await prisma.session.create({
-        data: {
+    // Ensure session for today covering all 24 hours exists
+    sessionObj = await prisma.session.upsert({
+      where: {
+        session_date_start_time: {
           session_date: todayDateObj,
-          start_time: '10:00',
-          end_time: '23:59',
-          max_capacity: 10
+          start_time: '00:00'
         }
-      });
-    }
+      },
+      update: {
+        end_time: '23:59',
+        max_capacity: 16
+      },
+      create: {
+        session_date: todayDateObj,
+        start_time: '00:00',
+        end_time: '23:59',
+        max_capacity: 16
+      }
+    });
 
     // Ensure daily setting mode is 'self' (is_self_service: true)
     await prisma.dailySetting.upsert({
@@ -272,8 +292,17 @@ async function run() {
       await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
     }
     if (customerUser) {
+      await prisma.userLoginLog.deleteMany({ where: { user_id: customerUser.id } }).catch(() => {});
       await prisma.user.delete({ where: { id: customerUser.id } }).catch(() => {});
     }
+    if (sessionObj) {
+      await prisma.session.delete({ where: { id: sessionObj.id } }).catch(() => {});
+    }
+    await prisma.seat.deleteMany({ where: { layout_id: 999 } }).catch(() => {});
+    await prisma.seatTable.deleteMany({ where: { layout_id: 999 } }).catch(() => {});
+    await prisma.seatZone.deleteMany({ where: { layout_id: 999 } }).catch(() => {});
+    await prisma.seatLayout.deleteMany({ where: { id: 999 } }).catch(() => {});
+    await prisma.dailySetting.deleteMany({ where: { date: todayDateObj } }).catch(() => {});
     await prisma.$disconnect();
   }
 }

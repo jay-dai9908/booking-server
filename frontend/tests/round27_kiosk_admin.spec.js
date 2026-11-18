@@ -8,7 +8,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BASE_URL = 'http://localhost:5173';
-const SCREENSHOT_DIR = path.resolve(__dirname, '../../tests/screenshots');
+const SCREENSHOT_DIR = process.env.SCREENSHOT_DIR
+  ? path.resolve(process.env.SCREENSHOT_DIR)
+  : path.resolve(__dirname, 'screenshots');
 const HEADLESS = process.env.HEADLESS !== 'false';
 
 async function run() {
@@ -95,7 +97,14 @@ async function run() {
     await browser.close();
     console.log('✅ Round 27 Admin Kiosk Playwright Test PASSED successfully!');
   } finally {
+    await prisma.kioskSetting.updateMany({
+      where: { id: 1 },
+      data: { fw_target_id: null, fw_policy: 'none', slides_rev: 0 }
+    }).catch(() => {});
+    await prisma.kioskSlide.deleteMany({}).catch(() => {});
+    await prisma.kioskFirmware.deleteMany({}).catch(() => {});
     await prisma.adminUser.delete({ where: { id: testStaff.id } }).catch(() => {});
+    await prisma.$disconnect();
   }
 }
 

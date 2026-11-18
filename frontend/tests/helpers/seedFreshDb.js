@@ -28,6 +28,7 @@ export async function cleanOperationalData(customPrisma) {
   await prisma.oneTimeAccountPool.deleteMany({}).catch(() => {});
   await prisma.cashClosing.deleteMany({}).catch(() => {});
   await prisma.userLoginLog.deleteMany({}).catch(() => {});
+  await prisma.dailySetting.deleteMany({}).catch(() => {});
   if (!customPrisma) {
     await prisma.$disconnect().catch(() => {});
   }

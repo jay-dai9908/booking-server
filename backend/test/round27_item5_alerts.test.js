@@ -8,11 +8,12 @@ import {
   notifyBackupCodeUsed,
   formatTaipeiTime
 } from '../src/services/kiosk/alertService.js';
-
-const ADMIN_PORT = 3001;
-const BASE_URL = `http://localhost:${ADMIN_PORT}`;
+import { startTestServer } from './helpers/testServer.js';
 
 test('Round 27 Item 5: Kiosk offline and backup code LINE notifications', async (t) => {
+  const testServer = await startTestServer();
+  const BASE_URL = testServer.baseUrl;
+
   let admin = null;
   let testUser = null;
   let fullDaySession = null;
@@ -73,6 +74,21 @@ test('Round 27 Item 5: Kiosk offline and backup code LINE notifications', async 
   assert.equal(resPutRecipients.status, 200);
   const dataPutRecipients = await resPutRecipients.json();
   assert.deepEqual(dataPutRecipients.alert_user_ids, [testUser.id]);
+
+  // Reject more than 3 recipients with 422
+  const resPutOverLimit = await fetch(`${BASE_URL}/api/kiosk/admin/alerts/recipients`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_ids: [1, 2, 3, 4] })
+  });
+  assert.equal(resPutOverLimit.status, 422);
+
+  // Test sending a test alert message
+  const resTestAlert = await fetch(`${BASE_URL}/api/kiosk/admin/alerts/test`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(resTestAlert.status, 200);
 
   // 3. Test isWithinSelfServiceBusinessHours logic
   origDailySetting = await prisma.dailySetting.findUnique({
@@ -188,5 +204,6 @@ test('Round 27 Item 5: Kiosk offline and backup code LINE notifications', async 
     if (testUser?.id) {
       await prisma.user.delete({ where: { id: testUser.id } }).catch(() => {});
     }
+    await testServer.close();
   }
 });

@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import prisma from '../src/prismaClient.js';
 import { processKioskSync } from '../src/services/kiosk/syncService.js';
-
-const ADMIN_PORT = 3001;
-const BASE_URL = `http://localhost:${ADMIN_PORT}`;
+import { startTestServer } from './helpers/testServer.js';
 
 test('Round 27 Item 3: Carousel Slides RGB565 management and kiosk sync', async () => {
-  // 1. Setup admin staff user and login via /api/auth/admin/login
+  const testServer = await startTestServer();
+  const BASE_URL = testServer.baseUrl;
+
+  try {
+    // 1. Setup admin staff user and login via /api/auth/admin/login
   const staffPass = `test_pwd_${Date.now()}`;
   const admin = await prisma.adminUser.create({
     data: {
@@ -52,7 +54,7 @@ test('Round 27 Item 3: Carousel Slides RGB565 management and kiosk sync', async 
       duration_sec: 8
     })
   });
-  assert.equal(resInvalid.status, 400);
+  assert.equal(resInvalid.status, 422);
   const dataInvalid = await resInvalid.json();
   assert.equal(dataInvalid.error, 'SLIDE_INVALID_SIZE');
 
@@ -123,7 +125,7 @@ test('Round 27 Item 3: Carousel Slides RGB565 management and kiosk sync', async 
       enabled: true
     })
   });
-  assert.equal(res6Fail.status, 400);
+  assert.equal(res6Fail.status, 422);
   const data6Fail = await res6Fail.json();
   assert.equal(data6Fail.error, 'MAX_SLIDES_EXCEEDED');
 
@@ -155,7 +157,7 @@ test('Round 27 Item 3: Carousel Slides RGB565 management and kiosk sync', async 
     },
     body: JSON.stringify({ enabled: true })
   });
-  assert.equal(resEnableFail.status, 400);
+  assert.equal(resEnableFail.status, 422);
   const dataEnableFail = await resEnableFail.json();
   assert.equal(dataEnableFail.error, 'MAX_SLIDES_EXCEEDED');
 
@@ -196,7 +198,8 @@ test('Round 27 Item 3: Carousel Slides RGB565 management and kiosk sync', async 
   assert.equal(syncPayload.slides.items.length, 5); // Only 5 enabled slides
   assert.equal(syncPayload.slides.items[0].id, slide1Id);
   assert.equal(syncPayload.slides.items[0].sha256, sha256_1);
-  assert.equal(syncPayload.slides.items[0].duration_sec, 10);
+  assert.equal(syncPayload.slides.items[0].seconds, 10);
+  assert.equal(syncPayload.slides.items[0].size, 768000);
   assert.equal(syncPayload.slides.items[0].url, `/api/kiosk/files/slides/${slide1Id}.bin`);
 
   // 11. Delete a slide and verify rev increments
@@ -209,11 +212,16 @@ test('Round 27 Item 3: Carousel Slides RGB565 management and kiosk sync', async 
   const nextRev = (await prisma.kioskSetting.findUnique({ where: { id: 1 } })).slides_rev;
   assert.equal(nextRev, prevRev + 1);
 
-  // Cleanup
-  await prisma.kioskSlide.deleteMany();
-  await prisma.kioskSetting.updateMany({
-    where: { id: 1 },
-    data: { slides_rev: 0 }
-  });
-  await prisma.adminUser.delete({ where: { id: admin.id } }).catch(() => {});
+    // Cleanup
+    await prisma.kioskSlide.deleteMany();
+    await prisma.kioskSetting.updateMany({
+      where: { id: 1 },
+      data: { slides_rev: 0 }
+    });
+    if (admin) {
+      await prisma.adminUser.delete({ where: { id: admin.id } }).catch(() => {});
+    }
+  } finally {
+    await testServer.close();
+  }
 });
