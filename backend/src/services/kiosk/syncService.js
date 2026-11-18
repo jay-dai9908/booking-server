@@ -5,7 +5,7 @@ import { ironText } from '../../../../shared/selfService.js';
 import { ensureKioskSetting } from '../selfService/prepayService.js';
 import { getActiveLayoutForDate } from '../seating/layoutService.js';
 import { buildFloorMap } from '../../../../shared/floorMap.js';
-import { notifyBackupCodeUsed, sendKioskAlertMessage } from './alertService.js';
+import { notifyBackupCodeUsed, resolveEventTime, sendKioskAlertMessage } from './alertService.js';
 
 export function addDaysYmd(ymd, offsetDays) {
   const [y, m, d] = String(ymd).split('-').map(Number);
@@ -92,7 +92,7 @@ export async function buildSevenDaysSchedule(db = prisma, now = new Date()) {
 /**
  * 處理報到機 sync 請求：更新裝置狀態、去重複儲存事件、組裝設定與 7 天模式清單
  */
-export async function processKioskSync(db = prisma, { device, body = {}, clientIp = null, now = new Date() }) {
+export async function processKioskSync(db = prisma, { device, body = {}, clientIp = null, now = new Date(), pushFn } = {}) {
   const statusJson = {
     boot_id: body.boot_id ?? null,
     uptime_s: Number.isFinite(Number(body.uptime_s)) ? Number(body.uptime_s) : null,
@@ -135,10 +135,7 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     const eventId = ev.id.trim();
 
     if (ev.type === 'backup_open' || ev.type === 'pad_locked') {
-      const evAtSec = ev.at === null || ev.at === undefined ? null : Number(ev.at);
-      const hasValidTime = evAtSec !== null && Number.isFinite(evAtSec) && evAtSec > 0;
-      const evAt = hasValidTime ? new Date(evAtSec * 1000) : now;
-      const atUnknown = !hasValidTime;
+      const { at: evAt, unknown: atUnknown } = resolveEventTime(ev.at, now);
       const isBackup = ev.type === 'backup_open';
 
       const existingLog = await db.kioskAccessLog.findUnique({
@@ -151,7 +148,7 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
       });
 
       if (!existingLog && isBackup) {
-        notifyBackupCodeUsed(db, now, evAtSec).catch((err) =>
+        await notifyBackupCodeUsed(db, now, ev.at, pushFn ? { pushFn } : undefined).catch((err) =>
           console.warn('[syncService] notifyBackupCodeUsed error:', err)
         );
       }

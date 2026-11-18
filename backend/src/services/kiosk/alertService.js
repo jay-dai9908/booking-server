@@ -11,14 +11,34 @@ export function formatTaipeiTime(date) {
     timeZone: 'Asia/Taipei',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false
+    hourCycle: 'h23'
   }).format(date);
+}
+
+/**
+ * 統一解析報到機事件時間（同步進出紀錄與 LINE 通知共用）：
+ * - 僅當 rawAt 為有限正數（> 0 的 Unix 秒）時視為有效事件時間；
+ * - null、undefined、非數字、0、負數一律判定為發生時間不明，改用伺服器接收時間 now。
+ *
+ * @param {unknown} rawAt
+ * @param {Date} [now]
+ * @returns {{ at: Date, unknown: boolean }}
+ */
+export function resolveEventTime(rawAt, now = new Date()) {
+  const isNumericInput =
+    typeof rawAt === 'number' || (typeof rawAt === 'string' && rawAt.trim() !== '');
+  const sec = isNumericInput ? Number(rawAt) : NaN;
+  const isValid = Number.isFinite(sec) && sec > 0;
+  return {
+    at: isValid ? new Date(sec * 1000) : now,
+    unknown: !isValid
+  };
 }
 
 /**
  * 發送推播訊息給所有指定的報到機警報收件人 (User.id)
  */
-export async function sendKioskAlertMessage(db = prisma, textMessage) {
+export async function sendKioskAlertMessage(db = prisma, textMessage, { pushFn = sendLinePushMessage } = {}) {
   try {
     const kioskSetting = await ensureKioskSetting(db);
     const alertUserIds = Array.isArray(kioskSetting.alert_user_ids)
@@ -40,7 +60,7 @@ export async function sendKioskAlertMessage(db = prisma, textMessage) {
         continue;
       }
       try {
-        await sendLinePushMessage(u.line_user_id, {
+        await pushFn(u.line_user_id, {
           type: 'text',
           text: textMessage
         });
@@ -158,9 +178,16 @@ export async function checkKioskOfflineAlerts(db = prisma, now = new Date()) {
 /**
  * 備用密碼開門通知
  */
-export async function notifyBackupCodeUsed(db = prisma, now = new Date(), atSec = null) {
-  const eventDate = atSec ? new Date(atSec * 1000) : now;
-  const timeStr = formatTaipeiTime(eventDate);
-  const msg = `備用開門密碼在 ${timeStr} 被使用，請到後台換一組新的`;
-  return sendKioskAlertMessage(db, msg);
+export async function notifyBackupCodeUsed(
+  db = prisma,
+  now = new Date(),
+  rawAt = null,
+  { pushFn = sendLinePushMessage } = {}
+) {
+  const { at, unknown } = resolveEventTime(rawAt, now);
+  const timeStr = formatTaipeiTime(at);
+  const msg = unknown
+    ? `備用開門密碼被使用了（發生時間不明，補報於 ${timeStr}），請到後台換一組新的`
+    : `備用開門密碼在 ${timeStr} 被使用，請到後台換一組新的`;
+  return sendKioskAlertMessage(db, msg, { pushFn });
 }
