@@ -834,7 +834,9 @@ export const modifyBookingEquipment = async (req, res) => {
 
     const bookingStartTime = new Date(`${sessionDateStr}T${firstSession.start_time}:00+08:00`);
     const bookingEndTime = new Date(`${sessionDateStr}T${lastSession.end_time}:00+08:00`);
-    const now = new Date();
+    const rawTestNow = process.env.NODE_ENV === 'test' ? (req.body?.now || req.query?.now) : null;
+    const parsedTestNow = rawTestNow ? new Date(rawTestNow) : null;
+    const now = (parsedTestNow && !Number.isNaN(parsedTestNow.getTime())) ? parsedTestNow : new Date();
 
     // Verification 2: Order expired check
     if (!isAdmin && now >= bookingEndTime) {
