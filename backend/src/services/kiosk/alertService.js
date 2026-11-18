@@ -98,8 +98,10 @@ export async function isWithinSelfServiceBusinessHours(db = prisma, now = new Da
     }
   }
 
-  const effectiveOpen = minOpenMinutes - 30;
-  const effectiveClose = maxCloseMinutes + 60;
+  const kioskSetting = await ensureKioskSetting(db);
+  const afterCloseMinutes = kioskSetting?.after_close_minutes ?? 60;
+  const effectiveOpen = minOpenMinutes - 60;
+  const effectiveClose = maxCloseMinutes + afterCloseMinutes;
 
   return currMinutes >= effectiveOpen && currMinutes <= effectiveClose;
 }
@@ -126,15 +128,9 @@ export async function checkKioskOfflineAlerts(db = prisma, now = new Date()) {
   const isOffline = diffMs > 10 * 60 * 1000;
 
   if (isOffline) {
-    const lastAlertMs = device.offline_alerted_at
-      ? new Date(device.offline_alerted_at).getTime()
-      : 0;
-    const alertDiffMs = now.getTime() - lastAlertMs;
-    const shouldAlert = !device.offline_alerted_at || alertDiffMs > 60 * 60 * 1000;
-
-    if (shouldAlert) {
-      const msg =
-        '⚠️ 門口報到機已離線超過 10 分鐘！目前為半自助營業時段，顧客可能無法進門，請確認店內網路與報到機電源。';
+    if (!device.offline_alerted_at) {
+      const lastSeenStr = device.last_seen_at ? formatTaipeiTime(new Date(device.last_seen_at)) : '未知';
+      const msg = `門口報到機離線超過 10 分鐘，顧客目前只能用備用開門密碼進門。最後一次連線：${lastSeenStr}`;
       await sendKioskAlertMessage(db, msg);
       await db.kioskDevice.update({
         where: { id: device.id },
@@ -147,7 +143,7 @@ export async function checkKioskOfflineAlerts(db = prisma, now = new Date()) {
 
   // 機台在線上：若之前有發過離線警報，發送恢復通知並重置
   if (device.offline_alerted_at) {
-    const recoveryMsg = '✅ 門口報到機已恢復連線';
+    const recoveryMsg = '門口報到機已恢復連線';
     await sendKioskAlertMessage(db, recoveryMsg);
     await db.kioskDevice.update({
       where: { id: device.id },
@@ -165,6 +161,6 @@ export async function checkKioskOfflineAlerts(db = prisma, now = new Date()) {
 export async function notifyBackupCodeUsed(db = prisma, now = new Date(), atSec = null) {
   const eventDate = atSec ? new Date(atSec * 1000) : now;
   const timeStr = formatTaipeiTime(eventDate);
-  const msg = `🔔 門口報到機剛才以『備用密碼』開門！時間：${timeStr}，若非員工操作，請至後台確認進出紀錄或更換備用密碼。`;
+  const msg = `備用開門密碼在 ${timeStr} 被使用，請到後台換一組新的`;
   return sendKioskAlertMessage(db, msg);
 }

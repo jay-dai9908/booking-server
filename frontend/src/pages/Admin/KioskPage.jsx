@@ -323,6 +323,9 @@ export default function KioskPage() {
     reader.readAsDataURL(file);
   };
 
+  const [testingAlert, setTestingAlert] = useState(false);
+  const [searchPhone, setSearchPhone] = useState('');
+
   const handleUploadSlide = async () => {
     if (!slideImageData) {
       setSlideError('請先選取圖片');
@@ -344,6 +347,7 @@ export default function KioskPage() {
         title: slideTitle || '輪播圖片',
         duration_sec: Number(slideDuration) || 8,
         raw_base64: b64,
+        preview: slidePreviewDataUrl,
         enabled: true
       });
 
@@ -354,6 +358,48 @@ export default function KioskPage() {
       fetchSlides();
     } catch (err) {
       setSlideError(err.response?.data?.message || err.response?.data?.error || '上傳輪播圖失敗');
+    } finally {
+      setUploadingSlide(false);
+    }
+  };
+
+  const handleGenerateTestPattern = async () => {
+    setUploadingSlide(true);
+    setSlideError('');
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = SLIDE_WIDTH;
+      canvas.height = SLIDE_HEIGHT;
+      const ctx = canvas.getContext('2d');
+      // Red, Green, Blue, White vertical stripes (200px each)
+      const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFFFF'];
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = colors[i];
+        ctx.fillRect(i * 200, 0, 200, SLIDE_HEIGHT);
+      }
+      const imgData = ctx.getImageData(0, 0, SLIDE_WIDTH, SLIDE_HEIGHT);
+      const previewUrl = canvas.toDataURL('image/jpeg', 0.8);
+      const rgb565Bytes = rgbaToRgb565(imgData, { dither: false });
+      let binaryStr = '';
+      const len = rgb565Bytes.byteLength;
+      for (let i = 0; i < len; i += 8192) {
+        const chunk = rgb565Bytes.subarray(i, Math.min(i + 8192, len));
+        binaryStr += String.fromCharCode.apply(null, chunk);
+      }
+      const b64 = btoa(binaryStr);
+
+      await api.post('/kiosk/admin/slides', {
+        title: '色彩校正測試圖',
+        duration_sec: 8,
+        raw_base64: b64,
+        preview: previewUrl,
+        enabled: true
+      });
+
+      showNotice('success', '已產生並上傳色彩校正測試圖');
+      fetchSlides();
+    } catch (err) {
+      setSlideError(err.response?.data?.message || '產生測試圖失敗');
     } finally {
       setUploadingSlide(false);
     }
@@ -466,11 +512,40 @@ export default function KioskPage() {
     }
   };
 
+  const handleApplyFwPolicy = async (policy, targetVersion = '') => {
+    if (policy !== 'none' && !fwTarget.id) {
+      showNotice('error', '請先選擇要更新的目標韌體版本');
+      return;
+    }
+    const isSelfService = Boolean(todayMode?.is_self_service);
+    if (policy === 'now') {
+      const confirmText = isSelfService
+        ? '現在是半自助時段，更新期間（約 1 到 2 分鐘）顧客無法報到。確定要立即更新嗎？'
+        : '確定要立即更新報到機韌體嗎？（報到機將在閒置 1 分鐘後開始更新）';
+      if (!window.confirm(confirmText)) return;
+    } else if (policy === 'night') {
+      if (!window.confirm(`確定排定在今晚 03:00 之後更新至 ${targetVersion || '新版本'} 嗎？`)) return;
+    }
+    setSavingFwTarget(true);
+    try {
+      await api.put('/kiosk/admin/firmware/target', {
+        firmware_id: fwTarget.id ? Number(fwTarget.id) : null,
+        policy
+      });
+      showNotice('success', policy === 'none' ? '已取消韌體更新' : '韌體更新策略已排定');
+      fetchFirmwares();
+    } catch (err) {
+      showNotice('error', err.response?.data?.message || '設定韌體更新策略失敗');
+    } finally {
+      setSavingFwTarget(false);
+    }
+  };
+
   const handleSaveFwTarget = async () => {
     setSavingFwTarget(true);
     try {
       await api.put('/kiosk/admin/firmware/target', {
-        target_id: fwTarget.id ? Number(fwTarget.id) : null,
+        firmware_id: fwTarget.id ? Number(fwTarget.id) : null,
         policy: fwTarget.policy || 'none'
       });
       showNotice('success', '韌體目標與更新策略已儲存');
@@ -499,7 +574,49 @@ export default function KioskPage() {
     );
   };
 
+  const handleAddRecipientByPhone = () => {
+    if (!searchPhone.trim()) return;
+    const cleanPhone = searchPhone.trim();
+    const candidate = alertCandidates.find(
+      (c) => c.phone === cleanPhone || c.phone.replace(/[^0-9]/g, '') === cleanPhone.replace(/[^0-9]/g, '')
+    );
+    if (!candidate) {
+      showNotice('error', '查無此電話或該會員尚未綁定 LINE');
+      return;
+    }
+    if (alertUserIds.includes(candidate.id)) {
+      showNotice('error', '該會員已在通知名單中');
+      return;
+    }
+    if (alertUserIds.length >= 3) {
+      showNotice('error', '最多只能設定 3 位通知對象');
+      return;
+    }
+    setAlertUserIds((prev) => [...prev, candidate.id]);
+    setSearchPhone('');
+  };
+
+  const handleRemoveRecipient = (userId) => {
+    setAlertUserIds((prev) => prev.filter((id) => id !== userId));
+  };
+
+  const handleSendTestAlert = async () => {
+    setTestingAlert(true);
+    try {
+      await api.post('/kiosk/admin/alerts/test');
+      showNotice('success', '測試通知已發送');
+    } catch (err) {
+      showNotice('error', err.response?.data?.message || '發送測試通知失敗');
+    } finally {
+      setTestingAlert(false);
+    }
+  };
+
   const handleSaveRecipients = async () => {
+    if (alertUserIds.length > 3) {
+      showNotice('error', '通知對象最多只能設定 3 位');
+      return;
+    }
     setSavingRecipients(true);
     try {
       await api.put('/kiosk/admin/alerts/recipients', { user_ids: alertUserIds });
@@ -729,6 +846,9 @@ export default function KioskPage() {
                     裝置：{primaryDevice.name} · 上次重開機原因：<span className="font-mono">{primaryDevice.reset_reason}</span>
                   </p>
                 )}
+                <p className="text-xs text-stone-500 pt-1">
+                  超過 10 分鐘沒同步會顯示『離線』，並用 LINE 通知管理員。
+                </p>
               </>
             )}
           </section>
@@ -958,19 +1078,22 @@ export default function KioskPage() {
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-stone-800 flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-sg-brown" />
-                待機輪播圖（ESP32-P4）
+                輪播圖 {slides.length}／5 張
               </h2>
               <span className="text-xs text-stone-500 font-mono">
                 {slides.filter((s) => s.enabled).length}/5 張啟用中 · 800×480 RGB565
               </span>
             </div>
+            <p className="text-xs text-stone-500">
+              會自動裁成 800×480。報到機同步時只下載有變動的圖。
+            </p>
 
             {/* 現有輪播圖清單 */}
             {loadingSlides ? (
               <div className="py-4 text-center text-sm text-stone-400">載入輪播圖中...</div>
             ) : slides.length === 0 ? (
               <div className="py-6 text-center text-sm text-stone-400 border border-dashed border-stone-200 rounded-lg">
-                目前沒有待機輪播圖，機台將顯示預設待機畫面
+                還沒有輪播圖，報到機會顯示內建的畫面。
               </div>
             ) : (
               <div className="grid gap-3">
@@ -982,18 +1105,20 @@ export default function KioskPage() {
                     <div className="flex items-center gap-3">
                       <span className="font-mono text-xs text-stone-400 w-4 text-center">#{idx + 1}</span>
                       <div className="w-16 h-10 bg-black rounded overflow-hidden flex items-center justify-center border border-stone-300">
-                        <img
-                          src={`/api/kiosk/files/slides/${slide.id}.bin`}
-                          alt={slide.title}
-                          className="w-full h-full object-cover hidden"
-                          onError={(e) => { e.target.style.display = 'none'; }}
-                        />
-                        <span className="text-[10px] text-stone-400 font-mono">800×480</span>
+                        {slide.preview ? (
+                          <img
+                            src={slide.preview}
+                            alt={slide.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-[10px] text-stone-400 font-mono">800×480</span>
+                        )}
                       </div>
                       <div>
                         <div className="text-sm font-semibold text-stone-800">{slide.title}</div>
                         <div className="text-xs text-stone-500 font-mono">
-                          播放 {slide.duration_sec} 秒 · SHA: {slide.sha256.slice(0, 8)}...
+                          顯示 {slide.seconds || slide.duration_sec || 8} 秒 · SHA: {slide.sha256.slice(0, 8)}...
                         </div>
                       </div>
                     </div>
@@ -1110,14 +1235,24 @@ export default function KioskPage() {
                     </div>
                   </div>
                   {slideError && <p className="text-xs text-rose-600 font-medium">{slideError}</p>}
-                  <button
-                    type="button"
-                    onClick={handleUploadSlide}
-                    disabled={!slideImageData || uploadingSlide || slides.filter((s) => s.enabled).length >= 5}
-                    className="px-4 py-2 bg-sg-brown text-white text-xs font-bold rounded-lg hover:opacity-95 disabled:opacity-50"
-                  >
-                    {uploadingSlide ? '轉檔編碼並上傳中...' : '轉為 RGB565 並上傳至機台'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleUploadSlide}
+                      disabled={!slideImageData || uploadingSlide || slides.filter((s) => s.enabled).length >= 5}
+                      className="px-4 py-2 bg-sg-brown text-white text-xs font-bold rounded-lg hover:opacity-95 disabled:opacity-50"
+                    >
+                      {uploadingSlide ? '上傳中...' : '上傳圖片'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleGenerateTestPattern}
+                      disabled={slides.filter((s) => s.enabled).length >= 5 || uploadingSlide}
+                      className="px-3 py-2 bg-white border border-stone-300 text-stone-700 text-xs font-bold rounded-lg hover:bg-stone-50 disabled:opacity-50"
+                    >
+                      產生測試圖
+                    </button>
+                  </div>
                   {slides.filter((s) => s.enabled).length >= 5 && (
                     <p className="text-[11px] text-amber-600">已達 5 張啟用上限，請先停用或刪除其他圖片。</p>
                   )}
@@ -1150,10 +1285,20 @@ export default function KioskPage() {
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-stone-800 flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-sg-brown" />
-                韌體更新（OTA）
+                韌體更新
               </h2>
               <span className="text-xs text-stone-500 font-mono">ESP32-P4 SGK1 v1</span>
             </div>
+
+            <p className="text-xs text-stone-500">
+              『立即更新』會等報到機閒置 1 分鐘才開始，期間畫面顯示『系統更新中』。更新失敗會自動退回舊版。
+            </p>
+
+            {todayMode?.is_self_service && (
+              <div className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-lg border border-amber-200 font-medium">
+                現在是半自助時段，更新期間（約 1 到 2 分鐘）顧客無法報到
+              </div>
+            )}
 
             {/* 機台目前韌體狀態與目標推送策略 */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 bg-stone-50 rounded-xl border border-stone-200 text-xs">
@@ -1162,23 +1307,31 @@ export default function KioskPage() {
                 <div className="font-mono text-stone-800 font-bold text-sm">
                   {primaryDevice?.fw_version || '未知'}
                 </div>
-                <div className="text-stone-500">
-                  狀態：<span className="font-mono">{primaryDevice?.status_json?.fw_state || 'idle'}</span>
-                  {primaryDevice?.status_json?.ota_failed && (
-                    <span className="text-rose-600 ml-1">({primaryDevice.status_json.ota_failed})</span>
-                  )}
+                <div className="text-stone-700">
+                  狀態：
+                  {fwTarget.policy === 'night'
+                    ? `已排定今晚 03:00 之後更新到 ${firmwares.find((f) => f.id === fwTarget.id)?.version || ''}`
+                    : fwTarget.policy === 'now'
+                    ? `已排定立即更新到 ${firmwares.find((f) => f.id === fwTarget.id)?.version || ''}`
+                    : primaryDevice?.status_json?.fw_state === 'downloading'
+                    ? '報到機下載中'
+                    : (primaryDevice?.status_json?.fw_state?.startsWith('failed:') || primaryDevice?.status_json?.ota_failed)
+                    ? `更新失敗：${primaryDevice?.status_json?.ota_failed || primaryDevice?.status_json?.fw_state}，報到機仍在 ${primaryDevice?.fw_version || '舊版'}`
+                    : (primaryDevice?.fw_version && firmwares.find((f) => f.id === fwTarget.id)?.version && primaryDevice?.fw_version === firmwares.find((f) => f.id === fwTarget.id)?.version)
+                    ? `已更新到 ${primaryDevice.fw_version}，報到機回報正常`
+                    : '目前無排定更新'}
                 </div>
               </div>
 
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-stone-600">目標版本：</span>
+                  <span className="text-stone-600">指定更新版本：</span>
                   <select
                     value={fwTarget.id || ''}
                     onChange={(e) => setFwTarget((t) => ({ ...t, id: e.target.value ? Number(e.target.value) : null }))}
                     className="px-2 py-1 border border-stone-300 rounded font-mono text-xs"
                   >
-                    <option value="">(無目標版本)</option>
+                    <option value="">(請選擇版本)</option>
                     {firmwares.map((f) => (
                       <option key={f.id} value={f.id}>
                         {f.version} ({f.note || '無備註'})
@@ -1187,25 +1340,32 @@ export default function KioskPage() {
                   </select>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-stone-600">推送策略：</span>
-                  <select
-                    value={fwTarget.policy}
-                    onChange={(e) => setFwTarget((t) => ({ ...t, policy: e.target.value }))}
-                    className="px-2 py-1 border border-stone-300 rounded text-xs"
-                  >
-                    <option value="none">不推送 (none)</option>
-                    <option value="idle_only">打烊或閒置時更新 (idle_only)</option>
-                    <option value="force">立即強制更新 (force)</option>
-                  </select>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={handleSaveFwTarget}
-                    disabled={savingFwTarget}
-                    className="px-3 py-1 bg-stone-800 text-white font-medium rounded hover:bg-stone-700 disabled:opacity-50"
+                    onClick={() => handleApplyFwPolicy('now')}
+                    disabled={!fwTarget.id || savingFwTarget}
+                    className="px-3 py-1.5 bg-sg-brown text-white font-bold text-xs rounded hover:opacity-95 disabled:opacity-50"
                   >
-                    {savingFwTarget ? '儲存中...' : '儲存策略'}
+                    立即更新
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyFwPolicy('night', firmwares.find((f) => f.id === fwTarget.id)?.version)}
+                    disabled={!fwTarget.id || savingFwTarget}
+                    className="px-3 py-1.5 bg-stone-800 text-white font-bold text-xs rounded hover:bg-stone-700 disabled:opacity-50"
+                  >
+                    凌晨 3 到 5 點自動更新
+                  </button>
+                  {fwTarget.policy && fwTarget.policy !== 'none' && (
+                    <button
+                      type="button"
+                      onClick={() => handleApplyFwPolicy('none')}
+                      className="px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded border border-rose-200"
+                    >
+                      取消排程
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1317,61 +1477,92 @@ export default function KioskPage() {
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-stone-800 flex items-center gap-2">
                 <Bell className="w-4 h-4 text-sg-brown" />
-                LINE 警報通知收件人
+                通知對象
               </h2>
-              <span className="text-xs text-stone-500">
-                機台離線超過 10 分鐘或備用密碼開門時即刻推播
+              <button
+                type="button"
+                onClick={handleSendTestAlert}
+                disabled={testingAlert || alertUserIds.length === 0}
+                className="px-2.5 py-1 text-xs border border-stone-300 rounded-lg text-stone-700 hover:bg-stone-50 disabled:opacity-50 font-medium"
+              >
+                {testingAlert ? '發送中...' : '發一則測試通知'}
+              </button>
+            </div>
+
+            {alertUserIds.length === 0 && overview?.has_self_service_in_7_days && (
+              <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-sm font-medium">
+                沒有設定通知對象（未來 7 天內有半自助日，請盡快設定）
+              </div>
+            )}
+
+            {/* 加入收件人：電話搜尋 */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <input
+                type="text"
+                value={searchPhone}
+                onChange={(e) => setSearchPhone(e.target.value)}
+                placeholder="輸入會員電話加入"
+                className="px-2.5 py-1.5 border border-stone-300 rounded text-xs min-w-[180px]"
+              />
+              <button
+                type="button"
+                onClick={handleAddRecipientByPhone}
+                disabled={alertUserIds.length >= 3}
+                className="px-3 py-1.5 bg-stone-800 text-white text-xs font-bold rounded hover:bg-stone-700 disabled:opacity-50"
+              >
+                加入
+              </button>
+              <span className="text-[11px] text-stone-500">
+                （最多 3 位，限已綁定 LINE 會員）
               </span>
             </div>
 
-            {loadingRecipients ? (
-              <div className="py-2 text-center text-xs text-stone-400">載入收件人中...</div>
-            ) : alertCandidates.length === 0 ? (
-              <div className="text-xs text-stone-400 text-center py-3 border border-dashed border-stone-200 rounded">
-                尚無綁定 LINE 的管理員帳號
-              </div>
-            ) : (
-              <div className="space-y-2">
+            {/* 目前已加入的通知對象清單 */}
+            <div className="space-y-2 pt-2">
+              <div className="text-xs font-semibold text-stone-700">目前通知清單（{alertUserIds.length}/3）：</div>
+              {alertUserIds.length === 0 ? (
+                <div className="text-xs text-stone-400 py-3 border border-dashed border-stone-200 rounded text-center">
+                  尚未設定任何通知對象
+                </div>
+              ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                  {alertCandidates.map((user) => {
-                    const isChecked = alertUserIds.includes(user.id);
+                  {alertUserIds.map((userId) => {
+                    const candidate = alertCandidates.find((c) => c.id === userId);
                     return (
-                      <label
-                        key={user.id}
-                        className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer select-none transition-colors ${
-                          isChecked
-                            ? 'bg-emerald-50/60 border-emerald-300 text-emerald-950 font-medium'
-                            : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'
-                        }`}
+                      <div
+                        key={userId}
+                        className="flex items-center justify-between p-2.5 rounded-lg border border-emerald-300 bg-emerald-50/60 text-xs"
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleRecipient(user.id)}
-                          className="rounded text-emerald-600"
-                        />
                         <div>
-                          <div>{user.name}</div>
-                          <div className="text-[11px] text-stone-500 font-mono">{user.phone || '無電話'}</div>
+                          <div className="font-semibold text-emerald-950">{candidate?.name || `會員 #${userId}`}</div>
+                          <div className="text-[11px] text-stone-500 font-mono">{candidate?.phone || '無電話'}</div>
                         </div>
-                      </label>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRecipient(userId)}
+                          className="p-1 text-stone-400 hover:text-rose-600 rounded"
+                          title="移除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
+              )}
 
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="button"
-                    onClick={handleSaveRecipients}
-                    disabled={savingRecipients}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sg-brown text-white text-xs font-bold hover:opacity-95 disabled:opacity-50"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    {savingRecipients ? '儲存中...' : '儲存警報收件人'}
-                  </button>
-                </div>
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={handleSaveRecipients}
+                  disabled={savingRecipients}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sg-brown text-white text-xs font-bold hover:opacity-95 disabled:opacity-50"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  {savingRecipients ? '儲存中...' : '儲存通知對象'}
+                </button>
               </div>
-            )}
+            </div>
           </section>
 
           {/* 8. 進出紀錄 */}

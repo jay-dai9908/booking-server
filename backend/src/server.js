@@ -721,6 +721,8 @@ const ensureDatabaseSchema = async () => {
       "title" TEXT NOT NULL,
       "sort_order" INTEGER NOT NULL DEFAULT 0,
       "duration_sec" INTEGER NOT NULL DEFAULT 8,
+      "seconds" INTEGER NOT NULL DEFAULT 8,
+      "preview" TEXT,
       "enabled" BOOLEAN NOT NULL DEFAULT true,
       "sha256" TEXT NOT NULL,
       "bytes" BYTEA NOT NULL,
@@ -728,6 +730,8 @@ const ensureDatabaseSchema = async () => {
       "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "KioskSlide_pkey" PRIMARY KEY ("id")
     )`,
+    `ALTER TABLE "KioskSlide" ADD COLUMN IF NOT EXISTS "seconds" INTEGER NOT NULL DEFAULT 8`,
+    `ALTER TABLE "KioskSlide" ADD COLUMN IF NOT EXISTS "preview" TEXT`,
 
     `CREATE TABLE IF NOT EXISTS "KioskFirmware" (
       "id" SERIAL NOT NULL,
@@ -737,9 +741,11 @@ const ensureDatabaseSchema = async () => {
       "bytes" BYTEA NOT NULL,
       "note" TEXT,
       "uploaded_by" TEXT,
+      "uploaded_by_name" TEXT,
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "KioskFirmware_pkey" PRIMARY KEY ("id")
-    )`
+    )`,
+    `ALTER TABLE "KioskFirmware" ADD COLUMN IF NOT EXISTS "uploaded_by_name" TEXT`
   ];
 
   for (const sql of statements) {

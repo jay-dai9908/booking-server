@@ -737,6 +737,8 @@ model KioskSlide {
   title        String
   sort_order   Int      @default(0)
   duration_sec Int      @default(8)
+  seconds      Int      @default(8)
+  preview      String?
   enabled      Boolean  @default(true)
   sha256       String
   bytes        Bytes
@@ -745,14 +747,15 @@ model KioskSlide {
 }
 
 model KioskFirmware {
-  id          Int      @id @default(autoincrement())
-  version     String
-  size        Int
-  sha256      String
-  bytes       Bytes
-  note        String?
-  uploaded_by String?
-  created_at  DateTime @default(now())
+  id               Int      @id @default(autoincrement())
+  version          String
+  size             Int
+  sha256           String
+  bytes            Bytes
+  note             String?
+  uploaded_by      String?
+  uploaded_by_name String?
+  created_at       DateTime @default(now())
 }
 
 model BookingPrepay {

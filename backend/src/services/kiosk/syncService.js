@@ -5,7 +5,7 @@ import { ironText } from '../../../../shared/selfService.js';
 import { ensureKioskSetting } from '../selfService/prepayService.js';
 import { getActiveLayoutForDate } from '../seating/layoutService.js';
 import { buildFloorMap } from '../../../../shared/floorMap.js';
-import { notifyBackupCodeUsed } from './alertService.js';
+import { notifyBackupCodeUsed, sendKioskAlertMessage } from './alertService.js';
 
 export function addDaysYmd(ymd, offsetDays) {
   const [y, m, d] = String(ymd).split('-').map(Number);
@@ -101,12 +101,19 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     psram_kb: Number.isFinite(Number(body.psram_kb)) ? Number(body.psram_kb) : null,
     rssi: Number.isFinite(Number(body.rssi)) ? Number(body.rssi) : null,
     scanner_ok: typeof body.scanner_ok === 'boolean' ? body.scanner_ok : null,
-    fw_state: typeof body.fw_state === 'string' ? body.fw_state : (body.status?.fw_state || null),
+    fw_state: typeof body.fw_state === 'string' ? body.fw_state : (body.status?.fw_state || (body.have?.fw_state || null)),
     ota_failed: body.ota_failed !== undefined ? body.ota_failed : (body.status?.ota_failed || null),
     last_sync_at: now.toISOString()
   };
 
   const haveJson = body.have && typeof body.have === 'object' ? body.have : device.have_json;
+
+  // 若機台過去曾發出離線警報，恢復連線後發送恢復通知
+  if (device.offline_alerted_at) {
+    sendKioskAlertMessage(db, '門口報到機已恢復連線').catch((err) =>
+      console.warn('[syncService] recovery alert error:', err)
+    );
+  }
 
   await db.kioskDevice.update({
     where: { id: device.id },
@@ -115,7 +122,8 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
       last_ip: clientIp || null,
       fw_version: typeof body.fw === 'string' && body.fw.trim() ? body.fw.trim() : device.fw_version,
       status_json: statusJson,
-      have_json: haveJson ?? undefined
+      have_json: haveJson ?? undefined,
+      offline_alerted_at: null
     }
   });
 
@@ -186,7 +194,7 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     db.kioskSlide.findMany({
       where: { enabled: true },
       orderBy: { sort_order: 'asc' },
-      select: { id: true, sha256: true, duration_sec: true }
+      select: { id: true, sha256: true, duration_sec: true, seconds: true }
     })
   ]);
 
@@ -213,9 +221,11 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
     rev: kioskSetting.slides_rev ?? 0,
     items: enabledSlides.map((s) => ({
       id: s.id,
+      url: `/api/kiosk/files/slides/${s.id}.bin`,
       sha256: s.sha256,
-      duration_sec: s.duration_sec,
-      url: `/api/kiosk/files/slides/${s.id}.bin`
+      size: 768000,
+      seconds: s.seconds ?? s.duration_sec ?? 8,
+      duration_sec: s.seconds ?? s.duration_sec ?? 8
     }))
   };
 
@@ -226,13 +236,30 @@ export async function processKioskSync(db = prisma, { device, body = {}, clientI
       select: { id: true, version: true, sha256: true, size: true }
     });
     if (targetFw) {
-      firmwarePayload = {
-        version: targetFw.version,
-        url: `/api/kiosk/files/firmware/${targetFw.id}.bin`,
-        sha256: targetFw.sha256,
-        size: targetFw.size,
-        policy: kioskSetting.fw_policy
-      };
+      const currentKioskFw = (typeof body.fw === 'string' && body.fw.trim()) ? body.fw.trim() : device.fw_version;
+      const fwStateStr = statusJson.fw_state || (body.have && typeof body.have.fw_state === 'string' ? body.have.fw_state : '');
+      const isOtaFailed = Boolean(
+        (fwStateStr && fwStateStr.startsWith('failed:')) ||
+        statusJson.ota_failed ||
+        events.some((e) => e.type === 'ota_failed')
+      );
+      const isOtaDone = currentKioskFw === targetFw.version;
+
+      if (isOtaDone || isOtaFailed) {
+        await db.kioskSetting.update({
+          where: { id: 1 },
+          data: { fw_policy: 'none' }
+        });
+        firmwarePayload = null;
+      } else {
+        firmwarePayload = {
+          version: targetFw.version,
+          url: `/api/kiosk/files/firmware/${targetFw.id}.bin`,
+          sha256: targetFw.sha256,
+          size: targetFw.size,
+          policy: kioskSetting.fw_policy
+        };
+      }
     }
   }
 

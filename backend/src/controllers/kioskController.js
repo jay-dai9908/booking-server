@@ -9,6 +9,7 @@ import { processKioskSync, buildSevenDaysSchedule } from '../services/kiosk/sync
 import { processKioskAccess } from '../services/kiosk/accessService.js';
 import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { buildFloorMap } from '../../../shared/floorMap.js';
+import { sendKioskAlertMessage } from '../services/kiosk/alertService.js';
 
 const ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -365,6 +366,8 @@ export const listSlidesHandler = async (req, res) => {
         title: true,
         sort_order: true,
         duration_sec: true,
+        seconds: true,
+        preview: true,
         enabled: true,
         sha256: true,
         created_at: true
@@ -375,6 +378,8 @@ export const listSlidesHandler = async (req, res) => {
       ok: true,
       slides: slides.map((s) => ({
         ...s,
+        seconds: s.seconds ?? s.duration_sec ?? 8,
+        duration_sec: s.seconds ?? s.duration_sec ?? 8,
         size: 768000
       }))
     });
@@ -390,22 +395,27 @@ export const createSlideHandler = async (req, res) => {
     let title = '待機圖片';
     let durationSec = 8;
     let enabled = true;
+    let preview = null;
 
     if (Buffer.isBuffer(req.body)) {
       rawBuffer = req.body;
       if (req.query.title) title = String(req.query.title).trim();
-      if (req.query.duration_sec) durationSec = parseInt(req.query.duration_sec, 10) || 8;
+      if (req.query.duration_sec || req.query.seconds) {
+        durationSec = parseInt(req.query.seconds || req.query.duration_sec, 10) || 8;
+      }
       if (req.query.enabled !== undefined) enabled = req.query.enabled === 'true';
+      if (req.query.preview) preview = String(req.query.preview);
     } else if (req.body && typeof req.body === 'object') {
-      const { title: t, duration_sec: d, enabled: e, raw_base64: b64 } = req.body;
+      const { title: t, duration_sec: d, seconds: sec, enabled: e, raw_base64: b64, preview: prev } = req.body;
       if (t) title = String(t).trim();
-      if (d !== undefined) durationSec = parseInt(d, 10) || 8;
+      if (sec !== undefined || d !== undefined) durationSec = parseInt(sec !== undefined ? sec : d, 10) || 8;
       if (e !== undefined) enabled = Boolean(e);
       if (b64) rawBuffer = Buffer.from(b64, 'base64');
+      if (prev) preview = String(prev);
     }
 
     if (!rawBuffer || rawBuffer.length !== 768000) {
-      return res.status(400).json({
+      return res.status(422).json({
         error: 'SLIDE_INVALID_SIZE',
         message: `待機輪播圖大小必須恰好 768,000 bytes (800x480 RGB565)，目前為 ${rawBuffer ? rawBuffer.length : 0} bytes`
       });
@@ -414,7 +424,7 @@ export const createSlideHandler = async (req, res) => {
     if (enabled) {
       const enabledCount = await prisma.kioskSlide.count({ where: { enabled: true } });
       if (enabledCount >= 5) {
-        return res.status(400).json({
+        return res.status(422).json({
           error: 'MAX_SLIDES_EXCEEDED',
           message: '最多只能有 5 張啟用中的待機輪播圖'
         });
@@ -424,12 +434,15 @@ export const createSlideHandler = async (req, res) => {
     const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
     const maxOrder = await prisma.kioskSlide.aggregate({ _max: { sort_order: true } });
     const sortOrder = (maxOrder._max.sort_order ?? -1) + 1;
+    const finalSeconds = Math.max(3, Math.min(60, durationSec));
 
     const slide = await prisma.kioskSlide.create({
       data: {
         title,
         sort_order: sortOrder,
-        duration_sec: Math.max(5, Math.min(60, durationSec)),
+        duration_sec: finalSeconds,
+        seconds: finalSeconds,
+        preview: preview || null,
         enabled,
         sha256,
         bytes: rawBuffer
@@ -449,6 +462,8 @@ export const createSlideHandler = async (req, res) => {
         title: slide.title,
         sort_order: slide.sort_order,
         duration_sec: slide.duration_sec,
+        seconds: slide.seconds,
+        preview: slide.preview,
         enabled: slide.enabled,
         sha256: slide.sha256,
         size: 768000,
@@ -469,17 +484,22 @@ export const updateSlideHandler = async (req, res) => {
       return res.status(404).json({ error: 'SLIDE_NOT_FOUND' });
     }
 
-    const { title, sort_order, duration_sec, enabled } = req.body;
+    const { title, sort_order, duration_sec, seconds, enabled, preview } = req.body;
     let revNeedsIncrement = false;
     const dataToUpdate = {};
 
     if (title !== undefined) {
       dataToUpdate.title = String(title).trim();
     }
-    if (duration_sec !== undefined) {
-      const d = Math.max(5, Math.min(60, parseInt(duration_sec, 10) || 8));
-      if (d !== existing.duration_sec) revNeedsIncrement = true;
+    const secVal = seconds !== undefined ? seconds : duration_sec;
+    if (secVal !== undefined) {
+      const d = Math.max(3, Math.min(60, parseInt(secVal, 10) || 8));
+      if (d !== existing.duration_sec || d !== existing.seconds) revNeedsIncrement = true;
       dataToUpdate.duration_sec = d;
+      dataToUpdate.seconds = d;
+    }
+    if (preview !== undefined) {
+      dataToUpdate.preview = preview ? String(preview) : null;
     }
     if (sort_order !== undefined) {
       const s = parseInt(sort_order, 10) || 0;
@@ -491,7 +511,7 @@ export const updateSlideHandler = async (req, res) => {
       if (e && !existing.enabled) {
         const enabledCount = await prisma.kioskSlide.count({ where: { enabled: true } });
         if (enabledCount >= 5) {
-          return res.status(400).json({
+          return res.status(422).json({
             error: 'MAX_SLIDES_EXCEEDED',
             message: '最多只能有 5 張啟用中的待機輪播圖'
           });
@@ -521,6 +541,8 @@ export const updateSlideHandler = async (req, res) => {
         title: updated.title,
         sort_order: updated.sort_order,
         duration_sec: updated.duration_sec,
+        seconds: updated.seconds ?? updated.duration_sec,
+        preview: updated.preview,
         enabled: updated.enabled,
         sha256: updated.sha256,
         size: 768000,
@@ -617,6 +639,7 @@ export const listFirmwareHandler = async (req, res) => {
           sha256: true,
           note: true,
           uploaded_by: true,
+          uploaded_by_name: true,
           created_at: true
         }
       }),
@@ -652,18 +675,33 @@ export const uploadFirmwareHandler = async (req, res) => {
       if (b64) rawBuffer = Buffer.from(b64, 'base64');
     }
 
-    if (!rawBuffer || rawBuffer.length <= 64 || rawBuffer.length > 2097152) {
-      return res.status(400).json({
+    // 檢查大小：64 bytes 至 4,194,304 bytes (4MB)
+    if (!rawBuffer || rawBuffer.length <= 64 || rawBuffer.length > 4194304) {
+      return res.status(422).json({
         error: 'INVALID_FIRMWARE_SIZE',
-        message: '韌體大小必須在 64 bytes 至 2MB 之間'
+        message: '韌體大小不合格（必須介於 64 bytes 至 4,194,304 bytes 之間）'
       });
     }
 
     // 檢查 ESP32 image magic byte (0xE9)
     if (rawBuffer[0] !== 0xe9) {
-      return res.status(400).json({
+      return res.status(422).json({
         error: 'INVALID_FIRMWARE_HEADER',
-        message: '無效的 ESP32 韌體檔頭（Magic byte 必須為 0xE9）'
+        message: '無效的 ESP32 韌體檔頭（第 1 個位元組必須為 0xE9）'
+      });
+    }
+
+    // 位移 32 檢查：應用程式描述魔術字元 32 54 CD AB
+    if (
+      rawBuffer.length < 112 ||
+      rawBuffer[32] !== 0x32 ||
+      rawBuffer[33] !== 0x54 ||
+      rawBuffer[34] !== 0xcd ||
+      rawBuffer[35] !== 0xab
+    ) {
+      return res.status(422).json({
+        error: 'INVALID_APP_DESC_MAGIC',
+        message: '位移 32 之應用程式描述魔術字元必須為 32 54 CD AB'
       });
     }
 
@@ -674,9 +712,33 @@ export const uploadFirmwareHandler = async (req, res) => {
     const version = verBytes.subarray(0, nullIdx).toString('ascii').trim();
 
     if (!version) {
-      return res.status(400).json({
+      return res.status(422).json({
         error: 'INVALID_FIRMWARE_VERSION',
         message: '韌體檔頭 offset 0x30 處未找到有效 ASCII 版本字串'
+      });
+    }
+
+    // 專案名稱在 offset 0x50 (80) 處，最長 32 bytes，固定 kiosk-firmware
+    const projBytes = rawBuffer.subarray(80, 112);
+    let projNullIdx = projBytes.indexOf(0);
+    if (projNullIdx === -1) projNullIdx = projBytes.length;
+    const projName = projBytes.subarray(0, projNullIdx).toString('ascii').trim();
+
+    if (projName !== 'kiosk-firmware') {
+      return res.status(422).json({
+        error: 'INVALID_PROJECT_NAME',
+        message: `位移 80 之專案名稱必須為 kiosk-firmware，目前為：${projName || '空'}`
+      });
+    }
+
+    // 同一個版本已經上傳過回 409
+    const existingVer = await prisma.kioskFirmware.findFirst({
+      where: { version }
+    });
+    if (existingVer) {
+      return res.status(409).json({
+        error: 'FIRMWARE_VERSION_EXISTS',
+        message: `版本 ${version} 已經上傳過`
       });
     }
 
@@ -690,21 +752,28 @@ export const uploadFirmwareHandler = async (req, res) => {
         sha256,
         bytes: rawBuffer,
         note: note || null,
-        uploaded_by: uploader
+        uploaded_by: uploader,
+        uploaded_by_name: uploader
       }
     });
 
-    // 最多保留 3 個歷史版本＋目前 target 版本（自動清理更舊的非 target 版本）
+    // 只保留最新 3 份，以及目前指定要更新的那一份
     const kioskSetting = await ensureKioskSettingRow(prisma);
     const targetId = kioskSetting.fw_target_id;
     const allFirmwares = await prisma.kioskFirmware.findMany({
       orderBy: { created_at: 'desc' }
     });
-    const nonTargetFirmwares = allFirmwares.filter((f) => f.id !== targetId);
-    if (nonTargetFirmwares.length > 3) {
-      const toDelete = nonTargetFirmwares.slice(3);
+
+    const keepIds = new Set(allFirmwares.slice(0, 3).map((f) => f.id));
+    if (targetId) keepIds.add(targetId);
+
+    const toDeleteIds = allFirmwares
+      .filter((f) => !keepIds.has(f.id))
+      .map((f) => f.id);
+
+    if (toDeleteIds.length > 0) {
       await prisma.kioskFirmware.deleteMany({
-        where: { id: { in: toDelete.map((f) => f.id) } }
+        where: { id: { in: toDeleteIds } }
       });
     }
 
@@ -717,6 +786,7 @@ export const uploadFirmwareHandler = async (req, res) => {
         sha256: fw.sha256,
         note: fw.note,
         uploaded_by: fw.uploaded_by,
+        uploaded_by_name: fw.uploaded_by_name,
         created_at: fw.created_at
       }
     });
@@ -728,9 +798,15 @@ export const uploadFirmwareHandler = async (req, res) => {
 
 export const setFirmwareTargetHandler = async (req, res) => {
   try {
-    const { target_id, policy = 'none' } = req.body;
-    const targetId = target_id === null || target_id === undefined ? null : parseInt(target_id, 10);
-    const validPolicy = ['none', 'force', 'idle_only'].includes(policy) ? policy : 'none';
+    const { target_id, firmware_id, policy = 'none' } = req.body;
+    const rawTarget = firmware_id !== undefined ? firmware_id : target_id;
+    const targetId = rawTarget === null || rawTarget === undefined ? null : parseInt(rawTarget, 10);
+
+    // 規範政策：none, night, now；相容舊版：force -> now, idle_only -> night
+    let validPolicy = 'none';
+    if (policy === 'night' || policy === 'idle_only') validPolicy = 'night';
+    else if (policy === 'now' || policy === 'force') validPolicy = 'now';
+    else if (policy === 'none') validPolicy = 'none';
 
     if (targetId !== null) {
       const exists = await prisma.kioskFirmware.findUnique({ where: { id: targetId } });
@@ -759,6 +835,7 @@ export const setFirmwareTargetHandler = async (req, res) => {
     res.json({
       ok: true,
       target_id: targetId,
+      firmware_id: targetId,
       policy: validPolicy
     });
   } catch (err) {
@@ -852,7 +929,16 @@ export const getAlertRecipientsHandler = async (req, res) => {
 export const updateAlertRecipientsHandler = async (req, res) => {
   try {
     const { user_ids } = req.body;
-    const userIds = Array.isArray(user_ids) ? user_ids.map(Number).filter((n) => Number.isInteger(n)) : [];
+    const userIds = Array.isArray(user_ids)
+      ? user_ids.map(Number).filter((n) => Number.isInteger(n))
+      : [];
+
+    if (userIds.length > 3) {
+      return res.status(422).json({
+        error: 'MAX_ALERT_RECIPIENTS_EXCEEDED',
+        message: '警報通知收件人最多只能設定 3 位'
+      });
+    }
 
     await prisma.kioskSetting.upsert({
       where: { id: 1 },
@@ -864,5 +950,18 @@ export const updateAlertRecipientsHandler = async (req, res) => {
   } catch (err) {
     console.error('[kioskController] updateAlertRecipientsHandler error:', err);
     res.status(500).json({ error: '更新警報收件人失敗' });
+  }
+};
+
+export const sendTestAlertHandler = async (req, res) => {
+  try {
+    const result = await sendKioskAlertMessage(
+      prisma,
+      '這是來自門口報到機系統的測試通知，LINE 警報推播設定正常。'
+    );
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error('[kioskController] sendTestAlertHandler error:', err);
+    res.status(500).json({ error: '發送測試通知失敗' });
   }
 };

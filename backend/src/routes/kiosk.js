@@ -21,7 +21,8 @@ import {
   deleteFirmwareHandler,
   downloadFirmwareHandler,
   getAlertRecipientsHandler,
-  updateAlertRecipientsHandler
+  updateAlertRecipientsHandler,
+  sendTestAlertHandler
 } from '../controllers/kioskController.js';
 import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
 import { kioskEnvelope } from '../middlewares/kioskEnvelope.js';
@@ -53,14 +54,14 @@ router.patch('/admin/slides/:id', verifyToken, requireAnyPermission(['settings']
 router.put('/admin/slides/order', verifyToken, requireAnyPermission(['settings']), reorderSlidesHandler);
 router.delete('/admin/slides/:id', verifyToken, requireAnyPermission(['settings']), deleteSlideHandler);
 
-// 韌體 OTA 管理（權限：settings）
+// 韌體 OTA 管理（權限：settings，上限 5 MB）
 router.get('/admin/firmware', verifyToken, requireAnyPermission(['settings']), listFirmwareHandler);
 router.post(
   '/admin/firmware',
   verifyToken,
   requireAnyPermission(['settings']),
-  express.raw({ type: ['application/octet-stream', 'application/x-esp32-bin'], limit: '2mb' }),
-  express.json({ limit: '4mb' }),
+  express.raw({ type: ['application/octet-stream', 'application/x-esp32-bin'], limit: '5mb' }),
+  express.json({ limit: '5mb' }),
   uploadFirmwareHandler
 );
 router.put('/admin/firmware/target', verifyToken, requireAnyPermission(['settings']), setFirmwareTargetHandler);
@@ -69,6 +70,7 @@ router.delete('/admin/firmware/:id', verifyToken, requireAnyPermission(['setting
 // 警報通知收件人設定（權限：settings）
 router.get('/admin/alerts/recipients', verifyToken, requireAnyPermission(['settings']), getAlertRecipientsHandler);
 router.put('/admin/alerts/recipients', verifyToken, requireAnyPermission(['settings']), updateAlertRecipientsHandler);
+router.post('/admin/alerts/test', verifyToken, requireAnyPermission(['settings']), sendTestAlertHandler);
 
 // 檔案下載（公開，靠檢查碼）
 router.get('/files/floor-map/:version.json', getFloorMapFileHandler);
