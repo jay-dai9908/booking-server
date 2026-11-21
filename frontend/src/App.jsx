@@ -31,13 +31,19 @@ const SettingsPage = lazy(() => import('./pages/Admin/SettingsPage'));
 const SeatLayoutPage = lazy(() => import('./pages/Admin/SeatLayoutPage'));
 const PrintStationPage = lazy(() => import('./pages/Admin/PrintStationPage'));
 const KioskPage = lazy(() => import('./pages/Admin/KioskPage'));
+const DisplayAdminPage = lazy(() => import('./pages/Admin/DisplayAdminPage'));
+const DisplayPage = lazy(() => import('./pages/Display/DisplayPage'));
 
 function App() {
   const [userRole, setUserRole] = useState(null); // 'customer', 'temp_customer', 'admin', or null
   const [initialAdminInfo, setInitialAdminInfo] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !window.location.pathname.startsWith('/display'));
 
   useEffect(() => {
+    if (window.location.pathname.startsWith('/display')) {
+      setLoading(false);
+      return;
+    }
     const checkAuth = async () => {
       try {
         const isFastLoadPath =
@@ -151,9 +157,13 @@ function App() {
             <Route path="accounting" element={<AccountingPage />} />
             <Route path="print-station" element={<PrintStationPage />} />
             <Route path="kiosk" element={<KioskPage />} />
+            <Route path="display" element={<DisplayAdminPage />} />
             <Route path="staff" element={<StaffPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
+
+          {/* Standalone Store Display Route (NO customer or admin layout) */}
+          <Route path="/display" element={<DisplayPage />} />
 
           {/* Catch old dashboard link */}
           <Route path="/admin/dashboard" element={<Navigate to="/admin/seating" replace />} />

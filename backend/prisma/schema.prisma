@@ -863,6 +863,22 @@ model DisplaySetting {
   updated_at           DateTime @default(now()) @updatedAt
 }
 
+model DisplaySlide {
+  id         Int      @id @default(autoincrement())
+  set        String   @default("self") // "self" | "general"
+  title      String
+  sort_order Int      @default(0)
+  seconds    Int      @default(8)
+  enabled    Boolean  @default(true)
+  mime       String
+  sha256     String
+  bytes      Bytes
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@index([set, enabled, sort_order])
+}
+
 
 
 

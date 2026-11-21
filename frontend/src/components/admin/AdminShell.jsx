@@ -18,7 +18,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Smartphone,
-  MonitorSmartphone
+  MonitorSmartphone,
+  Monitor
 } from 'lucide-react';
 import api from '../../api/axios';
 import AdminAppBar from './AdminAppBar';
@@ -123,6 +124,7 @@ export default function AdminShell({ children, title = '拾光製所', subtitle 
 
     { to: '/admin/accounting', perm: 'accounting', group: '帳務與系統', icon: Banknote, label: '帳務管理' },
     { to: '/admin/kiosk', perm: 'settings', group: '帳務與系統', icon: MonitorSmartphone, label: '報到機' },
+    { to: '/admin/display', perm: 'settings', group: '帳務與系統', icon: Monitor, label: '店內顯示屏' },
     { to: '/admin/settings', perm: 'settings', fallbackPerm: 'sessions', group: '帳務與系統', icon: Settings, label: '系統全域設定' },
     { to: '/admin/staff', perm: 'staff', superAdminOnly: true, group: '帳務與系統', icon: ShieldCheck, label: '人員權限管理' }
   ];

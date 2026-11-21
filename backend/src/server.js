@@ -782,7 +782,23 @@ const ensureDatabaseSchema = async () => {
       "slide_seconds" INTEGER NOT NULL DEFAULT 8,
       "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "DisplaySetting_pkey" PRIMARY KEY ("id")
-    )`
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "DisplaySlide" (
+      "id" SERIAL NOT NULL,
+      "set" TEXT NOT NULL DEFAULT 'self',
+      "title" TEXT NOT NULL,
+      "sort_order" INTEGER NOT NULL DEFAULT 0,
+      "seconds" INTEGER NOT NULL DEFAULT 8,
+      "enabled" BOOLEAN NOT NULL DEFAULT true,
+      "mime" TEXT NOT NULL,
+      "sha256" TEXT NOT NULL,
+      "bytes" BYTEA NOT NULL,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "DisplaySlide_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE INDEX IF NOT EXISTS "DisplaySlide_set_enabled_sort_order_idx" ON "DisplaySlide"("set", "enabled", "sort_order")`
   ];
 
   for (const sql of statements) {

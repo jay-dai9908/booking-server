@@ -204,11 +204,11 @@ test('Round 28 Item 3: Display state timer parity, privacy scan, heartbeat, and 
     });
     created.userId = user.id;
 
-    // Ensure EquipmentConfig pegboard exists
-    await prisma.equipmentConfig.upsert({
-      where: { id: 'pegboard_s' },
-      update: {},
-      create: { id: 'pegboard_s', name: '小板', hourly_rate: 80, total_stock: 5, visibility_status: 'ACTIVE' }
+    // Ensure dedicated test EquipmentConfig exists so earlier tests don't alter its name
+    const eqId = `r28_board_${ts}`;
+    created.eqId = eqId;
+    await prisma.equipmentConfig.create({
+      data: { id: eqId, name: '小板', hourly_rate: 80, total_stock: 5, visibility_status: 'ACTIVE' }
     });
 
     // Build 5 scenarios:
@@ -289,7 +289,7 @@ test('Round 28 Item 3: Display state timer parity, privacy scan, heartbeat, and 
     await prisma.bookingEquipment.create({
       data: {
         booking_ref: refBoard,
-        equipment_id: 'pegboard_s',
+        equipment_id: eqId,
         equipment_name_snapshot: '小板',
         quantity: 1,
         rental_hours: 2,
@@ -409,6 +409,7 @@ test('Round 28 Item 3: Display state timer parity, privacy scan, heartbeat, and 
     resetDisplayBusForTests();
     clearDisplayLoginFailures();
     await prisma.bookingEquipment.deleteMany({ where: { booking_ref: { in: created.bookingRefs } } });
+    if (created.eqId) await prisma.equipmentConfig.deleteMany({ where: { id: created.eqId } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: created.bookingRefs } } });
     await prisma.reservation.deleteMany({ where: { booking_ref: { in: created.bookingRefs } } });
     if (created.userId) await prisma.user.deleteMany({ where: { id: created.userId } });
