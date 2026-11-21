@@ -22,6 +22,7 @@ import floorRoutes from './routes/floor.js';
 import billingRoutes from './routes/billing.js';
 import printRoutes from './routes/print.js';
 import kioskRoutes from './routes/kiosk.js';
+import displayRoutes from './routes/display.js';
 import { ensureDefaultEquipmentConfigs } from './controllers/equipmentController.js';
 import { ensureDefaultCheckoutConfigs } from './controllers/checkoutController.js';
 import { ensureDefaultPaymentMethods, ensureDefaultProducts, ensureDefaultPassPlans } from './utils/shopDefaults.js';
@@ -745,7 +746,43 @@ const ensureDatabaseSchema = async () => {
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "KioskFirmware_pkey" PRIMARY KEY ("id")
     )`,
-    `ALTER TABLE "KioskFirmware" ADD COLUMN IF NOT EXISTS "uploaded_by_name" TEXT`
+    `ALTER TABLE "KioskFirmware" ADD COLUMN IF NOT EXISTS "uploaded_by_name" TEXT`,
+
+    `CREATE TABLE IF NOT EXISTS "DisplayDevice" (
+      "id" SERIAL NOT NULL,
+      "name" TEXT NOT NULL DEFAULT '店內顯示屏',
+      "password_hash" TEXT NOT NULL,
+      "token_version" INTEGER NOT NULL DEFAULT 1,
+      "last_seen_at" TIMESTAMP(3),
+      "last_ip" TEXT,
+      "current_view" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "DisplayDevice_pkey" PRIMARY KEY ("id")
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "DisplaySetting" (
+      "id" INTEGER NOT NULL DEFAULT 1,
+      "schedule" JSONB NOT NULL DEFAULT '{"self":{"mode":"biz","before":30,"after":30,"on":"09:30","off":"21:30","content":"slides_self"},"weekday":{"mode":"biz","before":15,"after":15,"on":"09:45","off":"21:15","content":"timers"},"holiday":{"mode":"biz","before":15,"after":30,"on":"09:45","off":"21:30","content":"timers"},"closed":{"mode":"never","before":0,"after":0,"on":"","off":"","content":"off"}}',
+      "special_dates" JSONB NOT NULL DEFAULT '[]',
+      "map_rotation" INTEGER NOT NULL DEFAULT 90,
+      "here_element" TEXT,
+      "time_mode" TEXT NOT NULL DEFAULT 'remain',
+      "soon_minutes" INTEGER NOT NULL DEFAULT 10,
+      "fallback_to_slides" BOOLEAN NOT NULL DEFAULT true,
+      "cards" JSONB NOT NULL DEFAULT '{"seats":true,"soon":true,"price":true}',
+      "card_seconds" INTEGER NOT NULL DEFAULT 12,
+      "announcements" JSONB NOT NULL DEFAULT '[]',
+      "announcement_seconds" INTEGER NOT NULL DEFAULT 10,
+      "show_line_mini" BOOLEAN NOT NULL DEFAULT true,
+      "line_title" TEXT NOT NULL DEFAULT '有問題請加 LINE',
+      "notices" JSONB NOT NULL DEFAULT '[]',
+      "closing_warn" BOOLEAN NOT NULL DEFAULT true,
+      "closing_minutes" INTEGER NOT NULL DEFAULT 30,
+      "shift_minutes" INTEGER NOT NULL DEFAULT 3,
+      "slide_seconds" INTEGER NOT NULL DEFAULT 8,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "DisplaySetting_pkey" PRIMARY KEY ("id")
+    )`
   ];
 
   for (const sql of statements) {
@@ -795,6 +832,7 @@ app.use('/api/floor', floorRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/print', printRoutes);
 app.use('/api/kiosk', kioskRoutes);
+app.use('/api/display', displayRoutes);
 
 // Basic error handler
 app.use((err, req, res, next) => {

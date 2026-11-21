@@ -9,6 +9,7 @@ import { log as auditLog } from '../services/audit/auditService.js';
 import { refreshBillingCache, getBookingBill } from '../services/billing/billService.js';
 import { swapBoundaryOptions, toTaipeiDateString } from '../../../shared/time.js';
 import { resolveCoveredSessions, formatCoveredSessions } from '../utils/equipmentWindow.js';
+import displayBus from '../services/display/displayBus.js';
 
 export async function getLive(req, res) {
   try {
@@ -141,6 +142,7 @@ export async function checkIn(req, res) {
       };
     });
 
+    displayBus.floorChanged();
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
@@ -302,6 +304,7 @@ export async function moveSeat(req, res) {
       await assertNoSeatCollisions(tx, allSessionsToCheck);
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[moveSeat] Error:', error);
@@ -458,6 +461,7 @@ export async function moveGroup(req, res) {
       };
     });
 
+    displayBus.floorChanged();
     return res.json(result);
   } catch (error) {
     console.error('[moveGroup] Error:', error);
@@ -684,6 +688,7 @@ export async function handleTimer(req, res) {
       }
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[handleTimer] Error:', error);
@@ -824,6 +829,7 @@ export async function addPerson(req, res) {
       return newPerson;
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, person: result, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[addPerson] Error:', error);
@@ -971,6 +977,7 @@ export async function removePerson(req, res) {
       await refreshBillingCache(tx, booking_ref);
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[removePerson] Error:', error);
@@ -1213,6 +1220,7 @@ export async function swapBoard(req, res) {
       return billData.bill;
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, bill: updatedBill, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[swapBoard] Error:', error);
@@ -1318,6 +1326,7 @@ export async function returnBoard(req, res) {
       return billData.bill;
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, bill: updatedBill, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[returnBoard] Error:', error);
@@ -1343,6 +1352,7 @@ export async function reassignBoard(req, res) {
       await refreshBillingCache(tx, booking_ref);
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[reassignBoard] Error:', error);
@@ -1580,6 +1590,7 @@ export async function addBoardRental(req, res) {
       return newEquipment;
     });
 
+    displayBus.floorChanged();
     return res.json({
       success: true,
       booking_equipment: result,
@@ -1643,6 +1654,7 @@ export async function pauseBoard(req, res) {
       return pauseRow;
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, board_pause: result, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[pauseBoard] Error:', error);
@@ -1698,6 +1710,7 @@ export async function resumeBoard(req, res) {
       await refreshBillingCache(tx, booking_ref);
     });
 
+    displayBus.floorChanged();
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[resumeBoard] Error:', error);

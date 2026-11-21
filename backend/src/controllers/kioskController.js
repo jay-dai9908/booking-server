@@ -10,6 +10,7 @@ import { processKioskAccess } from '../services/kiosk/accessService.js';
 import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { buildFloorMap } from '../../../shared/floorMap.js';
 import { sendKioskAlertMessage } from '../services/kiosk/alertService.js';
+import displayBus from '../services/display/displayBus.js';
 
 const ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -41,6 +42,9 @@ export const postKioskAccessHandler = async (req, res) => {
       payload,
       now: new Date()
     });
+    if (accessBody?.open_door) {
+      displayBus.floorChanged();
+    }
     return res.kioskReply({
       ok: true,
       code: 'OK',

@@ -9,6 +9,7 @@ import {
   markUnpaid,
   waivePayment
 } from '../services/billing/billService.js';
+import displayBus from '../services/display/displayBus.js';
 import { validatePassUsage } from '../services/billing/passTender.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
@@ -76,6 +77,7 @@ export async function postCollect(req, res) {
 
   try {
     const result = await collectPayment(booking_ref, req.body, staffUser, deviceInfo);
+    displayBus.floorChanged();
     return res.json({
       success: true,
       booking_ref,
@@ -102,6 +104,7 @@ export async function postSupplement(req, res) {
 
   try {
     const result = await supplementPayment(booking_ref, req.body, staffUser, deviceInfo);
+    displayBus.floorChanged();
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
@@ -121,6 +124,7 @@ export async function postRefund(req, res) {
 
   try {
     const result = await refundPayment(booking_ref, req.body, staffUser, deviceInfo);
+    displayBus.floorChanged();
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
@@ -140,6 +144,7 @@ export async function postWaive(req, res) {
 
   try {
     const result = await waivePayment(booking_ref, req.body, staffUser, deviceInfo);
+    displayBus.floorChanged();
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
@@ -160,6 +165,7 @@ export async function postVoid(req, res) {
 
   try {
     const result = await voidPayment(id, reason, staffUser, deviceInfo);
+    displayBus.floorChanged();
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
@@ -180,6 +186,7 @@ export async function postMarkUnpaid(req, res) {
 
   try {
     const result = await markUnpaid(booking_ref, reason, staffUser, deviceInfo);
+    displayBus.floorChanged();
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
