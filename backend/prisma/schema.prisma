@@ -825,6 +825,45 @@ model KioskAccessLog {
   @@index([booking_ref])
 }
 
+// -------------------------------------------------------------
+// 店內顯示屏 (Round 28)
+// -------------------------------------------------------------
+
+model DisplayDevice {
+  id            Int       @id @default(autoincrement())
+  name          String    @default("店內顯示屏")
+  password_hash String
+  token_version Int       @default(1)
+  last_seen_at  DateTime?
+  last_ip       String?
+  current_view  String?
+  created_at    DateTime  @default(now())
+}
+
+model DisplaySetting {
+  id                   Int      @id @default(1)
+  schedule             Json     @default("{\"self\":{\"mode\":\"biz\",\"before\":30,\"after\":30,\"on\":\"09:30\",\"off\":\"21:30\",\"content\":\"slides_self\"},\"weekday\":{\"mode\":\"biz\",\"before\":15,\"after\":15,\"on\":\"09:45\",\"off\":\"21:15\",\"content\":\"timers\"},\"holiday\":{\"mode\":\"biz\",\"before\":15,\"after\":30,\"on\":\"09:45\",\"off\":\"21:30\",\"content\":\"timers\"},\"closed\":{\"mode\":\"never\",\"before\":0,\"after\":0,\"on\":\"\",\"off\":\"\",\"content\":\"off\"}}")
+  special_dates        Json     @default("[]")
+  map_rotation         Int      @default(90)
+  here_element         String?
+  time_mode            String   @default("remain")
+  soon_minutes         Int      @default(10)
+  fallback_to_slides   Boolean  @default(true)
+  cards                Json     @default("{\"seats\":true,\"soon\":true,\"price\":true}")
+  card_seconds         Int      @default(12)
+  announcements        Json     @default("[]")
+  announcement_seconds Int      @default(10)
+  show_line_mini       Boolean  @default(true)
+  line_title           String   @default("有問題請加 LINE")
+  notices              Json     @default("[]")
+  closing_warn         Boolean  @default(true)
+  closing_minutes      Int      @default(30)
+  shift_minutes        Int      @default(3)
+  slide_seconds        Int      @default(8)
+  updated_at           DateTime @default(now()) @updatedAt
+}
+
+
 
 
 
