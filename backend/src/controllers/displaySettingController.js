@@ -9,11 +9,15 @@ import {
 import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { ensureKioskSetting } from './dailySettingController.js';
 import displayBus from '../services/display/displayBus.js';
+import { normalizePayload } from '../../../shared/twqr.js';
+import { getEnabledPaymentMethods, resolveTwqrConfig } from '../services/display/displayConfigHelper.js';
 
 const VALID_ROTATIONS = new Set([0, 90, 180, 270]);
 const VALID_TIME_MODES = new Set(['remain', 'used']);
+const VALID_TWQR_MODES = new Set(['acct', 'img', 'text']);
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DATA_IMAGE_RE = /^data:(image\/(?:png|jpeg|jpg|webp|svg\+xml));base64,([A-Za-z0-9+/=]+)$/i;
 
 export function getDefaultDisplaySettingData() {
   return {
@@ -35,7 +39,60 @@ export function getDefaultDisplaySettingData() {
     closing_warn: true,
     closing_minutes: 30,
     shift_minutes: 3,
-    slide_seconds: 8
+    slide_seconds: 8,
+    checkout_sync: true,
+    checkout_wake: true,
+    checkout_per_person: true,
+    thanks_seconds: 8,
+    idle_minutes: 5,
+    message_minutes: 3,
+    twqr_mode: 'acct',
+    twqr_bank_code: '',
+    twqr_account: '',
+    twqr_payload: '',
+    twqr_use_raw_image: false,
+    twqr_raw_image: null,
+    twqr_logo_enabled: true,
+    twqr_logo_image: null
+  };
+}
+
+function formatAdminSettingResponse(setting, { lineInfo, layout, paymentMethods }) {
+  const twqrMeta = resolveTwqrConfig(setting);
+  const rawAcct = String(setting.twqr_account || '');
+  const acctLast4 = rawAcct ? rawAcct.slice(-4) : (twqrMeta.parsed?.account_last4 || '');
+  const acctMasked = rawAcct
+    ? (rawAcct.length <= 4 ? rawAcct : '•'.repeat(rawAcct.length - 4) + rawAcct.slice(-4))
+    : '';
+
+  const safeSetting = { ...setting };
+  // Never echo raw full account number or huge data URLs blindly; return masked display & URLs
+  delete safeSetting.twqr_account;
+  delete safeSetting.twqr_raw_image;
+  delete safeSetting.twqr_logo_image;
+
+  return {
+    ...safeSetting,
+    twqr_account_last4: acctLast4,
+    twqr_account_masked: acctMasked,
+    twqr_payload: twqrMeta.payload_masked,
+    twqr_payload_masked: twqrMeta.payload_masked,
+    twqr_parsed: twqrMeta.parsed
+      ? {
+          type: twqrMeta.parsed.type,
+          bank_code: twqrMeta.parsed.bank_code,
+          account_last4: twqrMeta.parsed.account_last4
+        }
+      : null,
+    twqr_has_raw_image: twqrMeta.has_raw_image,
+    twqr_raw_image_url: twqrMeta.raw_image_url,
+    twqr_has_custom_logo: Boolean(setting.twqr_logo_image),
+    twqr_logo_url: twqrMeta.logo_url,
+    has_twqr: twqrMeta.has_twqr,
+    line_url: lineInfo.line_url,
+    line_id: lineInfo.line_id,
+    payment_methods: paymentMethods,
+    floor_elements: extractFloorElements(layout)
   };
 }
 
@@ -122,18 +179,14 @@ function isValidCalendarDate(ymd) {
 
 export async function getDisplaySettings(req, res) {
   try {
-    const [setting, lineInfo, layout] = await Promise.all([
+    const [setting, lineInfo, layout, paymentMethods] = await Promise.all([
       ensureDisplaySetting(prisma),
       resolveSharedLineInfo(prisma),
-      getActiveLayoutForDate(prisma, dateOnly(new Date()))
+      getActiveLayoutForDate(prisma, dateOnly(new Date())),
+      getEnabledPaymentMethods(prisma)
     ]);
 
-    return res.json({
-      ...setting,
-      line_url: lineInfo.line_url,
-      line_id: lineInfo.line_id,
-      floor_elements: extractFloorElements(layout)
-    });
+    return res.json(formatAdminSettingResponse(setting, { lineInfo, layout, paymentMethods }));
   } catch (err) {
     console.error('[displaySetting] getDisplaySettings error:', err.message);
     return res.status(500).json({ error: '無法讀取顯示屏設定' });
@@ -387,6 +440,113 @@ export async function updateDisplaySettings(req, res) {
       dataToUpdate.slide_seconds = r.value;
     }
 
+    // 19. Round 29 checkout & message settings
+    if (body.checkout_sync !== undefined) {
+      if (typeof body.checkout_sync !== 'boolean') {
+        return res.status(422).json({ error: 'checkout_sync 必須為布林值' });
+      }
+      dataToUpdate.checkout_sync = body.checkout_sync;
+    }
+    if (body.checkout_wake !== undefined) {
+      if (typeof body.checkout_wake !== 'boolean') {
+        return res.status(422).json({ error: 'checkout_wake 必須為布林值' });
+      }
+      dataToUpdate.checkout_wake = body.checkout_wake;
+    }
+    if (body.checkout_per_person !== undefined) {
+      if (typeof body.checkout_per_person !== 'boolean') {
+        return res.status(422).json({ error: 'checkout_per_person 必須為布林值' });
+      }
+      dataToUpdate.checkout_per_person = body.checkout_per_person;
+    }
+    if (body.thanks_seconds !== undefined) {
+      const r = parseIntStrict(body.thanks_seconds, 3, 30, '收款後感謝畫面停留秒數');
+      if (r.error) return res.status(422).json({ error: r.error });
+      dataToUpdate.thanks_seconds = r.value;
+    }
+    if (body.idle_minutes !== undefined) {
+      const r = parseIntStrict(body.idle_minutes, 1, 30, '店員無動作自動返回分鐘');
+      if (r.error) return res.status(422).json({ error: r.error });
+      dataToUpdate.idle_minutes = r.value;
+    }
+    if (body.message_minutes !== undefined) {
+      const r = parseIntStrict(body.message_minutes, 1, 30, '店員通知顯示分鐘');
+      if (r.error) return res.status(422).json({ error: r.error });
+      dataToUpdate.message_minutes = r.value;
+    }
+
+    // 20. Round 29 TWQR settings
+    if (body.twqr_mode !== undefined) {
+      const m = String(body.twqr_mode);
+      if (!VALID_TWQR_MODES.has(m)) {
+        return res.status(422).json({ error: 'twqr_mode 必須為 acct、img 或 text' });
+      }
+      dataToUpdate.twqr_mode = m;
+    }
+    if (body.twqr_bank_code !== undefined) {
+      const cleanBank = String(body.twqr_bank_code ?? '').replace(/\D/g, '');
+      if (cleanBank && cleanBank.length !== 3) {
+        return res.status(422).json({ error: '銀行代碼必須為 3 位數字' });
+      }
+      dataToUpdate.twqr_bank_code = cleanBank;
+    }
+    if (body.twqr_account !== undefined) {
+      const rawAcct = String(body.twqr_account ?? '').trim();
+      if (!rawAcct.includes('•')) {
+        const cleanAcct = rawAcct.replace(/\D/g, '');
+        if (cleanAcct && (cleanAcct.length < 6 || cleanAcct.length > 16)) {
+          return res.status(422).json({ error: '銀行帳號必須為 6 到 16 位數字' });
+        }
+        dataToUpdate.twqr_account = cleanAcct;
+      }
+    }
+    if (body.twqr_payload !== undefined) {
+      const rawPay = String(body.twqr_payload ?? '').trim();
+      if (!rawPay) {
+        dataToUpdate.twqr_payload = '';
+      } else if (!rawPay.includes('•')) {
+        const normalized = normalizePayload(rawPay);
+        if (!normalized) {
+          return res.status(422).json({ error: '這不是 TWQR 收款碼內容' });
+        }
+        dataToUpdate.twqr_payload = normalized;
+      }
+    }
+    if (body.twqr_use_raw_image !== undefined) {
+      if (typeof body.twqr_use_raw_image !== 'boolean') {
+        return res.status(422).json({ error: 'twqr_use_raw_image 必須為布林值' });
+      }
+      dataToUpdate.twqr_use_raw_image = body.twqr_use_raw_image;
+    }
+    if (body.twqr_raw_image !== undefined) {
+      if (!body.twqr_raw_image) {
+        dataToUpdate.twqr_raw_image = null;
+      } else {
+        const rawImg = String(body.twqr_raw_image).trim();
+        if (!DATA_IMAGE_RE.test(rawImg) || rawImg.length > 3 * 1024 * 1024) {
+          return res.status(422).json({ error: 'TWQR 原圖格式無效或超過大小限制' });
+        }
+        dataToUpdate.twqr_raw_image = rawImg;
+      }
+    }
+    if (body.twqr_logo_enabled !== undefined) {
+      if (typeof body.twqr_logo_enabled !== 'boolean') {
+        return res.status(422).json({ error: 'twqr_logo_enabled 必須為布林值' });
+      }
+      dataToUpdate.twqr_logo_enabled = body.twqr_logo_enabled;
+    }
+    if (body.twqr_logo_image !== undefined) {
+      if (!body.twqr_logo_image) {
+        dataToUpdate.twqr_logo_image = null;
+      } else {
+        const logoImg = String(body.twqr_logo_image).trim();
+        if (!DATA_IMAGE_RE.test(logoImg) || logoImg.length > 1024 * 1024) {
+          return res.status(422).json({ error: 'TWQR 標誌圖檔格式無效或超過 1MB 限制' });
+        }
+        dataToUpdate.twqr_logo_image = logoImg;
+      }
+    }
+
     // Optional: sync shared KioskSetting.line_url / line_id without duplicating in DisplaySetting
     const kioskUpdate = {};
     if (body.line_url !== undefined) {
@@ -428,24 +588,58 @@ export async function updateDisplaySettings(req, res) {
       });
     });
 
-    const [lineInfo, layout] = await Promise.all([
+    const [lineInfo, layout, paymentMethods] = await Promise.all([
       resolveSharedLineInfo(prisma),
-      getActiveLayoutForDate(prisma, dateOnly(new Date()))
+      getActiveLayoutForDate(prisma, dateOnly(new Date())),
+      getEnabledPaymentMethods(prisma)
     ]);
 
+    if (dataToUpdate.checkout_sync === false) {
+      displayBus.forceClearCheckoutSync();
+    }
     displayBus.settingsChanged();
 
     return res.json({
       message: '顯示設定已儲存',
-      setting: {
-        ...updated,
-        line_url: lineInfo.line_url,
-        line_id: lineInfo.line_id,
-        floor_elements: extractFloorElements(layout)
-      }
+      setting: formatAdminSettingResponse(updated, { lineInfo, layout, paymentMethods })
     });
   } catch (err) {
     console.error('[displaySetting] updateDisplaySettings error:', err.message);
     return res.status(500).json({ error: '儲存顯示設定失敗' });
+  }
+}
+
+function sendDataUrlImage(res, dataUrl) {
+  const m = String(dataUrl || '').match(DATA_IMAGE_RE);
+  if (!m) {
+    return res.status(404).json({ error: 'IMAGE_NOT_FOUND' });
+  }
+  const mime = m[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : m[1];
+  const buf = Buffer.from(m[2], 'base64');
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Content-Length', buf.length);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  return res.end(buf);
+}
+
+export async function serveTwqrRawImageHandler(req, res) {
+  try {
+    const ds = await ensureDisplaySetting(prisma);
+    if (!ds.twqr_raw_image) return res.status(404).json({ error: 'IMAGE_NOT_FOUND' });
+    return sendDataUrlImage(res, ds.twqr_raw_image);
+  } catch (err) {
+    console.error('[displaySetting] serveTwqrRawImageHandler error:', err.message);
+    return res.status(500).json({ error: '讀取圖片失敗' });
+  }
+}
+
+export async function serveTwqrLogoImageHandler(req, res) {
+  try {
+    const ds = await ensureDisplaySetting(prisma);
+    if (!ds.twqr_logo_image) return res.status(404).json({ error: 'IMAGE_NOT_FOUND' });
+    return sendDataUrlImage(res, ds.twqr_logo_image);
+  } catch (err) {
+    console.error('[displaySetting] serveTwqrLogoImageHandler error:', err.message);
+    return res.status(500).json({ error: '讀取標誌失敗' });
   }
 }

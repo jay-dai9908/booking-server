@@ -16,9 +16,16 @@ import {
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react';
+import jsQR from 'jsqr';
 import api from '../../api/axios';
 import { buildFloorMap } from '@shared/floorMap.js';
 import { DEFAULT_DISPLAY_SCHEDULE } from '@shared/displaySchedule.js';
+import {
+  buildTransferPayload,
+  normalizePayload,
+  parsePayload,
+  maskTwqrPayload
+} from '@shared/twqr.js';
 import DisplayFloorMap from '../../components/display/DisplayFloorMap';
 
 const DAY_LABELS = {
@@ -77,7 +84,21 @@ function createDefaultSettings() {
     closing_warn: true,
     closing_minutes: 30,
     shift_minutes: 3,
-    slide_seconds: 8
+    slide_seconds: 8,
+    checkout_sync: true,
+    checkout_wake: true,
+    checkout_per_person: true,
+    thanks_seconds: 8,
+    idle_minutes: 5,
+    message_minutes: 3,
+    twqr_mode: 'acct',
+    twqr_bank_code: '',
+    twqr_account: '',
+    twqr_payload: '',
+    twqr_use_raw_image: false,
+    twqr_raw_image: undefined,
+    twqr_logo_enabled: true,
+    twqr_logo_image: undefined
   };
 }
 
@@ -139,6 +160,12 @@ export default function DisplayAdminPage() {
     general: { title: '', seconds: 8, file: null, dataUrl: '', error: '', busy: false }
   });
 
+  // Round 29: Payment methods + TWQR UI state
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [twqrServerMeta, setTwqrServerMeta] = useState({ last4: '', maskedPayload: '' });
+  const [twqrImgError, setTwqrImgError] = useState('');
+  const [twqrImgDecoded, setTwqrImgDecoded] = useState('');
+
   const showNotice = (type, text) => {
     setNotice({ type, text });
     setTimeout(() => setNotice(null), 4000);
@@ -147,10 +174,11 @@ export default function DisplayAdminPage() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [devRes, setRes, slidesRes] = await Promise.all([
+      const [devRes, setRes, slidesRes, globalRes] = await Promise.all([
         api.get('/display/admin/devices'),
         api.get('/display/admin/settings'),
-        api.get('/display/admin/slides').catch(() => ({ data: { slides: [] } }))
+        api.get('/display/admin/slides').catch(() => ({ data: { slides: [] } })),
+        api.get('/daily-settings/global').catch(() => ({ data: {} }))
       ]);
 
       setDevices(Array.isArray(devRes.data?.devices) ? devRes.data.devices : []);
@@ -176,8 +204,27 @@ export default function DisplayAdminPage() {
         special_dates: Array.isArray(rawSettings.special_dates) ? rawSettings.special_dates : [],
         cards: { ...defaults.cards, ...(rawSettings.cards || {}) },
         notices: loadedNotices,
-        announcements: loadedAnns
+        announcements: loadedAnns,
+        twqr_account: rawSettings.twqr_account && !String(rawSettings.twqr_account).includes('•')
+          ? rawSettings.twqr_account
+          : '',
+        twqr_payload: rawSettings.twqr_payload && !String(rawSettings.twqr_payload).includes('•')
+          ? rawSettings.twqr_payload
+          : '',
+        twqr_raw_image: undefined,
+        twqr_logo_image: undefined
       });
+      setTwqrServerMeta({
+        last4: rawSettings.twqr_account_last4 || (rawSettings.twqr_account ? String(rawSettings.twqr_account).slice(-4) : ''),
+        maskedPayload: rawSettings.twqr_payload_masked || (rawSettings.twqr_payload ? maskTwqrPayload(rawSettings.twqr_payload) : '')
+      });
+      if (rawSettings.twqr_mode === 'img' && rawSettings.twqr_payload) {
+        setTwqrImgDecoded(rawSettings.twqr_payload);
+      }
+      const pmList = Array.isArray(setRes.data?.payment_methods)
+        ? setRes.data.payment_methods
+        : (Array.isArray(globalRes?.data?.payment_methods_json) ? globalRes.data.payment_methods_json : []);
+      setPaymentMethods(pmList);
       setNoticesText(loadedNotices.join('\n'));
       setAnnouncementsText(loadedAnns.join('\n'));
 
@@ -370,17 +417,167 @@ export default function DisplayAdminPage() {
         closing_warn: Boolean(settings.closing_warn),
         closing_minutes: Number(settings.closing_minutes),
         shift_minutes: Number(settings.shift_minutes),
-        slide_seconds: Number(settings.slide_seconds)
+        slide_seconds: Number(settings.slide_seconds),
+        checkout_sync: settings.checkout_sync !== false,
+        checkout_wake: settings.checkout_wake !== false,
+        checkout_per_person: settings.checkout_per_person !== false,
+        thanks_seconds: Number(settings.thanks_seconds) || 8,
+        idle_minutes: Number(settings.idle_minutes) || 5,
+        message_minutes: Number(settings.message_minutes) || 3,
+        twqr_mode: settings.twqr_mode || 'acct',
+        twqr_bank_code: settings.twqr_bank_code || '',
+        twqr_use_raw_image: Boolean(settings.twqr_use_raw_image),
+        twqr_logo_enabled: settings.twqr_logo_enabled !== false
       };
 
-      await api.put('/display/admin/settings', payload);
+      if (settings.twqr_raw_image !== undefined) {
+        payload.twqr_raw_image = settings.twqr_raw_image;
+      }
+      if (settings.twqr_logo_image !== undefined) {
+        payload.twqr_logo_image = settings.twqr_logo_image;
+      }
+
+      if (settings.twqr_mode === 'acct') {
+        const acctDigits = String(settings.twqr_account || '').replace(/\D/g, '');
+        if (acctDigits) {
+          payload.twqr_account = acctDigits;
+        }
+      } else if (settings.twqr_mode === 'img') {
+        const imgPay = twqrImgDecoded || settings.twqr_payload || '';
+        if (imgPay) payload.twqr_payload = imgPay;
+      } else if (settings.twqr_mode === 'text') {
+        if (settings.twqr_payload && !String(settings.twqr_payload).includes('•')) {
+          payload.twqr_payload = settings.twqr_payload;
+        } else if (!settings.twqr_payload && !twqrServerMeta.maskedPayload) {
+          payload.twqr_payload = '';
+        }
+      }
+
+      const saveRes = await api.put('/display/admin/settings', payload);
+      const savedData = saveRes.data?.setting || saveRes.data?.settings || saveRes.data || {};
+      if (savedData.twqr_account_last4 !== undefined || savedData.twqr_payload_masked !== undefined) {
+        setTwqrServerMeta({
+          last4: savedData.twqr_account_last4 || '',
+          maskedPayload: savedData.twqr_payload_masked || ''
+        });
+      }
+      setSettings(prev => ({
+        ...prev,
+        twqr_has_raw_image: savedData.twqr_has_raw_image ?? prev.twqr_has_raw_image,
+        twqr_raw_image_url: savedData.twqr_raw_image_url ?? prev.twqr_raw_image_url,
+        twqr_has_custom_logo: savedData.twqr_has_custom_logo ?? prev.twqr_has_custom_logo,
+        twqr_logo_url: savedData.twqr_logo_url ?? prev.twqr_logo_url,
+        twqr_raw_image: undefined,
+        twqr_logo_image: undefined
+      }));
       showNotice('success', '顯示設定已儲存並同步至顯示屏');
     } catch (err) {
-      showNotice('error', err.response?.data?.error || '儲存設定失敗，請檢查欄位範圍');
+      showNotice('error', err.response?.data?.message || err.response?.data?.error || '儲存設定失敗，請檢查欄位範圍');
     } finally {
       setSavingSettings(false);
     }
   };
+
+  // Round 29 Item 2: TWQR image QR decoder via jsqr + logo upload
+  const handleTwqrImageUpload = (file) => {
+    if (!file) return;
+    setTwqrImgError('');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = String(ev.target.result || '');
+      const img = new Image();
+      img.onload = () => {
+        const cvs = document.createElement('canvas');
+        const sc = Math.min(1, 1200 / Math.max(img.width, img.height));
+        cvs.width = Math.max(1, Math.round(img.width * sc));
+        cvs.height = Math.max(1, Math.round(img.height * sc));
+        const ctx = cvs.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cvs.width, cvs.height);
+        ctx.drawImage(img, 0, 0, cvs.width, cvs.height);
+        const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
+        const hit = jsQR(imgData.data, cvs.width, cvs.height, { inversionAttempts: 'attemptBoth' });
+        setSettings(prev => ({
+          ...prev,
+          twqr_raw_image: dataUrl
+        }));
+        if (!hit || !hit.data) {
+          setTwqrImgDecoded('');
+          setTwqrImgError('這張圖讀不到條碼，請換一張清楚、完整的條碼圖片。');
+        } else {
+          setTwqrImgDecoded(hit.data);
+          const norm = normalizePayload(hit.data);
+          setSettings(prev => ({
+            ...prev,
+            twqr_raw_image: dataUrl,
+            twqr_payload: norm || hit.data
+          }));
+        }
+      };
+      img.onerror = () => setTwqrImgError('無法讀取圖片檔案');
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleTwqrLogoUpload = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = String(ev.target.result || '');
+      setSettings(prev => ({ ...prev, twqr_logo_image: dataUrl }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const twqrPreview = useMemo(() => {
+    const mode = settings.twqr_mode || 'acct';
+    if (mode === 'img' && settings.twqr_use_raw_image && settings.twqr_raw_image) {
+      return { hint: '將直接顯示上傳的原圖（不重新產生，也不加 TWQR 標誌）。', masked: '' };
+    }
+    let candidate = '';
+    if (mode === 'acct') {
+      const bank = String(settings.twqr_bank_code || '').replace(/\D/g, '');
+      const acct = String(settings.twqr_account || '').replace(/\D/g, '');
+      if (bank.length === 3 && acct.length >= 6) {
+        candidate = buildTransferPayload(bank, acct);
+      } else if (bank.length === 3 && twqrServerMeta.last4 && twqrServerMeta.maskedPayload) {
+        return {
+          hint: `已設定帳號（銀行代碼 ${bank}，帳號末四碼 ${twqrServerMeta.last4}）。條碼實際內容如下（帳號中段遮起來）：`,
+          masked: twqrServerMeta.maskedPayload
+        };
+      } else {
+        return { hint: '請填 3 位數銀行代碼和帳號。', masked: '' };
+      }
+    } else if (mode === 'img') {
+      candidate = twqrImgDecoded || settings.twqr_payload || '';
+      if (!candidate) {
+        return { hint: twqrImgError || '請上傳 PayMe 或銀行給的條碼圖片。', masked: '' };
+      }
+    } else {
+      candidate = settings.twqr_payload || '';
+      if (!candidate.trim()) {
+        return { hint: '請貼上 TWQR 內容（TWQRP:// 或 TWQRP%3A 開頭）。', masked: '' };
+      }
+    }
+
+    const norm = normalizePayload(candidate);
+    if (!norm) {
+      return {
+        hint: '這不是 TWQR 格式（TWQRP:// 或 TWQRP%3A 開頭），無法儲存。',
+        masked: maskTwqrPayload(candidate),
+        isError: true
+      };
+    }
+    const parsed = parsePayload(norm);
+    return {
+      hint: parsed
+        ? `看得懂：${parsed.type === '02' ? '轉帳' : `交易類型 ${parsed.type}`}${parsed.bank_code ? `，銀行代碼 ${parsed.bank_code}` : ''}${parsed.account_last4 ? `，帳號末四碼 ${parsed.account_last4}` : ''}。條碼實際內容如下（帳號中段遮起來）：`
+        : 'TWQR 內容已編碼。',
+      masked: maskTwqrPayload(norm),
+      isError: false
+    };
+  }, [settings.twqr_mode, settings.twqr_bank_code, settings.twqr_account, settings.twqr_payload, settings.twqr_use_raw_image, settings.twqr_raw_image, twqrImgDecoded, twqrImgError, twqrServerMeta]);
 
   // Slide upload & management
   const handleSlideFileSelect = (setKey, file) => {
@@ -1288,6 +1485,277 @@ export default function DisplayAdminPage() {
           {renderSlideSection('general', generalSlides)}
         </section>
       </div>
+
+      {/* 4.5 Checkout Sync & TWQR Payment Barcode (Round 29) */}
+      <section
+        data-testid="display-checkout-twqr-section"
+        className="bg-sg-paper border border-sg-line rounded-[18px] p-5 space-y-4 shadow-warm"
+      >
+        <div>
+          <h2 className="font-display text-lg font-bold text-sg-ink">結帳同步與收款條碼（TWQR）</h2>
+          <p className="text-xs text-sg-muted mt-0.5">
+            店員手機開啟結帳時同步顯示明細與收款方式；只有店員選「銀行轉帳」時顯示收款條碼。
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 text-sm text-sg-ink cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="admin-checkout-sync-checkbox"
+                checked={settings.checkout_sync !== false}
+                onChange={e => setSettings(prev => ({ ...prev, checkout_sync: e.target.checked }))}
+                className="accent-sg-brown w-4 h-4"
+              />
+              店員手機開啟結帳時，顯示屏同步顯示
+            </label>
+
+            <label className="flex items-center gap-2 text-sm text-sg-ink cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="admin-checkout-wake-checkbox"
+                checked={settings.checkout_wake !== false}
+                onChange={e => setSettings(prev => ({ ...prev, checkout_wake: e.target.checked }))}
+                className="accent-sg-brown w-4 h-4"
+              />
+              螢幕關閉時段也叫醒來顯示
+            </label>
+
+            <label className="flex items-center gap-2 text-sm text-sg-ink cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="admin-checkout-per-person-checkbox"
+                checked={settings.checkout_per_person !== false}
+                onChange={e => setSettings(prev => ({ ...prev, checkout_per_person: e.target.checked }))}
+                className="accent-sg-brown w-4 h-4"
+              />
+              逐位列出金額
+            </label>
+
+            <div className="space-y-1 pt-1">
+              <div className="text-xs text-sg-muted">付款方式（直接沿用「系統設定 → 付款方式」，這裡只顯示）</div>
+              <div className="flex flex-wrap gap-1.5" data-testid="admin-payment-methods-preview">
+                {paymentMethods.length > 0 ? paymentMethods.map(m => (
+                  <span
+                    key={m.key}
+                    className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
+                      m.enabled !== false
+                        ? 'bg-sg-brown-soft border-sg-brown/30 text-sg-brown'
+                        : 'bg-sg-bg border-sg-line text-sg-muted line-through'
+                    }`}
+                  >
+                    {m.label}
+                  </span>
+                )) : (
+                  <span className="text-xs text-sg-muted">現金、LINE Pay、銀行轉帳</span>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+              <label className="flex flex-col gap-1 text-xs text-sg-muted">
+                感謝畫面停留
+                <span className="flex items-center gap-1 text-sm text-sg-ink">
+                  <input
+                    type="number"
+                    min={3}
+                    max={30}
+                    data-testid="admin-thanks-seconds-input"
+                    value={settings.thanks_seconds}
+                    onChange={e => setSettings(prev => ({ ...prev, thanks_seconds: Number(e.target.value) || 8 }))}
+                    className="w-16 px-2 py-1 rounded-lg border border-sg-line bg-sg-paper"
+                  />
+                  秒
+                </span>
+              </label>
+
+              <label className="flex flex-col gap-1 text-xs text-sg-muted">
+                店員訊息顯示
+                <span className="flex items-center gap-1 text-sm text-sg-ink">
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    data-testid="admin-message-minutes-input"
+                    value={settings.message_minutes}
+                    onChange={e => setSettings(prev => ({ ...prev, message_minutes: Number(e.target.value) || 3 }))}
+                    className="w-16 px-2 py-1 rounded-lg border border-sg-line bg-sg-paper"
+                  />
+                  分鐘
+                </span>
+              </label>
+
+              <label className="flex flex-col gap-1 text-xs text-sg-muted">
+                結帳無動作回去
+                <span className="flex items-center gap-1 text-sm text-sg-ink">
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    data-testid="admin-idle-minutes-input"
+                    value={settings.idle_minutes}
+                    onChange={e => setSettings(prev => ({ ...prev, idle_minutes: Number(e.target.value) || 5 }))}
+                    className="w-16 px-2 py-1 rounded-lg border border-sg-line bg-sg-paper"
+                  />
+                  分鐘
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="text-xs text-sg-muted">收款條碼怎麼來</div>
+            <div className="space-y-1.5 text-sm text-sg-ink">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="twqr_mode"
+                  data-testid="twqr-mode-acct"
+                  checked={settings.twqr_mode === 'acct'}
+                  onChange={() => setSettings(prev => ({ ...prev, twqr_mode: 'acct' }))}
+                  className="accent-sg-brown"
+                />
+                輸入銀行代碼和帳號（系統做成 TWQR 轉帳碼）
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="twqr_mode"
+                  data-testid="twqr-mode-img"
+                  checked={settings.twqr_mode === 'img'}
+                  onChange={() => setSettings(prev => ({ ...prev, twqr_mode: 'img' }))}
+                  className="accent-sg-brown"
+                />
+                上傳 PayMe 或銀行給的條碼圖片（系統讀出內容）
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="twqr_mode"
+                  data-testid="twqr-mode-text"
+                  checked={settings.twqr_mode === 'text'}
+                  onChange={() => setSettings(prev => ({ ...prev, twqr_mode: 'text' }))}
+                  className="accent-sg-brown"
+                />
+                貼上 TWQR 內容
+              </label>
+            </div>
+
+            {settings.twqr_mode === 'acct' && (
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={3}
+                  data-testid="twqr-bank-code-input"
+                  value={settings.twqr_bank_code || ''}
+                  onChange={e => setSettings(prev => ({ ...prev, twqr_bank_code: e.target.value.replace(/\D/g, '').slice(0, 3) }))}
+                  placeholder="銀行代碼，例如 822"
+                  className="w-40 px-3 py-1.5 rounded-lg border border-sg-line bg-sg-paper text-sm font-num"
+                />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={16}
+                  data-testid="twqr-account-input"
+                  value={settings.twqr_account || ''}
+                  onChange={e => setSettings(prev => ({ ...prev, twqr_account: e.target.value.replace(/\D/g, '').slice(0, 16) }))}
+                  placeholder={twqrServerMeta.last4 ? `已設定末四碼 ${twqrServerMeta.last4}（留空維持）` : '帳號（只填數字）'}
+                  className="w-56 px-3 py-1.5 rounded-lg border border-sg-line bg-sg-paper text-sm font-num"
+                />
+              </div>
+            )}
+
+            {settings.twqr_mode === 'img' && (
+              <div className="space-y-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  data-testid="twqr-img-file-input"
+                  onChange={e => handleTwqrImageUpload(e.target.files?.[0])}
+                  className="text-xs"
+                />
+                {twqrImgError && (
+                  <div className="text-xs font-bold text-sg-danger" data-testid="twqr-img-error">
+                    {twqrImgError}
+                  </div>
+                )}
+                <label className="flex items-center gap-2 text-sm text-sg-ink cursor-pointer">
+                  <input
+                    type="checkbox"
+                    data-testid="twqr-use-raw-checkbox"
+                    checked={Boolean(settings.twqr_use_raw_image)}
+                    onChange={e => setSettings(prev => ({ ...prev, twqr_use_raw_image: e.target.checked }))}
+                    className="accent-sg-brown w-4 h-4"
+                  />
+                  直接顯示上傳的原圖（不重新產生，也不加 TWQR 標誌）
+                </label>
+              </div>
+            )}
+
+            {settings.twqr_mode === 'text' && (
+              <input
+                type="text"
+                data-testid="twqr-payload-input"
+                value={settings.twqr_payload || ''}
+                onChange={e => setSettings(prev => ({ ...prev, twqr_payload: e.target.value }))}
+                placeholder="TWQRP:// 或 TWQRP%3A 開頭"
+                className="w-full px-3 py-1.5 rounded-lg border border-sg-line bg-sg-paper text-sm font-mono"
+              />
+            )}
+
+            <div className="space-y-1">
+              <div
+                data-testid="twqr-parse-preview"
+                className={`text-xs ${twqrPreview.isError ? 'text-sg-danger font-bold' : 'text-sg-muted'}`}
+              >
+                {twqrPreview.hint}
+              </div>
+              {twqrPreview.masked && (
+                <code
+                  data-testid="twqr-masked-code"
+                  className="block text-[11px] font-mono break-all bg-sg-bg px-2.5 py-1.5 rounded-lg text-sg-muted"
+                >
+                  {twqrPreview.masked}
+                </code>
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-sg-line space-y-2">
+              <label className="flex items-center gap-2 text-sm text-sg-ink cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid="twqr-logo-enabled-checkbox"
+                  checked={settings.twqr_logo_enabled !== false}
+                  onChange={e => setSettings(prev => ({ ...prev, twqr_logo_enabled: e.target.checked }))}
+                  className="accent-sg-brown w-4 h-4"
+                />
+                條碼中間顯示 TWQR 標誌
+              </label>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-sg-muted">
+                <span>TWQR 標誌圖檔：</span>
+                <input
+                  type="file"
+                  accept="image/png,image/svg+xml,image/jpeg"
+                  data-testid="twqr-logo-file-input"
+                  onChange={e => handleTwqrLogoUpload(e.target.files?.[0])}
+                  className="text-xs max-w-[200px]"
+                />
+                {(settings.twqr_logo_image || (settings.twqr_has_custom_logo && settings.twqr_logo_image !== null)) && (
+                  <button
+                    type="button"
+                    onClick={() => setSettings(prev => ({ ...prev, twqr_logo_image: null, twqr_has_custom_logo: false }))}
+                    className="px-2 py-0.5 rounded-full border border-sg-line bg-sg-bg text-xs text-sg-ink"
+                  >
+                    回復預設標誌
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* 5. Special Dates */}
       <section

@@ -11,11 +11,12 @@
     "preview": "vite preview",
     "test:e2e": "node tests/acceptance.spec.js",
     "test:layout": "node tests/layout-edges.spec.js",
-    "test:all": "node tests/admin-smoke.spec.js && node tests/layout-edges.spec.js && node tests/seating.spec.js && node tests/ux-fixes.spec.js && node tests/round9_section1.spec.js && node tests/round9_section2.spec.js && node tests/round9_section3.spec.js && node tests/round9_section4.spec.js && node tests/round9_section5.spec.js && node tests/acceptance.spec.js && node tests/round10_checkout_draft.spec.js && node tests/round13_floor.spec.js && node tests/round14_mark_unpaid.spec.js && node tests/emergency-hotfix.spec.js && node tests/round22_table_panel.spec.js && node tests/round23_seat_panel.spec.js && node tests/round24_zones.spec.js && node tests/round25_self_day.spec.js && node tests/round26_entry_pass.spec.js && node tests/round27_floor_guide.spec.js && node tests/round27_kiosk_admin.spec.js && node tests/round28_store_display.spec.js"
+    "test:all": "node tests/admin-smoke.spec.js && node tests/layout-edges.spec.js && node tests/seating.spec.js && node tests/ux-fixes.spec.js && node tests/round9_section1.spec.js && node tests/round9_section2.spec.js && node tests/round9_section3.spec.js && node tests/round9_section4.spec.js && node tests/round9_section5.spec.js && node tests/acceptance.spec.js && node tests/round10_checkout_draft.spec.js && node tests/round13_floor.spec.js && node tests/round14_mark_unpaid.spec.js && node tests/emergency-hotfix.spec.js && node tests/round22_table_panel.spec.js && node tests/round23_seat_panel.spec.js && node tests/round24_zones.spec.js && node tests/round25_self_day.spec.js && node tests/round26_entry_pass.spec.js && node tests/round27_floor_guide.spec.js && node tests/round27_kiosk_admin.spec.js && node tests/round28_store_display.spec.js && node tests/round29_display_checkout.spec.js"
   },
   "dependencies": {
     "axios": "^1.4.0",
     "date-fns": "^2.30.0",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.263.1",
     "mobile-drag-drop": "^3.0.0-rc.0",
     "qrcode": "^1.5.4",
