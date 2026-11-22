@@ -23,7 +23,8 @@ import {
   Lock,
   UserX,
   MoreHorizontal,
-  LogOut
+  LogOut,
+  Monitor
 } from 'lucide-react';
 import api from '../../api/axios';
 import { useLiveFloor } from '../../hooks/admin/useLiveFloor';
@@ -190,6 +191,66 @@ export default function SeatingPage() {
   const [lineMsgReservation, setLineMsgReservation] = useState(null);
   const [cardMenuBookingRef, setCardMenuBookingRef] = useState(null);
   const [cancelReservationTarget, setCancelReservationTarget] = useState(null);
+
+  // Round 29 Item 3: Staff message push to store display
+  const [activeDisplayMsg, setActiveDisplayMsg] = useState(null);
+  const [showDisplayMsgModal, setShowDisplayMsgModal] = useState(false);
+  const [displayMsgText, setDisplayMsgText] = useState('');
+  const [displayMsgError, setDisplayMsgError] = useState('');
+  const [displayMsgSending, setDisplayMsgSending] = useState(false);
+
+  useEffect(() => {
+    if (!activeDisplayMsg?.expires_at) return undefined;
+    const expMs = new Date(activeDisplayMsg.expires_at).getTime();
+    if (!Number.isFinite(expMs)) return undefined;
+    const delay = expMs - Date.now();
+    if (delay <= 0) {
+      setActiveDisplayMsg(null);
+      return undefined;
+    }
+    const id = setTimeout(() => setActiveDisplayMsg(null), delay);
+    return () => clearTimeout(id);
+  }, [activeDisplayMsg]);
+
+  const handlePushDisplayMessage = async (e) => {
+    if (e) e.preventDefault();
+    const cleaned = displayMsgText.replace(/[\r\n]+/g, ' ').trim();
+    if (!cleaned) {
+      setDisplayMsgError('請輸入要顯示的訊息');
+      return;
+    }
+    if (cleaned.length > 40) {
+      setDisplayMsgError('訊息最多 40 個字');
+      return;
+    }
+    setDisplayMsgSending(true);
+    setDisplayMsgError('');
+    try {
+      const res = await api.post('/display/message', { text: cleaned });
+      const msg = res.data?.message || {
+        text: cleaned,
+        expires_at: new Date(Date.now() + 3 * 60000).toISOString()
+      };
+      setActiveDisplayMsg(msg);
+      setShowDisplayMsgModal(false);
+      setDisplayMsgText('');
+      showToast('已推送訊息到店內顯示屏');
+    } catch (err) {
+      setDisplayMsgError(err.response?.data?.error || '推送訊息失敗');
+    } finally {
+      setDisplayMsgSending(false);
+    }
+  };
+
+  const handleClearDisplayMessage = async () => {
+    try {
+      await api.delete('/display/message');
+      setActiveDisplayMsg(null);
+      showToast('已收回顯示屏訊息');
+    } catch (err) {
+      showToast(err.response?.data?.error || '收回訊息失敗', 'error');
+    }
+  };
 
   const handleCancelReservation = async () => {
     if (!cancelReservationTarget) return;
@@ -859,6 +920,31 @@ export default function SeatingPage() {
             activeTab={activeTab}
             onChange={handleTabChange}
           />
+          {activeDisplayMsg ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="seating-clear-display-msg-btn"
+              onClick={handleClearDisplayMessage}
+              className="border-sg-honey bg-sg-honey-soft text-sg-honey-ink"
+            >
+              <Monitor className="w-4 h-4 mr-1" />
+              收回顯示屏訊息
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="seating-push-display-msg-btn"
+              onClick={() => {
+                setDisplayMsgError('');
+                setShowDisplayMsgModal(true);
+              }}
+            >
+              <Monitor className="w-4 h-4 mr-1 text-sg-brown" />
+              推到顯示屏
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -908,14 +994,41 @@ export default function SeatingPage() {
             activeTab={activeTab}
             onChange={handleTabChange}
           />
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowForceAdd(true)}
-          >
-            <Plus className="w-4 h-4 mr-0.5 text-sg-brown" />
-            加人
-          </Button>
+          <div className="flex items-center gap-1.5">
+            {activeDisplayMsg ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="seating-mobile-clear-display-msg-btn"
+                onClick={handleClearDisplayMessage}
+                className="border-sg-honey bg-sg-honey-soft text-sg-honey-ink"
+              >
+                <Monitor className="w-4 h-4 mr-0.5" />
+                收回訊息
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="seating-mobile-push-display-msg-btn"
+                onClick={() => {
+                  setDisplayMsgError('');
+                  setShowDisplayMsgModal(true);
+                }}
+              >
+                <Monitor className="w-4 h-4 mr-0.5 text-sg-brown" />
+                推到顯示屏
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowForceAdd(true)}
+            >
+              <Plus className="w-4 h-4 mr-0.5 text-sg-brown" />
+              加人
+            </Button>
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
@@ -3047,6 +3160,55 @@ export default function SeatingPage() {
           }}
         />
       )}
+
+      {/* Store Display Message Push Modal (Round 29 Item 3) */}
+      <ResponsivePanel
+        isOpen={showDisplayMsgModal}
+        onClose={() => setShowDisplayMsgModal(false)}
+        title="推一則訊息到店內顯示屏"
+        subtitle="顯示在畫面上方，最多 40 字（結帳畫面時不會蓋住）"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="secondary" size="md" onClick={() => setShowDisplayMsgModal(false)}>
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              data-testid="display-msg-submit-btn"
+              disabled={displayMsgSending}
+              onClick={handlePushDisplayMessage}
+            >
+              {displayMsgSending ? '推送中...' : '推到顯示屏'}
+            </Button>
+          </div>
+        }
+      >
+        <form onSubmit={handlePushDisplayMessage} className="space-y-3 py-2">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[12px] font-bold text-sg-ink">通知內容</label>
+              <span className="text-[11px] font-num text-sg-muted">
+                {displayMsgText.replace(/[\r\n]+/g, ' ').trim().length}/40
+              </span>
+            </div>
+            <input
+              type="text"
+              data-testid="display-msg-input"
+              maxLength={40}
+              value={displayMsgText}
+              onChange={(e) => setDisplayMsgText(e.target.value)}
+              placeholder="例如：A3 桌的客人，請到櫃檯一下"
+              className="w-full px-3 py-2 rounded-xl border border-sg-line text-[14px] focus:outline-none focus:border-sg-brown"
+            />
+          </div>
+          {displayMsgError && (
+            <div className="p-2.5 rounded-xl bg-sg-danger-soft text-sg-danger text-[12px] font-bold">
+              {displayMsgError}
+            </div>
+          )}
+        </form>
+      </ResponsivePanel>
     </div>
   );
 }

@@ -11,7 +11,9 @@ import {
 } from '../controllers/displayDeviceController.js';
 import {
   getDisplaySettings,
-  updateDisplaySettings
+  updateDisplaySettings,
+  serveTwqrRawImageHandler,
+  serveTwqrLogoImageHandler
 } from '../controllers/displaySettingController.js';
 import {
   getDisplayStateHandler,
@@ -27,9 +29,16 @@ import {
   deleteDisplaySlideHandler,
   downloadDisplaySlideHandler
 } from '../controllers/displaySlideController.js';
+import { postDisplayCheckout } from '../controllers/displayCheckoutController.js';
+import { postDisplayMessage, deleteDisplayMessage } from '../controllers/displayMessageController.js';
 
 const router = express.Router();
 const adminDisplayAuth = [verifyToken, requireAnyPermission(['settings'])];
+const checkoutStaffAuth = [
+  verifyToken,
+  requireAnyPermission(['reservations', 'seating', 'weekly', 'accounting', 'equipment', 'coupons'])
+];
+const floorStaffAuth = [verifyToken, requireAnyPermission(['reservations', 'seating', 'weekly'])];
 
 // Display device login & public device list (id + name only)
 router.get('/devices', listPublicDisplayDevices);
@@ -64,7 +73,16 @@ router.put('/admin/slides/order', ...adminDisplayAuth, reorderDisplaySlidesHandl
 router.patch('/admin/slides/:id', ...adminDisplayAuth, updateDisplaySlideHandler);
 router.delete('/admin/slides/:id', ...adminDisplayAuth, deleteDisplaySlideHandler);
 
-// Public slide image download (immutable cacheable via sha256)
+// Public slide & TWQR image downloads (immutable cacheable via sha256)
 router.get('/files/slides/:id/:sha256', downloadDisplaySlideHandler);
+router.get('/files/twqr-raw/:hash', serveTwqrRawImageHandler);
+router.get('/files/twqr-logo/:hash', serveTwqrLogoImageHandler);
+
+// Staff checkout sync (same permissions as /api/billing)
+router.post('/checkout', ...checkoutStaffAuth, postDisplayCheckout);
+
+// Staff message push / clear (same permissions as /api/floor)
+router.post('/message', ...floorStaffAuth, postDisplayMessage);
+router.delete('/message', ...floorStaffAuth, deleteDisplayMessage);
 
 export default router;

@@ -8,6 +8,8 @@ import DisplayTimersLayout from '../../components/display/DisplayTimersLayout';
 import DisplaySlideCard from '../../components/display/DisplaySlideCard';
 import DisplaySelfSide from '../../components/display/DisplaySelfSide';
 import DisplayTicker from '../../components/display/DisplayTicker';
+import DisplayCheckoutView from '../../components/display/DisplayCheckoutView';
+import DisplayThanksView from '../../components/display/DisplayThanksView';
 import {
   computeBurnInShift,
   formatTaipeiDateShort,
@@ -80,6 +82,10 @@ export default function DisplayPage() {
   const [annIdx, setAnnIdx] = useState(0);
   const [slideIdx, setSlideIdx] = useState(0);
 
+  // Round 29: Checkout sync & staff message push
+  const [checkoutState, setCheckoutState] = useState(null);
+  const [staffMessage, setStaffMessage] = useState(null);
+
   // Viewport scaling (1920x1080 proportional fit)
   const [scale, setScale] = useState(() => {
     if (typeof window === 'undefined') return 1;
@@ -118,6 +124,14 @@ export default function DisplayPage() {
       }
     }
     setStateData(payload);
+    if ('checkout' in payload || 'active_checkout' in payload) {
+      const nextCo = payload.checkout ?? payload.active_checkout ?? null;
+      setCheckoutState(nextCo && nextCo.phase && nextCo.phase !== 'close' ? nextCo : null);
+    }
+    if ('message' in payload || 'staff_message' in payload || 'active_message' in payload) {
+      const nextMsg = payload.message ?? payload.staff_message ?? payload.active_message ?? null;
+      setStaffMessage(nextMsg && nextMsg.text ? nextMsg : null);
+    }
     setOffline(false);
   }, []);
 
@@ -156,6 +170,30 @@ export default function DisplayPage() {
       try {
         const parsed = JSON.parse(ev.data);
         applyServerState(parsed);
+      } catch {}
+    });
+
+    es.addEventListener('checkout', (ev) => {
+      if (!active) return;
+      try {
+        const parsed = JSON.parse(ev.data);
+        if (!parsed || parsed.phase === 'close') {
+          setCheckoutState(null);
+        } else {
+          setCheckoutState({ ...parsed, _receivedAt: Date.now() });
+        }
+      } catch {}
+    });
+
+    es.addEventListener('message', (ev) => {
+      if (!active) return;
+      try {
+        const parsed = JSON.parse(ev.data);
+        if (!parsed || !parsed.text) {
+          setStaffMessage(null);
+        } else {
+          setStaffMessage({ ...parsed, _receivedAt: Date.now() });
+        }
       } catch {}
     });
 
@@ -269,7 +307,15 @@ export default function DisplayPage() {
 
   const effectiveContent = useMemo(() => {
     if (!stateData) return 'loading';
-    if (!decision?.on || decision?.content === 'off') return 'off';
+    const normallyOff = !decision?.on || decision?.content === 'off';
+    const syncEnabled = settings.checkout_sync !== false;
+    const wakeEnabled = checkoutState?.wake ?? (settings.checkout_wake !== false);
+
+    if (checkoutState && syncEnabled && (!normallyOff || wakeEnabled)) {
+      return checkoutState.phase === 'paid' ? 'thanks' : 'checkout';
+    }
+
+    if (normallyOff) return 'off';
     let c = decision.content || 'timers';
     const fallbackEnabled = settings.fallback_to_slides !== false;
     if ((c === 'timers' || c === 'timers_self') && fallbackEnabled) {
@@ -284,7 +330,38 @@ export default function DisplayPage() {
       }
     }
     return c;
-  }, [stateData, decision, settings.fallback_to_slides, seats, seatNowMs]);
+  }, [stateData, decision, settings.fallback_to_slides, settings.checkout_sync, settings.checkout_wake, checkoutState, seats, seatNowMs]);
+
+  // Round 29: Auto-clear thanks screen after thanks_seconds, or idle checkout after idle_minutes
+  useEffect(() => {
+    if (!checkoutState) return undefined;
+    const isPaid = checkoutState.phase === 'paid';
+    const thanksSec = Math.max(3, Math.min(30, Number(checkoutState.thanks_seconds ?? settings.thanks_seconds) || 8));
+    const idleMin = Math.max(1, Math.min(30, Number(checkoutState.idle_minutes ?? settings.idle_minutes) || 5));
+    const delayMs = isPaid ? thanksSec * 1000 : idleMin * 60000;
+    const id = setTimeout(() => {
+      setCheckoutState(null);
+    }, delayMs);
+    return () => clearTimeout(id);
+  }, [checkoutState, settings.thanks_seconds, settings.idle_minutes]);
+
+  // Round 29: Auto-expire staff message after expires_at / message_minutes
+  useEffect(() => {
+    if (!staffMessage) return undefined;
+    let delayMs = Math.max(1, Math.min(30, Number(settings.message_minutes) || 3)) * 60000;
+    if (staffMessage.expires_at) {
+      const expMs = new Date(staffMessage.expires_at).getTime();
+      if (Number.isFinite(expMs)) {
+        delayMs = expMs - (Date.now() + serverOffsetRef.current);
+      }
+    }
+    if (delayMs <= 0) {
+      setStaffMessage(null);
+      return undefined;
+    }
+    const id = setTimeout(() => setStaffMessage(null), delayMs);
+    return () => clearTimeout(id);
+  }, [staffMessage, settings.message_minutes]);
 
   // Rotation intervals
   const cardSec = Math.max(5, Math.min(60, Number(settings.card_seconds) || 12));
@@ -406,10 +483,31 @@ export default function DisplayPage() {
       return <div data-testid="display-off-screen" className="w-full h-full bg-black" />;
     }
 
+    if (effectiveContent === 'thanks') {
+      return (
+        <div
+          data-testid="display-active-screen"
+          data-display-content="thanks"
+          className="relative w-full h-full bg-sg-bg text-sg-ink font-body overflow-hidden pointer-events-none select-none"
+        >
+          <BrandBlobs />
+          <DisplayThanksView />
+        </div>
+      );
+    }
+
     const lineInfo = stateData.line || {};
     const notices = stateData.notices || settings.notices || [];
     const announcements = stateData.announcements || settings.announcements || [];
     const showLineMini = settings.show_line_mini !== false;
+    const isMsgNotExpired = !staffMessage?.expires_at || clockNowMs < new Date(staffMessage.expires_at).getTime();
+    const showStaffNotice = Boolean(
+      staffMessage?.text &&
+      isMsgNotExpired &&
+      effectiveContent !== 'checkout' &&
+      effectiveContent !== 'thanks' &&
+      effectiveContent !== 'off'
+    );
 
     return (
       <div
@@ -426,6 +524,44 @@ export default function DisplayPage() {
           offline={offline}
           screenScale={scale}
         />
+
+        {showStaffNotice && (
+          <div
+            data-testid="display-staff-notice-bar"
+            className="absolute left-1/2 -translate-x-1/2 flex items-center bg-sg-honey-soft border-4 border-sg-honey text-sg-ink rounded-full"
+            style={{
+              top: 150,
+              zIndex: 30,
+              gap: 20,
+              maxWidth: 1500,
+              padding: '18px 40px',
+              boxShadow: '0 10px 28px rgba(62,51,43,0.18)'
+            }}
+          >
+            <i
+              className="not-italic font-body font-bold text-sg-paper bg-sg-honey-ink rounded-full flex-none"
+              style={{ fontSize: 26, padding: '4px 18px' }}
+            >
+              店員通知
+            </i>
+            <b
+              data-testid="display-staff-notice-text"
+              className="font-display font-bold whitespace-nowrap overflow-hidden text-ellipsis"
+              style={{ fontSize: 44 }}
+            >
+              {staffMessage.text}
+            </b>
+          </div>
+        )}
+
+        {effectiveContent === 'checkout' && (
+          <DisplayCheckoutView
+            checkout={checkoutState}
+            paymentMethods={stateData.payment_methods || checkoutState?.payment_methods || []}
+            perPerson={checkoutState?.per_person_detail ?? (settings.checkout_per_person !== false)}
+            twqr={checkoutState?.twqr || stateData.twqr || {}}
+          />
+        )}
 
         {(effectiveContent === 'timers' || effectiveContent === 'timers_self') && (
           <DisplayTimersLayout
@@ -484,15 +620,17 @@ export default function DisplayPage() {
           </div>
         )}
 
-        <DisplayTicker
-          announcements={announcements}
-          annIdx={annIdx}
-          closingWarning={closingWarning}
-          isSelfMode={effectiveContent === 'timers_self' || effectiveContent === 'slides_self'}
-          isSelfSlides={effectiveContent === 'slides_self'}
-          showLineMini={showLineMini}
-          line={lineInfo}
-        />
+        {effectiveContent !== 'checkout' && (
+          <DisplayTicker
+            announcements={announcements}
+            annIdx={annIdx}
+            closingWarning={closingWarning}
+            isSelfMode={effectiveContent === 'timers_self' || effectiveContent === 'slides_self'}
+            isSelfSlides={effectiveContent === 'slides_self'}
+            showLineMini={showLineMini}
+            line={lineInfo}
+          />
+        )}
       </div>
     );
   };
