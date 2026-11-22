@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Lock, Plus, RotateCcw, AlertTriangle, Check, Ticket, Printer, MoreVertical } from 'lucide-react';
 import api from '../../../api/axios';
+import { postDisplayCheckout } from '../../../utils/display/checkoutSync';
 import ResponsivePanel from '../ResponsivePanel';
 import StatusPill from '../StatusPill';
 import PayMethodGrid from '../PayMethodGrid';
@@ -22,7 +23,10 @@ export default function SplitCollectView({
   onPaymentSuccess,
   initialPersonNo = null,
   onOpenSharedSplit = null,
-  initialSupplementPerson = null
+  initialSupplementPerson = null,
+  displaySyncEnabled = true,
+  onDisplayPaid = null,
+  onDisplayNextPerson = null
 }) {
   const bill = billData?.bill || {};
   const persons = bill.persons || [];
@@ -36,6 +40,9 @@ export default function SplitCollectView({
 
   const [method, setMethod] = useState('cash');
   const [cashReceived, setCashReceived] = useState(0);
+  const [hasSelectedMethod, setHasSelectedMethod] = useState(false);
+  const splitDisplayTimerRef = useRef(null);
+  const splitPaidRef = useRef(false);
   const [passTenders, setPassTenders] = useState([]);
   const [note, setNote] = useState('');
   const [autoPrint, setAutoPrint] = useState(true);
@@ -216,6 +223,34 @@ export default function SplitCollectView({
     }
   };
 
+  useEffect(() => {
+    if (!isOpen || !bookingRef || !displaySyncEnabled || successPaymentData || splitPaidRef.current) {
+      return undefined;
+    }
+    if (splitDisplayTimerRef.current) {
+      clearTimeout(splitDisplayTimerRef.current);
+    }
+    splitDisplayTimerRef.current = setTimeout(() => {
+      splitDisplayTimerRef.current = null;
+      if (splitPaidRef.current) return;
+      const activeMethod = hasSelectedMethod ? (method === 'pass' ? 'cash' : method) : null;
+      const activeCash = (hasSelectedMethod && method === 'cash' && cashReceived > 0) ? cashReceived : null;
+      postDisplayCheckout({
+        booking_ref: bookingRef,
+        phase: activeMethod ? 'method' : 'open',
+        person_nos: selectedPersonNos,
+        method: activeMethod,
+        cash_received: activeCash
+      });
+    }, 300);
+    return () => {
+      if (splitDisplayTimerRef.current) {
+        clearTimeout(splitDisplayTimerRef.current);
+        splitDisplayTimerRef.current = null;
+      }
+    };
+  }, [isOpen, bookingRef, displaySyncEnabled, selectedPersonNos, method, cashReceived, hasSelectedMethod, successPaymentData]);
+
   const handleMethodChange = (m) => {
     if (m === 'pass') {
       if (selectedPersonNos.length === 0) {
@@ -226,6 +261,7 @@ export default function SplitCollectView({
       return;
     }
     setMethod(m);
+    setHasSelectedMethod(true);
   };
 
   const handleCollect = async () => {
@@ -263,6 +299,18 @@ export default function SplitCollectView({
             console.warn('[SplitCollect] Local print trigger:', printErr);
           }
         }
+      }
+
+      splitPaidRef.current = true;
+      if (onDisplayPaid) onDisplayPaid();
+      if (displaySyncEnabled) {
+        postDisplayCheckout({
+          booking_ref: bookingRef,
+          phase: 'paid',
+          person_nos: selectedPersonNos,
+          method: method === 'pass' ? 'cash' : method,
+          cash_received: method === 'cash' ? (cashReceived || netCashDue) : null
+        });
       }
 
       const payData = {
@@ -557,6 +605,10 @@ export default function SplitCollectView({
             bookingRef={bookingRef}
             booking={billData?.booking}
             onNextPerson={(nextPNo) => {
+              splitPaidRef.current = false;
+              setHasSelectedMethod(false);
+              setCashReceived(0);
+              if (onDisplayNextPerson) onDisplayNextPerson();
               setSuccessPaymentData(null);
               setSelectedPersonNos([nextPNo]);
             }}
@@ -712,7 +764,10 @@ export default function SplitCollectView({
                   <CashPad
                     dueAmount={netCashDue}
                     cashReceived={cashReceived || netCashDue}
-                    onChange={setCashReceived}
+                    onChange={(val) => {
+                      setCashReceived(val);
+                      setHasSelectedMethod(true);
+                    }}
                   />
                 )}
 

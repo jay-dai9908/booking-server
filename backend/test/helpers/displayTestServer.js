@@ -6,6 +6,7 @@ import reservationRoutes from '../../src/routes/reservations.js';
 import floorRoutes from '../../src/routes/floor.js';
 import billingRoutes from '../../src/routes/billing.js';
 import displayRoutes from '../../src/routes/display.js';
+import dailySettingsRoutes from '../../src/routes/dailySettings.js';
 import { getGlobalSetting } from '../../src/controllers/dailySettingController.js';
 
 export function createDisplayTestApp() {
@@ -16,6 +17,7 @@ export function createDisplayTestApp() {
   app.use('/api/reservations', reservationRoutes);
   app.use('/api/floor', floorRoutes);
   app.use('/api/billing', billingRoutes);
+  app.use('/api/daily-settings', dailySettingsRoutes);
   app.use('/api/display', displayRoutes);
   app.get('/api/global-settings', getGlobalSetting);
   app.use((err, req, res, next) => {

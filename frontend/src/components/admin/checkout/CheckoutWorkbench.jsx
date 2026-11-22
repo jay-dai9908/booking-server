@@ -16,9 +16,16 @@ import {
   Sparkles,
   Info,
   MoreVertical,
-  Trash2
+  Trash2,
+  Monitor
 } from 'lucide-react';
 import api from '../../../api/axios';
+import {
+  isDisplayCheckoutSyncEnabled,
+  setDisplayCheckoutSyncEnabled,
+  postDisplayCheckout,
+  sendDisplayCheckoutCloseKeepalive
+} from '../../../utils/display/checkoutSync';
 import ResponsivePanel from '../ResponsivePanel';
 import StatusPill from '../StatusPill';
 import PayMethodGrid from '../PayMethodGrid';
@@ -105,6 +112,12 @@ export default function CheckoutWorkbench({
   const [collectNote, setCollectNote] = useState('');
   const [collectLoading, setCollectLoading] = useState(false);
   const [collectError, setCollectError] = useState(null);
+  const [togetherMethodSelected, setTogetherMethodSelected] = useState(false);
+
+  // Round 29 Item 1: Store display checkout sync toggle & refs
+  const [displaySyncEnabled, setDisplaySyncEnabled] = useState(() => isDisplayCheckoutSyncEnabled());
+  const displaySyncTimerRef = useRef(null);
+  const displayPaidBookingRef = useRef(null);
 
   // Waive state
   const [waiveReason, setWaiveReason] = useState('店家招待');
@@ -310,6 +323,13 @@ export default function CheckoutWorkbench({
   };
 
   const handleClose = () => {
+    if (displaySyncTimerRef.current) {
+      clearTimeout(displaySyncTimerRef.current);
+      displaySyncTimerRef.current = null;
+    }
+    if (bookingRef && displaySyncEnabled && displayPaidBookingRef.current !== bookingRef) {
+      postDisplayCheckout({ booking_ref: bookingRef, phase: 'close' });
+    }
     if (pendingDraftRef.current || saveTimeoutRef.current) {
       flushDraft().catch(err => {
         console.error('[CheckoutWorkbench] Close flush error:', err);
@@ -321,6 +341,7 @@ export default function CheckoutWorkbench({
 
   useEffect(() => {
     isMountedRef.current = true;
+    displayPaidBookingRef.current = null;
     if (isOpen && bookingRef) {
       hasAutoOpenedSplitRef.current = false;
       loadBill();
@@ -330,6 +351,13 @@ export default function CheckoutWorkbench({
     }
     return () => {
       isMountedRef.current = false;
+      if (displaySyncTimerRef.current) {
+        clearTimeout(displaySyncTimerRef.current);
+        displaySyncTimerRef.current = null;
+      }
+      if (isOpen && bookingRef && isDisplayCheckoutSyncEnabled() && displayPaidBookingRef.current !== bookingRef) {
+        sendDisplayCheckoutCloseKeepalive(bookingRef);
+      }
       if (pendingDraftRef.current || saveTimeoutRef.current) {
         flushDraft().catch(err => {
           console.error('[CheckoutWorkbench] Cleanup flush error:', err);
@@ -339,11 +367,14 @@ export default function CheckoutWorkbench({
     };
   }, [isOpen, bookingRef]);
 
-  // Keepalive flush on tab switch or page close (Section 2)
+  // Keepalive flush on tab switch or page close (Section 2 + Round 29 display close)
   useEffect(() => {
     const handleVisibilityOrPageHide = (e) => {
       if (e.type === 'visibilitychange' && document.visibilityState !== 'hidden') {
         return;
+      }
+      if (isOpen && bookingRef && displaySyncEnabled && displayPaidBookingRef.current !== bookingRef) {
+        sendDisplayCheckoutCloseKeepalive(bookingRef);
       }
       if (pendingDraftRef.current || saveTimeoutRef.current) {
         if (saveTimeoutRef.current) {
@@ -385,7 +416,19 @@ export default function CheckoutWorkbench({
       window.removeEventListener('visibilitychange', handleVisibilityOrPageHide);
       window.removeEventListener('pagehide', handleVisibilityOrPageHide);
     };
-  }, [bookingRef, billData]);
+  }, [isOpen, bookingRef, billData, displaySyncEnabled]);
+
+  const handleToggleDisplaySync = (checked) => {
+    setDisplaySyncEnabled(checked);
+    setDisplayCheckoutSyncEnabled(checked);
+    if (displaySyncTimerRef.current) {
+      clearTimeout(displaySyncTimerRef.current);
+      displaySyncTimerRef.current = null;
+    }
+    if (!checked && bookingRef) {
+      postDisplayCheckout({ booking_ref: bookingRef, phase: 'close' });
+    }
+  };
 
   const scheduleDraftSave = (nextDraft) => {
     pendingDraftRef.current = nextDraft;
@@ -459,6 +502,54 @@ export default function CheckoutWorkbench({
       return billData.bill;
     }
   }, [billData, draftState]);
+
+  // Round 29 Item 1: Debounced checkout sync (open / method) when workbench is active
+  useEffect(() => {
+    if (!isOpen || !bookingRef || loading || !billData || !displaySyncEnabled || showSplitCollect || successPaymentData) {
+      return undefined;
+    }
+    const personsList = clientBill?.persons || billData?.bill?.persons || [];
+    const unpaidNos = personsList.filter(p => !p.paid && !p.is_paid).map(p => p.person_no);
+    const activeMethod = (showCollectModal && togetherMethodSelected) ? collectMethod : null;
+    const activeCash = (showCollectModal && togetherMethodSelected && collectMethod === 'cash' && collectCashReceived > 0)
+      ? collectCashReceived
+      : null;
+
+    if (displaySyncTimerRef.current) {
+      clearTimeout(displaySyncTimerRef.current);
+    }
+    displaySyncTimerRef.current = setTimeout(() => {
+      displaySyncTimerRef.current = null;
+      if (displayPaidBookingRef.current === bookingRef) return;
+      postDisplayCheckout({
+        booking_ref: bookingRef,
+        phase: activeMethod ? 'method' : 'open',
+        person_nos: unpaidNos,
+        method: activeMethod,
+        cash_received: activeCash
+      });
+    }, activeMethod ? 300 : 100);
+
+    return () => {
+      if (displaySyncTimerRef.current) {
+        clearTimeout(displaySyncTimerRef.current);
+        displaySyncTimerRef.current = null;
+      }
+    };
+  }, [
+    isOpen,
+    bookingRef,
+    loading,
+    billData,
+    displaySyncEnabled,
+    showSplitCollect,
+    successPaymentData,
+    showCollectModal,
+    togetherMethodSelected,
+    collectMethod,
+    collectCashReceived,
+    clientBill
+  ]);
 
   if (!isOpen) return null;
 
@@ -626,6 +717,8 @@ export default function CheckoutWorkbench({
     if (pendingDraftRef.current || isSavingRef.current || syncStatus === 'unsynced') {
       await flushDraft();
     }
+    setTogetherMethodSelected(false);
+    setCollectCashReceived(0);
     setShowCollectModal(true);
   };
 
@@ -928,6 +1021,17 @@ export default function CheckoutWorkbench({
           status: res.data.status || prev?.status,
           bill: res.data.bill || prev?.bill
         }));
+      }
+
+      displayPaidBookingRef.current = bookingRef;
+      if (displaySyncEnabled) {
+        postDisplayCheckout({
+          booking_ref: bookingRef,
+          phase: 'paid',
+          person_nos: unpaidNos,
+          method: collectMethod,
+          cash_received: collectMethod === 'cash' ? (collectCashReceived || expectedAmount) : null
+        });
       }
 
       setSuccessPaymentData(res.data);
@@ -1390,6 +1494,20 @@ export default function CheckoutWorkbench({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <label
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-sg-line bg-white text-[12px] font-bold text-sg-ink cursor-pointer select-none whitespace-nowrap"
+              title="同步顯示明細與付款方式到櫃檯店內顯示屏"
+            >
+              <input
+                type="checkbox"
+                data-testid="checkout-display-sync-toggle"
+                checked={displaySyncEnabled}
+                onChange={(e) => handleToggleDisplaySync(e.target.checked)}
+                className="w-3.5 h-3.5 accent-sg-brown rounded"
+              />
+              <Monitor className="w-3.5 h-3.5 text-sg-brown" />
+              <span className="hidden sm:inline">同步到店內顯示屏</span>
+            </label>
             <div data-testid="workbench-header-sync-status" className="text-[12px] font-medium flex items-center gap-1.5">
               {syncStatus === 'unsynced' && (
                 <span className="text-sg-muted">尚未同步</span>
@@ -2307,14 +2425,24 @@ export default function CheckoutWorkbench({
         <div className="space-y-4 py-2">
           <div>
             <span className="text-[13px] font-bold text-sg-ink block mb-2">付款方式</span>
-            <PayMethodGrid value={collectMethod} onChange={setCollectMethod} hidePass />
+            <PayMethodGrid
+              value={collectMethod}
+              onChange={(m) => {
+                setCollectMethod(m);
+                setTogetherMethodSelected(true);
+              }}
+              hidePass
+            />
           </div>
 
           {collectMethod === 'cash' && (
             <CashPad
               dueAmount={netDue}
               cashReceived={collectCashReceived || netDue}
-              onChange={setCollectCashReceived}
+              onChange={(val) => {
+                setCollectCashReceived(val);
+                setTogetherMethodSelected(true);
+              }}
             />
           )}
 
@@ -2408,6 +2536,13 @@ export default function CheckoutWorkbench({
           bookingRef={bookingRef}
           billData={billData}
           initialSupplementPerson={supplementPerson}
+          displaySyncEnabled={displaySyncEnabled}
+          onDisplayPaid={() => {
+            displayPaidBookingRef.current = bookingRef;
+          }}
+          onDisplayNextPerson={() => {
+            displayPaidBookingRef.current = null;
+          }}
           onOpenSharedSplit={() => setShowSharedSplitPanel(true)}
           onPaymentSuccess={(data) => {
             const statusCode = data?.status?.code || data?.status?.status || (typeof data?.status === 'string' ? data.status : 'paid');

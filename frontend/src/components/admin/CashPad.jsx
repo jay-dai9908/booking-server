@@ -56,6 +56,7 @@ export default function CashPad({
           <input
             type="text"
             inputMode="numeric"
+            data-testid="cashpad-received-input"
             value={received === 0 ? '' : received}
             placeholder={String(due)}
             onChange={(e) => {

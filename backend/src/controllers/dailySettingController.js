@@ -2,6 +2,7 @@ import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
+import displayBus from '../services/display/displayBus.js';
 
 export async function ensureKioskSetting(txOrPrisma = prisma) {
   let ks = await txOrPrisma.kioskSetting.findUnique({ where: { id: 1 } });
@@ -635,6 +636,10 @@ export const updateGlobalSetting = async (req, res) => {
         staff_name: req.user?.name || '管理員',
         device_label: '後台'
       }).catch(err => console.error('Failed to log audit event for booking_note_chips:', err));
+    }
+
+    if (dataToUpdate.payment_methods_json !== undefined) {
+      displayBus.settingsChanged();
     }
 
     res.json({ message: 'Global setting updated successfully', setting });

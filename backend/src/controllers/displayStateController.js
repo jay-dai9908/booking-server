@@ -56,10 +56,18 @@ export async function streamDisplayHandler(req, res) {
 
   const unsubscribe = displayBus.subscribeDisplayClient(client);
 
-  // Send immediate state on connect
+  // Send immediate state on connect (and active checkout / message if any)
   try {
     const initialState = await buildDisplayState(new Date());
     sendEvent('state', initialState);
+    const activeCo = displayBus.getActiveCheckout();
+    if (activeCo) {
+      sendEvent('checkout', activeCo);
+    }
+    const activeMsg = displayBus.getActiveMessage();
+    if (activeMsg) {
+      sendEvent('message', activeMsg);
+    }
   } catch (err) {
     console.error('[displayState] initial SSE state error:', err.message);
   }

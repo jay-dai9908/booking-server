@@ -798,7 +798,22 @@ const ensureDatabaseSchema = async () => {
       "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "DisplaySlide_pkey" PRIMARY KEY ("id")
     )`,
-    `CREATE INDEX IF NOT EXISTS "DisplaySlide_set_enabled_sort_order_idx" ON "DisplaySlide"("set", "enabled", "sort_order")`
+    `CREATE INDEX IF NOT EXISTS "DisplaySlide_set_enabled_sort_order_idx" ON "DisplaySlide"("set", "enabled", "sort_order")`,
+
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "checkout_sync" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "checkout_wake" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "checkout_per_person" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "thanks_seconds" INTEGER NOT NULL DEFAULT 8`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "idle_minutes" INTEGER NOT NULL DEFAULT 5`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "message_minutes" INTEGER NOT NULL DEFAULT 3`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_mode" TEXT NOT NULL DEFAULT 'acct'`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_bank_code" TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_account" TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_payload" TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_use_raw_image" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_raw_image" TEXT`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_logo_enabled" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_logo_image" TEXT`
   ];
 
   for (const sql of statements) {

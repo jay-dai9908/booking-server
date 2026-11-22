@@ -8,6 +8,8 @@ import {
   ensureDisplaySetting,
   resolveSharedLineInfo
 } from '../../controllers/displaySettingController.js';
+import { getEnabledPaymentMethods, resolveTwqrConfig } from './displayConfigHelper.js';
+import displayBus from './displayBus.js';
 
 function getTaipeiHour(date) {
   const str = new Intl.DateTimeFormat('en-GB', {
@@ -128,7 +130,7 @@ export async function buildDisplayState(serverNow = new Date()) {
   const businessDateStr = ctx.dateStr;
   const businessDate = dateOnly(businessDateStr);
 
-  const [liveData, resMetaRows, equipmentConfigs, globalSetting, lineInfo] = await Promise.all([
+  const [liveData, resMetaRows, equipmentConfigs, globalSetting, lineInfo, enabledPaymentMethods] = await Promise.all([
     getLiveFloorData(businessDateStr, nowDate),
     prisma.reservation.findMany({
       where: {
@@ -162,7 +164,8 @@ export async function buildDisplayState(serverNow = new Date()) {
         equipment_discount_free_hours: true
       }
     }),
-    resolveSharedLineInfo(prisma)
+    resolveSharedLineInfo(prisma),
+    getEnabledPaymentMethods(prisma)
   ]);
 
   let slidesPayload = { self: [], general: [] };
@@ -389,6 +392,8 @@ export async function buildDisplayState(serverNow = new Date()) {
       : { enabled: true, buy_hours: 3, free_hours: 1 }
   };
 
+  const twqrMeta = resolveTwqrConfig(displaySetting);
+
   return {
     server_now: nowDate.toISOString(),
     date: businessDateStr,
@@ -413,6 +418,16 @@ export async function buildDisplayState(serverNow = new Date()) {
     },
     notices: Array.isArray(displaySetting.notices) ? displaySetting.notices : [],
     slides: slidesPayload,
+    payment_methods: enabledPaymentMethods,
+    twqr: {
+      has_twqr: twqrMeta.has_twqr,
+      use_raw_image: twqrMeta.has_raw_image,
+      raw_image_url: twqrMeta.raw_image_url,
+      logo_enabled: twqrMeta.logo_enabled,
+      logo_url: twqrMeta.logo_url
+    },
+    checkout: displayBus.getActiveCheckout(),
+    message: displayBus.getActiveMessage(),
     settings: {
       map_rotation: displaySetting.map_rotation,
       here_element: displaySetting.here_element,
@@ -426,7 +441,13 @@ export async function buildDisplayState(serverNow = new Date()) {
       closing_warn: displaySetting.closing_warn,
       closing_minutes: displaySetting.closing_minutes,
       shift_minutes: displaySetting.shift_minutes,
-      slide_seconds: displaySetting.slide_seconds
+      slide_seconds: displaySetting.slide_seconds,
+      checkout_sync: displaySetting.checkout_sync ?? true,
+      checkout_wake: displaySetting.checkout_wake ?? true,
+      checkout_per_person: displaySetting.checkout_per_person ?? true,
+      thanks_seconds: displaySetting.thanks_seconds ?? 8,
+      idle_minutes: displaySetting.idle_minutes ?? 5,
+      message_minutes: displaySetting.message_minutes ?? 3
     }
   };
 }

@@ -860,6 +860,20 @@ model DisplaySetting {
   closing_minutes      Int      @default(30)
   shift_minutes        Int      @default(3)
   slide_seconds        Int      @default(8)
+  checkout_sync        Boolean  @default(true)
+  checkout_wake        Boolean  @default(true)
+  checkout_per_person  Boolean  @default(true)
+  thanks_seconds       Int      @default(8)
+  idle_minutes         Int      @default(5)
+  message_minutes      Int      @default(3)
+  twqr_mode            String   @default("acct")
+  twqr_bank_code       String   @default("")
+  twqr_account         String   @default("")
+  twqr_payload         String   @default("")
+  twqr_use_raw_image   Boolean  @default(false)
+  twqr_raw_image       String?  @db.Text
+  twqr_logo_enabled    Boolean  @default(true)
+  twqr_logo_image      String?  @db.Text
   updated_at           DateTime @default(now()) @updatedAt
 }
 
