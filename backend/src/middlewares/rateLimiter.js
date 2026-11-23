@@ -40,50 +40,6 @@ export const createMemoryLimiter = ({ windowMs, max, message }) => {
 };
 
 /**
- * 1. 後台登入失敗限流：15 分鐘內最多 10 次失敗（只計 401，不計成功），超過回傳 429
- */
-export const adminLoginLimiter = (() => {
-  const store = new Map();
-  const windowMs = 15 * 60 * 1000;
-  const maxFailures = 10;
-
-  const cleanup = setInterval(() => {
-    const now = Date.now();
-    for (const [ip, record] of store.entries()) {
-      if (now > record.resetTime) {
-        store.delete(ip);
-      }
-    }
-  }, 60000);
-  if (cleanup.unref) cleanup.unref();
-
-  return (req, res, next) => {
-    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
-    const now = Date.now();
-    const record = store.get(ip);
-
-    if (record && now <= record.resetTime && record.failures >= maxFailures) {
-      return res.status(429).json({ error: '登入嘗試失敗次數過多，請於 15 分鐘後再試' });
-    }
-
-    res.on('finish', () => {
-      if (res.statusCode === 401) {
-        const cur = store.get(ip);
-        if (!cur || Date.now() > cur.resetTime) {
-          store.set(ip, { failures: 1, resetTime: Date.now() + windowMs });
-        } else {
-          cur.failures += 1;
-        }
-      } else if (res.statusCode === 200) {
-        store.delete(ip);
-      }
-    });
-
-    next();
-  };
-})();
-
-/**
  * 2. LINE callback：10 分鐘內最多 20 次，超過回傳 429
  */
 export const lineCallbackLimiter = createMemoryLimiter({

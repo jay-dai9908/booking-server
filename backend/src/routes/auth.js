@@ -1,13 +1,14 @@
 import express from 'express';
-import { lineCallback, register, adminLogin, logout, me } from '../controllers/authController.js';
+import { lineCallback, register, adminLogin, getAdminLockStatusHandler, logout, me } from '../controllers/authController.js';
 import { verifyToken, generateToken } from '../middlewares/authMiddleware.js';
-import { adminLoginLimiter, lineCallbackLimiter, registerLimiter } from '../middlewares/rateLimiter.js';
+import { lineCallbackLimiter, registerLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
 router.post('/line/callback', lineCallbackLimiter, lineCallback);
 router.post('/register', verifyToken, registerLimiter, register);
-router.post('/admin/login', adminLoginLimiter, adminLogin);
+router.get('/admin/lock-status', getAdminLockStatusHandler);
+router.post('/admin/login', adminLogin);
 router.post('/logout', logout);
 router.get('/me', verifyToken, me);
 

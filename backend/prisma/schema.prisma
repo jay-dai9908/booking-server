@@ -851,6 +851,42 @@ model KioskAccessLog {
   @@index([booking_ref])
 }
 
+model AdminLoginGuard {
+  id                         Int       @id @default(1)
+  locked_at                  DateTime?
+  password_failures_reset_at DateTime?
+  unlock_failures_reset_at   DateTime?
+  unlock_blocked_until       DateTime?
+  totp_secret_enc            String?
+  totp_pending_secret_enc    String?
+  totp_enabled               Boolean   @default(false)
+  totp_enabled_at            DateTime?
+  totp_last_step             Int?
+  backup_codes_json          Json?
+  updated_at                 DateTime  @default(now()) @updatedAt
+}
+
+model AdminLoginFailure {
+  id         Int      @id @default(autoincrement())
+  kind       String   // password | unlock_code
+  ip         String?
+  user_agent String?
+  created_at DateTime @default(now())
+
+  @@index([kind, created_at])
+}
+
+model AdminLoginGuardEvent {
+  id         Int      @id @default(autoincrement())
+  type       String   // locked | unlocked_totp | unlocked_backup | unlocked_cli | unlock_blocked | totp_enabled | totp_disabled | totp_regenerated | backup_codes_regenerated | totp_reset_cli
+  ip         String?
+  user_agent String?
+  note       String?
+  created_at DateTime @default(now())
+
+  @@index([created_at])
+}
+
 
 
 

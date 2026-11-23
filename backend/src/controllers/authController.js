@@ -1,9 +1,10 @@
 import axios from 'axios';
 import prisma from '../prismaClient.js';
 import { generateToken, getSuperAdminFingerprint, syncAndVerifyAdminUser } from '../middlewares/authMiddleware.js';
-import { recordUserLoginLog } from '../utils/deviceParser.js';
+import { getClientIp, recordUserLoginLog } from '../utils/deviceParser.js';
 import { isPlainString, normalizeTwMobile } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
+import { attemptAdminPasswordLogin, getAdminLockStatus } from '../services/auth/adminLoginGuard.js';
 
 export const lineCallback = async (req, res) => {
   const { code, clientInfo } = req.body;
@@ -254,6 +255,16 @@ export const register = async (req, res) => {
   }
 };
 
+export const getAdminLockStatusHandler = async (req, res) => {
+  try {
+    const status = await getAdminLockStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('getAdminLockStatusHandler error:', error);
+    res.status(500).json({ error: '無法讀取後台鎖定狀態' });
+  }
+};
+
 export const adminLogin = async (req, res) => {
   const rawPassword = req.body?.password;
   const inputPass = rawPassword ? String(rawPassword).trim() : '';
@@ -262,70 +273,91 @@ export const adminLogin = async (req, res) => {
     ? String(process.env.ADMIN_PASSWORD).trim().replace(/^["']|["']$/g, '').replace(/[\r\n]/g, '')
     : '';
 
-  // 嚴格大小寫比對環境變數中的 ADMIN_PASSWORD，不再保留任何寫死預設值
-  const isSuperAdminMatch = Boolean(envAdminPassword && inputPass === envAdminPassword);
   const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  const ip = getClientIp(req);
+  const userAgent = req.headers['user-agent'] || '';
 
-  if (isSuperAdminMatch) {
-    const pwdHash = getSuperAdminFingerprint();
-    const token = generateToken({
-      role: 'admin',
-      isSuperAdmin: true,
-      name: '最高管理員',
-      pwd_hash: pwdHash,
-      permissions: ['all']
-    }, { expiresIn: '12h' });
+  try {
+    const outcome = await attemptAdminPasswordLogin({
+      inputPass,
+      ip,
+      userAgent,
+      verifyPasswordFn: async (tx) => {
+        // 嚴格大小寫比對環境變數中的 ADMIN_PASSWORD，不再保留任何寫死預設值
+        if (envAdminPassword && inputPass === envAdminPassword) {
+          const pwdHash = getSuperAdminFingerprint();
+          return {
+            ok: true,
+            message: 'Admin login successful',
+            tokenPayload: {
+              role: 'admin',
+              isSuperAdmin: true,
+              name: '最高管理員',
+              pwd_hash: pwdHash,
+              permissions: ['all']
+            },
+            adminInfo: {
+              name: '最高管理員',
+              isSuperAdmin: true,
+              permissions: ['all']
+            }
+          };
+        }
 
+        const activeStaffs = await tx.adminUser.findMany({
+          where: { is_active: true }
+        });
+
+        // 員工密碼比對維持精確字串比對
+        const staff = activeStaffs.find(s => s.password === inputPass);
+        if (staff) {
+          const isSuperAdmin = staff.role === 'super_admin';
+          const permissions = isSuperAdmin ? ['all'] : staff.permissions;
+          return {
+            ok: true,
+            message: 'Staff login successful',
+            tokenPayload: {
+              id: staff.id,
+              role: 'admin',
+              isSuperAdmin,
+              name: staff.name,
+              token_version: staff.token_version,
+              permissions
+            },
+            adminInfo: {
+              name: staff.name,
+              isSuperAdmin,
+              permissions
+            }
+          };
+        }
+
+        return { ok: false };
+      }
+    });
+
+    if (outcome.status === 423) {
+      return res.status(423).json({ code: outcome.code, error: outcome.error });
+    }
+    if (outcome.status === 400) {
+      return res.status(400).json({ error: outcome.error });
+    }
+    if (outcome.status === 401) {
+      return res.status(401).json({ error: outcome.error });
+    }
+
+    const token = generateToken(outcome.tokenPayload, { expiresIn: '12h' });
     res.cookie('token', token, {
       httpOnly: true,
       secure: isHttps,
       sameSite: 'lax',
-      maxAge: 12 * 60 * 60 * 1000 // 後台 token 效期縮短至 12 小時 (約一個班次)
+      maxAge: 12 * 60 * 60 * 1000 // 後台 token 效期縮短至 12 小時
     });
     return res.json({
-      message: 'Admin login successful',
+      message: outcome.message,
       token,
-      admin: { name: '最高管理員', isSuperAdmin: true, permissions: ['all'] }
+      admin: outcome.adminInfo
     });
-  }
-
-  try {
-    const activeStaffs = await prisma.adminUser.findMany({
-      where: { is_active: true }
-    });
-
-    // 員工密碼比對維持精確字串比對
-    const staff = activeStaffs.find(s => s.password === inputPass);
-
-    if (staff) {
-      const isSuperAdmin = staff.role === 'super_admin';
-      const token = generateToken({
-        id: staff.id,
-        role: 'admin',
-        isSuperAdmin,
-        name: staff.name,
-        token_version: staff.token_version,
-        permissions: isSuperAdmin ? ['all'] : staff.permissions
-      }, { expiresIn: '12h' });
-
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: isHttps,
-        sameSite: 'lax',
-        maxAge: 12 * 60 * 60 * 1000 // 後台 token 效期縮短至 12 小時
-      });
-      return res.json({
-        message: 'Staff login successful',
-        token,
-        admin: {
-          name: staff.name,
-          isSuperAdmin,
-          permissions: isSuperAdmin ? ['all'] : staff.permissions
-        }
-      });
-    }
-
-    return res.status(401).json({ error: '密碼錯誤，請重新輸入' });
   } catch (error) {
     console.error('Staff login error:', error);
     return res.status(500).json({ error: '登入驗證時伺服器發生錯誤' });

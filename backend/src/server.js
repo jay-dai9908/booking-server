@@ -768,7 +768,42 @@ const ensureDatabaseSchema = async () => {
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "KioskFirmware_pkey" PRIMARY KEY ("id")
     )`,
-    `ALTER TABLE "KioskFirmware" ADD COLUMN IF NOT EXISTS "uploaded_by_name" TEXT`
+    `ALTER TABLE "KioskFirmware" ADD COLUMN IF NOT EXISTS "uploaded_by_name" TEXT`,
+
+    `CREATE TABLE IF NOT EXISTS "AdminLoginGuard" (
+      "id" INTEGER NOT NULL DEFAULT 1,
+      "locked_at" TIMESTAMP(3),
+      "password_failures_reset_at" TIMESTAMP(3),
+      "unlock_failures_reset_at" TIMESTAMP(3),
+      "unlock_blocked_until" TIMESTAMP(3),
+      "totp_secret_enc" TEXT,
+      "totp_pending_secret_enc" TEXT,
+      "totp_enabled" BOOLEAN NOT NULL DEFAULT false,
+      "totp_enabled_at" TIMESTAMP(3),
+      "totp_last_step" INTEGER,
+      "backup_codes_json" JSONB,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "AdminLoginGuard_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE TABLE IF NOT EXISTS "AdminLoginFailure" (
+      "id" SERIAL NOT NULL,
+      "kind" TEXT NOT NULL,
+      "ip" TEXT,
+      "user_agent" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "AdminLoginFailure_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE INDEX IF NOT EXISTS "AdminLoginFailure_kind_created_at_idx" ON "AdminLoginFailure"("kind", "created_at")`,
+    `CREATE TABLE IF NOT EXISTS "AdminLoginGuardEvent" (
+      "id" SERIAL NOT NULL,
+      "type" TEXT NOT NULL,
+      "ip" TEXT,
+      "user_agent" TEXT,
+      "note" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "AdminLoginGuardEvent_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE INDEX IF NOT EXISTS "AdminLoginGuardEvent_created_at_idx" ON "AdminLoginGuardEvent"("created_at")`
   ];
 
   for (const sql of statements) {
