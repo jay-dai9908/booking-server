@@ -4,7 +4,7 @@ import { generateToken, getSuperAdminFingerprint, syncAndVerifyAdminUser } from 
 import { getClientIp, recordUserLoginLog } from '../utils/deviceParser.js';
 import { isPlainString, normalizeTwMobile } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
-import { attemptAdminPasswordLogin, getAdminLockStatus } from '../services/auth/adminLoginGuard.js';
+import { attemptAdminPasswordLogin, attemptAdminUnlock, getAdminLockStatus } from '../services/auth/adminLoginGuard.js';
 
 export const lineCallback = async (req, res) => {
   const { code, clientInfo } = req.body;
@@ -262,6 +262,27 @@ export const getAdminLockStatusHandler = async (req, res) => {
   } catch (error) {
     console.error('getAdminLockStatusHandler error:', error);
     res.status(500).json({ error: '無法讀取後台鎖定狀態' });
+  }
+};
+
+export const adminUnlockHandler = async (req, res) => {
+  try {
+    const code = req.body?.code;
+    const ip = getClientIp(req);
+    const userAgent = req.headers['user-agent'] || '';
+    const result = await attemptAdminUnlock({ code, ip, userAgent });
+
+    if (result.status !== 200) {
+      return res.status(result.status).json({ code: result.code, error: result.error });
+    }
+
+    return res.json({
+      unlocked: true,
+      backup_codes_remaining: result.backup_codes_remaining
+    });
+  } catch (error) {
+    console.error('adminUnlockHandler error:', error);
+    res.status(500).json({ error: '解鎖失敗，請稍後再試' });
   }
 };
 

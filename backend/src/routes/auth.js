@@ -1,5 +1,5 @@
 import express from 'express';
-import { lineCallback, register, adminLogin, getAdminLockStatusHandler, logout, me } from '../controllers/authController.js';
+import { lineCallback, register, adminLogin, getAdminLockStatusHandler, adminUnlockHandler, logout, me } from '../controllers/authController.js';
 import { verifyToken, generateToken } from '../middlewares/authMiddleware.js';
 import { lineCallbackLimiter, registerLimiter } from '../middlewares/rateLimiter.js';
 
@@ -8,6 +8,7 @@ const router = express.Router();
 router.post('/line/callback', lineCallbackLimiter, lineCallback);
 router.post('/register', verifyToken, registerLimiter, register);
 router.get('/admin/lock-status', getAdminLockStatusHandler);
+router.post('/admin/unlock', adminUnlockHandler);
 router.post('/admin/login', adminLogin);
 router.post('/logout', logout);
 router.get('/me', verifyToken, me);
