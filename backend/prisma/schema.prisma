@@ -8,22 +8,48 @@ datasource db {
 }
 
 model User {
-  id                Int            @id @default(autoincrement())
-  line_user_id      String         @unique
-  name              String?
-  phone             String?
-  line_display_name String?
-  line_picture_url  String?
-  line_status_msg   String?
-  last_login_at     DateTime?
-  created_at        DateTime       @default(now())
-  is_blacklisted    Boolean        @default(false)
-  notes             String?
+  id                  Int            @id @default(autoincrement())
+  line_user_id        String         @unique
+  name                String?
+  phone               String?
+  line_display_name   String?
+  line_picture_url    String?
+  line_status_msg     String?
+  last_login_at       DateTime?
+  created_at          DateTime       @default(now())
+  is_blacklisted      Boolean        @default(false)
+  notes               String?
+  merged_into_user_id Int?
+  merged_at           DateTime?
   
-  reservations      Reservation[]
-  login_logs        UserLoginLog[]
-  product_orders    ProductOrder[]
-  user_passes       UserPass[]
+  reservations             Reservation[]
+  login_logs               UserLoginLog[]
+  product_orders           ProductOrder[]
+  user_passes              UserPass[]
+  bind_requests_as_new     MemberBindRequest[] @relation("BindNewUser")
+  bind_requests_as_manual  MemberBindRequest[] @relation("BindManualUser")
+}
+
+model MemberBindRequest {
+  id              Int       @id @default(autoincrement())
+  new_user_id     Int
+  manual_user_id  Int
+  phone           String
+  status          String    @default("pending") // pending | approved | rejected
+  pass_summary    Json      @default("[]")
+  created_at      DateTime  @default(now())
+  decided_at      DateTime?
+  decided_by_name String?
+  decided_by_id   Int?
+  decision_note   String?
+
+  new_user        User      @relation("BindNewUser", fields: [new_user_id], references: [id], onDelete: Cascade)
+  manual_user     User      @relation("BindManualUser", fields: [manual_user_id], references: [id], onDelete: Cascade)
+
+  @@unique([new_user_id, manual_user_id])
+  @@index([status])
+  @@index([new_user_id])
+  @@index([manual_user_id])
 }
 
 model UserLoginLog {

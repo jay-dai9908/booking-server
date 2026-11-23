@@ -18,14 +18,15 @@ import {
   Copy,
   CheckCircle2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  AlertTriangle
 } from 'lucide-react';
 import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
 import SendLineMessageModal from './SendLineMessageModal';
 import ConfirmPanel from './admin/ConfirmPanel';
 
-export default function MemberDetailsModal({ member, onClose, onMemberUpdated }) {
+export default function MemberDetailsModal({ member, onClose, onMemberUpdated, onSwitchMember, onBindRequestResolved }) {
   const [memberReservations, setMemberReservations] = useState([]);
   const [loginLogs, setLoginLogs] = useState([]);
   const [isMemberLoading, setIsMemberLoading] = useState(false);
@@ -64,6 +65,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
   const [localMember, setLocalMember] = useState(member);
   const [toastMsg, setToastMsg] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [bindRequests, setBindRequests] = useState([]);
+  const [processingBindId, setProcessingBindId] = useState(null);
 
   const showToast = (text, isError = false) => {
     setToastMsg({ text, isError });
@@ -81,9 +84,71 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
       fetchMemberReservations(member.id);
       fetchMemberLoginLogs(member.id);
       fetchUserPasses(member.id);
+      fetchBindRequests(member.id);
       fetchPassPlans();
     }
   }, [member?.id]);
+
+  const fetchBindRequests = async (userId) => {
+    const targetId = userId || localMember?.id;
+    if (!targetId) return;
+    try {
+      const res = await api.get(`/users/${targetId}/bind-requests`);
+      setBindRequests(res.data?.requests || []);
+    } catch (err) {
+      console.error('Failed to fetch bind requests:', err);
+      setBindRequests([]);
+    }
+  };
+
+  const handleApproveBindRequest = (req) => {
+    setConfirmAction({
+      title: '確認核准帳號合併',
+      message: `請先向客人確認身分（例如看 LINE 頭像或預約紀錄）。\n\n確認將「${req.manual_user?.name || '櫃檯建檔會員'}」的預約、卡券、商城訂單合併至「${req.new_user?.name || 'LINE 會員'}」嗎？`,
+      confirmText: '確認核准合併',
+      onConfirm: async () => {
+        setProcessingBindId(req.id);
+        try {
+          await api.post(`/users/bind-requests/${req.id}/approve`);
+          showToast('已完成帳號合併！');
+          const activeId = localMember?.id;
+          await Promise.all([
+            fetchBindRequests(activeId),
+            refreshMemberDetails(activeId),
+            fetchMemberReservations(activeId),
+            fetchUserPasses(activeId)
+          ]);
+          if (onBindRequestResolved) onBindRequestResolved();
+        } catch (err) {
+          showToast(err.response?.data?.error || '核准合併失敗', true);
+        } finally {
+          setProcessingBindId(null);
+        }
+      }
+    });
+  };
+
+  const handleRejectBindRequest = (req) => {
+    setConfirmAction({
+      title: '拒絕帳號綁定申請',
+      message: `確定不將「${req.manual_user?.name || '櫃檯建檔會員'}」合併到「${req.new_user?.name || 'LINE 會員'}」嗎？兩個帳號將保持獨立。`,
+      danger: true,
+      confirmText: '確定不合併',
+      onConfirm: async () => {
+        setProcessingBindId(req.id);
+        try {
+          await api.post(`/users/bind-requests/${req.id}/reject`, { note: '店員確認不合併' });
+          showToast('已拒絕帳號綁定申請');
+          await fetchBindRequests(localMember?.id);
+          if (onBindRequestResolved) onBindRequestResolved();
+        } catch (err) {
+          showToast(err.response?.data?.error || '操作失敗', true);
+        } finally {
+          setProcessingBindId(null);
+        }
+      }
+    });
+  };
 
   const refreshMemberDetails = async (userId) => {
     const targetId = userId || localMember?.id;
@@ -268,6 +333,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
   };
 
   const isManualOnly = localMember.line_user_id?.startsWith('manual_');
+  const pendingBindRequests = bindRequests.filter(r => r.status === 'pending');
 
   const groupedReservations = Object.values(
     memberReservations.reduce((acc, curr) => {
@@ -343,6 +409,28 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                       <div>
                         <div className="flex items-center flex-wrap gap-2">
                           <h3 className="text-xl font-bold text-[#3E332B]">{localMember.name || '未設定姓名'}</h3>
+                          {localMember.merged_into_user_id && (
+                            <button
+                              type="button"
+                              data-testid="merged-into-link"
+                              onClick={() => {
+                                const targetId = localMember.merged_into_user_id;
+                                if (onSwitchMember) {
+                                  onSwitchMember(targetId);
+                                } else {
+                                  refreshMemberDetails(targetId);
+                                  fetchMemberReservations(targetId);
+                                  fetchMemberLoginLogs(targetId);
+                                  fetchUserPasses(targetId);
+                                  fetchBindRequests(targetId);
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition-colors"
+                              title="點擊前往合併後的新會員檔案"
+                            >
+                              已併入 #{localMember.merged_into_user_id}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => {
@@ -497,6 +585,100 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
                 </div>
               </div>
             </div>
+
+            {/* Bind Request Yellow Card */}
+            {pendingBindRequests.length > 0 && (
+              <div
+                data-testid="bind-request-card"
+                className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 space-y-4 shadow-2xs"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-base font-bold text-amber-950 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                    LINE 帳號綁定申請（{pendingBindRequests.length} 筆待確認）
+                  </h3>
+                </div>
+
+                <div className="space-y-3">
+                  {pendingBindRequests.map((req) => {
+                    const passesList = Array.isArray(req.pass_summary) ? req.pass_summary : [];
+                    const statsInfo = req.manual_stats || {};
+                    const isBusy = processingBindId === req.id;
+
+                    return (
+                      <div
+                        key={req.id}
+                        className="bg-white/90 border border-amber-200 rounded-xl p-4 space-y-2.5"
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-[#3E332B]">
+                          <div>
+                            <span className="text-[#8C8279]">新帳號：</span>
+                            <span className="font-bold">{req.new_user?.name || '未設定'}</span>
+                            {req.new_user?.line_display_name && (
+                              <span className="ml-1 text-[#059941] font-semibold">
+                                （LINE：{req.new_user.line_display_name}）
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            <span className="text-[#8C8279]">代建會員：</span>
+                            <span className="font-bold">{req.manual_user?.name || '未設定'}</span>
+                            <span className="ml-1 text-[#8C8279]">#{req.manual_user_id}</span>
+                          </div>
+                          <div>
+                            <span className="text-[#8C8279]">手機號碼：</span>
+                            <span className="font-mono font-bold">{req.phone}</span>
+                          </div>
+                          <div>
+                            <span className="text-[#8C8279]">舊帳號紀錄：</span>
+                            <span className="font-bold">
+                              預約 {statsInfo.reservation_count ?? 0} 筆（未來 {statsInfo.future_reservation_count ?? 0} 筆）、商城訂單 {statsInfo.product_order_count ?? 0} 筆
+                            </span>
+                          </div>
+                        </div>
+
+                        {passesList.length > 0 && (
+                          <div className="space-y-1 pt-1">
+                            {passesList.map((p, idx) => (
+                              <p key={p.user_pass_id || idx} className="text-xs font-bold text-red-600">
+                                舊帳號有卡券：{p.plan_name || '卡券'}{' '}
+                                {p.remaining != null ? `剩 ${p.remaining} 次` : '不限次數'}
+                                （{p.expires_at ? format(new Date(p.expires_at), 'yyyy/MM/dd') : '無期限'}）
+                              </p>
+                            ))}
+                          </div>
+                        )}
+
+                        {req.manual_user?.is_blacklisted && (
+                          <p className="text-xs font-bold text-red-600">
+                            舊帳號在黑名單，合併後新帳號也會列入
+                          </p>
+                        )}
+
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-amber-100">
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleRejectBindRequest(req)}
+                            className="px-3.5 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-xs font-bold text-gray-700 disabled:opacity-50"
+                          >
+                            不合併
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleApproveBindRequest(req)}
+                            className="px-4 py-1.5 rounded-lg bg-[#8B5B43] hover:bg-[#724834] text-xs font-bold text-white shadow-2xs disabled:opacity-50"
+                          >
+                            {isBusy ? '處理中...' : '核准合併'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Section 2: Dual-Track Statistics Cards (不限時封頂人次 vs 一般計時時長) */}
             <div>
@@ -1119,7 +1301,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated })
           isOpen={!!confirmAction}
           title={confirmAction.title}
           message={confirmAction.message}
-          confirmText="確認"
+          confirmText={confirmAction.confirmText || '確認'}
+          danger={Boolean(confirmAction.danger)}
           onClose={() => setConfirmAction(null)}
           onConfirm={async () => {
             const act = confirmAction.onConfirm;

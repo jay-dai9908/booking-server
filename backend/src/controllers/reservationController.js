@@ -28,6 +28,7 @@ import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { getReservationEntryPass } from '../services/kiosk/entryService.js';
 import { isPlainString } from '../utils/phone.js';
+import { activeUserWhere } from '../utils/userQuery.js';
 
 function mergeCustomerEquipments(rawList = []) {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
@@ -1182,8 +1183,8 @@ export const getAdminReservations = async (req, res) => {
       const cleanRefPrefix = search.replace(/^BK-/i, '');
       const orConditions = [
         { booking_ref: { contains: search, mode: 'insensitive' } },
-        { user: { name: { contains: search, mode: 'insensitive' } } },
-        { user: { phone: { contains: search } } },
+        { user: activeUserWhere({ name: { contains: search, mode: 'insensitive' } }) },
+        { user: activeUserWhere({ phone: { contains: search } }) },
         { customer_note: { contains: search, mode: 'insensitive' } },
         { admin_note: { contains: search, mode: 'insensitive' } }
       ];
@@ -2060,12 +2061,17 @@ export const adminCreateReservation = async (req, res) => {
     const booking_ref = crypto.randomUUID();
 
     const result = await prisma.$transaction(async (tx) => {
-      // 0. Handle user finding / creation
+      // 0. Handle user finding / creation (exclude merged users; prefer real LINE user over manual user)
       let targetUser = null;
       if (cleanPhone) {
-        targetUser = await tx.user.findFirst({
-          where: { phone: cleanPhone }
+        const matchedUsers = await tx.user.findMany({
+          where: activeUserWhere({ phone: cleanPhone }),
+          orderBy: { id: 'asc' }
         });
+        targetUser =
+          matchedUsers.find((u) => u.line_user_id && !u.line_user_id.startsWith('manual_')) ||
+          matchedUsers[0] ||
+          null;
       }
 
       if (!targetUser) {
@@ -2795,8 +2801,8 @@ export const adminQuickLookup = async (req, res) => {
     const cleanRefPrefix = q.replace(/^BK-/i, '');
     const resOrConditions = [
       { booking_ref: { contains: q, mode: 'insensitive' } },
-      { user: { name: { contains: q, mode: 'insensitive' } } },
-      { user: { phone: { contains: q } } }
+      { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+      { user: activeUserWhere({ phone: { contains: q } }) }
     ];
     if (cleanRefPrefix && cleanRefPrefix !== q) {
       resOrConditions.push({ booking_ref: { contains: cleanRefPrefix, mode: 'insensitive' } });
@@ -2821,8 +2827,8 @@ export const adminQuickLookup = async (req, res) => {
         where: {
           OR: [
             { pass_code: { contains: q, mode: 'insensitive' } },
-            { user: { name: { contains: q, mode: 'insensitive' } } },
-            { user: { phone: { contains: q } } }
+            { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+            { user: activeUserWhere({ phone: { contains: q } }) }
           ]
         },
         include: {
@@ -2839,8 +2845,8 @@ export const adminQuickLookup = async (req, res) => {
             { order_ref: { contains: q, mode: 'insensitive' } },
             { remittance_last5: { contains: q } },
             { assigned_pool_account: { contains: q } },
-            { user: { name: { contains: q, mode: 'insensitive' } } },
-            { user: { phone: { contains: q } } }
+            { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+            { user: activeUserWhere({ phone: { contains: q } }) }
           ]
         },
         include: {

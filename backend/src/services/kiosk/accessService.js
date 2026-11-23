@@ -7,6 +7,7 @@ import { getActiveLayoutForDate } from '../seating/layoutService.js';
 import { reseatBookings } from '../seating/allocator.js';
 import { applyCheckInRecords } from '../floor/checkInService.js';
 import { sendSelfServiceFirstCheckinNotification } from '../../utils/lineMessaging.js';
+import { activeUserWhere } from '../../utils/userQuery.js';
 
 export function isBookingClearedForEntry(firstRes, prepay) {
   if (!firstRes) return false;
@@ -232,7 +233,7 @@ export async function processKioskAccess(db = prisma, {
     const matchingRows = await db.reservation.findMany({
       where: {
         status: 'confirmed',
-        user: { phone: rawPayload },
+        user: activeUserWhere({ phone: rawPayload }),
         session: { session_date: todayDate }
       },
       include: {

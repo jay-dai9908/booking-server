@@ -5,7 +5,7 @@ import AppBar from '../../components/customer/AppBar';
 import BrandLogo from '../../components/customer/BrandLogo';
 import Field from '../../components/customer/Field';
 import Button from '../../components/customer/Button';
-import { ErrorBanner } from '../../components/customer/Banners';
+import { ErrorBanner, InfoBanner } from '../../components/customer/Banners';
 import api from '../../api/axios';
 import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
 
@@ -23,6 +23,7 @@ export default function Register({ setUserRole }) {
   const [phoneError, setPhoneError] = useState('');
   const [backendError, setBackendError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [successTarget, setSuccessTarget] = useState(null);
 
   const rawPhone = phoneDisplay.replace(/\D/g, '');
 
@@ -87,8 +88,7 @@ export default function Register({ setUserRole }) {
         }
       } catch (err) {}
 
-      if (setUserRole) setUserRole('customer');
-      window.location.href = target;
+      setSuccessTarget(target);
     } catch (err) {
       console.error('Registration failed', err);
       setBackendError(err.response?.data?.error || err.response?.data?.message || '註冊失敗，請重試');
@@ -96,6 +96,54 @@ export default function Register({ setUserRole }) {
       setIsSubmitting(false);
     }
   };
+
+  const handleContinueAfterSuccess = () => {
+    if (setUserRole) setUserRole('customer');
+    window.location.href = successTarget || '/booking';
+  };
+
+  if (successTarget) {
+    return (
+      <CustomerLayout
+        header={
+          <AppBar
+            variant="brandTwoLine"
+            subtitle="綁定會員"
+          />
+        }
+      >
+        <div className="flex flex-col flex-1 justify-between">
+          <div className="py-6 space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-full bg-sg-sage-soft text-sg-sage-ink flex items-center justify-center">
+              <Check className="w-7 h-7 stroke-[2.5]" />
+            </div>
+            <div className="text-center">
+              <h2 className="font-display text-[20px] leading-[1.35] font-bold text-sg-ink">
+                註冊成功，已完成會員綁定
+              </h2>
+              <p className="text-[13px] text-sg-muted mt-1">
+                現在可以開始預約時段或查看會員資料
+              </p>
+            </div>
+            <InfoBanner>
+              如果你之前在店裡留過電話，店員確認後會把舊紀錄合併到這個帳號
+            </InfoBanner>
+          </div>
+
+          <div className="sticky bottom-0 z-40 bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))]">
+            <Button
+              variant="primary"
+              size="md"
+              onClick={handleContinueAfterSuccess}
+              className="w-full"
+            >
+              開始預約
+            </Button>
+          </div>
+        </div>
+      </CustomerLayout>
+    );
+  }
 
   return (
     <CustomerLayout

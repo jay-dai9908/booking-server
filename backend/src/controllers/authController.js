@@ -3,6 +3,7 @@ import prisma from '../prismaClient.js';
 import { generateToken, getSuperAdminFingerprint, syncAndVerifyAdminUser } from '../middlewares/authMiddleware.js';
 import { recordUserLoginLog } from '../utils/deviceParser.js';
 import { isPlainString, normalizeTwMobile } from '../utils/phone.js';
+import { activeUserWhere } from '../utils/userQuery.js';
 
 export const lineCallback = async (req, res) => {
   const { code, clientInfo } = req.body;
@@ -140,55 +141,89 @@ export const register = async (req, res) => {
   }
 
   try {
-    const existingUser = await prisma.user.findFirst({
-      where: { phone: normalizedPhone }
+    const activeSamePhoneUsers = await prisma.user.findMany({
+      where: activeUserWhere({ phone: normalizedPhone }),
+      orderBy: { id: 'asc' }
     });
+
+    const realLineUsers = activeSamePhoneUsers.filter(
+      (u) => u.line_user_id && !u.line_user_id.startsWith('manual_')
+    );
+    const sameLineUser = realLineUsers.find((u) => u.line_user_id === userPayload.line_user_id);
 
     let finalUser;
 
-    if (existingUser) {
-      if (existingUser.line_user_id.startsWith('manual_')) {
-        finalUser = await prisma.user.update({
-          where: { id: existingUser.id },
-          data: { 
-            line_user_id: userPayload.line_user_id,
-            name: cleanName, // 依據顧客自己填寫的名稱更新
-            line_display_name: userPayload.line_display_name || null,
-            line_picture_url: userPayload.line_picture_url || null,
-            line_status_msg: userPayload.line_status_msg || null,
-            last_login_at: new Date()
-          }
-        });
-      } else if (existingUser.line_user_id === userPayload.line_user_id) {
-        // 同一 LINE 帳號更新基本資料
-        finalUser = await prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            name: cleanName,
-            line_display_name: userPayload.line_display_name || null,
-            line_picture_url: userPayload.line_picture_url || null,
-            line_status_msg: userPayload.line_status_msg || null,
-            last_login_at: new Date()
-          }
-        });
-      } else {
-        // 此手機號碼已被其他真實 LINE 帳號註冊綁定
-        return res.status(409).json({ 
-          error: '此手機號碼已被其他 LINE 帳號綁定。如需變更綁定，請直接聯繫門市人員。',
-          code: 'PHONE_ALREADY_BOUND'
-        });
-      }
-    } else {
-      finalUser = await prisma.user.create({
+    if (sameLineUser) {
+      // 同一 LINE 帳號更新基本資料
+      finalUser = await prisma.user.update({
+        where: { id: sameLineUser.id },
         data: {
-          line_user_id: userPayload.line_user_id,
           name: cleanName,
-          phone: normalizedPhone,
           line_display_name: userPayload.line_display_name || null,
           line_picture_url: userPayload.line_picture_url || null,
           line_status_msg: userPayload.line_status_msg || null,
           last_login_at: new Date()
-        },
+        }
+      });
+    } else if (realLineUsers.length > 0) {
+      // 此手機號碼已被其他真實 LINE 帳號註冊綁定
+      return res.status(409).json({
+        error: '此手機號碼已被其他 LINE 帳號綁定。如需變更綁定，請直接聯繫門市人員。',
+        code: 'PHONE_ALREADY_BOUND'
+      });
+    } else {
+      // 原則：註冊時永遠不自動合併；同手機若有代建會員，建立 pending 綁定申請
+      const manualUsers = activeSamePhoneUsers.filter(
+        (u) => u.line_user_id && u.line_user_id.startsWith('manual_')
+      );
+      const now = new Date();
+
+      finalUser = await prisma.$transaction(async (tx) => {
+        const createdUser = await tx.user.create({
+          data: {
+            line_user_id: userPayload.line_user_id,
+            name: cleanName,
+            phone: normalizedPhone,
+            line_display_name: userPayload.line_display_name || null,
+            line_picture_url: userPayload.line_picture_url || null,
+            line_status_msg: userPayload.line_status_msg || null,
+            last_login_at: now
+          }
+        });
+
+        for (const manualUser of manualUsers) {
+          const activePasses = await tx.userPass.findMany({
+            where: {
+              user_id: manualUser.id,
+              status: 'ACTIVE',
+              payment_status: 'active',
+              AND: [
+                { OR: [{ expires_at: null }, { expires_at: { gt: now } }] },
+                { OR: [{ remaining_quota: null }, { remaining_quota: { gt: 0 } }] }
+              ]
+            },
+            orderBy: { id: 'asc' }
+          });
+
+          const passSummary = activePasses.map((p) => ({
+            user_pass_id: p.id,
+            plan_name: p.plan_name_snapshot,
+            remaining: p.remaining_quota,
+            expires_at: p.expires_at ? p.expires_at.toISOString() : null
+          }));
+
+          await tx.memberBindRequest.create({
+            data: {
+              new_user_id: createdUser.id,
+              manual_user_id: manualUser.id,
+              phone: normalizedPhone,
+              status: 'pending',
+              pass_summary: passSummary
+            }
+          });
+        }
+
+        return createdUser;
       });
     }
 

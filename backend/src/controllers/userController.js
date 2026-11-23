@@ -1,6 +1,9 @@
 import prisma from '../prismaClient.js';
 import { sendLinePushMessage, buildBrandFlexMessage, formatBookingRef } from '../utils/lineMessaging.js';
 import { isPlainString } from '../utils/phone.js';
+import { activeUserWhere } from '../utils/userQuery.js';
+import auditService from '../services/audit/auditService.js';
+import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 
 /**
  * Compute dual-track member statistics from a user's raw reservation rows.
@@ -124,24 +127,39 @@ export const computeUserDualStats = (reservations = []) => {
 
 export const getUsers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
     const search = (req.query.search || '').trim();
-    
+    const includeMerged = req.query.include_merged === '1' || req.query.include_merged === 'true';
+    const pendingBindOnly = req.query.pending_bind === '1' || req.query.pending_bind === 'true';
+
     const skip = (page - 1) * limit;
 
-    let whereClause = {};
+    const andConditions = [];
+    if (!includeMerged) {
+      andConditions.push(activeUserWhere());
+    }
     if (search) {
-      whereClause = {
+      andConditions.push({
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { phone: { contains: search, mode: 'insensitive' } },
           { line_display_name: { contains: search, mode: 'insensitive' } }
         ]
-      };
+      });
+    }
+    if (pendingBindOnly) {
+      andConditions.push({
+        OR: [
+          { bind_requests_as_new: { some: { status: 'pending' } } },
+          { bind_requests_as_manual: { some: { status: 'pending' } } }
+        ]
+      });
     }
 
-    const [users, total] = await Promise.all([
+    const whereClause = andConditions.length > 0 ? { AND: andConditions } : {};
+
+    const [users, total, pendingRequests] = await Promise.all([
       prisma.user.findMany({
         where: whereClause,
         orderBy: { created_at: 'desc' },
@@ -159,6 +177,8 @@ export const getUsers = async (req, res) => {
           created_at: true,
           is_blacklisted: true,
           notes: true,
+          merged_into_user_id: true,
+          merged_at: true,
           reservations: {
             select: {
               booking_ref: true,
@@ -174,14 +194,25 @@ export const getUsers = async (req, res) => {
           }
         }
       }),
-      prisma.user.count({ where: whereClause })
+      prisma.user.count({ where: whereClause }),
+      prisma.memberBindRequest.findMany({
+        where: { status: 'pending' },
+        select: { id: true, new_user_id: true, manual_user_id: true }
+      })
     ]);
+
+    const pendingUserSet = new Set();
+    for (const r of pendingRequests) {
+      pendingUserSet.add(r.new_user_id);
+      pendingUserSet.add(r.manual_user_id);
+    }
 
     const enrichedUsers = users.map(u => {
       const stats = computeUserDualStats(u.reservations);
       const { reservations, ...userWithoutReservations } = u;
       return {
         ...userWithoutReservations,
+        has_pending_bind: pendingUserSet.has(u.id),
         stats
       };
     });
@@ -190,7 +221,8 @@ export const getUsers = async (req, res) => {
       data: enrichedUsers,
       total,
       page,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
+      pending_bind_requests_count: pendingRequests.length
     });
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -201,6 +233,9 @@ export const getUsers = async (req, res) => {
 export const getUserById = async (req, res) => {
   try {
     const userId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: '無效的會員 ID' });
+    }
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -215,6 +250,8 @@ export const getUserById = async (req, res) => {
         created_at: true,
         is_blacklisted: true,
         notes: true,
+        merged_into_user_id: true,
+        merged_at: true,
         reservations: {
           select: {
             booking_ref: true,
@@ -494,6 +531,394 @@ export const sendLineMessageToUser = async (req, res) => {
     console.error('sendLineMessageToUser error:', error);
     const statusCode = error.status || 500;
     res.status(statusCode).json({ error: error.message || '發送 LINE 訊息失敗' });
+  }
+};
+
+async function enrichBindRequests(requests) {
+  if (!requests || requests.length === 0) return [];
+  const manualIds = [...new Set(requests.map((r) => r.manual_user_id))];
+  const todayDate = dateOnly(toTaipeiDateString(new Date()));
+
+  const [reservations, productOrders] = await Promise.all([
+    prisma.reservation.findMany({
+      where: { user_id: { in: manualIds } },
+      select: {
+        user_id: true,
+        booking_ref: true,
+        status: true,
+        session: { select: { session_date: true } }
+      }
+    }),
+    prisma.productOrder.groupBy({
+      by: ['user_id'],
+      where: { user_id: { in: manualIds } },
+      _count: { _all: true }
+    })
+  ]);
+
+  const resStatsByUser = new Map();
+  for (const row of reservations) {
+    if (!resStatsByUser.has(row.user_id)) {
+      resStatsByUser.set(row.user_id, { allRefs: new Set(), futureRefs: new Set() });
+    }
+    const entry = resStatsByUser.get(row.user_id);
+    if (row.status !== 'cancelled') {
+      entry.allRefs.add(row.booking_ref);
+      if (row.session?.session_date && row.session.session_date >= todayDate) {
+        entry.futureRefs.add(row.booking_ref);
+      }
+    }
+  }
+
+  const orderCountByUser = new Map();
+  for (const row of productOrders) {
+    orderCountByUser.set(row.user_id, row._count?._all || 0);
+  }
+
+  return requests.map((reqRow) => {
+    const resStats = resStatsByUser.get(reqRow.manual_user_id);
+    return {
+      ...reqRow,
+      pass_summary: Array.isArray(reqRow.pass_summary) ? reqRow.pass_summary : [],
+      manual_stats: {
+        reservation_count: resStats ? resStats.allRefs.size : 0,
+        future_reservation_count: resStats ? resStats.futureRefs.size : 0,
+        product_order_count: orderCountByUser.get(reqRow.manual_user_id) || 0
+      }
+    };
+  });
+}
+
+const BIND_USER_SELECT = {
+  id: true,
+  name: true,
+  phone: true,
+  line_user_id: true,
+  line_display_name: true,
+  line_picture_url: true,
+  created_at: true,
+  is_blacklisted: true,
+  notes: true,
+  merged_into_user_id: true
+};
+
+export const getBindRequests = async (req, res) => {
+  try {
+    const status = String(req.query.status || 'pending').trim();
+    const where = status && status !== 'all' ? { status } : {};
+
+    const rows = await prisma.memberBindRequest.findMany({
+      where,
+      include: {
+        new_user: { select: BIND_USER_SELECT },
+        manual_user: { select: BIND_USER_SELECT }
+      },
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }]
+    });
+
+    const enriched = await enrichBindRequests(rows);
+    res.json({ total: enriched.length, requests: enriched });
+  } catch (error) {
+    console.error('getBindRequests error:', error);
+    res.status(500).json({ error: '獲取帳號綁定申請列表失敗' });
+  }
+};
+
+export const getUserBindRequests = async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: '無效的會員 ID' });
+  }
+
+  try {
+    const rows = await prisma.memberBindRequest.findMany({
+      where: {
+        OR: [{ new_user_id: userId }, { manual_user_id: userId }]
+      },
+      include: {
+        new_user: { select: BIND_USER_SELECT },
+        manual_user: { select: BIND_USER_SELECT }
+      },
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }]
+    });
+
+    // Sort pending requests first
+    rows.sort((a, b) => {
+      if (a.status === 'pending' && b.status !== 'pending') return -1;
+      if (a.status !== 'pending' && b.status === 'pending') return 1;
+      return 0;
+    });
+
+    const enriched = await enrichBindRequests(rows);
+    res.json({ requests: enriched });
+  } catch (error) {
+    console.error('getUserBindRequests error:', error);
+    res.status(500).json({ error: '獲取會員綁定申請失敗' });
+  }
+};
+
+export const approveBindRequest = async (req, res) => {
+  const reqId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(reqId) || reqId <= 0) {
+    return res.status(400).json({ error: '無效的申請 ID' });
+  }
+
+  const note = req.body?.note !== undefined && req.body?.note !== null
+    ? String(req.body.note).trim()
+    : null;
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw`
+        SELECT id, status, new_user_id, manual_user_id
+        FROM "MemberBindRequest"
+        WHERE id = ${reqId}
+        FOR UPDATE
+      `;
+
+      if (!locked || locked.length === 0) {
+        const err = new Error('找不到該綁定申請');
+        err.status = 404;
+        throw err;
+      }
+
+      const bindReq = locked[0];
+      if (bindReq.status !== 'pending') {
+        const err = new Error('此綁定申請已處理，無法重複核准');
+        err.status = 409;
+        err.code = 'BIND_REQUEST_NOT_PENDING';
+        throw err;
+      }
+
+      const [newUser, manualUser] = await Promise.all([
+        tx.user.findUnique({ where: { id: bindReq.new_user_id } }),
+        tx.user.findUnique({ where: { id: bindReq.manual_user_id } })
+      ]);
+
+      if (!newUser || !manualUser) {
+        const err = new Error('找不到對應的會員資料');
+        err.status = 404;
+        throw err;
+      }
+
+      if (manualUser.merged_into_user_id !== null) {
+        const err = new Error('此代建會員已併入其他帳號');
+        err.status = 409;
+        err.code = 'MANUAL_USER_ALREADY_MERGED';
+        throw err;
+      }
+
+      const now = new Date();
+      const manualId = manualUser.id;
+      const newId = newUser.id;
+
+      // Move all 7 user-referencing tables from manualUser -> newUser
+      const [
+        loginLogsRes,
+        reservationsRes,
+        productOrdersRes,
+        userPassesRes,
+        bookingPrepaysRes,
+        kioskLogsRes,
+        poolAccountsRes
+      ] = await Promise.all([
+        tx.userLoginLog.updateMany({ where: { user_id: manualId }, data: { user_id: newId } }),
+        tx.reservation.updateMany({ where: { user_id: manualId }, data: { user_id: newId } }),
+        tx.productOrder.updateMany({ where: { user_id: manualId }, data: { user_id: newId } }),
+        tx.userPass.updateMany({ where: { user_id: manualId }, data: { user_id: newId } }),
+        tx.bookingPrepay.updateMany({ where: { user_id: manualId }, data: { user_id: newId } }),
+        tx.kioskAccessLog.updateMany({ where: { user_id: manualId }, data: { user_id: newId } }),
+        tx.oneTimeAccountPool.updateMany({ where: { assigned_user_id: manualId }, data: { assigned_user_id: newId } })
+      ]);
+
+      const movedCounts = {
+        login_logs: loginLogsRes.count,
+        reservations: reservationsRes.count,
+        product_orders: productOrdersRes.count,
+        user_passes: userPassesRes.count,
+        booking_prepays: bookingPrepaysRes.count,
+        kiosk_access_logs: kioskLogsRes.count,
+        one_time_pool_accounts: poolAccountsRes.count
+      };
+
+      // Merge notes & blacklist onto newUser
+      const newUserUpdate = {};
+      if (manualUser.is_blacklisted) {
+        newUserUpdate.is_blacklisted = true;
+      }
+      if (manualUser.notes && manualUser.notes.trim()) {
+        const mergedNoteLine = `[合併自櫃檯建檔] ${manualUser.notes.trim()}`;
+        newUserUpdate.notes = newUser.notes && newUser.notes.trim()
+          ? `${newUser.notes.trim()}\n${mergedNoteLine}`
+          : mergedNoteLine;
+      }
+      if (Object.keys(newUserUpdate).length > 0) {
+        await tx.user.update({
+          where: { id: newId },
+          data: newUserUpdate
+        });
+      }
+
+      // Mark manualUser merged (keep old phone intact per product decision)
+      await tx.user.update({
+        where: { id: manualId },
+        data: {
+          merged_into_user_id: newId,
+          merged_at: now
+        }
+      });
+
+      const decidedByName = req.user?.name || '店員';
+      const decidedById = req.user?.id || null;
+
+      const updatedRequest = await tx.memberBindRequest.update({
+        where: { id: reqId },
+        data: {
+          status: 'approved',
+          decided_at: now,
+          decided_by_name: decidedByName,
+          decided_by_id: decidedById,
+          decision_note: note
+        }
+      });
+
+      // Reject any other pending bind requests for this manual user
+      await tx.memberBindRequest.updateMany({
+        where: {
+          manual_user_id: manualId,
+          id: { not: reqId },
+          status: 'pending'
+        },
+        data: {
+          status: 'rejected',
+          decided_at: now,
+          decided_by_name: decidedByName,
+          decided_by_id: decidedById,
+          decision_note: '已併入其他帳號'
+        }
+      });
+
+      await auditService.log(tx, {
+        event_type: 'member_merged',
+        category: 'member',
+        summary: `核准合併代建會員 #${manualId} 至 LINE 會員 #${newId}`,
+        before_json: {
+          bind_request_id: reqId,
+          new_user_id: newId,
+          manual_user_id: manualId
+        },
+        after_json: {
+          bind_request_id: reqId,
+          new_user_id: newId,
+          manual_user_id: manualId,
+          moved_counts: movedCounts
+        },
+        reason: note,
+        staff_name: decidedByName,
+        staff_id: decidedById
+      });
+
+      return { updatedRequest, movedCounts };
+    });
+
+    res.json({
+      ok: true,
+      message: '已核准合併會員資料',
+      request: result.updatedRequest,
+      moved_counts: result.movedCounts
+    });
+  } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    console.error('approveBindRequest error:', error);
+    res.status(500).json({ error: '核准合併失敗' });
+  }
+};
+
+export const rejectBindRequest = async (req, res) => {
+  const reqId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(reqId) || reqId <= 0) {
+    return res.status(400).json({ error: '無效的申請 ID' });
+  }
+
+  const note = req.body?.note !== undefined && req.body?.note !== null
+    ? String(req.body.note).trim()
+    : null;
+
+  try {
+    const updatedRequest = await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw`
+        SELECT id, status, new_user_id, manual_user_id
+        FROM "MemberBindRequest"
+        WHERE id = ${reqId}
+        FOR UPDATE
+      `;
+
+      if (!locked || locked.length === 0) {
+        const err = new Error('找不到該綁定申請');
+        err.status = 404;
+        throw err;
+      }
+
+      const bindReq = locked[0];
+      if (bindReq.status !== 'pending') {
+        const err = new Error('此綁定申請已處理，無法重複拒絕');
+        err.status = 409;
+        err.code = 'BIND_REQUEST_NOT_PENDING';
+        throw err;
+      }
+
+      const now = new Date();
+      const decidedByName = req.user?.name || '店員';
+      const decidedById = req.user?.id || null;
+
+      const updated = await tx.memberBindRequest.update({
+        where: { id: reqId },
+        data: {
+          status: 'rejected',
+          decided_at: now,
+          decided_by_name: decidedByName,
+          decided_by_id: decidedById,
+          decision_note: note
+        }
+      });
+
+      await auditService.log(tx, {
+        event_type: 'member_bind_rejected',
+        category: 'member',
+        summary: `拒絕合併代建會員 #${bindReq.manual_user_id} 至 LINE 會員 #${bindReq.new_user_id}`,
+        before_json: {
+          bind_request_id: reqId,
+          new_user_id: bindReq.new_user_id,
+          manual_user_id: bindReq.manual_user_id,
+          status: 'pending'
+        },
+        after_json: {
+          bind_request_id: reqId,
+          new_user_id: bindReq.new_user_id,
+          manual_user_id: bindReq.manual_user_id,
+          status: 'rejected'
+        },
+        reason: note,
+        staff_name: decidedByName,
+        staff_id: decidedById
+      });
+
+      return updated;
+    });
+
+    res.json({
+      ok: true,
+      message: '已拒絕合併申請',
+      request: updatedRequest
+    });
+  } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    console.error('rejectBindRequest error:', error);
+    res.status(500).json({ error: '拒絕申請失敗' });
   }
 };
 

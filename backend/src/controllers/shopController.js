@@ -9,6 +9,7 @@ import {
   releasePoolAccount,
   markPoolAccountUsed
 } from '../services/selfService/poolAccountService.js';
+import { activeUserWhere } from '../utils/userQuery.js';
 
 /**
  * Public: Get active products for customer shop
@@ -406,8 +407,8 @@ export const getAdminProductOrders = async (req, res) => {
         { order_ref: { contains: q, mode: 'insensitive' } },
         { assigned_pool_account: { contains: q, mode: 'insensitive' } },
         { remittance_last5: { contains: q, mode: 'insensitive' } },
-        { user: { name: { contains: q, mode: 'insensitive' } } },
-        { user: { phone: { contains: q, mode: 'insensitive' } } }
+        { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+        { user: activeUserWhere({ phone: { contains: q, mode: 'insensitive' } }) }
       ];
     }
 
