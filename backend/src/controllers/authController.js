@@ -4,7 +4,16 @@ import { generateToken, getSuperAdminFingerprint, syncAndVerifyAdminUser } from 
 import { getClientIp, recordUserLoginLog } from '../utils/deviceParser.js';
 import { isPlainString, normalizeTwMobile } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
-import { attemptAdminPasswordLogin, attemptAdminUnlock, getAdminLockStatus } from '../services/auth/adminLoginGuard.js';
+import {
+  attemptAdminPasswordLogin,
+  attemptAdminUnlock,
+  confirmAdminTotp,
+  disableAdminTotp,
+  getAdminGuardOverview,
+  getAdminLockStatus,
+  regenerateAdminBackupCodes,
+  setupAdminTotp
+} from '../services/auth/adminLoginGuard.js';
 
 export const lineCallback = async (req, res) => {
   const { code, clientInfo } = req.body;
@@ -283,6 +292,89 @@ export const adminUnlockHandler = async (req, res) => {
   } catch (error) {
     console.error('adminUnlockHandler error:', error);
     res.status(500).json({ error: '解鎖失敗，請稍後再試' });
+  }
+};
+
+export const getAdminGuardHandler = async (req, res) => {
+  try {
+    const overview = await getAdminGuardOverview();
+    res.json(overview);
+  } catch (error) {
+    console.error('getAdminGuardHandler error:', error);
+    res.status(500).json({ error: '無法讀取後台登入保護設定' });
+  }
+};
+
+export const setupAdminTotpHandler = async (req, res) => {
+  try {
+    const result = await setupAdminTotp({ code: req.body?.code });
+    if (result.status !== 200) {
+      return res.status(result.status).json({ code: result.code, error: result.error });
+    }
+    res.json({
+      secret: result.secret,
+      otpauth_uri: result.otpauth_uri
+    });
+  } catch (error) {
+    console.error('setupAdminTotpHandler error:', error);
+    res.status(500).json({ error: '產生驗證器金鑰失敗' });
+  }
+};
+
+export const confirmAdminTotpHandler = async (req, res) => {
+  try {
+    const result = await confirmAdminTotp({
+      code: req.body?.code,
+      ip: getClientIp(req),
+      userAgent: req.headers['user-agent'] || '',
+      staffName: req.user?.name,
+      staffId: req.user?.id
+    });
+    if (result.status !== 200) {
+      return res.status(result.status).json({ code: result.code, error: result.error });
+    }
+    res.json({ backup_codes: result.backup_codes });
+  } catch (error) {
+    console.error('confirmAdminTotpHandler error:', error);
+    res.status(500).json({ error: '確認驗證器設定失敗' });
+  }
+};
+
+export const regenerateBackupCodesHandler = async (req, res) => {
+  try {
+    const result = await regenerateAdminBackupCodes({
+      code: req.body?.code,
+      ip: getClientIp(req),
+      userAgent: req.headers['user-agent'] || '',
+      staffName: req.user?.name,
+      staffId: req.user?.id
+    });
+    if (result.status !== 200) {
+      return res.status(result.status).json({ code: result.code, error: result.error });
+    }
+    res.json({ backup_codes: result.backup_codes });
+  } catch (error) {
+    console.error('regenerateBackupCodesHandler error:', error);
+    res.status(500).json({ error: '重新產生備用碼失敗' });
+  }
+};
+
+export const disableAdminTotpHandler = async (req, res) => {
+  try {
+    const result = await disableAdminTotp({
+      code: req.body?.code,
+      ip: getClientIp(req),
+      userAgent: req.headers['user-agent'] || '',
+      staffName: req.user?.name,
+      staffId: req.user?.id
+    });
+    if (result.status !== 200) {
+      return res.status(result.status).json({ code: result.code, error: result.error });
+    }
+    res.json({ disabled: true });
+  } catch (error) {
+    console.error('disableAdminTotpHandler error:', error);
+    res.status(500).json({ error: '停用驗證器失敗' });
   }
 };
 

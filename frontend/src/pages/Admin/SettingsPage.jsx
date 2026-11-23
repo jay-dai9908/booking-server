@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import api from '../../api/axios';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
+import AdminLoginGuardCard from '../../components/admin/AdminLoginGuardCard';
 import { setPrintGloballyEnabled } from '../../utils/sunmiPrinter';
 
 const DEFAULT_PREVIEW_DISABLED_TEXT = '系統維護中，請點擊下方按鈕使用 LINE 進行預約';
@@ -398,6 +399,9 @@ export default function SettingsPage() {
           {saving ? '儲存設定中...' : '儲存全部系統設定'}
         </button>
       </div>
+
+      {/* SuperAdmin-only Admin Login Guard */}
+      <AdminLoginGuardCard />
 
       {/* SECTION 1: 登入驗證機制與空位預覽頁開關 */}
       <div className="bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-6">

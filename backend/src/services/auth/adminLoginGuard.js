@@ -1,7 +1,12 @@
 import prisma from '../../prismaClient.js';
 import auditService from '../audit/auditService.js';
 import {
+  buildOtpauthUri,
   decryptTotpSecret,
+  encryptTotpSecret,
+  generateBackupCodes,
+  generateSecret,
+  hashBackupCode,
   normalizeBackupCode,
   verifyBackupCodeHash,
   verifyTotp
@@ -443,4 +448,358 @@ export async function cliGetAdminGuardStatus(db = prisma) {
     recent_unlock_failures_10m: recentUnlockFails,
     recent_events: recentEvents
   };
+}
+
+/**
+ * SuperAdmin guard settings overview (never exposes secret or backup code hashes).
+ */
+export async function getAdminGuardOverview(db = prisma) {
+  const [guard, recentEvents] = await Promise.all([
+    db.adminLoginGuard.findUnique({ where: { id: 1 } }),
+    db.adminLoginGuardEvent.findMany({
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+      take: 20,
+      select: {
+        id: true,
+        type: true,
+        ip: true,
+        user_agent: true,
+        note: true,
+        created_at: true
+      }
+    })
+  ]);
+
+  let totpBroken = false;
+  if (guard?.totp_secret_enc) {
+    try {
+      decryptTotpSecret(guard.totp_secret_enc);
+    } catch (err) {
+      console.error('[adminLoginGuard] TOTP secret decryption failed (JWT_SECRET changed or corrupted):', err.message);
+      totpBroken = true;
+    }
+  } else if (guard?.totp_enabled) {
+    totpBroken = true;
+  }
+
+  return {
+    locked: Boolean(guard?.locked_at),
+    locked_at: guard?.locked_at || null,
+    totp_enabled: Boolean(guard?.totp_enabled),
+    totp_enabled_at: guard?.totp_enabled_at || null,
+    totp_broken: totpBroken,
+    backup_codes_remaining: countRemainingBackupCodes(guard?.backup_codes_json),
+    recent_events: recentEvents
+  };
+}
+
+/**
+ * Step 1 of TOTP setup/rotation: requires current TOTP code when already enabled & unbroken.
+ */
+export async function setupAdminTotp({ code }) {
+  return await prisma.$transaction(async (tx) => {
+    const guard = await lockGuardRow(tx);
+    const now = new Date();
+    let updatedLastStep = undefined;
+
+    if (guard.totp_enabled && guard.totp_secret_enc) {
+      let currentSecret = null;
+      let isBroken = false;
+      try {
+        currentSecret = decryptTotpSecret(guard.totp_secret_enc);
+      } catch (err) {
+        console.error('[adminLoginGuard] Existing TOTP secret broken during setup:', err.message);
+        isBroken = true;
+      }
+
+      if (!isBroken) {
+        const cleanCode = typeof code === 'string' ? code.trim() : '';
+        const check = verifyTotp(currentSecret, cleanCode, {
+          nowMs: now.getTime(),
+          lastStep: guard.totp_last_step
+        });
+        if (!check.ok) {
+          return {
+            status: 401,
+            code: 'TOTP_INVALID',
+            error: '目前驗證碼不正確'
+          };
+        }
+        updatedLastStep = check.step;
+      }
+    }
+
+    const secret = generateSecret();
+    const pendingEnc = encryptTotpSecret(secret);
+    const otpauthUri = buildOtpauthUri(secret);
+
+    await tx.adminLoginGuard.update({
+      where: { id: 1 },
+      data: {
+        totp_pending_secret_enc: pendingEnc,
+        ...(updatedLastStep !== undefined ? { totp_last_step: updatedLastStep } : {})
+      }
+    });
+
+    return {
+      status: 200,
+      secret,
+      otpauth_uri: otpauthUri
+    };
+  });
+}
+
+/**
+ * Step 2 of TOTP setup: verify code against pending secret, promote it, and return 8 plain backup codes once.
+ */
+export async function confirmAdminTotp({ code, ip, userAgent, staffName, staffId }) {
+  const safeIp = ip ? String(ip) : null;
+  const safeUa = userAgent ? String(userAgent).slice(0, 200) : null;
+
+  return await prisma.$transaction(async (tx) => {
+    const guard = await lockGuardRow(tx);
+    const now = new Date();
+
+    if (!guard.totp_pending_secret_enc) {
+      return {
+        status: 400,
+        code: 'NO_PENDING_TOTP',
+        error: '請先產生驗證器金鑰'
+      };
+    }
+
+    let pendingSecret;
+    try {
+      pendingSecret = decryptTotpSecret(guard.totp_pending_secret_enc);
+    } catch {
+      return {
+        status: 400,
+        code: 'NO_PENDING_TOTP',
+        error: '待確認驗證器金鑰已失效，請重新產生'
+      };
+    }
+
+    const cleanCode = typeof code === 'string' ? code.trim() : '';
+    const check = verifyTotp(pendingSecret, cleanCode, {
+      nowMs: now.getTime(),
+      lastStep: null
+    });
+    if (!check.ok) {
+      return {
+        status: 401,
+        code: 'TOTP_INVALID',
+        error: '驗證碼不正確，請重新輸入'
+      };
+    }
+
+    const wasEnabled = Boolean(guard.totp_enabled);
+    const plainCodes = generateBackupCodes(8);
+    const hashedCodes = plainCodes.map((c) => ({
+      hash: hashBackupCode(c),
+      used_at: null
+    }));
+
+    await tx.adminLoginGuard.update({
+      where: { id: 1 },
+      data: {
+        totp_secret_enc: guard.totp_pending_secret_enc,
+        totp_pending_secret_enc: null,
+        totp_enabled: true,
+        totp_enabled_at: now,
+        totp_last_step: check.step,
+        backup_codes_json: hashedCodes
+      }
+    });
+
+    const eventType = wasEnabled ? 'totp_regenerated' : 'totp_enabled';
+    await tx.adminLoginGuardEvent.create({
+      data: {
+        type: eventType,
+        ip: safeIp,
+        user_agent: safeUa,
+        note: wasEnabled ? '更換驗證器' : '首次啟用驗證器'
+      }
+    });
+
+    await auditService.log(tx, {
+      event_type: eventType,
+      category: 'security',
+      summary: wasEnabled ? '更換後台登入驗證器' : '啟用後台登入驗證器',
+      before_json: { totp_enabled: wasEnabled },
+      after_json: { totp_enabled: true, backup_codes_count: 8 },
+      staff_name: staffName || '最高管理員',
+      staff_id: staffId || null,
+      device_label: (safeIp || '後台').slice(0, 20)
+    });
+
+    return {
+      status: 200,
+      backup_codes: plainCodes
+    };
+  });
+}
+
+/**
+ * Regenerate 8 single-use backup codes after verifying current TOTP code.
+ */
+export async function regenerateAdminBackupCodes({ code, ip, userAgent, staffName, staffId }) {
+  const safeIp = ip ? String(ip) : null;
+  const safeUa = userAgent ? String(userAgent).slice(0, 200) : null;
+
+  return await prisma.$transaction(async (tx) => {
+    const guard = await lockGuardRow(tx);
+    const now = new Date();
+
+    if (!guard.totp_enabled || !guard.totp_secret_enc) {
+      return {
+        status: 409,
+        code: 'TOTP_NOT_CONFIGURED',
+        error: '尚未設定驗證器'
+      };
+    }
+
+    let currentSecret;
+    try {
+      currentSecret = decryptTotpSecret(guard.totp_secret_enc);
+    } catch {
+      return {
+        status: 409,
+        code: 'TOTP_BROKEN',
+        error: '驗證器設定已失效，請重新設定'
+      };
+    }
+
+    const cleanCode = typeof code === 'string' ? code.trim() : '';
+    const check = verifyTotp(currentSecret, cleanCode, {
+      nowMs: now.getTime(),
+      lastStep: guard.totp_last_step
+    });
+    if (!check.ok) {
+      return {
+        status: 401,
+        code: 'TOTP_INVALID',
+        error: '驗證碼不正確'
+      };
+    }
+
+    const plainCodes = generateBackupCodes(8);
+    const hashedCodes = plainCodes.map((c) => ({
+      hash: hashBackupCode(c),
+      used_at: null
+    }));
+
+    await tx.adminLoginGuard.update({
+      where: { id: 1 },
+      data: {
+        totp_last_step: check.step,
+        backup_codes_json: hashedCodes
+      }
+    });
+
+    await tx.adminLoginGuardEvent.create({
+      data: {
+        type: 'backup_codes_regenerated',
+        ip: safeIp,
+        user_agent: safeUa,
+        note: '重新產生 8 組備用碼'
+      }
+    });
+
+    await auditService.log(tx, {
+      event_type: 'backup_codes_regenerated',
+      category: 'security',
+      summary: '重新產生後台登入備用碼',
+      after_json: { backup_codes_count: 8 },
+      staff_name: staffName || '最高管理員',
+      staff_id: staffId || null,
+      device_label: (safeIp || '後台').slice(0, 20)
+    });
+
+    return {
+      status: 200,
+      backup_codes: plainCodes
+    };
+  });
+}
+
+/**
+ * Disable TOTP and clear all backup codes after verifying current TOTP code.
+ */
+export async function disableAdminTotp({ code, ip, userAgent, staffName, staffId }) {
+  const safeIp = ip ? String(ip) : null;
+  const safeUa = userAgent ? String(userAgent).slice(0, 200) : null;
+
+  return await prisma.$transaction(async (tx) => {
+    const guard = await lockGuardRow(tx);
+    const now = new Date();
+
+    if (!guard.totp_enabled || !guard.totp_secret_enc) {
+      return {
+        status: 409,
+        code: 'TOTP_NOT_CONFIGURED',
+        error: '尚未設定驗證器'
+      };
+    }
+
+    let currentSecret;
+    try {
+      currentSecret = decryptTotpSecret(guard.totp_secret_enc);
+    } catch {
+      return {
+        status: 409,
+        code: 'TOTP_BROKEN',
+        error: '驗證器設定已失效，請重新設定或從伺服器重設'
+      };
+    }
+
+    const cleanCode = typeof code === 'string' ? code.trim() : '';
+    const check = verifyTotp(currentSecret, cleanCode, {
+      nowMs: now.getTime(),
+      lastStep: guard.totp_last_step
+    });
+    if (!check.ok) {
+      return {
+        status: 401,
+        code: 'TOTP_INVALID',
+        error: '驗證碼不正確'
+      };
+    }
+
+    await tx.adminLoginGuard.update({
+      where: { id: 1 },
+      data: {
+        totp_secret_enc: null,
+        totp_pending_secret_enc: null,
+        totp_enabled: false,
+        totp_enabled_at: null,
+        totp_last_step: null,
+        backup_codes_json: null
+      }
+    });
+
+    await tx.adminLoginGuardEvent.create({
+      data: {
+        type: 'totp_disabled',
+        ip: safeIp,
+        user_agent: safeUa,
+        note: '停用後台驗證器'
+      }
+    });
+
+    await auditService.log(tx, {
+      event_type: 'totp_disabled',
+      category: 'security',
+      summary: '停用後台登入驗證器',
+      before_json: { totp_enabled: true },
+      after_json: { totp_enabled: false },
+      staff_name: staffName || '最高管理員',
+      staff_id: staffId || null,
+      device_label: (safeIp || '後台').slice(0, 20)
+    });
+
+    return {
+      status: 200,
+      disabled: true
+    };
+  });
 }
