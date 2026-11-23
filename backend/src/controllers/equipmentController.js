@@ -4,6 +4,7 @@ import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js'
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { dateOnly } from '../../../shared/time.js';
 import { selfEquipmentTerms } from '../../../shared/selfService.js';
+import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
 
 export const DEFAULT_EQUIPMENT_CONFIGS = [
   {
@@ -660,7 +661,7 @@ export const updateGlobalEquipmentSetting = async (req, res) => {
       }
     });
 
-    res.json(updated);
+    res.json(sanitizeGlobalSetting(updated));
   } catch (error) {
     console.error('Error updating global equipment setting:', error);
     res.status(500).json({ error: '更新全域設備設定失敗' });

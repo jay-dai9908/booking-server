@@ -2,6 +2,7 @@ import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
+import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
 
 export async function ensureKioskSetting(txOrPrisma = prisma) {
   let ks = await txOrPrisma.kioskSetting.findUnique({ where: { id: 1 } });
@@ -406,25 +407,16 @@ export const getGlobalSetting = async (req, res) => {
       });
     }
 
-    // Never expose plain text LINE messaging token to frontend
-    const rawToken = setting.line_messaging_token || process.env.LINE_MESSAGING_ACCESS_TOKEN || '';
-    const has_line_messaging_token = Boolean(rawToken);
-    let line_messaging_token_masked = '';
-    if (rawToken) {
-      line_messaging_token_masked = `••••••••${rawToken.slice(-4)}`;
-    }
-
     const rawMethods = Array.isArray(setting.payment_methods_json) && setting.payment_methods_json.length > 0
       ? setting.payment_methods_json
       : DEFAULT_PAYMENT_METHODS;
     const payment_methods_json = rawMethods.filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass');
 
+    const baseSafe = sanitizeGlobalSetting(setting);
     const safeSetting = {
-      ...setting,
+      ...baseSafe,
       payment_methods_json,
       business_hours_json: setting.business_hours_json || DEFAULT_BUSINESS_HOURS,
-      has_line_messaging_token,
-      line_messaging_token_masked,
       line_auto_notify_booking: setting.line_auto_notify_booking ?? false,
       line_auto_notify_cancel: setting.line_auto_notify_cancel ?? false,
       shop_enabled: setting.shop_enabled ?? true,
@@ -432,7 +424,6 @@ export const getGlobalSetting = async (req, res) => {
       default_session_capacity: setting.default_session_capacity ?? 16,
       print_enabled: setting.print_enabled ?? true
     };
-    delete safeSetting.line_messaging_token;
 
     res.json(safeSetting);
   } catch (error) {
@@ -637,7 +628,7 @@ export const updateGlobalSetting = async (req, res) => {
       }).catch(err => console.error('Failed to log audit event for booking_note_chips:', err));
     }
 
-    res.json({ message: 'Global setting updated successfully', setting });
+    res.json({ message: 'Global setting updated successfully', setting: sanitizeGlobalSetting(setting) });
   } catch (error) {
     console.error('Error updating global setting:', error);
     res.status(500).json({ error: 'Failed to update global setting' });

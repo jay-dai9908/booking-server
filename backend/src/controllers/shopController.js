@@ -10,6 +10,7 @@ import {
   markPoolAccountUsed
 } from '../services/selfService/poolAccountService.js';
 import { activeUserWhere } from '../utils/userQuery.js';
+import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
 
 /**
  * Public: Get active products for customer shop
@@ -855,7 +856,7 @@ export const updateShopGlobalSettings = async (req, res) => {
       create: { id: 1, ...dataToUpdate }
     });
 
-    res.json({ message: '預購商城全域設定已儲存', setting });
+    res.json({ message: '預購商城全域設定已儲存', setting: sanitizeGlobalSetting(setting) });
   } catch (error) {
     res.status(500).json({ error: '儲存設定失敗' });
   }
