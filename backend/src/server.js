@@ -25,6 +25,7 @@ import kioskRoutes from './routes/kiosk.js';
 import { ensureDefaultEquipmentConfigs } from './controllers/equipmentController.js';
 import { ensureDefaultCheckoutConfigs } from './controllers/checkoutController.js';
 import { ensureDefaultPaymentMethods, ensureDefaultProducts, ensureDefaultPassPlans } from './utils/shopDefaults.js';
+import { resolveTrustProxy } from './utils/trustProxy.js';
 import { startCronJobs } from './cronJobs.js';
 
 const app = express();
@@ -781,11 +782,9 @@ const ensureDatabaseSchema = async () => {
 };
 
 // Middleware
-const trustProxyEnv = process.env.TRUST_PROXY;
-const trustProxyVal = trustProxyEnv !== undefined
-  ? (isNaN(trustProxyEnv) ? trustProxyEnv : Number(trustProxyEnv))
-  : 1;
+const trustProxyVal = resolveTrustProxy(process.env.TRUST_PROXY);
 app.set('trust proxy', trustProxyVal);
+console.log(`[trust proxy] ${trustProxyVal}`);
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true, // Allow cookies to be sent
