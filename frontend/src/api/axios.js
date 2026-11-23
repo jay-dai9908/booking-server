@@ -1,7 +1,11 @@
 import axios from 'axios';
 
+export const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env?.PROD)
+  ? '/api'
+  : 'http://localhost:3001/api';
+
 const api = axios.create({
-  baseURL: import.meta.env.PROD ? '/api' : 'http://localhost:3001/api',
+  baseURL: API_BASE_URL,
   withCredentials: true, // IMPORTANT: Allows sending cookies for HttpOnly JWT
 });
 

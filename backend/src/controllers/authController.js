@@ -14,117 +14,196 @@ import {
   regenerateAdminBackupCodes,
   setupAdminTotp
 } from '../services/auth/adminLoginGuard.js';
+import {
+  LINE_STATE_COOKIE_NAME,
+  LINE_STATE_COOKIE_PATH,
+  LINE_STATE_TTL_MS,
+  appendLineStateEntry,
+  consumeLineStateEntry,
+  generateLineState,
+  sanitizeReturnPath
+} from '../services/auth/lineState.js';
 
-export const lineCallback = async (req, res) => {
-  const { code, clientInfo } = req.body;
-  
-  if (!code) {
-    return res.status(400).json({ error: 'Authorization code is required' });
+const defaultExchangeCodeForToken = async ({ code, redirectUri, channelId, channelSecret }) => {
+  const tokenParams = new URLSearchParams();
+  tokenParams.append('grant_type', 'authorization_code');
+  tokenParams.append('code', code);
+  tokenParams.append('redirect_uri', redirectUri);
+  tokenParams.append('client_id', channelId);
+  tokenParams.append('client_secret', channelSecret);
+
+  const tokenResponse = await axios.post('https://api.line.me/oauth2/v2.1/token', tokenParams.toString(), {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+  return tokenResponse.data.access_token;
+};
+
+const defaultFetchLineProfile = async (accessToken) => {
+  const profileResponse = await axios.get('https://api.line.me/v2/profile', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+  return profileResponse.data;
+};
+
+export const lineStart = (req, res) => {
+  const channelId = process.env.LINE_CHANNEL_ID;
+  const redirectUri = process.env.LINE_CALLBACK_URL;
+
+  if (!channelId || !redirectUri) {
+    console.error('LINE configuration is missing in .env');
+    return res.status(500).json({ error: 'Server misconfiguration: LINE setup incomplete' });
   }
 
-  try {
-    const channelId = process.env.LINE_CHANNEL_ID;
-    const channelSecret = process.env.LINE_CHANNEL_SECRET;
-    const redirectUri = process.env.LINE_CALLBACK_URL;
+  const returnPath = sanitizeReturnPath(req.query?.return);
+  const state = generateLineState(req.query?.prefix);
+  const cookieVal = appendLineStateEntry(req.cookies?.[LINE_STATE_COOKIE_NAME], {
+    state,
+    returnPath
+  });
 
-    if (!channelId || !channelSecret || !redirectUri) {
-      console.error('LINE configuration is missing in .env');
-      return res.status(500).json({ error: 'Server misconfiguration: LINE setup incomplete' });
+  res.cookie(LINE_STATE_COOKIE_NAME, cookieVal, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: LINE_STATE_COOKIE_PATH,
+    secure: Boolean(req.secure),
+    maxAge: LINE_STATE_TTL_MS
+  });
+
+  const authorizeUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${encodeURIComponent(channelId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}&scope=profile%20openid&bot_prompt=normal`;
+  return res.redirect(302, authorizeUrl);
+};
+
+export const createLineCallbackHandler = (deps = {}) => {
+  const exchangeCodeForToken = deps.exchangeCodeForToken || defaultExchangeCodeForToken;
+  const fetchLineProfile = deps.fetchLineProfile || defaultFetchLineProfile;
+  const nowFn = deps.now || (() => Date.now());
+
+  return async (req, res) => {
+    const { code, state, clientInfo } = req.body || {};
+
+    if (!code) {
+      return res.status(400).json({ error: 'Authorization code is required' });
     }
 
-    // 1. Exchange code for access token
-    const tokenParams = new URLSearchParams();
-    tokenParams.append('grant_type', 'authorization_code');
-    tokenParams.append('code', code);
-    tokenParams.append('redirect_uri', redirectUri);
-    tokenParams.append('client_id', channelId);
-    tokenParams.append('client_secret', channelSecret);
+    const consumed = consumeLineStateEntry(req.cookies?.[LINE_STATE_COOKIE_NAME], state, {
+      nowMs: nowFn()
+    });
+    if (!consumed.ok) {
+      return res.status(400).json({
+        code: 'LINE_STATE_INVALID',
+        error: '登入逾時或換了瀏覽器，請再按一次 LINE 登入'
+      });
+    }
 
-    const tokenResponse = await axios.post('https://api.line.me/oauth2/v2.1/token', tokenParams.toString(), {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+    // Consume matched state from cookie immediately
+    res.cookie(LINE_STATE_COOKIE_NAME, consumed.nextCookieVal, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: LINE_STATE_COOKIE_PATH,
+      secure: Boolean(req.secure),
+      maxAge: LINE_STATE_TTL_MS
     });
 
-    const accessToken = tokenResponse.data.access_token;
+    try {
+      const channelId = process.env.LINE_CHANNEL_ID;
+      const channelSecret = process.env.LINE_CHANNEL_SECRET;
+      const redirectUri = process.env.LINE_CALLBACK_URL;
 
-    // 2. Get user profile
-    const profileResponse = await axios.get('https://api.line.me/v2/profile', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+      if (!channelId || !channelSecret || !redirectUri) {
+        console.error('LINE configuration is missing in .env');
+        return res.status(500).json({ error: 'Server misconfiguration: LINE setup incomplete' });
+      }
 
-    const lineUserId = profileResponse.data.userId;
-    const displayName = profileResponse.data.displayName || null;
-    const pictureUrl = profileResponse.data.pictureUrl || null;
-    const statusMessage = profileResponse.data.statusMessage || null;
-    
-    // Check if user exists
-    let user = await prisma.user.findUnique({
-      where: { line_user_id: lineUserId },
-    });
+      // 1. Exchange code for access token
+      const accessToken = await exchangeCodeForToken({
+        code,
+        redirectUri,
+        channelId,
+        channelSecret
+      });
 
-    if (user) {
-      // Update LINE Profile info & last_login_at
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: {
+      // 2. Get user profile
+      const profile = await fetchLineProfile(accessToken);
+
+      const lineUserId = profile.userId;
+      const displayName = profile.displayName || null;
+      const pictureUrl = profile.pictureUrl || null;
+      const statusMessage = profile.statusMessage || null;
+
+      // Check if user exists
+      let user = await prisma.user.findUnique({
+        where: { line_user_id: lineUserId }
+      });
+
+      if (user) {
+        // Update LINE Profile info & last_login_at
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            line_display_name: displayName,
+            line_picture_url: pictureUrl,
+            line_status_msg: statusMessage,
+            last_login_at: new Date()
+          }
+        });
+
+        // Record login log (retained for 2 months)
+        await recordUserLoginLog(user.id, req, clientInfo, { throttleMinutes: 0 });
+
+        const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } }).catch(() => null);
+        const requireEveryTime = !!globalSetting?.require_line_login_every_time;
+
+        // Existing User -> Issue formal JWT
+        const token = generateToken({ id: user.id, role: 'customer', typ: 'customer' });
+        res.cookie('token', token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: requireEveryTime ? 4 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
+        });
+        return res.json({
+          message: 'Login successful',
+          token,
+          user: { name: user.name, phone: user.phone, line_display_name: user.line_display_name, line_picture_url: user.line_picture_url },
+          isNewUser: false,
+          requireLineLoginEveryTime: requireEveryTime,
+          return_path: consumed.returnPath
+        });
+      } else {
+        // New User -> Issue temporary JWT, include LINE profile info
+        const tempToken = generateToken({
+          line_user_id: lineUserId,
           line_display_name: displayName,
           line_picture_url: pictureUrl,
           line_status_msg: statusMessage,
-          last_login_at: new Date()
-        }
-      });
-
-      // Record login log (retained for 2 months)
-      await recordUserLoginLog(user.id, req, clientInfo, { throttleMinutes: 0 });
-
-      const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } }).catch(() => null);
-      const requireEveryTime = !!globalSetting?.require_line_login_every_time;
-
-      // Existing User -> Issue formal JWT
-      const token = generateToken({ id: user.id, role: 'customer', typ: 'customer' });
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: requireEveryTime ? 4 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
-      });
-      return res.json({ 
-        message: 'Login successful',
-        token,
-        user: { name: user.name, phone: user.phone, line_display_name: user.line_display_name, line_picture_url: user.line_picture_url },
-        isNewUser: false,
-        requireLineLoginEveryTime: requireEveryTime
-      });
-    } else {
-      // New User -> Issue temporary JWT, include LINE profile info
-      const tempToken = generateToken({
-        line_user_id: lineUserId,
-        line_display_name: displayName,
-        line_picture_url: pictureUrl,
-        line_status_msg: statusMessage,
-        isTemp: true,
-        typ: 'line_temp'
-      }, { expiresIn: '30m' });
-      res.cookie('token', tempToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 60 * 1000 }); // 30 mins
-      return res.json({ 
-        message: 'Registration required',
-        token: tempToken,
-        isNewUser: true,
-        suggestedName: displayName
+          isTemp: true,
+          typ: 'line_temp'
+        }, { expiresIn: '30m' });
+        res.cookie('token', tempToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 60 * 1000 }); // 30 mins
+        return res.json({
+          message: 'Registration required',
+          token: tempToken,
+          isNewUser: true,
+          suggestedName: displayName,
+          return_path: consumed.returnPath
+        });
+      }
+    } catch (error) {
+      console.error('Line login error:', error.response?.data || error.message);
+      const isLineClientError = error.response?.status === 400 || error.response?.data?.error === 'invalid_grant';
+      const statusCode = isLineClientError ? 400 : 500;
+      res.status(statusCode).json({
+        error: 'LINE 登入驗證失敗，請重新嘗試'
       });
     }
-  } catch (error) {
-    console.error('Line login error:', error.response?.data || error.message);
-    const isLineClientError = error.response?.status === 400 || error.response?.data?.error === 'invalid_grant';
-    const statusCode = isLineClientError ? 400 : 500;
-    res.status(statusCode).json({ 
-      error: 'LINE 登入驗證失敗，請重新嘗試'
-    });
-  }
+  };
 };
+
+export const lineCallback = createLineCallbackHandler();
 
 export const register = async (req, res) => {
   const { name, phone, clientInfo } = req.body || {};

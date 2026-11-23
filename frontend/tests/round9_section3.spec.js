@@ -247,17 +247,18 @@ async function run() {
     await preorderPage.waitForTimeout(200);
     await preorderPage.screenshot({ path: path.join(SCREENSHOT_DIR, 'preorder-line-login-mobile.png') });
 
-    // Clicking "登入進行購買" initiates LINE OAuth with preorder_ state (not official_line_url)
+    // Clicking "登入進行購買" initiates LINE OAuth via /api/auth/line/start redirecting with state=preorder_ (not official_line_url)
     let interceptedLineOAuthUrl = '';
-    await preorderPage.route('https://access.line.me/**', (route) => {
-      interceptedLineOAuthUrl = route.request().url();
-      route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>LINE OAuth Redirect Mock</body></html>' });
+    await preorderPage.route('**/api/auth/line/start**', async (route) => {
+      const startUrl = route.request().url();
+      const res = await preorderPage.request.get(startUrl, { maxRedirects: 0 });
+      interceptedLineOAuthUrl = res.headers()['location'] || '';
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>LINE OAuth Redirect Mock</body></html>' });
     });
     await buyLoginBtn.click();
     await preorderPage.waitForTimeout(300);
-    if (interceptedLineOAuthUrl) {
-      assert.ok(interceptedLineOAuthUrl.includes('state=preorder_'), `Expected LINE OAuth URL with state=preorder_, got ${interceptedLineOAuthUrl}`);
-    }
+    assert.ok(interceptedLineOAuthUrl, 'Expected /api/auth/line/start to be called');
+    assert.ok(interceptedLineOAuthUrl.includes('state=preorder_'), `Expected LINE OAuth URL with state=preorder_, got ${interceptedLineOAuthUrl}`);
 
     await preorderContext.close();
     console.log('PASS: /preorder login-to-purchase & /shop OA preview verified');

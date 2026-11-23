@@ -165,10 +165,22 @@ test('Round 30 Item 1: register phone type checks, temp token ttl/typ, rate limi
     }
   });
 
+  const startRes = await fetch(`${baseUrl}/api/auth/line/start?return=/booking`, {
+    redirect: 'manual'
+  });
+  assert.equal(startRes.status, 302);
+  const startLocation = startRes.headers.get('location');
+  const startState = new URL(startLocation).searchParams.get('state');
+  const setCookies = startRes.headers.getSetCookie ? startRes.headers.getSetCookie() : [startRes.headers.get('set-cookie')];
+  const cookieHeader = setCookies.map((c) => c.split(';')[0]).join('; ');
+
   const cbRes = await fetch(`${baseUrl}/api/auth/line/callback`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: 'fake-code' })
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookieHeader
+    },
+    body: JSON.stringify({ code: 'fake-code', state: startState })
   });
   assert.equal(cbRes.status, 200);
   const cbData = await cbRes.json();

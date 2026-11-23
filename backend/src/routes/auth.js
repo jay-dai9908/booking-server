@@ -1,5 +1,6 @@
 import express from 'express';
 import {
+  lineStart,
   lineCallback,
   register,
   adminLogin,
@@ -18,6 +19,7 @@ import { lineCallbackLimiter, registerLimiter } from '../middlewares/rateLimiter
 
 const router = express.Router();
 
+router.get('/line/start', lineCallbackLimiter, lineStart);
 router.post('/line/callback', lineCallbackLimiter, lineCallback);
 router.post('/register', verifyToken, registerLimiter, register);
 router.get('/admin/lock-status', getAdminLockStatusHandler);
