@@ -2,6 +2,7 @@ import axios from 'axios';
 import prisma from '../prismaClient.js';
 import { generateToken, getSuperAdminFingerprint, syncAndVerifyAdminUser } from '../middlewares/authMiddleware.js';
 import { recordUserLoginLog } from '../utils/deviceParser.js';
+import { isPlainString, normalizeTwMobile } from '../utils/phone.js';
 
 export const lineCallback = async (req, res) => {
   const { code, clientInfo } = req.body;
@@ -93,8 +94,9 @@ export const lineCallback = async (req, res) => {
         line_display_name: displayName,
         line_picture_url: pictureUrl,
         line_status_msg: statusMessage,
-        isTemp: true
-      });
+        isTemp: true,
+        typ: 'line_temp'
+      }, { expiresIn: '30m' });
       res.cookie('token', tempToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 60 * 1000 }); // 30 mins
       return res.json({ 
         message: 'Registration required',
@@ -114,20 +116,32 @@ export const lineCallback = async (req, res) => {
 };
 
 export const register = async (req, res) => {
-  const { name, phone, clientInfo } = req.body;
+  const { name, phone, clientInfo } = req.body || {};
   const userPayload = req.user; // from verifyToken middleware
   
   if (!userPayload || !userPayload.isTemp || !userPayload.line_user_id) {
     return res.status(400).json({ error: 'Invalid temporary session. Please login with LINE again.' });
   }
 
-  if (!name || !phone) {
-    return res.status(400).json({ error: 'Name and phone are required.' });
+  if (!isPlainString(name)) {
+    return res.status(400).json({ error: '姓名必須為文字' });
+  }
+  const cleanName = name.trim();
+  if (cleanName.length < 1 || cleanName.length > 30) {
+    return res.status(400).json({ error: '姓名長度須為 1～30 字' });
+  }
+
+  const normalizedPhone = normalizeTwMobile(phone);
+  if (!normalizedPhone) {
+    return res.status(400).json({
+      code: 'INVALID_PHONE',
+      error: '手機號碼格式不正確（09 開頭 10 碼）'
+    });
   }
 
   try {
     const existingUser = await prisma.user.findFirst({
-      where: { phone }
+      where: { phone: normalizedPhone }
     });
 
     let finalUser;
@@ -138,7 +152,7 @@ export const register = async (req, res) => {
           where: { id: existingUser.id },
           data: { 
             line_user_id: userPayload.line_user_id,
-            name, // 依據顧客自己填寫的名稱更新
+            name: cleanName, // 依據顧客自己填寫的名稱更新
             line_display_name: userPayload.line_display_name || null,
             line_picture_url: userPayload.line_picture_url || null,
             line_status_msg: userPayload.line_status_msg || null,
@@ -150,7 +164,7 @@ export const register = async (req, res) => {
         finalUser = await prisma.user.update({
           where: { id: existingUser.id },
           data: {
-            name,
+            name: cleanName,
             line_display_name: userPayload.line_display_name || null,
             line_picture_url: userPayload.line_picture_url || null,
             line_status_msg: userPayload.line_status_msg || null,
@@ -168,8 +182,8 @@ export const register = async (req, res) => {
       finalUser = await prisma.user.create({
         data: {
           line_user_id: userPayload.line_user_id,
-          name,
-          phone,
+          name: cleanName,
+          phone: normalizedPhone,
           line_display_name: userPayload.line_display_name || null,
           line_picture_url: userPayload.line_picture_url || null,
           line_status_msg: userPayload.line_status_msg || null,

@@ -27,6 +27,7 @@ import { earliestEntry, ironText } from '../../../shared/selfService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { getReservationEntryPass } from '../services/kiosk/entryService.js';
+import { isPlainString } from '../utils/phone.js';
 
 function mergeCustomerEquipments(rawList = []) {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
@@ -2038,16 +2039,22 @@ export const getSessionSeats = async (req, res) => {
 };
 
 export const adminCreateReservation = async (req, res) => {
-  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, attendance, autoCheckIn } = req.body;
+  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, attendance, autoCheckIn } = req.body || {};
   
   const parsedPax = parseInt(pax, 10);
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !Number.isInteger(parsedPax) || parsedPax < 1) {
     return res.status(400).json({ error: '人數必須為大於 0 的正整數，且必須選擇至少一個時段' });
   }
 
-  if (!name) {
+  if (!isPlainString(name) || !name.trim()) {
     return res.status(400).json({ error: 'Name is required for manual booking.' });
   }
+
+  if (phone !== undefined && phone !== null && !isPlainString(phone)) {
+    return res.status(400).json({ error: '電話號碼格式不正確' });
+  }
+  const cleanName = name.trim();
+  const cleanPhone = isPlainString(phone) ? phone.trim() : '';
 
   try {
     const booking_ref = crypto.randomUUID();
@@ -2055,9 +2062,9 @@ export const adminCreateReservation = async (req, res) => {
     const result = await prisma.$transaction(async (tx) => {
       // 0. Handle user finding / creation
       let targetUser = null;
-      if (phone) {
+      if (cleanPhone) {
         targetUser = await tx.user.findFirst({
-          where: { phone }
+          where: { phone: cleanPhone }
         });
       }
 
@@ -2066,8 +2073,8 @@ export const adminCreateReservation = async (req, res) => {
         targetUser = await tx.user.create({
           data: {
             line_user_id: `manual_${crypto.randomUUID()}`,
-            name,
-            phone: phone || null
+            name: cleanName,
+            phone: cleanPhone || null
           }
         });
       }

@@ -1,5 +1,6 @@
 import prisma from '../prismaClient.js';
 import { sendLinePushMessage, buildBrandFlexMessage, formatBookingRef } from '../utils/lineMessaging.js';
+import { isPlainString } from '../utils/phone.js';
 
 /**
  * Compute dual-track member statistics from a user's raw reservation rows.
@@ -337,7 +338,10 @@ export const updateUser = async (req, res) => {
     const dataToUpdate = {};
 
     if (name !== undefined) {
-      const trimmedName = String(name).trim();
+      if (!isPlainString(name)) {
+        return res.status(400).json({ error: '會員姓名格式不正確' });
+      }
+      const trimmedName = name.trim();
       if (!trimmedName) {
         return res.status(400).json({ error: '會員姓名不可為空白' });
       }
@@ -345,7 +349,10 @@ export const updateUser = async (req, res) => {
     }
 
     if (phone !== undefined) {
-      const trimmedPhone = String(phone).trim();
+      if (phone !== null && !isPlainString(phone)) {
+        return res.status(400).json({ error: '電話號碼格式不正確' });
+      }
+      const trimmedPhone = phone === null ? '' : phone.trim();
       dataToUpdate.phone = trimmedPhone || null;
     }
 

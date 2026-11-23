@@ -182,5 +182,59 @@ export const entryPassLimiter = (() => {
   };
 })();
 
+/**
+ * 7. 註冊限流：同一 IP 10 分鐘內最多 10 次；同一 line_user_id 10 分鐘內最多 5 次
+ */
+export const registerLimiter = (() => {
+  const ipStore = new Map();
+  const userStore = new Map();
+  const windowMs = 10 * 60 * 1000;
+  const maxPerIp = 10;
+  const maxPerUser = 5;
+
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of ipStore.entries()) {
+      if (now > record.resetTime) {
+        ipStore.delete(key);
+      }
+    }
+    for (const [key, record] of userStore.entries()) {
+      if (now > record.resetTime) {
+        userStore.delete(key);
+      }
+    }
+  }, 60000);
+  if (cleanup.unref) cleanup.unref();
+
+  const bumpAndCheck = (store, key, max, now) => {
+    let record = store.get(key);
+    if (!record || now > record.resetTime) {
+      record = { count: 1, resetTime: now + windowMs };
+      store.set(key, record);
+    } else {
+      record.count += 1;
+    }
+    return record.count > max;
+  };
+
+  return (req, res, next) => {
+    const now = Date.now();
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    if (bumpAndCheck(ipStore, ip, maxPerIp, now)) {
+      return res.status(429).json({ error: '註冊嘗試過於頻繁，請於 10 分鐘後再試', code: 'RATE_LIMITED' });
+    }
+
+    const lineUserId = req.user?.line_user_id;
+    if (typeof lineUserId === 'string' && lineUserId) {
+      if (bumpAndCheck(userStore, lineUserId, maxPerUser, now)) {
+        return res.status(429).json({ error: '註冊嘗試過於頻繁，請於 10 分鐘後再試', code: 'RATE_LIMITED' });
+      }
+    }
+
+    next();
+  };
+})();
+
 // 舊相容相容函式
 export const rateLimiter = (options) => createMemoryLimiter(options);
