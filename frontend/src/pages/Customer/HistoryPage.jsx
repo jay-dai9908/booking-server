@@ -31,6 +31,7 @@ import { useToast } from '../../components/customer/Toast';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
 import api from '../../api/axios';
+import { safeHttpUrl } from '@shared/safeUrl.js';
 import {
   formatDateShort,
   formatDateFull,
@@ -175,6 +176,11 @@ export default function HistoryPage() {
 
   const { settings: globalSettings } = useGlobalSettings();
   const { user } = useCustomerProfile();
+  const safeOfficialLineUrl = safeHttpUrl(globalSettings?.official_line_url);
+  const safeMismatchLineUrl =
+    safeHttpUrl(globalSettings?.line_button_url) ||
+    safeOfficialLineUrl ||
+    'https://lin.ee/vsZhRW5';
 
   const noteChips = useMemo(() => {
     if (Array.isArray(globalSettings?.booking_note_chips) && globalSettings.booking_note_chips.length > 0) {
@@ -562,7 +568,7 @@ export default function HistoryPage() {
                     匯款金額和預約金額不同，請用 LINE 聯絡我們
                   </div>
                   <a
-                    href={globalSettings?.line_button_url || globalSettings?.official_line_url || 'https://lin.ee/vsZhRW5'}
+                    href={safeMismatchLineUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-[#06C755] text-white font-bold text-[14px] py-2.5 px-4"
@@ -957,7 +963,7 @@ export default function HistoryPage() {
                             >
                               <div className="font-bold">匯款金額和預約金額不同，請用 LINE 聯絡我們</div>
                               <a
-                                href={globalSettings?.line_button_url || globalSettings?.official_line_url || 'https://lin.ee/vsZhRW5'}
+                                href={safeMismatchLineUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#06C755] text-white font-bold text-[13px] py-2 px-3"
@@ -1002,7 +1008,7 @@ export default function HistoryPage() {
                                 >
                                   <div className="font-bold">匯款金額和預約金額不同，請用 LINE 聯絡我們</div>
                                   <a
-                                    href={globalSettings?.line_button_url || globalSettings?.official_line_url || 'https://lin.ee/vsZhRW5'}
+                                    href={safeMismatchLineUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#06C755] text-white font-bold text-[13px] py-2 px-3"
@@ -1248,12 +1254,12 @@ export default function HistoryPage() {
                         )}
 
                         {/* LINE verify button */}
-                        {globalSettings?.official_line_url && (
+                        {safeOfficialLineUrl && (
                           <Button
                             variant="secondary"
                             size="sm"
                             icon={<MessageCircle className="w-4 h-4" />}
-                            onClick={() => window.open(globalSettings.official_line_url, '_blank')}
+                            onClick={() => window.open(safeOfficialLineUrl, '_blank', 'noopener,noreferrer')}
                             className="w-full mt-1"
                           >
                             傳 LINE 給我們對帳
@@ -1423,10 +1429,10 @@ export default function HistoryPage() {
 
         {/* 6. Page bottom buttons (all 3 tabs) */}
         <div className="flex items-center justify-center gap-1 sg-small text-sg-muted mt-4">
-          {globalSettings?.show_line_button !== false && globalSettings?.official_line_url && (
+          {globalSettings?.show_line_button !== false && safeOfficialLineUrl && (
             <>
               <a
-                href={globalSettings.official_line_url}
+                href={safeOfficialLineUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sg-brown font-bold hover:underline inline-flex items-center gap-1"

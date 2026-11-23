@@ -2,6 +2,7 @@ import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
+import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
 import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
 
 export async function ensureKioskSetting(txOrPrisma = prisma) {
@@ -538,15 +539,23 @@ export const updateGlobalSetting = async (req, res) => {
       dataToUpdate.guest_line_hint_text = typeof guest_line_hint_text === 'string' ? guest_line_hint_text.trim() : null;
     }
     if (official_line_url !== undefined) {
-      dataToUpdate.official_line_url = official_line_url;
+      if (official_line_url !== null && (typeof official_line_url !== 'string' || (official_line_url.trim() && !isSafeHttpUrl(official_line_url)))) {
+        return res.status(422).json({ code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
+      }
+      const cleanOfficialUrl = safeHttpUrl(official_line_url, null);
+      dataToUpdate.official_line_url = cleanOfficialUrl;
       if (line_button_url === undefined) {
-        dataToUpdate.line_button_url = official_line_url;
+        dataToUpdate.line_button_url = cleanOfficialUrl;
       }
     }
     if (line_button_url !== undefined) {
-      dataToUpdate.line_button_url = line_button_url;
+      if (line_button_url !== null && (typeof line_button_url !== 'string' || (line_button_url.trim() && !isSafeHttpUrl(line_button_url)))) {
+        return res.status(422).json({ code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
+      }
+      const cleanBtnUrl = safeHttpUrl(line_button_url, null);
+      dataToUpdate.line_button_url = cleanBtnUrl;
       if (dataToUpdate.official_line_url === undefined) {
-        dataToUpdate.official_line_url = line_button_url;
+        dataToUpdate.official_line_url = cleanBtnUrl;
       }
     }
     if (weekday_hourly_price !== undefined && weekday_hourly_price !== null && weekday_hourly_price !== '') {

@@ -1,5 +1,6 @@
 import prisma from '../prismaClient.js';
 import { ensureKioskSetting } from './dailySettingController.js';
+import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
 
 export function sanitizeKioskSetting(setting, globalSetting = null) {
   if (!setting) return null;
@@ -84,11 +85,10 @@ export const updateKioskSettings = async (req, res) => {
     dataToUpdate.max_unpaid_self_bookings = r.value;
   }
   if (line_url !== undefined) {
-    const cleanUrl = String(line_url ?? '').trim();
-    if (cleanUrl && !/^https?:\/\//i.test(cleanUrl)) {
-      return res.status(422).json({ error: 'LINE 連結必須以 http:// 或 https:// 開頭' });
+    if (line_url !== null && (typeof line_url !== 'string' || (line_url.trim() && !isSafeHttpUrl(line_url)))) {
+      return res.status(422).json({ code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
     }
-    dataToUpdate.line_url = cleanUrl || null;
+    dataToUpdate.line_url = safeHttpUrl(line_url, null);
   }
   if (line_id !== undefined) {
     const cleanId = String(line_id ?? '').trim().slice(0, 64);
