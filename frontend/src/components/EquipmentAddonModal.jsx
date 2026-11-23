@@ -169,7 +169,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
     }
 
     try {
-      const res = await api.patch(`/reservations/${reservation.booking_ref}/equipment`, {
+      const res = await api.patch(`/reservations/admin/${reservation.booking_ref}/equipment`, {
         equipments: equipmentsPayload
       });
       if (onSuccess) onSuccess(res.data);

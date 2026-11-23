@@ -227,7 +227,7 @@ export default function ReservationsPage() {
 
   const handleCancelReservation = async (id) => {
     try {
-      await api.delete(`/reservations/${id}`);
+      await api.post(`/reservations/admin/${id}/cancel`, {});
       showToast('預約已成功取消');
       fetchReservations();
     } catch (err) {

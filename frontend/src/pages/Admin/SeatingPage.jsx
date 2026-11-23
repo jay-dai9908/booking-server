@@ -194,7 +194,7 @@ export default function SeatingPage() {
   const handleCancelReservation = async () => {
     if (!cancelReservationTarget) return;
     try {
-      await api.delete(`/reservations/${cancelReservationTarget.booking_ref}`);
+      await api.post(`/reservations/admin/${cancelReservationTarget.booking_ref}/cancel`, {});
       showToast('已取消預約');
       setCancelReservationTarget(null);
       refresh();

@@ -259,11 +259,10 @@ export const evaluatePromoCode = async (txOrPrisma, {
   };
 };
 
-// POST /api/checkout/promo-codes/validate
-export const validatePromoCode = async (req, res) => {
+async function validatePromoCodeCore(req, res, { actor }) {
   try {
-    const isAdmin = req.user?.role === 'admin' || req.user?.isVerifiedAdmin;
-    const is_pos = isAdmin ? (req.body.is_pos === true) : false;
+    const isAdmin = actor === 'admin';
+    const is_pos = isAdmin ? true : false;
     const user_id = isAdmin ? (req.body.user_id || req.user?.id || null) : req.user.id;
     const skip_usage_check = isAdmin ? (req.body.skip_usage_check === true) : false;
 
@@ -302,7 +301,13 @@ export const validatePromoCode = async (req, res) => {
     console.error('Error validating promo code:', error);
     res.status(500).json({ error: '驗證折扣碼失敗' });
   }
-};
+}
+
+// POST /api/checkout/promo-codes/validate
+export const validatePromoCode = (req, res) => validatePromoCodeCore(req, res, { actor: 'customer' });
+
+// POST /api/checkout/admin/promo-codes/validate
+export const adminValidatePromoCode = (req, res) => validatePromoCodeCore(req, res, { actor: 'admin' });
 
 // GET /api/checkout/promo-codes
 export const getPromoCodes = async (req, res) => {

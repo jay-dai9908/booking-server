@@ -74,7 +74,7 @@ export const lineCallback = async (req, res) => {
       const requireEveryTime = !!globalSetting?.require_line_login_every_time;
 
       // Existing User -> Issue formal JWT
-      const token = generateToken({ id: user.id, role: 'customer' });
+      const token = generateToken({ id: user.id, role: 'customer', typ: 'customer' });
       res.cookie('token', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -120,8 +120,8 @@ export const register = async (req, res) => {
   const { name, phone, clientInfo } = req.body || {};
   const userPayload = req.user; // from verifyToken middleware
   
-  if (!userPayload || !userPayload.isTemp || !userPayload.line_user_id) {
-    return res.status(400).json({ error: 'Invalid temporary session. Please login with LINE again.' });
+  if (!userPayload || userPayload.typ !== 'line_temp' || userPayload.isTemp !== true || !userPayload.line_user_id) {
+    return res.status(401).json({ error: 'Invalid temporary session. Please login with LINE again.' });
   }
 
   if (!isPlainString(name)) {
@@ -234,7 +234,7 @@ export const register = async (req, res) => {
     const requireEveryTime = !!globalSetting?.require_line_login_every_time;
 
     // Registration complete -> Issue formal JWT
-    const token = generateToken({ id: finalUser.id, role: 'customer' });
+    const token = generateToken({ id: finalUser.id, role: 'customer', typ: 'customer' });
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -351,6 +351,11 @@ export const me = async (req, res) => {
         name: verifiedAdmin.name || '最高管理員',
         permissions: verifiedAdmin.permissions || []
       });
+    }
+
+    if (req.user.role === 'customer' && req.user.typ !== 'customer') {
+      res.clearCookie('token');
+      return res.status(401).json({ error: '登入憑證已過期，請重新登入' });
     }
 
     const globalSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } }).catch(() => null);

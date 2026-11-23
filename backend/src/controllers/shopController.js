@@ -11,6 +11,7 @@ import {
 } from '../services/selfService/poolAccountService.js';
 import { activeUserWhere } from '../utils/userQuery.js';
 import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
+import auditService from '../services/audit/auditService.js';
 
 /**
  * Public: Get active products for customer shop
@@ -301,13 +302,11 @@ export const createProductOrder = async (req, res) => {
   }
 };
 
-/**
- * Customer: Update remittance last 5 digits
- */
-export const updateRemittanceLast5 = async (req, res) => {
+async function updateRemittanceLast5Core(req, res, { actor }) {
   const { id } = req.params;
   const userId = req.user?.id;
   const { remittance_last5 } = req.body;
+  const isAdmin = actor === 'admin';
 
   if (!remittance_last5 || !String(remittance_last5).trim()) {
     return res.status(400).json({ error: '請輸入匯款末五碼' });
@@ -322,9 +321,12 @@ export const updateRemittanceLast5 = async (req, res) => {
       return res.status(404).json({ error: '找不到該筆預購訂單' });
     }
 
-    // Only allow customer who owns the order or admin
-    if (order.user_id !== userId && req.user?.role !== 'admin') {
+    if (!isAdmin && order.user_id !== userId) {
       return res.status(403).json({ error: '無權限修改此訂單' });
+    }
+
+    if (!isAdmin && !['pending_payment', 'reported_pending_verify'].includes(order.payment_status)) {
+      return res.status(409).json({ error: '已核對的訂單不能修改末五碼' });
     }
 
     const cleanLast5 = String(remittance_last5).trim();
@@ -337,8 +339,21 @@ export const updateRemittanceLast5 = async (req, res) => {
       }
     });
 
+    if (isAdmin) {
+      await auditService.log(prisma, {
+        booking_ref: order.order_ref,
+        event_type: 'shop_remittance_updated',
+        category: 'shop',
+        summary: `後台更新商城訂單 ${order.order_ref} 匯款末五碼`,
+        before_json: { remittance_last5: order.remittance_last5, payment_status: order.payment_status },
+        after_json: { remittance_last5: updated.remittance_last5, payment_status: updated.payment_status },
+        staff_name: req.user?.name || '店員',
+        staff_id: req.user?.id || null
+      });
+    }
+
     const sanitizedUpdated = { ...updated };
-    if (req.user?.role !== 'admin') {
+    if (!isAdmin) {
       delete sanitizedUpdated.admin_note;
     }
 
@@ -347,7 +362,10 @@ export const updateRemittanceLast5 = async (req, res) => {
     console.error('updateRemittanceLast5 error:', error);
     res.status(500).json({ error: '回報末五碼失敗' });
   }
-};
+}
+
+export const updateRemittanceLast5 = (req, res) => updateRemittanceLast5Core(req, res, { actor: 'customer' });
+export const adminUpdateRemittanceLast5 = (req, res) => updateRemittanceLast5Core(req, res, { actor: 'admin' });
 
 /**
  * Customer: Get my preorder orders

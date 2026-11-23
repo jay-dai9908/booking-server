@@ -780,12 +780,11 @@ export const getEquipmentOccupancy = async (req, res) => {
   }
 };
 
-// PATCH /api/reservations/:booking_ref/equipment (Retroactive Add-on / Modify)
-export const modifyBookingEquipment = async (req, res) => {
+async function modifyBookingEquipmentCore(req, res, { actor }) {
   const { booking_ref } = req.params;
   const { equipments } = req.body; // Array of { equipment_id, quantity, rental_hours }
   const userId = req.user?.id;
-  const isAdmin = req.user?.role === 'admin';
+  const isAdmin = actor === 'admin';
 
   if (!Array.isArray(equipments)) {
     return res.status(400).json({ error: 'equipments 必須是陣列' });
@@ -1120,4 +1119,7 @@ export const modifyBookingEquipment = async (req, res) => {
     }
     res.status(500).json({ error: '更新智能拼豆板失敗' });
   }
-};
+}
+
+export const modifyBookingEquipment = (req, res) => modifyBookingEquipmentCore(req, res, { actor: 'customer' });
+export const adminModifyBookingEquipment = (req, res) => modifyBookingEquipmentCore(req, res, { actor: 'admin' });

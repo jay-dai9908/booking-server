@@ -1394,12 +1394,12 @@ export const getMyReservations = async (req, res) => {
   }
 };
 
-export const cancelReservation = async (req, res) => {
-  // We use :id parameter, but it actually receives booking_ref now.
-  const { id: booking_ref } = req.params;
+async function cancelReservationCore(req, res, { actor }) {
+  const isAdmin = actor === 'admin';
+  // Customer route uses :id, admin route uses :booking_ref
+  const booking_ref = isAdmin ? req.params.booking_ref : req.params.id;
   const userId = req.user?.id;
-  const isAdmin = req.user?.role === 'admin';
-  const confirmPaidCancel = Boolean(req.body?.confirmPaidCancel || req.query?.confirmPaidCancel === 'true');
+  const confirmPaidCancel = isAdmin ? Boolean(req.body?.confirmPaidCancel || req.query?.confirmPaidCancel === 'true') : false;
   const operatorName = isAdmin ? (req.user?.name || '管理員') : 'customer';
   const cancelledByTag = isAdmin ? `admin:${operatorName}` : 'customer';
 
@@ -1438,7 +1438,7 @@ export const cancelReservation = async (req, res) => {
       }
 
       const isCollected = !isSelfCustomerAllPassVerified &&
-        reservations.some(r => (r.amount_received && r.amount_received > 0) || r.is_paid);
+        reservations.some(r => r.amount_received && r.amount_received > 0);
       if (isCollected) {
         const amt = reservations[0].amount_received || 0;
         return { errorStatus: 409, errorBody: { error: `這筆已收款 NT$${amt}，請先退款或作廢收款` } };
@@ -1641,7 +1641,10 @@ export const cancelReservation = async (req, res) => {
     console.error('Error cancelling reservation:', error);
     res.status(500).json({ error: 'Failed to cancel reservation' });
   }
-};
+}
+
+export const cancelReservation = (req, res) => cancelReservationCore(req, res, { actor: 'customer' });
+export const adminCancelReservation = (req, res) => cancelReservationCore(req, res, { actor: 'admin' });
 
 export const deleteReservationRecord = async (req, res) => {
   const { id: booking_ref } = req.params;
@@ -2650,11 +2653,11 @@ export const updateAmount = async (req, res) => {
   }
 };
 
-export const updateReservationNotes = async (req, res) => {
+async function updateReservationNotesCore(req, res, { actor }) {
   const { booking_ref } = req.params;
   const { customer_note, admin_note } = req.body;
   const userId = req.user?.id;
-  const isStaff = req.user?.role === 'admin' || req.user?.role === 'staff';
+  const isStaff = actor === 'admin';
 
   try {
     const reservations = await prisma.reservation.findMany({
@@ -2695,7 +2698,10 @@ export const updateReservationNotes = async (req, res) => {
     console.error('Error updating reservation notes:', error);
     res.status(500).json({ error: '更新備註失敗' });
   }
-};
+}
+
+export const updateReservationNotes = (req, res) => updateReservationNotesCore(req, res, { actor: 'customer' });
+export const adminUpdateReservationNotes = (req, res) => updateReservationNotesCore(req, res, { actor: 'admin' });
 
 /**
  * Admin Sidebar Navigation Live Badges

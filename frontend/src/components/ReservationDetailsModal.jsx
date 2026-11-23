@@ -252,7 +252,7 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
   const handleSaveAdminNote = async () => {
     setIsSavingAdminNote(true);
     try {
-      const res = await api.patch(`/reservations/${reservation.booking_ref}/notes`, {
+      const res = await api.patch(`/reservations/admin/${reservation.booking_ref}/notes`, {
         admin_note: adminNoteInput.trim() || null
       });
       if (onUpdate) {
@@ -336,8 +336,8 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
             return;
           }
           try {
-            await api.delete(`/reservations/${reservation.booking_ref}`, {
-              data: { confirmPaidCancel: true }
+            await api.post(`/reservations/admin/${reservation.booking_ref}/cancel`, {
+              confirmPaidCancel: true
             });
             if (onUpdate) onUpdate();
             onClose();
@@ -353,8 +353,8 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
         danger: true,
         onConfirm: async () => {
           try {
-            await api.delete(`/reservations/${reservation.booking_ref}`, {
-              data: { confirmPaidCancel: false }
+            await api.post(`/reservations/admin/${reservation.booking_ref}/cancel`, {
+              confirmPaidCancel: false
             });
             if (onUpdate) onUpdate();
             onClose();

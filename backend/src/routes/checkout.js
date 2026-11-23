@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   validatePromoCode,
+  adminValidatePromoCode,
   getPromoCodes,
   createPromoCode,
   updatePromoCode,
@@ -23,6 +24,7 @@ const checkoutStaffAuth = [
 
 // Customer + Admin promo code validation
 router.post('/promo-codes/validate', verifyToken, requireRegisteredUser, promoValidateLimiter, validatePromoCode);
+router.post('/admin/promo-codes/validate', ...checkoutStaffAuth, adminValidatePromoCode);
 
 // Promo code management & POS quick select
 router.get('/promo-codes', ...checkoutStaffAuth, getPromoCodes);

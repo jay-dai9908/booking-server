@@ -112,16 +112,25 @@ export const verifyToken = async (req, res, next) => {
 };
 
 /**
- * 顧客專屬 API 驗證：必須是已註冊完成的正式會員（正整數 id，且非 isTemp），已驗證管理員一律放行
+ * 顧客專屬 API 驗證：只接受已完成註冊的顧客正式權杖（typ === 'customer', role === 'customer', 非 isTemp, 正整數 id）
  */
 export const requireRegisteredUser = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ error: '尚未登入，請先登入' });
   }
   if (req.user.isVerifiedAdmin || req.user.role === 'admin') {
-    return next();
+    return res.status(403).json({
+      code: 'CUSTOMER_ONLY',
+      error: '這是顧客專用功能，請用顧客帳號登入'
+    });
   }
-  if (req.user.isTemp === true || !Number.isInteger(req.user.id) || req.user.id <= 0) {
+  if (
+    req.user.typ !== 'customer' ||
+    req.user.role !== 'customer' ||
+    req.user.isTemp === true ||
+    !Number.isInteger(req.user.id) ||
+    req.user.id <= 0
+  ) {
     return res.status(401).json({ error: '尚未完成會員註冊或身分無效，請先完成註冊' });
   }
   next();

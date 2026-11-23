@@ -109,6 +109,7 @@ test('Round 30 Item 2: manual member bind request flow, approval merge, and merg
         await prisma.productOrderItem.deleteMany({ where: { order_id: { in: orders.map((o) => o.id) } } }).catch(() => {});
         await prisma.productOrder.deleteMany({ where: { id: { in: orders.map((o) => o.id) } } }).catch(() => {});
       }
+      await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: cleanupBookingRefs } } }).catch(() => {});
       await prisma.reservation.deleteMany({
         where: { OR: [{ user_id: { in: userIds } }, { booking_ref: { in: cleanupBookingRefs } }] }
       }).catch(() => {});

@@ -829,7 +829,7 @@ export default function CheckoutWorkbench({
     try {
       setIsValidatingPromo(true);
       setPromoError('');
-      const res = await api.post('/checkout/promo-codes/validate', {
+      const res = await api.post('/checkout/admin/promo-codes/validate', {
         code,
         booking_ref: bookingRef,
         pax: booking.pax || persons.length

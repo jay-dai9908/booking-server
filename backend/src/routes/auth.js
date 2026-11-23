@@ -14,7 +14,8 @@ router.get('/me', verifyToken, me);
 if (process.env.NODE_ENV === 'test') {
   router.post('/test-login', (req, res) => {
     const { id = 1, role = 'customer' } = req.body || {};
-    const token = generateToken({ id, role });
+    const payload = role === 'customer' ? { id, role, typ: 'customer' } : { id, role };
+    const token = generateToken(payload);
     res.json({ token });
   });
 }

@@ -1,8 +1,8 @@
 import express from 'express';
-import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount, updateReservationNotes, getAdminNavBadges, adminQuickLookup, getReservationEntryPassHandler } from '../controllers/reservationController.js';
+import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount, updateReservationNotes, adminUpdateReservationNotes, getAdminNavBadges, adminQuickLookup, getReservationEntryPassHandler } from '../controllers/reservationController.js';
 import { verifyToken, requireAdmin, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
 
-import { modifyBookingEquipment } from '../controllers/equipmentController.js';
+import { modifyBookingEquipment, adminModifyBookingEquipment } from '../controllers/equipmentController.js';
 import {
   getPrepayOptionsHandler,
   postPrepayQuoteHandler,
@@ -40,6 +40,9 @@ router.get('/admin/quick-lookup', verifyToken, requireAnyPermission(['reservatio
 router.get('/admin', ...reservationStaffAuth, getAdminReservations);
 router.get('/admin/:booking_ref/details', ...reservationStaffAuth, getAdminReservationDetails);
 router.post('/admin', ...reservationStaffAuth, adminCreateReservation);
+router.post('/admin/:booking_ref/cancel', ...reservationStaffAuth, adminCancelReservation);
+router.patch('/admin/:booking_ref/notes', ...reservationStaffAuth, adminUpdateReservationNotes);
+router.patch('/admin/:booking_ref/equipment', verifyToken, requireAnyPermission(['reservations', 'seating', 'weekly', 'equipment']), adminModifyBookingEquipment);
 router.post('/admin/:booking_ref/extend', ...reservationStaffAuth, extendReservation);
 router.patch('/admin/:booking_ref/payment', ...reservationStaffAuth, updatePaymentStatus);
 router.patch('/admin/:booking_ref/amount', ...reservationStaffAuth, updateAmount);
