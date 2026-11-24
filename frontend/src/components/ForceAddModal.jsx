@@ -25,6 +25,7 @@ export default function ForceAddModal({
   const [selectedSessionIds, setSelectedSessionIds] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [seatConflict, setSeatConflict] = useState(false);
 
   // Sort sessions chronologically
   const sortedSessions = useMemo(() => {
@@ -35,6 +36,7 @@ export default function ForceAddModal({
   useEffect(() => {
     if (!isOpen) return;
     setError('');
+    setSeatConflict(false);
     setIsSubmitting(false);
     if (initialPax != null) {
       setPax(initialPax);
@@ -92,7 +94,7 @@ export default function ForceAddModal({
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e, { skipPreselected = false } = {}) => {
     if (e) e.preventDefault();
     const cleanName = name.trim();
     const paxNum = parseInt(pax, 10);
@@ -113,6 +115,7 @@ export default function ForceAddModal({
     try {
       setIsSubmitting(true);
       setError('');
+      setSeatConflict(false);
 
       // Chronologically sorted session IDs
       const sortedIds = [...selectedSessionIds].sort((a, b) => {
@@ -132,7 +135,7 @@ export default function ForceAddModal({
         isWalkIn: true,
         attendance: isForceWait ? null : 'checked_in',
         autoCheckIn: !isForceWait,
-        assigned_seats: preselectedSeats.length > 0 ? preselectedSeats.slice(0, paxNum) : undefined,
+        assigned_seats: (!skipPreselected && preselectedSeats.length > 0) ? preselectedSeats.slice(0, paxNum) : undefined,
         equipments: []
       });
 
@@ -170,6 +173,8 @@ export default function ForceAddModal({
       setIsForceWait(false);
     } catch (err) {
       console.error('Failed to create walk-in reservation:', err);
+      const isConflict = err.response?.status === 409 && err.response?.data?.code === 'SEAT_CONFLICT';
+      setSeatConflict(isConflict);
       setError(err.response?.data?.error || '建立失敗，請稍後再試');
     } finally {
       setIsSubmitting(false);
@@ -180,14 +185,14 @@ export default function ForceAddModal({
   const timeSummary = selectedSessionsList.length > 0
     ? `${selectedSessionsList[0].start_time} 到 ${selectedSessionsList[selectedSessionsList.length - 1].end_time}（${selectedSessionsList.length} 小時）`
     : '尚未選取時段';
-  const estWalkInEnd = useMemo(() => {
+  const estWalkInEnd = (() => {
     if (!selectedSessionsList.length) return null;
     const baseNow = now ? (now instanceof Date ? now : new Date(now)) : new Date();
     return walkInBillingEndAt({
       billingStartAt: Number.isFinite(baseNow.getTime()) ? baseNow : new Date(),
       bookedMinutes: selectedSessionsList.length * 60
     });
-  }, [selectedSessionsList, now]);
+  })();
   const estWalkInEndHM = estWalkInEnd ? formatTimeHHmm(estWalkInEnd) : '';
 
   return (
@@ -199,8 +204,19 @@ export default function ForceAddModal({
       footer={
         <div className="space-y-2">
           {error && (
-            <div className="p-2.5 rounded-xl bg-sg-danger-soft text-sg-danger text-[12px] font-bold">
-              {error}
+            <div className="p-2.5 rounded-xl bg-sg-danger-soft text-sg-danger text-[12px] font-bold flex items-center justify-between gap-2 flex-wrap">
+              <span>{error}</span>
+              {seatConflict && (
+                <button
+                  type="button"
+                  data-testid="force-add-auto-seat-btn"
+                  onClick={() => handleSubmit(null, { skipPreselected: true })}
+                  disabled={isSubmitting}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-sg-danger/40 text-sg-danger hover:bg-sg-paper text-[11px] font-bold cursor-pointer"
+                >
+                  改由系統安排座位
+                </button>
+              )}
             </div>
           )}
           <div className="flex items-center justify-between">

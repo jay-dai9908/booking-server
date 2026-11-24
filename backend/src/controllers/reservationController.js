@@ -2251,12 +2251,26 @@ export const getSessionSeats = async (req, res) => {
 };
 
 export const adminCreateReservation = async (req, res) => {
-  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, is_walk_in, attendance, autoCheckIn } = req.body || {};
+  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, is_walk_in, attendance, autoCheckIn, assigned_seats } = req.body || {};
   const effectiveWalkIn = isWalkIn === true || isWalkIn === 'true' || is_walk_in === true || is_walk_in === 'true';
   
   const parsedPax = parseInt(pax, 10);
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !Number.isInteger(parsedPax) || parsedPax < 1) {
     return res.status(400).json({ error: '人數必須為大於 0 的正整數，且必須選擇至少一個時段' });
+  }
+
+  let cleanPreselectedSeats = [];
+  if (assigned_seats !== undefined && assigned_seats !== null) {
+    if (!Array.isArray(assigned_seats) || assigned_seats.some(s => !isPlainString(s) || !s.trim())) {
+      return res.status(422).json({ error: '指定座位格式不正確' });
+    }
+    cleanPreselectedSeats = assigned_seats.map(s => s.trim());
+    if (new Set(cleanPreselectedSeats).size !== cleanPreselectedSeats.length) {
+      return res.status(422).json({ error: '指定座位不可重複' });
+    }
+    if (cleanPreselectedSeats.length > parsedPax) {
+      return res.status(422).json({ error: `指定座位數（${cleanPreselectedSeats.length}）不可超過預約人數（${parsedPax} 位）` });
+    }
   }
 
   if (!isPlainString(name) || !name.trim()) {
@@ -2346,9 +2360,10 @@ export const adminCreateReservation = async (req, res) => {
         session_ids: session_ids 
       };
 
-      // Run Allocation algorithm or Force Wait
+      // Run Allocation algorithm, preselected seats, or Force Wait
       let mySeats = [];
       let allocReason = null;
+      let usedPreselected = false;
       const sessionUpdates = [];
 
       if (isForceWait === true || isForceWait === 'true') {
@@ -2367,6 +2382,109 @@ export const adminCreateReservation = async (req, res) => {
         for (let i = 0; i < parseInt(pax, 10); i++) {
           mySeats.push(`WAIT-${waitCounter++}`);
         }
+      } else if (cleanPreselectedSeats.length > 0) {
+        const [ctx, activeHolds, seatedOccupants] = await Promise.all([
+          loadAllocatorContext(tx, sessionDate),
+          loadActiveSeatHolds(tx, allSessionIdsOfDay),
+          loadSeatedOccupants(tx, dateStr)
+        ]);
+        const layoutSeats = ctx.layout?.seats || [];
+        for (const sc of cleanPreselectedSeats) {
+          const foundSeat = layoutSeats.find(s => s.code === sc);
+          if (!foundSeat || !foundSeat.is_active) {
+            throw { status: 422, code: 'INVALID_SEAT', message: `座位 ${sc} 不存在或未啟用` };
+          }
+          if (seatedOccupants[sc]) {
+            throw { status: 409, code: 'SEAT_CONFLICT', conflict_seat: sc, message: `${sc} 已有人，請選其他座位` };
+          }
+        }
+
+        const requestedSessionSet = new Set(session_ids);
+        for (const h of activeHolds) {
+          if (!requestedSessionSet.has(h.session_id)) continue;
+          const hit = cleanPreselectedSeats.find(sc => (h.seat_codes || []).includes(sc));
+          if (hit) {
+            throw { status: 409, code: 'SEAT_CONFLICT', conflict_seat: hit, message: `${hit} 已有人，請選其他座位` };
+          }
+        }
+
+        const displaceableRefs = [];
+        for (const r of currentReservations) {
+          if (!requestedSessionSet.has(r.session_id)) continue;
+          if (r.attendance === 'completed' || r.attendance === 'no_show') continue;
+          const hit = cleanPreselectedSeats.find(sc => (r.assigned_seats || []).includes(sc));
+          if (!hit) continue;
+          if (isReservationPinned(r)) {
+            throw { status: 409, code: 'SEAT_CONFLICT', conflict_seat: hit, message: `${hit} 已有人，請選其他座位` };
+          }
+          displaceableRefs.push(r.booking_ref);
+        }
+
+        if (displaceableRefs.length > 0) {
+          await reseatBookings(tx, {
+            bookingRefs: [...new Set(displaceableRefs)],
+            reservedSeats: cleanPreselectedSeats,
+            sessionIds: session_ids
+          });
+        }
+
+        if (cleanPreselectedSeats.length < parsedPax) {
+          const freshReservations = displaceableRefs.length > 0
+            ? await tx.reservation.findMany({ where: { session_id: { in: allSessionIdsOfDay }, status: 'confirmed' } })
+            : currentReservations;
+          const allocInput = [
+            ...freshReservations,
+            ...seatHoldsToPinnedReservations(activeHolds)
+          ];
+          if (effectiveWalkIn) {
+            for (const sCode of Object.keys(seatedOccupants)) {
+              for (const sId of session_ids) {
+                allocInput.push({
+                  booking_ref: `__SEATED_${seatedOccupants[sCode].booking_ref}_${sCode}__`,
+                  session_id: sId,
+                  assigned_seats: [sCode],
+                  pax: 1,
+                  status: 'confirmed',
+                  attendance: 'checked_in',
+                  is_seat_locked: true,
+                  seat_source: 'staff',
+                  is_pinned: true
+                });
+              }
+            }
+          }
+          for (const sId of session_ids) {
+            allocInput.push({
+              booking_ref: `__PRESELECTED_${sId}__`,
+              session_id: sId,
+              assigned_seats: cleanPreselectedSeats,
+              pax: cleanPreselectedSeats.length,
+              status: 'confirmed',
+              attendance: 'checked_in',
+              is_seat_locked: true,
+              seat_source: 'staff',
+              is_pinned: true
+            });
+          }
+          const remainingBlock = {
+            booking_ref: 'NEW_RES',
+            pax: parsedPax - cleanPreselectedSeats.length,
+            session_ids
+          };
+          const allocResult = allocateSeats(allocInput, remainingBlock, forceSplit === true || forceSplit === 'true', ctx);
+          if (!allocResult.success) {
+            if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
+            if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
+            throw new Error('ALLOCATION_FAILED');
+          }
+          const remainingSeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES')?.assigned_seats || [];
+          await applyMovableSeatUpdates(tx, allocResult.updates);
+          mySeats = [...cleanPreselectedSeats, ...remainingSeats];
+        } else {
+          mySeats = [...cleanPreselectedSeats];
+        }
+        allocReason = '店員指定座位';
+        usedPreselected = true;
       } else {
         const [ctx, activeHolds] = await Promise.all([
           loadAllocatorContext(tx, sessionDate),
@@ -2505,6 +2623,7 @@ export const adminCreateReservation = async (req, res) => {
           attendance: checkInStatus,
           checked_in_at: checkInTime,
           assigned_seats: mySeats,
+          seat_source: usedPreselected ? 'staff' : 'auto',
           is_force_split: forceSplit === true || forceSplit === 'true',
           is_walk_in: effectiveWalkIn,
           is_unlimited: is_unlimited,
@@ -2540,7 +2659,8 @@ export const adminCreateReservation = async (req, res) => {
         booking_ref,
         count: newReservations.count,
         assigned_seats: mySeats,
-        reason: allocReason || (isForceWait ? '放入等待區' : undefined)
+        reason: allocReason || (isForceWait ? '放入等待區' : undefined),
+        allocation_reason: allocReason || (isForceWait ? '放入等待區' : undefined)
       };
     });
 
