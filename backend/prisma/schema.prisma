@@ -282,6 +282,7 @@ model PromoCode {
   description         String?
   discount_type       String    @default("fixed_order") // "fixed_order", "fixed_per_pax", "percentage", "free_hours"
   discount_value      Int       @default(0)
+  percent_off         Int?
   max_discount_amount Int?
   target_scope        String    @default("all") // "all", "seating", "equipment"
   day_type_limit      String    @default("all") // "all", "weekday", "weekend"

@@ -23,6 +23,12 @@ import {
 } from 'lucide-react';
 import api from '../../api/axios';
 import { useAdminPermissions, COUPON_WRITE } from '../../hooks/admin/useAdminPermissions';
+import {
+  parsePercentInput,
+  initPercentInputFromPromo,
+  formatPercentConversionHint,
+  formatPercentageBadge
+} from '../../utils/promoPercent';
 
 const DISCOUNT_TYPE_CONFIG = {
   fixed_order: {
@@ -40,9 +46,9 @@ const DISCOUNT_TYPE_CONFIG = {
     color: 'text-[#8B5B43] bg-[#FAF7F2] border-[#E8DEC8]'
   },
   percentage: {
-    label: '百分比折抵 (% off)',
+    label: '百分比折抵 (打幾折 / 折 %)',
     shortLabel: '折數優惠',
-    unit: '% OFF',
+    unit: '折 / %',
     icon: Percent,
     color: 'text-rose-700 bg-rose-50 border-rose-200'
   },
@@ -92,6 +98,8 @@ export default function CouponsPage() {
     description: '',
     discount_type: 'fixed_order',
     discount_value: 50,
+    percent_mode: 'zhe',
+    percent_input: '9',
     max_discount_amount: '',
     channel: 'all',
     target_scope: 'all',
@@ -210,6 +218,8 @@ export default function CouponsPage() {
       description: '',
       discount_type: 'fixed_order',
       discount_value: 50,
+      percent_mode: 'zhe',
+      percent_input: '9',
       max_discount_amount: '',
       channel: 'all',
       target_scope: 'all',
@@ -231,12 +241,17 @@ export default function CouponsPage() {
   // Open modal for editing promo
   const handleOpenEditPromo = (promo) => {
     setEditingPromo(promo);
+    const pctInit = promo.discount_type === 'percentage'
+      ? initPercentInputFromPromo(promo)
+      : { mode: 'zhe', value: '9' };
     setPromoForm({
       code: promo.code || '',
       name: promo.name || '',
       description: promo.description || '',
       discount_type: promo.discount_type || 'fixed_order',
       discount_value: promo.discount_value != null ? promo.discount_value : 50,
+      percent_mode: pctInit.mode,
+      percent_input: pctInit.value,
       max_discount_amount: promo.max_discount_amount != null ? promo.max_discount_amount : '',
       channel: promo.channel || 'all',
       target_scope: promo.target_scope || 'all',
@@ -264,12 +279,26 @@ export default function CouponsPage() {
       return;
     }
 
+    let finalDiscountValue = parseInt(promoForm.discount_value, 10) || 0;
+    let finalPercentOff;
+    if (promoForm.discount_type === 'percentage') {
+      const parsed = parsePercentInput({ mode: promoForm.percent_mode, value: promoForm.percent_input });
+      if (!parsed.valid) {
+        showToast(parsed.error, 'error');
+        return;
+      }
+      finalPercentOff = parsed.percent_off;
+      finalDiscountValue = parsed.percent_off;
+    }
+
+    const { percent_mode: _pm, percent_input: _pi, ...formRest } = promoForm;
     const payload = {
-      ...promoForm,
+      ...formRest,
       code: cleanCode,
       name: promoForm.name.trim(),
       description: promoForm.description ? promoForm.description.trim() : null,
-      discount_value: parseInt(promoForm.discount_value, 10) || 0,
+      discount_value: finalDiscountValue,
+      ...(finalPercentOff !== undefined ? { percent_off: finalPercentOff } : {}),
       max_discount_amount: promoForm.max_discount_amount !== '' && promoForm.max_discount_amount !== null
         ? parseInt(promoForm.max_discount_amount, 10)
         : null,
@@ -729,9 +758,7 @@ export default function CouponsPage() {
                 } else if (promo.discount_type === 'fixed_per_pax') {
                   valueDisplay = `每人現折 NT$ ${promo.discount_value}`;
                 } else if (promo.discount_type === 'percentage') {
-                  const val = promo.discount_value;
-                  const discountPct = val > 50 && val < 100 ? (100 - val) : val;
-                  valueDisplay = `享 ${10 - (discountPct / 10)} 折 (${discountPct}% OFF)`;
+                  valueDisplay = formatPercentageBadge(promo);
                 } else if (promo.discount_type === 'free_hours') {
                   valueDisplay = `贈送 ${promo.discount_value} 小時免費時數`;
                 }
@@ -1251,30 +1278,75 @@ export default function CouponsPage() {
                   <div>
                     <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">折扣類型</label>
                     <select
+                      data-testid="coupon-discount-type-select"
                       value={promoForm.discount_type}
                       onChange={e => setPromoForm({ ...promoForm, discount_type: e.target.value })}
                       className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
                     >
                       <option value="fixed_order">整單折抵固定金額 ($)</option>
                       <option value="fixed_per_pax">依人數每人折抵 ($)</option>
-                      <option value="percentage">百分比折抵 (% OFF)</option>
+                      <option value="percentage">百分比折抵 (打幾折 / 折 %)</option>
                       <option value="free_hours">贈送免費時數 (小時)</option>
                     </select>
                   </div>
 
-                  <div>
-                    <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">
-                      折抵數值 ({DISCOUNT_TYPE_CONFIG[promoForm.discount_type]?.unit})
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min="1"
-                      value={promoForm.discount_value}
-                      onChange={e => setPromoForm({ ...promoForm, discount_value: e.target.value })}
-                      className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-black text-[#8B5B43]"
-                    />
-                  </div>
+                  {promoForm.discount_type === 'percentage' ? (
+                    <div>
+                      <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">輸入方式與折數</label>
+                      <div className="flex gap-1 mb-1.5">
+                        <button
+                          type="button"
+                          data-testid="coupon-pct-mode-zhe"
+                          onClick={() => setPromoForm(prev => ({ ...prev, percent_mode: 'zhe', percent_input: prev.percent_mode === 'zhe' ? prev.percent_input : '9' }))}
+                          className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-bold border ${
+                            promoForm.percent_mode === 'zhe'
+                              ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                              : 'bg-white text-[#3E332B] border-[#E8DEC8]'
+                          }`}
+                        >
+                          打幾折
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="coupon-pct-mode-pct"
+                          onClick={() => setPromoForm(prev => ({ ...prev, percent_mode: 'pct', percent_input: prev.percent_mode === 'pct' ? prev.percent_input : '10' }))}
+                          className={`flex-1 py-1 px-2 rounded-lg text-[11px] font-bold border ${
+                            promoForm.percent_mode === 'pct'
+                              ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                              : 'bg-white text-[#3E332B] border-[#E8DEC8]'
+                          }`}
+                        >
+                          折掉幾 %
+                        </button>
+                      </div>
+                      <input
+                        type="number"
+                        required
+                        data-testid="coupon-pct-value-input"
+                        min={promoForm.percent_mode === 'zhe' ? '1' : '1'}
+                        max={promoForm.percent_mode === 'zhe' ? '9.9' : '99'}
+                        step={promoForm.percent_mode === 'zhe' ? '0.1' : '1'}
+                        value={promoForm.percent_input}
+                        onChange={e => setPromoForm({ ...promoForm, percent_input: e.target.value })}
+                        placeholder={promoForm.percent_mode === 'zhe' ? '例：9 或 8.5' : '例：10 或 60'}
+                        className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-black text-[#8B5B43]"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">
+                        折抵數值 ({DISCOUNT_TYPE_CONFIG[promoForm.discount_type]?.unit})
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min="1"
+                        value={promoForm.discount_value}
+                        onChange={e => setPromoForm({ ...promoForm, discount_value: e.target.value })}
+                        className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-black text-[#8B5B43]"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">
@@ -1291,9 +1363,16 @@ export default function CouponsPage() {
                   </div>
                 </div>
 
-                <div className="text-[12px] text-[#8C8279] italic">
-                  百分比折抵說明：填寫 10 代表 9 折（折抵 10%）；填寫 90 亦自動轉換為 9 折。
-                </div>
+                {promoForm.discount_type === 'percentage' && (
+                  <div data-testid="coupon-pct-conversion-hint" className="text-[12px] font-bold text-[#8B5B43]">
+                    {(() => {
+                      const parsed = parsePercentInput({ mode: promoForm.percent_mode, value: promoForm.percent_input });
+                      return parsed.valid
+                        ? formatPercentConversionHint(parsed.percent_off, 600)
+                        : parsed.error;
+                    })()}
+                  </div>
+                )}
               </div>
 
               {/* Thresholds & Mode limits */}

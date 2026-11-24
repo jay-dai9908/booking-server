@@ -43,8 +43,11 @@ async function run() {
   const todayStr = toTaipeiDateString(new Date());
   const todayDate = new Date(`${todayStr}T00:00:00.000Z`);
   const bookingRef = `BK-R34P-${runId}`;
+  const bookingRef600 = `BK-R34Z-${runId}`;
   const quickCode = `R34Q50_${runId}`;
   const quickName = `現場折50_${runId}`;
+  const zhe9Code = `R34ZHE9_${runId}`;
+  const zhe9Name = `九折體驗_${runId}`;
 
   await prisma.dailySetting.upsert({
     where: { date: todayDate },
@@ -110,6 +113,38 @@ async function run() {
     }
   });
 
+  // 2 pax * 2h * 150 = 600 (for Round 34 Item 5 check)
+  await prisma.reservation.create({
+    data: {
+      booking_ref: bookingRef600,
+      session: { connect: { id: session.id } },
+      user: { connect: { id: testUser.id } },
+      pax: 2,
+      status: 'confirmed',
+      assigned_seats: ['A2-1', 'A2-2'],
+      attendance: 'checked_in',
+      checked_in_at: new Date(),
+      total_amount: 600,
+      checkout_details: {
+        version: 2,
+        rev: 0,
+        split_mode: 'proportional',
+        persons: [
+          { person_no: 1, seat_code: 'A2-1', mode: 'hourly' },
+          { person_no: 2, seat_code: 'A2-2', mode: 'hourly' }
+        ],
+        order_addons: [],
+        order_promos: []
+      }
+    }
+  });
+  await prisma.bookingPerson.createMany({
+    data: [
+      { booking_ref: bookingRef600, person_no: 1, seat_code: 'A2-1', status: 'active', billing_start_at: new Date(), timer_started_at: new Date() },
+      { booking_ref: bookingRef600, person_no: 2, seat_code: 'A2-2', status: 'active', billing_start_at: new Date(), timer_started_at: new Date() }
+    ]
+  });
+
   const launchOptions = { headless: HEADLESS };
   if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
     launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
@@ -172,12 +207,74 @@ async function run() {
       fullPage: false
     });
     console.log('✅ Round 34 Item 2 POS Promo Playwright Test PASSED!');
+
+    // 6. Round 34 Item 5: QuickPromoModal percentage two-mode + live conversion hint screenshot
+    await page.locator('[data-testid="add-quick-pos-promo-btn"]:visible').click();
+    await page.locator('[data-testid="quick-promo-type-percentage-btn"]').click();
+    await page.locator('[data-testid="quick-promo-pct-value-input"]').fill('8.5');
+    const qHint = await page.locator('[data-testid="quick-promo-pct-conversion-hint"]').innerText();
+    assert.ok(qHint.includes('顧客付 85%（8.5 折），600 元折 90 元'), `Unexpected QuickPromo conversion hint: ${qHint}`);
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, 'round34_shot3_quick_promo_percent.png'),
+      fullPage: false
+    });
+    await page.getByRole('button', { name: '取消', exact: true }).last().click();
+    await page.locator('[data-testid="workbench-close-btn"]:visible').click();
+    await page.waitForTimeout(200);
+
+    // 7. Round 34 Item 5: CouponsPage create percentage code using 打 9 折 -> verify card & apply on $600 booking -> $540
+    await page.goto(`${BASE_URL}/admin/coupons`, { waitUntil: 'networkidle' });
+    await page.locator('button:has-text("新增優惠券"):visible').first().click();
+    await page.locator('input[placeholder*="CHECKIN50"]').fill(zhe9Code);
+    await page.locator('input[placeholder*="雙人同行"]').fill(zhe9Name);
+    await page.locator('[data-testid="coupon-discount-type-select"]').selectOption('percentage');
+    await page.locator('[data-testid="coupon-pct-mode-zhe"]').click();
+    await page.locator('[data-testid="coupon-pct-value-input"]').fill('9');
+    const cHint = await page.locator('[data-testid="coupon-pct-conversion-hint"]').innerText();
+    assert.ok(cHint.includes('顧客付 90%（9 折），600 元折 60 元'), `Unexpected Coupons conversion hint: ${cHint}`);
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, 'round34_shot2_coupons_percent.png'),
+      fullPage: false
+    });
+    await page.locator('button:has-text("確認建立優惠券")').click();
+
+    const createdCard = page.locator(`text=${zhe9Code}`).first();
+    await createdCard.waitFor({ state: 'visible', timeout: 10000 });
+    const cardContainer = createdCard.locator('xpath=ancestor::div[contains(@class,"rounded-2xl")]').first();
+    const cardText = await cardContainer.innerText();
+    assert.ok(cardText.includes('9 折（折 10%）'), `Expected card text to show "9 折（折 10%）", got: ${cardText}`);
+
+    // Apply zhe9Code on $600 booking in CheckoutWorkbench -> $540
+    await page.goto(`${BASE_URL}/admin/reservations`, { waitUntil: 'networkidle' });
+    const card600 = page.locator(`[data-testid="reservation-card-${bookingRef600}"]:visible`).first();
+    await card600.waitFor({ state: 'visible', timeout: 10000 });
+    await card600.click();
+    const openWb600 = page.locator('button:has-text("結帳明細"), button:has-text("前往結帳")').first();
+    await openWb600.waitFor({ state: 'visible', timeout: 8000 });
+    await openWb600.click();
+
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[data-testid="workbench-net-due"]');
+      return el && el.innerText.includes('600');
+    }, { timeout: 10000 });
+
+    const promoInput600 = page.locator('input[placeholder*="VIP2026"]:visible').first();
+    await promoInput600.fill(zhe9Code);
+    await page.locator('button:has-text("驗證套用"):visible').first().click();
+
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[data-testid="workbench-net-due"]');
+      return el && el.innerText.includes('540');
+    }, { timeout: 10000 });
+    const finalDue600 = await page.locator('[data-testid="workbench-net-due"]:visible').first().innerText();
+    assert.ok(finalDue600.includes('540'), `Expected NT$540 on NT$600 booking after 9折 promo, got ${finalDue600}`);
+    console.log('✅ Round 34 Item 5 Coupons & QuickPromo Percentage Playwright Test PASSED!');
   } finally {
     await browser.close();
-    await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
-    await prisma.reservation.deleteMany({ where: { booking_ref: bookingRef } }).catch(() => {});
+    await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: [bookingRef, bookingRef600] } } }).catch(() => {});
+    await prisma.reservation.deleteMany({ where: { booking_ref: { in: [bookingRef, bookingRef600] } } }).catch(() => {});
     await prisma.dailySetting.delete({ where: { date: todayDate } }).catch(() => {});
-    await prisma.promoCode.deleteMany({ where: { code: quickCode } }).catch(() => {});
+    await prisma.promoCode.deleteMany({ where: { code: { in: [quickCode, zhe9Code] } } }).catch(() => {});
     await prisma.user.delete({ where: { id: testUser.id } }).catch(() => {});
     await prisma.$disconnect();
   }

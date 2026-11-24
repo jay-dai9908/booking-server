@@ -187,6 +187,7 @@ const ensureDatabaseSchema = async () => {
       CONSTRAINT "PromoCode_pkey" PRIMARY KEY ("id")
     )`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "max_discount_amount" INTEGER`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "percent_off" INTEGER`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "target_scope" TEXT NOT NULL DEFAULT 'all'`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "day_type_limit" TEXT NOT NULL DEFAULT 'all'`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "mode_limit" TEXT NOT NULL DEFAULT 'all'`,

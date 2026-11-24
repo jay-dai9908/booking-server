@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
 import api from '../../../api/axios';
+import { parsePercentInput, formatPercentConversionHint } from '../../../utils/promoPercent';
 
 export default function QuickPromoModal({
   isOpen = false,
@@ -12,6 +13,8 @@ export default function QuickPromoModal({
   const [code, setCode] = useState('');
   const [discountType, setDiscountType] = useState('fixed_order'); // 'fixed_order' | 'percentage'
   const [discountValue, setDiscountValue] = useState(30);
+  const [percentMode, setPercentMode] = useState('zhe'); // 'zhe' | 'pct'
+  const [percentInput, setPercentInput] = useState('9');
   const [isPosOnly, setIsPosOnly] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -23,6 +26,18 @@ export default function QuickPromoModal({
       return;
     }
 
+    let finalDiscountValue = parseInt(discountValue, 10) || 0;
+    let finalPercentOff;
+    if (discountType === 'percentage') {
+      const parsed = parsePercentInput({ mode: percentMode, value: percentInput });
+      if (!parsed.valid) {
+        setError(parsed.error);
+        return;
+      }
+      finalPercentOff = parsed.percent_off;
+      finalDiscountValue = parsed.percent_off;
+    }
+
     const finalCode = (code.trim() || `POS${Date.now().toString().slice(-4)}`).toUpperCase();
 
     try {
@@ -32,7 +47,8 @@ export default function QuickPromoModal({
         code: finalCode,
         name: name.trim(),
         discount_type: discountType,
-        discount_value: parseInt(discountValue, 10) || 0,
+        discount_value: finalDiscountValue,
+        ...(finalPercentOff !== undefined ? { percent_off: finalPercentOff } : {}),
         channel: isPosOnly ? 'pos' : 'all',
         is_pos_quick_select: true,
         is_active: true
@@ -127,6 +143,7 @@ export default function QuickPromoModal({
             </button>
             <button
               type="button"
+              data-testid="quick-promo-type-percentage-btn"
               onClick={() => setDiscountType('percentage')}
               className={`p-2.5 rounded-xl border text-[13px] font-bold transition ${
                 discountType === 'percentage'
@@ -134,29 +151,93 @@ export default function QuickPromoModal({
                   : 'bg-white text-sg-ink border-sg-line hover:bg-sg-paper'
               }`}
             >
-              比例折數 (%)
+              比例折數 (打幾折 / 折 %)
             </button>
           </div>
 
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sg-muted text-[13px] font-bold">
-              {discountType === 'fixed_order' ? 'NT$' : '%'}
-            </span>
-            <input
-              type="number"
-              required
-              min="1"
-              max={discountType === 'percentage' ? 100 : 9999}
-              value={discountValue}
-              onChange={(e) => setDiscountValue(e.target.value)}
-              className="w-full pl-12 pr-3 py-2 rounded-xl border border-sg-line text-[14px] font-bold focus:ring-sg-brown focus:border-sg-brown"
-            />
-          </div>
-          <span className="block text-[11px] text-sg-muted mt-1">
-            {discountType === 'fixed_order'
-              ? '整單結帳時直接扣減指定金額'
-              : '例：填 10 代表折抵 10%（九折）；填 20 代表折抵 20%（八折）'}
-          </span>
+          {discountType === 'percentage' ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  data-testid="quick-promo-pct-mode-zhe"
+                  onClick={() => {
+                    setPercentMode('zhe');
+                    if (percentMode !== 'zhe') setPercentInput('9');
+                  }}
+                  className={`py-1.5 px-3 rounded-xl border text-[12px] font-bold ${
+                    percentMode === 'zhe'
+                      ? 'bg-sg-brown-soft text-sg-brown border-sg-brown'
+                      : 'bg-white text-sg-muted border-sg-line'
+                  }`}
+                >
+                  打幾折 (1～9.9)
+                </button>
+                <button
+                  type="button"
+                  data-testid="quick-promo-pct-mode-pct"
+                  onClick={() => {
+                    setPercentMode('pct');
+                    if (percentMode !== 'pct') setPercentInput('10');
+                  }}
+                  className={`py-1.5 px-3 rounded-xl border text-[12px] font-bold ${
+                    percentMode === 'pct'
+                      ? 'bg-sg-brown-soft text-sg-brown border-sg-brown'
+                      : 'bg-white text-sg-muted border-sg-line'
+                  }`}
+                >
+                  折掉幾 % (1～99)
+                </button>
+              </div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sg-muted text-[13px] font-bold">
+                  {percentMode === 'zhe' ? '打' : '折'}
+                </span>
+                <input
+                  type="number"
+                  required
+                  data-testid="quick-promo-pct-value-input"
+                  min={percentMode === 'zhe' ? '1' : '1'}
+                  max={percentMode === 'zhe' ? '9.9' : '99'}
+                  step={percentMode === 'zhe' ? '0.1' : '1'}
+                  value={percentInput}
+                  onChange={(e) => setPercentInput(e.target.value)}
+                  className="w-full pl-9 pr-12 py-2 rounded-xl border border-sg-line text-[14px] font-bold focus:ring-sg-brown focus:border-sg-brown"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sg-muted text-[13px] font-bold">
+                  {percentMode === 'zhe' ? '折' : '%'}
+                </span>
+              </div>
+              <div data-testid="quick-promo-pct-conversion-hint" className="text-[12px] font-bold text-sg-brown">
+                {(() => {
+                  const parsed = parsePercentInput({ mode: percentMode, value: percentInput });
+                  return parsed.valid
+                    ? formatPercentConversionHint(parsed.percent_off, 600)
+                    : parsed.error;
+                })()}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sg-muted text-[13px] font-bold">
+                  NT$
+                </span>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  max={9999}
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  className="w-full pl-12 pr-3 py-2 rounded-xl border border-sg-line text-[14px] font-bold focus:ring-sg-brown focus:border-sg-brown"
+                />
+              </div>
+              <span className="block text-[11px] text-sg-muted mt-1">
+                整單結帳時直接扣減指定金額
+              </span>
+            </>
+          )}
         </div>
 
         {/* POS Channel limit */}

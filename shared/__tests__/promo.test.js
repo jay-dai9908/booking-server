@@ -151,3 +151,23 @@ test('shared/promo: legacy draft without rule_v keeps old percentage behavior un
   assert.equal(bill.summary.discounts_total, 540);
   assert.equal(bill.summary.amount_due, 60);
 });
+
+test('shared/promo: percent_off 60 discounts 360 on 600; null percent_off with discount_value 85 discounts 15%', () => {
+  const r60 = normalizePromoRule({
+    code: 'OFF60',
+    discount_type: 'percentage',
+    discount_value: 60,
+    percent_off: 60
+  });
+  assert.equal(r60.pct_off, 60);
+  assert.equal(computePromoDiscount(r60, [{ person_no: 1, entry_amount: 600, board_amount: 0, base_amount: 600 }]).total, 360);
+
+  const rLegacy85 = normalizePromoRule({
+    code: 'ZHE85',
+    discount_type: 'percentage',
+    discount_value: 85,
+    percent_off: null
+  });
+  assert.equal(rLegacy85.pct_off, 15);
+  assert.equal(computePromoDiscount(rLegacy85, [{ person_no: 1, entry_amount: 600, board_amount: 0, base_amount: 600 }]).total, 90);
+});

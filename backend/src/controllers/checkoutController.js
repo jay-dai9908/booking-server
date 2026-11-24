@@ -385,6 +385,7 @@ export const createPromoCode = async (req, res) => {
       description,
       discount_type = 'fixed_order',
       discount_value = 0,
+      percent_off,
       max_discount_amount = null,
       target_scope = 'all',
       day_type_limit,
@@ -418,13 +419,27 @@ export const createPromoCode = async (req, res) => {
     const startDateVal = start_date || valid_from;
     const endDateVal = end_date || valid_until;
 
+    let finalDiscountValue = parseInt(discount_value, 10) || 0;
+    let finalPercentOff = null;
+    if (discount_type === 'percentage') {
+      const num = typeof percent_off === 'boolean' || percent_off === null || percent_off === '' || percent_off === undefined
+        ? NaN
+        : Number(percent_off);
+      if (!Number.isInteger(num) || num < 1 || num > 100) {
+        return res.status(422).json({ error: '百分比折抵 percent_off 必須為 1～100 的整數' });
+      }
+      finalPercentOff = num;
+      finalDiscountValue = num;
+    }
+
     const created = await prisma.promoCode.create({
       data: {
         code: cleanCode,
         name: name.trim(),
         description: description ? description.trim() : null,
         discount_type,
-        discount_value: parseInt(discount_value, 10) || 0,
+        discount_value: finalDiscountValue,
+        percent_off: finalPercentOff,
         max_discount_amount: max_discount_amount !== null && max_discount_amount !== '' ? parseInt(max_discount_amount, 10) : null,
         target_scope: target_scope || 'all',
         day_type_limit: day_type_limit || applicable_days || 'all',
@@ -468,6 +483,7 @@ export const updatePromoCode = async (req, res) => {
       description,
       discount_type,
       discount_value,
+      percent_off,
       max_discount_amount,
       target_scope,
       day_type_limit,
@@ -509,7 +525,24 @@ export const updatePromoCode = async (req, res) => {
     if (name !== undefined) data.name = name.trim();
     if (description !== undefined) data.description = description ? description.trim() : null;
     if (discount_type !== undefined) data.discount_type = discount_type;
-    if (discount_value !== undefined) data.discount_value = parseInt(discount_value, 10) || 0;
+    const targetType = discount_type !== undefined ? discount_type : existingPromo.discount_type;
+    if (targetType === 'percentage') {
+      if (percent_off !== undefined) {
+        const num = typeof percent_off === 'boolean' || percent_off === null || percent_off === ''
+          ? NaN
+          : Number(percent_off);
+        if (!Number.isInteger(num) || num < 1 || num > 100) {
+          return res.status(422).json({ error: '百分比折抵 percent_off 必須為 1～100 的整數' });
+        }
+        data.percent_off = num;
+        data.discount_value = num;
+      } else if (discount_type === 'percentage' || discount_value !== undefined) {
+        return res.status(422).json({ error: '百分比折抵請提供 1～100 的整數 percent_off' });
+      }
+    } else {
+      if (discount_value !== undefined) data.discount_value = parseInt(discount_value, 10) || 0;
+      if (discount_type !== undefined) data.percent_off = null;
+    }
     if (max_discount_amount !== undefined) data.max_discount_amount = max_discount_amount !== null && max_discount_amount !== '' ? parseInt(max_discount_amount, 10) : null;
     if (target_scope !== undefined) data.target_scope = target_scope;
     if (day_type_limit !== undefined || applicable_days !== undefined) data.day_type_limit = day_type_limit || applicable_days;
