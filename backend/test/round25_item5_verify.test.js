@@ -379,10 +379,12 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
       const dbResC = await prisma.reservation.findFirst({ where: { booking_ref: refC } });
       assert.equal(dbResC.billing_status, 'paid');
 
-      // Void passPayC -> restores pass quota from 2 back to 3!
+      // Void passPayC -> reopens BookingPrepay to reported_pending_verify; pass remains in pass_holds (quota stays 2 until cancelled)
       await voidPayment(passPayC.id, '測試作廢退次', { id: 1, name: 'R25管理員' }, { device_label: '測試' });
       const quotaAfterVoid = (await prisma.userPass.findUnique({ where: { id: userPass.id } })).remaining_quota;
-      assert.equal(quotaAfterVoid, 3);
+      assert.equal(quotaAfterVoid, 2);
+      const prepayCAfterVoid = await prisma.bookingPrepay.findUnique({ where: { booking_ref: refC } });
+      assert.equal(prepayCAfterVoid.status, 'reported_pending_verify');
     }
 
     // ---------------------------------------------------------

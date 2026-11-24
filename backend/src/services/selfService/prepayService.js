@@ -745,6 +745,7 @@ export async function settleSelfServiceBooking(
         amount: entryAmt,
         person_nos: [pBill.person_no],
         breakdown_json: {
+          source: 'self_prepay',
           persons: [{ ...pBill, amount: entryAmt }],
           pricing,
           snapshot_at: now.toISOString()

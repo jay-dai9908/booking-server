@@ -230,6 +230,11 @@ export default function SelfServicePrepaysPanel({ onCountsChange, onToast }) {
                         <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}>
                           {badge.label}
                         </span>
+                        {item.status === 'reported_pending_verify' && /作廢入帳/.test(item.admin_note || '') && (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                            入帳已作廢
+                          </span>
+                        )}
                         {item.is_overdue && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-600 text-white">
                             已過期限，請儘快處理
@@ -378,6 +383,11 @@ export default function SelfServicePrepaysPanel({ onCountsChange, onToast }) {
                             <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}>
                               {badge.label}
                             </span>
+                            {item.status === 'reported_pending_verify' && /作廢入帳/.test(item.admin_note || '') && (
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                                入帳已作廢
+                              </span>
+                            )}
                             {item.deadline_at && (
                               <span className="text-[11px] text-gray-500 font-mono">
                                 期限 {formatDateTime(item.deadline_at, 'MM/dd HH:mm')}

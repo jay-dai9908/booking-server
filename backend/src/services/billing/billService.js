@@ -1723,6 +1723,56 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
   });
 }
 
+function isSelfPrepayHoldPayment(payment, prepay) {
+  if (!payment || payment.method !== 'pass') return false;
+  if (payment.breakdown_json?.source === 'self_prepay') return true;
+  if (!prepay) return false;
+  const holds = Array.isArray(prepay.pass_holds) ? prepay.pass_holds : [];
+  const holdCodes = new Set(holds.map((h) => h.pass_code).filter(Boolean));
+  const passCodes = Array.isArray(payment.pass_json) ? payment.pass_json.map((p) => p.pass_code) : [];
+  return passCodes.length > 0 && passCodes.some((c) => holdCodes.has(c));
+}
+
+async function reopenVerifiedPrepayIfUnsettled(tx, { booking_ref, reason, staffName, staffId, deviceInfo, statusAfter }) {
+  if (statusAfter?.code === 'paid' || statusAfter?.code === 'waived') return;
+  const prepay = await tx.bookingPrepay.findUnique({ where: { booking_ref } });
+  if (!prepay || prepay.status !== 'verified') return;
+
+  const nowDate = new Date();
+  const datePart = toTaipeiDateString(nowDate);
+  const timePart = nowDate.toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Taipei',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  const noteLine = `${datePart} ${timePart} 作廢入帳，待重新對帳（${staffName}）`;
+  const nextNote = prepay.admin_note ? `${prepay.admin_note}\n${noteLine}` : noteLine;
+
+  await tx.bookingPrepay.update({
+    where: { booking_ref },
+    data: {
+      status: 'reported_pending_verify',
+      settled_at: null,
+      verified_at: null,
+      verified_by_name: null,
+      admin_note: nextNote
+    }
+  });
+
+  await auditLog(tx, {
+    booking_ref,
+    event_type: 'prepay_reopened',
+    category: 'status',
+    summary: `預付單 ${booking_ref} 因作廢入帳改回待重新對帳`,
+    reason: String(reason || '').trim() || null,
+    staff_name: staffName,
+    staff_id: staffId,
+    device_id: deviceInfo?.device_id,
+    device_label: deviceInfo?.device_label
+  });
+}
+
 /**
  * Void payment batch (spec 5.4 POST /payments/:id/void)
  */
@@ -1890,6 +1940,10 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
       }
     }
 
+    const bookingPrepay = await tx.bookingPrepay.findUnique({
+      where: { booking_ref: payment.booking_ref }
+    });
+
     const nowVoidedAt = new Date();
     for (const bp of batchPayments) {
       await tx.payment.update({
@@ -1902,8 +1956,8 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
         }
       });
 
-      // Restore pass if this payment used pass
-      if (bp.method === 'pass' && bp.pass_json && Array.isArray(bp.pass_json)) {
+      // Restore pass if this payment used pass (skip self-service prepay pass holds; stays in pass_holds)
+      if (bp.method === 'pass' && bp.pass_json && Array.isArray(bp.pass_json) && !isSelfPrepayHoldPayment(bp, bookingPrepay)) {
         for (const pj of bp.pass_json) {
           if (pj.user_pass_id) {
             await restorePass(tx, {
@@ -1957,6 +2011,14 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
     }
 
     const { bill, status } = await refreshBillingCache(tx, payment.booking_ref);
+    await reopenVerifiedPrepayIfUnsettled(tx, {
+      booking_ref: payment.booking_ref,
+      reason,
+      staffName,
+      staffId,
+      deviceInfo,
+      statusAfter: status
+    });
     return { voided_count: batchPayments.length, bill, status };
   });
 }
@@ -1999,6 +2061,7 @@ export async function markUnpaid(booking_ref, reason, staffUser, deviceInfo) {
       }
     }
 
+    const bookingPrepay = await tx.bookingPrepay.findUnique({ where: { booking_ref } });
     let voidedTotal = 0;
 
     for (const p of validPayments) {
@@ -2013,7 +2076,7 @@ export async function markUnpaid(booking_ref, reason, staffUser, deviceInfo) {
         }
       });
 
-      if (p.method === 'pass' && p.pass_json && Array.isArray(p.pass_json)) {
+      if (p.method === 'pass' && p.pass_json && Array.isArray(p.pass_json) && !isSelfPrepayHoldPayment(p, bookingPrepay)) {
         for (const pj of p.pass_json) {
           if (pj.user_pass_id) {
             await restorePass(tx, {
@@ -2061,6 +2124,14 @@ export async function markUnpaid(booking_ref, reason, staffUser, deviceInfo) {
     });
 
     const { bill, status } = await refreshBillingCache(tx, booking_ref);
+    await reopenVerifiedPrepayIfUnsettled(tx, {
+      booking_ref,
+      reason,
+      staffName,
+      staffId,
+      deviceInfo,
+      statusAfter: status
+    });
     return { voided_count: validPayments.length, bill, status };
   });
 }
