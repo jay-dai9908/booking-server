@@ -1,10 +1,37 @@
 import prisma from '../../prismaClient.js';
 import { toTaipeiDateString } from '../../../../shared/time.js';
 
+function toDateStrTaipei(dateInput = new Date()) {
+  if (typeof dateInput === 'string') {
+    const trimmed = dateInput.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed.slice(0, 10);
+  }
+  return toTaipeiDateString(dateInput);
+}
+
+function getWeekdayFromYmd(ymd) {
+  const [y, m, d] = String(ymd).split('-').map(Number);
+  if (!y || !m || !d) return new Date().getUTCDay();
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+function getTaipeiWeekBounds(ymd) {
+  const [y, m, d] = String(ymd).split('-').map(Number);
+  const utcDay = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  const diffToMonday = utcDay === 0 ? -6 : 1 - utcDay;
+  const monday = new Date(Date.UTC(y, m - 1, d + diffToMonday));
+  const sunday = new Date(Date.UTC(y, m - 1, d + diffToMonday + 6));
+  return {
+    mondayStr: monday.toISOString().slice(0, 10),
+    sundayStr: sunday.toISOString().slice(0, 10)
+  };
+}
+
 export function checkDayRestrictionForDate(restriction, dateInput) {
   if (!restriction || restriction === 'ALL') return { ok: true };
-  const d = new Date(dateInput);
-  const day = d.getDay(); // 0 is Sunday, 6 is Saturday
+  const ymd = toDateStrTaipei(dateInput);
+  const day = getWeekdayFromYmd(ymd); // 0 is Sunday, 6 is Saturday
   const isWeekend = day === 0 || day === 6;
   if (restriction === 'WEEKDAY_ONLY' && isWeekend) {
     return { ok: false, reason: '今天是假日，這張限平日' };
@@ -35,45 +62,42 @@ export function validatePassUsage(userPass, { date = new Date(), units = 1 } = {
     return { usable: false, reason: '已過期' };
   }
 
-  if (userPass.expires_at && new Date(date) > new Date(userPass.expires_at)) {
+  const targetDateStr = toDateStrTaipei(date);
+  if (userPass.expires_at && targetDateStr > toDateStrTaipei(userPass.expires_at)) {
     return { usable: false, reason: '已過期' };
   }
 
-  const dayCheck = checkDayRestrictionForDate(userPass.day_restriction, date);
+  const dayCheck = checkDayRestrictionForDate(userPass.day_restriction, targetDateStr);
   if (!dayCheck.ok) {
     return { usable: false, reason: dayCheck.reason };
   }
 
   const usageLogs = Array.isArray(userPass.usage_logs_json) ? userPass.usage_logs_json : [];
-  const targetDateStr = typeof date === 'string' ? date.slice(0, 10) : toTaipeiDateString(date);
+  const { mondayStr, sundayStr } = getTaipeiWeekBounds(targetDateStr);
 
-  // Compute usage on target date and target week
-  const d = new Date(date);
-  const dayOfWeek = d.getDay();
-  const diffToMonday = d.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-  const monday = new Date(d);
-  monday.setDate(diffToMonday);
-  monday.setHours(0, 0, 0, 0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-
-  let dateUsedHours = 0;
-  const weekDaysUsed = new Set();
+  const dailyNetMap = new Map();
   let weekUsedHours = 0;
 
   for (const log of usageLogs) {
-    if (!log.date && !log.at) continue;
-    const logDate = new Date(log.date || log.at);
-    const logDateStr = toTaipeiDateString(logDate);
-    const amt = parseInt(log.deducted || log.units, 10) || 0;
+    const rawLogDate = log.use_date ?? log.date ?? log.at;
+    if (!rawLogDate) continue;
+    const logDateStr = toDateStrTaipei(rawLogDate);
+    if (!logDateStr) continue;
+    const rawAmt = Number(log.units ?? log.deducted) || 0;
+    const signedAmt = log.type === 'restore' ? -Math.abs(rawAmt) : Math.abs(rawAmt);
 
-    if (logDateStr === targetDateStr) {
-      dateUsedHours += amt;
+    dailyNetMap.set(logDateStr, (dailyNetMap.get(logDateStr) || 0) + signedAmt);
+    if (logDateStr >= mondayStr && logDateStr <= sundayStr) {
+      weekUsedHours += signedAmt;
     }
-    if (logDate >= monday && logDate <= sunday) {
-      weekDaysUsed.add(logDateStr);
-      weekUsedHours += amt;
+  }
+
+  const dateUsedHours = Math.max(0, dailyNetMap.get(targetDateStr) || 0);
+  weekUsedHours = Math.max(0, weekUsedHours);
+  const weekDaysUsed = new Set();
+  for (const [dStr, netVal] of dailyNetMap.entries()) {
+    if (dStr >= mondayStr && dStr <= sundayStr && netVal > 0) {
+      weekDaysUsed.add(dStr);
     }
   }
 
@@ -155,9 +179,11 @@ export async function deductPass(tx, {
       }
     }
 
+    const useDateStr = toDateStrTaipei(date || new Date());
     const usageLogs = Array.isArray(pass.usage_logs_json) ? [...pass.usage_logs_json] : [];
     usageLogs.push({
       at: new Date().toISOString(),
+      use_date: useDateStr,
       booking_ref,
       payment_no,
       person_no,
@@ -190,8 +216,10 @@ export async function restorePass(tx, {
   units = 1,
   booking_ref,
   payment_no,
+  orig_payment_no = null,
   person_no,
-  staff_name
+  staff_name,
+  date = null
 }) {
   if (!Number.isInteger(units) || units <= 0) {
     throw { status: 422, message: '退回數量必須為正整數' };
@@ -217,9 +245,21 @@ export async function restorePass(tx, {
     }
 
     const usageLogs = Array.isArray(pass.usage_logs_json) ? [...pass.usage_logs_json] : [];
+    const reversedDeducts = [...usageLogs].reverse().filter(l => l.type !== 'restore');
+    const matchedDeduct =
+      (orig_payment_no && reversedDeducts.find(l => l.payment_no === orig_payment_no)) ||
+      (payment_no && reversedDeducts.find(l => l.payment_no === payment_no)) ||
+      (booking_ref && reversedDeducts.find(l => l.booking_ref === booking_ref && (person_no == null || Number(l.person_no) === Number(person_no)))) ||
+      (booking_ref && reversedDeducts.find(l => l.booking_ref === booking_ref)) ||
+      null;
+    const inheritedUseDate = matchedDeduct
+      ? toDateStrTaipei(matchedDeduct.use_date ?? matchedDeduct.date ?? matchedDeduct.at)
+      : toDateStrTaipei(date || new Date());
+
     usageLogs.push({
       type: 'restore',
       at: new Date().toISOString(),
+      use_date: inheritedUseDate,
       booking_ref,
       payment_no,
       person_no,

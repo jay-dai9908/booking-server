@@ -787,7 +787,14 @@ export async function planPassTenders(txOrPrisma = prisma, {
       throw { status: 422, message: validation.reason };
     }
 
-    const pBill = targetPersons.find(p => p.person_no === Number(pt.person_no)) || targetPersons[0];
+    const tenderPersonNo = Number(pt?.person_no);
+    if (!Number.isInteger(tenderPersonNo) || !normalizedNos.includes(tenderPersonNo)) {
+      throw { status: 422, message: '卡券對應的人不在這次收款名單' };
+    }
+    const pBill = targetPersons.find(p => p.person_no === tenderPersonNo);
+    if (!pBill) {
+      throw { status: 422, message: '卡券對應的人不在這次收款名單' };
+    }
     const alreadyCovered = personCovered.get(pBill.person_no) || 0;
     const rawValue = computePassTenderValue({
       checkout_effect: pass.plan?.checkout_effect,
@@ -1467,7 +1474,8 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       passRestoreTarget = {
         user_pass_id: pj.user_pass_id,
         plan_name: pj.plan_name,
-        units: remainingUnits
+        units: remainingUnits,
+        orig_payment_no: targetPassPay.payment_no
       };
       extraBreakdown = {
         restored_units: remainingUnits,
@@ -1534,6 +1542,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
         units: passRestoreTarget.units,
         booking_ref,
         payment_no: payNo,
+        orig_payment_no: passRestoreTarget.orig_payment_no,
         person_no: pNo,
         staff_name: staffName
       });
