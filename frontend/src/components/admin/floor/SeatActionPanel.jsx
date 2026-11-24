@@ -175,8 +175,8 @@ export default function SeatActionPanel({
     subtitle = [personPart, statusPart, boardPart, endPart].filter(Boolean).join(' · ');
   }
 
-  // Group members (同組)
-  const allPersons = booking?.persons || [];
+  // Group members (同組，排除已移除)
+  const allPersons = (booking?.persons || []).filter(p => p.status !== 'removed');
   const currentPerson = allPersons.find(p => Number(p.person_no) === Number(personNo)) || null;
   const otherPersons = allPersons.filter(p => p.person_no !== personNo);
 
@@ -238,7 +238,7 @@ export default function SeatActionPanel({
             const isPaused = Boolean(p.timer?.paused_at && !p.timer?.timer_ended_at);
             const pStatusText = getPersonStatusText(p, booking);
             const pReason = p.timer?.pause_reason;
-            const seatCodeStr = p.seat_code || (booking?.assigned_seats && booking.assigned_seats[p.person_no - 1]) || '未排座';
+            const seatCodeStr = p.seat_code || '未排座';
 
             return (
               <div

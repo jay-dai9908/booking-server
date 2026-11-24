@@ -1989,7 +1989,7 @@ export default function SeatingPage() {
               </button>
             </div>
 
-            {(timerTarget?.persons || []).map((p) => {
+            {(timerTarget?.persons || []).filter(p => p.status !== 'removed').map((p) => {
               const tm = p.timer || p;
               const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
               const isEnded = Boolean(tm.timer_ended_at);
@@ -2345,6 +2345,12 @@ export default function SeatingPage() {
               );
             })}
           </div>
+
+          {(timerTarget?.persons || []).filter(p => p.status === 'removed').length > 0 && (
+            <p data-testid="removed-persons-note" className="text-[12px] text-sg-muted">
+              已移除 {(timerTarget?.persons || []).filter(p => p.status === 'removed').length} 位（這位不玩了）
+            </p>
+          )}
 
           <p className="text-[12px] text-sg-muted">
             暫停的時間不計費。結帳時每位的時數會自動帶入，店員可以再修改。

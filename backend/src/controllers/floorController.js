@@ -551,15 +551,26 @@ export async function handleTimer(req, res) {
       const now = (process.env.NODE_ENV === 'test' && (req.body?.now || req.body?.at))
         ? new Date(req.body.now || req.body.at)
         : new Date();
-      const wherePersons = { booking_ref, status: 'active' };
+      let persons;
       if (person_nos !== 'all' && Array.isArray(person_nos)) {
-        wherePersons.person_no = { in: person_nos.map(Number) };
+        const reqNos = person_nos.map(Number);
+        const targetRows = await tx.bookingPerson.findMany({
+          where: { booking_ref, person_no: { in: reqNos } },
+          include: { pauses: true }
+        });
+        for (const no of reqNos) {
+          const found = targetRows.find(r => r.person_no === no);
+          if (!found || found.status !== 'active') {
+            throw { status: 409, code: 'PERSON_REMOVED', message: `第 ${no} 位已移除，不能再操作計時` };
+          }
+        }
+        persons = targetRows;
+      } else {
+        persons = await tx.bookingPerson.findMany({
+          where: { booking_ref, status: 'active' },
+          include: { pauses: true }
+        });
       }
-
-      const persons = await tx.bookingPerson.findMany({
-        where: wherePersons,
-        include: { pauses: true }
-      });
 
       for (const p of persons) {
         if (action === 'pause') {

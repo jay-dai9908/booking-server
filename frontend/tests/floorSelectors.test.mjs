@@ -664,5 +664,43 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(states['A1-1'].conflictWith[0].bookingRef, 'BK-B-SECOND');
     assert.ok(states.attentionList.some(a => a.type === 'seat_conflict' && a.seat_code === 'A1-1'));
   });
+
+  await t.test('18. Round 39 Item 3: buildSeatStates maps person.seat_code & person_no when person 1 is removed', () => {
+    const layout = {
+      seats: [
+        { id: 1, code: 'A1-1', is_active: true },
+        { id: 2, code: 'A1-2', is_active: true },
+        { id: 3, code: 'A1-3', is_active: true }
+      ]
+    };
+    const booking = {
+      booking_ref: 'BK-REM-1',
+      name: '三位組',
+      attendance: 'checked_in',
+      checked_in_at: '2026-11-10T14:00:00+08:00',
+      start_at: '2026-11-10T14:00:00+08:00',
+      end_at: '2026-11-10T16:00:00+08:00',
+      assigned_seats: ['A1-2', 'A1-3'],
+      persons: [
+        { person_no: 1, status: 'removed', seat_code: null, timer: { timer_ended_at: '2026-11-10T14:05:00+08:00' } },
+        {
+          person_no: 2,
+          status: 'active',
+          seat_code: 'A1-2',
+          timer: { timer_started_at: '2026-11-10T14:00:00+08:00', timer_ended_at: null, paused_at: null }
+        },
+        {
+          person_no: 3,
+          status: 'active',
+          seat_code: 'A1-3',
+          timer: { timer_started_at: '2026-11-10T14:00:00+08:00', timer_ended_at: null, paused_at: null }
+        }
+      ]
+    };
+    const states = buildSeatStates(layout, [booking], new Date('2026-11-10T14:15:00+08:00'));
+    assert.strictEqual(states['A1-1'].state, 'empty');
+    assert.strictEqual(states['A1-2'].personNo, 2);
+    assert.strictEqual(states['A1-3'].personNo, 3);
+  });
 });
 

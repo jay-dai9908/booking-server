@@ -155,7 +155,7 @@ export default function TablePanel({
             groups.map((group, idx) => {
               const isCheckedIn = group.attendance === 'checked_in';
               const isPending = group.attendance === 'pending' || !group.attendance;
-              const persons = group.persons || group.booking_persons || [];
+              const persons = (group.persons || group.booking_persons || []).filter(p => p.status !== 'removed');
 
               const getPersonTimer = (p) => p?.timer || p || {};
 
