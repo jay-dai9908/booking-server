@@ -785,6 +785,20 @@ export async function moveGroup(req, res) {
 
 export const TIMER_ACTION_WHITELIST = ['pause', 'resume', 'end', 'restart'];
 
+async function closeOpenPersonPausesTx(tx, person, closeAtDt) {
+  const openPauses = (person.pauses || []).filter((pa) => !pa.ended_at);
+  let pauseDurationSec = 0;
+  if (openPauses.length > 0) {
+    const earliestStartMs = Math.min(...openPauses.map((pa) => new Date(pa.started_at).getTime()));
+    pauseDurationSec = Math.max(0, Math.floor((closeAtDt.getTime() - earliestStartMs) / 1000));
+    await tx.timerPause.updateMany({
+      where: { person_id: person.id, ended_at: null },
+      data: { ended_at: closeAtDt }
+    });
+  }
+  return pauseDurationSec;
+}
+
 export async function handleTimer(req, res) {
   const { booking_ref } = req.params;
   const { action, person_nos = 'all', reason } = req.body;
@@ -796,6 +810,8 @@ export async function handleTimer(req, res) {
 
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
       const now = (process.env.NODE_ENV === 'test' && (req.body?.now || req.body?.at))
         ? new Date(req.body.now || req.body.at)
         : new Date();
@@ -861,20 +877,12 @@ export async function handleTimer(req, res) {
         } else if (action === 'resume') {
           if (p.status === 'active' && p.paused_at && !p.timer_ended_at) {
             affectedCount++;
-            const openPause = p.pauses?.find(pa => !pa.ended_at);
-            let pauseDurationSec = 0;
-            if (openPause) {
-              pauseDurationSec = Math.floor((now.getTime() - new Date(openPause.started_at).getTime()) / 1000);
-              await tx.timerPause.update({
-                where: { id: openPause.id },
-                data: { ended_at: now }
-              });
-            }
+            const pauseDurationSec = await closeOpenPersonPausesTx(tx, p, now);
             await tx.bookingPerson.update({
               where: { id: p.id },
               data: {
                 paused_at: null,
-                paused_seconds: (p.paused_seconds || 0) + Math.max(0, pauseDurationSec)
+                paused_seconds: (p.paused_seconds || 0) + pauseDurationSec
               }
             });
             const pBoards = await tx.bookingEquipment.findMany({
@@ -895,15 +903,7 @@ export async function handleTimer(req, res) {
             const origEndDt = new Date(p.timer_ended_at);
             const openPauses = (p.pauses || []).filter(pa => !pa.ended_at);
             if (openPauses.length > 0 || p.paused_at) {
-              let extraSec = 0;
-              if (openPauses.length > 0) {
-                const earliestStartMs = Math.min(...openPauses.map(pa => new Date(pa.started_at).getTime()));
-                extraSec = Math.max(0, Math.floor((origEndDt.getTime() - earliestStartMs) / 1000));
-                await tx.timerPause.updateMany({
-                  where: { person_id: p.id, ended_at: null },
-                  data: { ended_at: origEndDt }
-                });
-              }
+              const extraSec = await closeOpenPersonPausesTx(tx, p, origEndDt);
               await tx.bookingPerson.update({
                 where: { id: p.id },
                 data: {
@@ -913,22 +913,15 @@ export async function handleTimer(req, res) {
               });
             }
           } else {
-            // Not yet departed: close pause (if any) and set timer_ended_at = now
-            if (p.paused_at) {
-              const openPause = p.pauses?.find(pa => !pa.ended_at);
-              let pauseDurationSec = 0;
-              if (openPause) {
-                pauseDurationSec = Math.floor((now.getTime() - new Date(openPause.started_at).getTime()) / 1000);
-                await tx.timerPause.update({
-                  where: { id: openPause.id },
-                  data: { ended_at: now }
-                });
-              }
+            // Not yet departed: close all open pauses (if any) and set timer_ended_at = now
+            const openPauses = (p.pauses || []).filter(pa => !pa.ended_at);
+            if (p.paused_at || openPauses.length > 0) {
+              const pauseDurationSec = await closeOpenPersonPausesTx(tx, p, now);
               await tx.bookingPerson.update({
                 where: { id: p.id },
                 data: {
                   paused_at: null,
-                  paused_seconds: (p.paused_seconds || 0) + Math.max(0, pauseDurationSec),
+                  paused_seconds: (p.paused_seconds || 0) + pauseDurationSec,
                   timer_ended_at: now
                 }
               });
@@ -1870,16 +1863,48 @@ export async function returnBoard(req, res) {
 
 export async function reassignBoard(req, res) {
   const { booking_ref, unit_group } = req.params;
-  const { person_no } = req.body;
+  const { person_no } = req.body || {};
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  const pNo = Number(person_no);
+  if (!Number.isInteger(pNo) || pNo <= 0) {
+    return res.status(400).json({ error: '請指定正確的顧客編號' });
+  }
 
   try {
     await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
       const person = await tx.bookingPerson.findUnique({
-        where: { booking_ref_person_no: { booking_ref, person_no: Number(person_no) } }
+        where: { booking_ref_person_no: { booking_ref, person_no: pNo } }
       });
+      if (!person || person.status !== 'active') {
+        throw { status: 404, message: `找不到第 ${pNo} 位，或這位已移除` };
+      }
+
+      const segCount = await tx.bookingEquipment.count({
+        where: { booking_ref, unit_group }
+      });
+      if (segCount === 0) {
+        throw { status: 404, message: '此智能板不屬於這筆預約' };
+      }
+
       await tx.bookingEquipment.updateMany({
         where: { booking_ref, unit_group },
-        data: { person_id: person ? person.id : null }
+        data: { person_id: person.id }
+      });
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'board_reassigned',
+        category: 'seating',
+        summary: `智能板改給第 ${pNo} 位`,
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id || null,
+        device_label: deviceInfo?.device_label || null
       });
 
       await refreshBillingCache(tx, booking_ref);
@@ -1889,6 +1914,12 @@ export async function reassignBoard(req, res) {
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[reassignBoard] Error:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
     return res.status(500).json({ error: '指派板子失敗' });
   }
 }
