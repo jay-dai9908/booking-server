@@ -338,10 +338,21 @@ export async function claimNextJob(stationId, waitSeconds = 20) {
 /**
  * Report result of a print job
  */
-export async function reportJobResult(jobId, { success, error_code = null, error_message = null }, via = 'station') {
+export async function reportJobResult(
+  jobId,
+  { success, error_code = null, error_message = null },
+  via = 'station',
+  { stationId = null } = {}
+) {
   return await prisma.$transaction(async (tx) => {
     const job = await tx.printJob.findUnique({ where: { id: Number(jobId) } });
     if (!job) throw { status: 404, message: '找不到此列印單' };
+
+    if (via === 'station') {
+      if (job.station_id !== stationId || job.status !== 'claimed') {
+        throw { status: 409, message: '這張單不是這台列印站領取的' };
+      }
+    }
 
     const status = success ? 'printed' : 'failed';
     const now = new Date();

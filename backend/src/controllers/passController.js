@@ -392,15 +392,27 @@ export const getMyPasses = async (req, res) => {
 };
 
 /**
- * Public/Admin: Get pass plan templates
+ * Public: Get active pass plan templates only
  */
-export const getPassPlans = async (req, res) => {
+export const getPassPlans = async (_req, res) => {
   try {
-    const where = req.query.all === 'true' || req.originalUrl?.includes('/admin')
-      ? {}
-      : { is_active: true };
     const plans = await prisma.passPlan.findMany({
-      where,
+      where: { is_active: true },
+      orderBy: { id: 'asc' }
+    });
+    res.json(plans);
+  } catch (error) {
+    res.status(500).json({ error: '獲取卡券方案失敗' });
+  }
+};
+
+/**
+ * Admin: Get all pass plan templates (including inactive)
+ */
+export const getAdminPassPlans = async (_req, res) => {
+  try {
+    const plans = await prisma.passPlan.findMany({
+      where: {},
       orderBy: { id: 'asc' }
     });
     res.json(plans);

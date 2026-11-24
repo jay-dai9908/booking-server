@@ -42,7 +42,7 @@ export async function getBillingDetails(req, res) {
   } catch (error) {
     console.error('[getBillingDetails] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '無法讀取結帳資訊', details: error.message });
+    return res.status(500).json({ error: '無法讀取結帳資訊' });
   }
 }
 
@@ -65,7 +65,7 @@ export async function putDraft(req, res) {
   } catch (error) {
     console.error('[putDraft] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
-    return res.status(500).json({ error: '儲存草稿失敗', details: error.message });
+    return res.status(500).json({ error: '儲存草稿失敗' });
   }
 }
 
@@ -91,7 +91,7 @@ export async function postCollect(req, res) {
         bill: error.bill
       });
     }
-    return res.status(500).json({ error: '收款失敗', details: error.message });
+    return res.status(500).json({ error: '收款失敗' });
   }
 }
 
@@ -110,7 +110,7 @@ export async function postSupplement(req, res) {
   } catch (error) {
     console.error('[postSupplement] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '補收失敗', details: error.message });
+    return res.status(500).json({ error: '補收失敗' });
   }
 }
 
@@ -129,7 +129,7 @@ export async function postRefund(req, res) {
   } catch (error) {
     console.error('[postRefund] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '退款失敗', details: error.message });
+    return res.status(500).json({ error: '退款失敗' });
   }
 }
 
@@ -148,7 +148,7 @@ export async function postWaive(req, res) {
   } catch (error) {
     console.error('[postWaive] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '免收失敗', details: error.message });
+    return res.status(500).json({ error: '免收失敗' });
   }
 }
 
@@ -168,7 +168,7 @@ export async function postVoid(req, res) {
   } catch (error) {
     console.error('[postVoid] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '作廢收款失敗', details: error.message });
+    return res.status(500).json({ error: '作廢收款失敗' });
   }
 }
 
@@ -188,7 +188,7 @@ export async function postMarkUnpaid(req, res) {
   } catch (error) {
     console.error('[postMarkUnpaid] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '標記未結帳失敗', details: error.message });
+    return res.status(500).json({ error: '標記未結帳失敗' });
   }
 }
 
@@ -268,7 +268,7 @@ export async function getMemberPasses(req, res) {
     });
   } catch (error) {
     console.error('[getMemberPasses] Error:', error);
-    return res.status(500).json({ error: '無法讀取會員卡券', details: error.message });
+    return res.status(500).json({ error: '無法讀取會員卡券' });
   }
 }
 

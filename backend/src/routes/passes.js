@@ -5,6 +5,7 @@ import {
   getUserPassesAdmin,
   getMyPasses,
   getPassPlans,
+  getAdminPassPlans,
   togglePassStatus,
   createPassPlan,
   updatePassPlan
@@ -21,7 +22,7 @@ router.get('/plans', getPassPlans);
 router.get('/my', verifyToken, requireRegisteredUser, getMyPasses);
 
 // Admin routes
-router.get('/admin/plans', verifyToken, checkPassPermission, getPassPlans);
+router.get('/admin/plans', verifyToken, checkPassPermission, getAdminPassPlans);
 router.post('/admin/plans', verifyToken, checkPassPermission, createPassPlan);
 router.put('/admin/plans/:id', verifyToken, checkPassPermission, updatePassPlan);
 router.post('/admin/grant', verifyToken, checkPassPermission, grantUserPass);

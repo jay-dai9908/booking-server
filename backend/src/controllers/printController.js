@@ -63,7 +63,9 @@ export async function stationReportResult(req, res) {
   const { success, error_code, error_message } = req.body;
 
   try {
-    const job = await reportJobResult(id, { success, error_code, error_message }, 'station');
+    const job = await reportJobResult(id, { success, error_code, error_message }, 'station', {
+      stationId: req.printStation.id
+    });
     return res.json({ success: true, job });
   } catch (error) {
     console.error('[stationReportResult] Error:', error);
@@ -133,7 +135,7 @@ export async function createJob(req, res) {
     return res.json({ success: true, job });
   } catch (error) {
     console.error('[createJob] Error:', error);
-    return res.status(500).json({ error: '建立列印單失敗', details: error.message });
+    return res.status(500).json({ error: '建立列印單失敗' });
   }
 }
 
