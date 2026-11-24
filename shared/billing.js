@@ -3,6 +3,10 @@
 
 import { blocksBy1030, floorMinutes, formatTimerHMM, formatBillingHours } from './time.js';
 import { calculateBoardTotal } from './boardPricing.js';
+import { splitAmount } from './splitAmount.js';
+import { computePromoDiscount } from './promo.js';
+
+export { splitAmount };
 
 export const PAYMENT_METHOD_LABELS = {
   cash: '現金',
@@ -17,56 +21,50 @@ export const PAYMENT_METHOD_LABELS = {
   mixed: '多種方式'
 };
 
-/**
- * 顯示品名替換：把「洞洞板」替換為「智能板」
- * @param {string} name
- * @returns {string}
- */
-export function displayBoardName(name) {
-  if (typeof name !== 'string') return '';
-  return name.replace(/洞洞板/g, '智能板');
-}
-
-/**
- * 最大餘數法分攤金額（確保每一筆加總剛好等於 total，不能差 1 元）
- * @param {number} total - 要分攤的總金額（可正可負）
- * @param {Array<{ person_no: number, weight: number }>} items
- * @returns {Array<{ person_no: number, amount: number }>}
- */
-export function splitAmount(total, items = []) {
-  if (!items || items.length === 0) return [];
-  const tot = Math.round(Number(total) || 0);
-  if (tot === 0) {
-    return items.map(it => ({ person_no: it.person_no, amount: 0 }));
+  /**
+   * 顯示品名替換：把「洞洞板」替換為「智能板」
+   * @param {string} name
+   * @returns {string}
+   */
+  export function displayBoardName(name) {
+    if (typeof name !== 'string') return '';
+    return name.replace(/洞洞板/g, '智能板');
   }
 
-  const sign = tot < 0 ? -1 : 1;
-  const T = Math.abs(tot);
-  const totalWeight = items.reduce((sum, it) => sum + Math.max(0, Number(it.weight) || 0), 0);
-  const hasPositiveWeight = totalWeight > 0;
-  const W = hasPositiveWeight ? totalWeight : items.length;
-  const weights = hasPositiveWeight ? items.map(it => Math.max(0, Number(it.weight) || 0)) : items.map(() => 1);
-
-  const raw = weights.map(w => (T * w) / W);
-  const base = raw.map(Math.floor);
-  let left = T - base.reduce((s, b) => s + b, 0);
-
-  // 排序：餘數大者優先，若餘數相同則 person_no 小者優先
-  const order = raw
-    .map((r, i) => ({ i, frac: r - Math.floor(r), no: items[i].person_no }))
-    .sort((a, b) => b.frac - a.frac || a.no - b.no);
-
-  for (const o of order) {
-    if (left <= 0) break;
-    base[o.i] += 1;
-    left -= 1;
+  /**
+   * 舊版整單優惠計算路徑（無 rule_v 的舊草稿，保留原本行為以維持半自助對帳相容）
+   */
+  function legacyOrderPromo({ op, promoTargetUnpaid, unpaidPersons, allowedPersonNos, distributeOrderItem }) {
+    if (op.discount_type === 'percentage') {
+      for (const up of promoTargetUnpaid) {
+        let base = up.base_amount;
+        if (op.target_scope === 'seating') base = up.entry.amount;
+        else if (op.target_scope === 'equipment') base = up.board.amount;
+        const d = Math.round((base * (Number(op.discount_value) || 0)) / 100);
+        up.promos.push({ code: op.code, name: op.name, amount: -d });
+      }
+      return;
+    }
+    if (op.discount_type === 'fixed_per_pax') {
+      for (const up of promoTargetUnpaid) {
+        up.promos.push({ code: op.code, name: op.name, amount: -Math.min(up.base_amount, Number(op.discount_value) || 0) });
+      }
+      return;
+    }
+    let promoDiscount = Number(op.discount_value) || 0;
+    if (op.max_discount_amount) {
+      promoDiscount = Math.min(promoDiscount, op.max_discount_amount);
+    }
+    distributeOrderItem({
+      source_key: `promo:${op.code}`,
+      label: op.name || op.code,
+      totalAmount: -promoDiscount,
+      splitMode: op.split?.mode || op.split_mode || 'proportional',
+      targetPersonNo: op.split?.person_no || op.target_person_no || op.person_no,
+      scope: op.target_scope || 'all',
+      allowedPersonNos
+    });
   }
-
-  return items.map((it, i) => ({
-    person_no: it.person_no,
-    amount: sign * base[i]
-  }));
-}
 
 /**
  * 計算單一客人的已付金額、已退金額、最多可退上限 (Round 21 Item 1)
@@ -526,39 +524,66 @@ export function computeBill({
       ? unpaidPersons.filter(up => allowedPersonNos.includes(Number(up.person_no)))
       : unpaidPersons;
 
-    // Calculate promo discount amount
-    let promoDiscount = 0;
-    if (op.discount_type === 'percentage') {
-      // Target scope bases
-      for (const up of promoTargetUnpaid) {
-        let base = up.base_amount;
-        if (op.target_scope === 'seating') base = up.entry.amount;
-        else if (op.target_scope === 'equipment') base = up.board.amount;
-        const d = Math.round((base * (Number(op.discount_value) || 0)) / 100);
-        up.promos.push({ code: op.code, name: op.name, amount: -d });
+    if (Number(op.rule_v) === 2) {
+      if (promoTargetUnpaid.length === 0) continue;
+      const targetInputs = promoTargetUnpaid.map(up => ({
+        person_no: up.person_no,
+        entry_amount: up.entry.amount,
+        board_amount: up.board.amount,
+        base_amount: up.base_amount
+      }));
+      const promoResult = computePromoDiscount(op, targetInputs);
+      if (op.discount_type === 'percentage' || op.discount_type === 'fixed_per_pax') {
+        for (const item of promoResult.per_person) {
+          if (item.amount > 0) {
+            const up = unpaidPersons.find(u => u.person_no === item.person_no);
+            if (up) {
+              up.promos.push({ code: op.code, name: op.name, amount: -item.amount });
+            }
+          }
+        }
+      } else {
+        const scope = op.target_scope || 'all';
+        const sourceKey = `promo:${op.code}`;
+        let frozenAllocatedAbs = 0;
+        for (const pp of paidPersons) {
+          const prevShare = pp.shares?.find(s => s.source_key === sourceKey);
+          if (prevShare && prevShare.amount < 0) {
+            frozenAllocatedAbs += Math.abs(prevShare.amount);
+          }
+        }
+        let targetDiscount = promoResult.total;
+        if (frozenAllocatedAbs > 0) {
+          const rawRuleAmt = op.discount_type === 'free_hours'
+            ? Math.max(0, Math.round(Number(op.free_hours_amount) || 0))
+            : Math.max(0, Math.round(Number(op.value) || 0));
+          const maxCap = op.max_discount_amount != null && Number(op.max_discount_amount) > 0
+            ? Math.round(Number(op.max_discount_amount))
+            : null;
+          const cappedRule = maxCap != null ? Math.min(rawRuleAmt, maxCap) : rawRuleAmt;
+          const remainingAllowance = Math.max(0, cappedRule - frozenAllocatedAbs);
+          const unpaidScopeSum = targetInputs.reduce((s, p) => {
+            const sc = scope === 'seating' ? p.entry_amount : scope === 'equipment' ? p.board_amount : p.base_amount;
+            return s + sc;
+          }, 0);
+          targetDiscount = Math.min(remainingAllowance, unpaidScopeSum);
+        }
+        if (targetDiscount > 0) {
+          distributeOrderItem({
+            source_key: sourceKey,
+            label: op.name || op.code,
+            totalAmount: -(targetDiscount + frozenAllocatedAbs),
+            splitMode: op.split?.mode || op.split_mode || 'proportional',
+            targetPersonNo: op.split?.person_no || op.target_person_no || op.person_no,
+            scope,
+            allowedPersonNos
+          });
+        }
       }
       continue;
-    } else if (op.discount_type === 'fixed_per_pax') {
-      for (const up of promoTargetUnpaid) {
-        up.promos.push({ code: op.code, name: op.name, amount: -Math.min(up.base_amount, Number(op.discount_value) || 0) });
-      }
-      continue;
-    } else {
-      // fixed_order or free_hours
-      promoDiscount = Number(op.discount_value) || 0;
-      if (op.max_discount_amount) {
-        promoDiscount = Math.min(promoDiscount, op.max_discount_amount);
-      }
-      distributeOrderItem({
-        source_key: `promo:${op.code}`,
-        label: op.name || op.code,
-        totalAmount: -promoDiscount,
-        splitMode: op.split?.mode || op.split_mode || 'proportional',
-        targetPersonNo: op.split?.person_no || op.target_person_no || op.person_no,
-        scope: op.target_scope || 'all',
-        allowedPersonNos
-      });
     }
+
+    legacyOrderPromo({ op, promoTargetUnpaid, unpaidPersons, allowedPersonNos, distributeOrderItem });
   }
 
   // 2c. Manual Discount

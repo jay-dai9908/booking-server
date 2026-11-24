@@ -1,4 +1,7 @@
 import prisma from '../prismaClient.js';
+import { toTaipeiDateString } from '../../../shared/time.js';
+import { normalizePromoRule, computePromoDiscount } from '../../../shared/promo.js';
+import { splitAmount } from '../../../shared/splitAmount.js';
 
 export const DEFAULT_PROMO_CODES = [
   {
@@ -119,7 +122,8 @@ export const evaluatePromoCode = async (txOrPrisma, {
   is_pos = false,
   skip_usage_check = false,
   seating_amount,
-  equipment_amount
+  equipment_amount,
+  persons = null
 }) => {
   const cleanCode = (code || '').trim().toUpperCase();
   if (!cleanCode) {
@@ -143,23 +147,22 @@ export const evaluatePromoCode = async (txOrPrisma, {
     return { valid: false, error: '此折扣碼僅限線上預約時使用' };
   }
 
-  // 2. Date validity check
-  const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
-  const targetDateStr = session_date ? new Date(session_date).toISOString().split('T')[0] : todayStr;
+  // 2. Date validity check (Taipei calendar date)
+  const todayStr = toTaipeiDateString(new Date());
+  const targetDateStr = session_date ? toTaipeiDateString(session_date) : todayStr;
 
   const startDate = promo.start_date || promo.valid_from;
   const endDate = promo.end_date || promo.valid_until;
 
   if (startDate) {
-    const sStr = new Date(startDate).toISOString().split('T')[0];
-    if (targetDateStr < sStr) {
+    const sStr = toTaipeiDateString(startDate);
+    if (sStr && targetDateStr < sStr) {
       return { valid: false, error: `此活動於 ${sStr} 開始，尚未生效` };
     }
   }
   if (endDate) {
-    const eStr = new Date(endDate).toISOString().split('T')[0];
-    if (targetDateStr > eStr) {
+    const eStr = toTaipeiDateString(endDate);
+    if (eStr && targetDateStr > eStr) {
       return { valid: false, error: `此活動已於 ${eStr} 截止` };
     }
   }
@@ -184,11 +187,10 @@ export const evaluatePromoCode = async (txOrPrisma, {
     }
   }
 
-  // 4. Day of week check (weekday vs weekend)
+  // 4. Day of week check (weekday vs weekend in Taipei date)
   const dayLimit = promo.day_type_limit || promo.applicable_days || 'all';
-  if (session_date && dayLimit !== 'all') {
-    const d = new Date(session_date);
-    const day = isNaN(d.getTime()) ? new Date().getDay() : d.getUTCDay();
+  if (session_date && dayLimit !== 'all' && targetDateStr) {
+    const day = new Date(`${targetDateStr}T00:00:00Z`).getUTCDay();
     const isWeekend = day === 0 || day === 6;
     if (dayLimit === 'weekday' && isWeekend) {
       return { valid: false, error: '此優惠碼僅限平日使用' };
@@ -220,44 +222,56 @@ export const evaluatePromoCode = async (txOrPrisma, {
     return { valid: false, error: `此優惠碼需消費滿 $${promo.min_amount} 方可使用` };
   }
 
-  // 7. Calculate discount amount
-  const scope = promo.target_scope || 'all';
-  let targetAmount = Number(base_amount) || 0;
-  if (scope === 'seating' && seating_amount !== undefined) {
-    targetAmount = Number(seating_amount) || 0;
-  } else if (scope === 'equipment' && equipment_amount !== undefined) {
-    targetAmount = Number(equipment_amount) || 0;
+  // 7. Normalize rule and compute unified discount
+  const rule = normalizePromoRule(promo, { hourly_price });
+  let personInputs;
+  if (Array.isArray(persons) && persons.length > 0) {
+    personInputs = persons.map((p, idx) => ({
+      person_no: p.person_no ?? idx + 1,
+      entry_amount: Number(p.entry_amount ?? p.entry?.amount ?? 0) || 0,
+      board_amount: Number(p.board_amount ?? p.board?.amount ?? 0) || 0,
+      base_amount: Number(p.base_amount ?? 0) || 0
+    }));
+  } else {
+    const count = Math.max(1, parseInt(pax, 10) || 1);
+    const rawBase = Math.max(0, Math.round(Number(base_amount) || 0));
+    const dummyWeights = Array.from({ length: count }, (_, i) => ({ person_no: i + 1, weight: 1 }));
+    if (seating_amount !== undefined || equipment_amount !== undefined) {
+      const eqAmt = Math.max(0, Math.round(Number(equipment_amount) || 0));
+      const seatTotal = seating_amount !== undefined
+        ? Math.max(0, Math.round(Number(seating_amount) || 0))
+        : Math.max(0, rawBase - eqAmt);
+      const extraTotal = Math.max(0, rawBase - seatTotal - eqAmt);
+      const seatSplits = splitAmount(seatTotal, dummyWeights);
+      const extraSplits = extraTotal > 0 ? splitAmount(extraTotal, dummyWeights) : null;
+      personInputs = seatSplits.map((s, idx) => {
+        const boardAmt = idx === 0 ? eqAmt : 0;
+        const extraAmt = extraSplits ? extraSplits[idx].amount : 0;
+        return {
+          person_no: s.person_no,
+          entry_amount: s.amount,
+          board_amount: boardAmt,
+          base_amount: s.amount + boardAmt + extraAmt
+        };
+      });
+    } else {
+      const baseSplits = splitAmount(rawBase, dummyWeights);
+      personInputs = baseSplits.map((s) => ({
+        person_no: s.person_no,
+        entry_amount: s.amount,
+        board_amount: 0,
+        base_amount: s.amount
+      }));
+    }
   }
 
-  let discount_amount = 0;
-  if (promo.discount_type === 'fixed_order') {
-    discount_amount = promo.discount_value;
-  } else if (promo.discount_type === 'fixed_per_pax') {
-    discount_amount = promo.discount_value * Math.max(1, Number(pax) || 1);
-  } else if (promo.discount_type === 'percentage') {
-    const val = promo.discount_value;
-    const pctOff = val > 50 && val < 100 ? (100 - val) : val;
-    discount_amount = Math.round(targetAmount * (pctOff / 100));
-  } else if (promo.discount_type === 'free_hours') {
-    discount_amount = Math.round((Number(hourly_price) || 150) * promo.discount_value);
-  }
-
-  // Apply maximum discount cap if configured
-  if (promo.max_discount_amount && promo.max_discount_amount > 0) {
-    discount_amount = Math.min(discount_amount, promo.max_discount_amount);
-  }
-
-  if (targetAmount > 0) {
-    discount_amount = Math.min(discount_amount, targetAmount);
-  }
-  if (base_amount > 0) {
-    discount_amount = Math.min(discount_amount, Number(base_amount));
-  }
+  const { total } = computePromoDiscount(rule, personInputs);
 
   return {
     valid: true,
     promo,
-    discount_amount: Math.max(0, Math.round(discount_amount))
+    rule,
+    discount_amount: Math.max(0, Math.round(total))
   };
 };
 

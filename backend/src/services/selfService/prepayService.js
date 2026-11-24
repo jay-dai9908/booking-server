@@ -210,21 +210,10 @@ export function buildSelfCheckoutDraft({ pax, isUnlimited, promoEval, unpaidCoun
   }));
 
   const unpaidNos = Array.from({ length: Math.max(0, unpaidCount) }, (_, i) => i + 1);
-  const order_promos = promoEval?.promo
+  const order_promos = promoEval?.rule
     ? [
         {
-          code: promoEval.promo.code,
-          name: promoEval.promo.name || promoEval.promo.code,
-          discount_type:
-            promoEval.promo.discount_type === 'free_hours'
-              ? 'fixed_order'
-              : promoEval.promo.discount_type,
-          discount_value:
-            promoEval.promo.discount_type === 'free_hours'
-              ? promoEval.discount_amount
-              : promoEval.promo.discount_value,
-          max_discount_amount: promoEval.promo.max_discount_amount ?? null,
-          target_scope: promoEval.promo.target_scope || 'all',
+          ...promoEval.rule,
           person_nos: unpaidNos
         }
       ]
@@ -661,11 +650,7 @@ export async function computeSelfServiceQuote(
   const transferAmount = Math.max(0, totalAmount - passTotalCover);
 
   if (promoEval && Math.abs((promoEval.discount_amount || 0) - promoDiscount) > 0) {
-    console.warn('[prepayService] Promo calculation differs between evaluatePromoCode and computeBill:', {
-      code: promoEval.promo.code,
-      evalDiscount: promoEval.discount_amount,
-      billDiscount: promoDiscount
-    });
+    throw makePrepayError('PROMO_MISMATCH', '優惠碼試算與帳單折抵不一致', 500);
   }
 
   const appliedPersonNos = promoEval
