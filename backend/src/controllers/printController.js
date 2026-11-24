@@ -3,6 +3,7 @@ import prisma from '../prismaClient.js';
 import { queuePrintJob, claimNextJob, reportJobResult } from '../services/print/printService.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+import { getAccountingGuardWarnings } from '../db/accountingGuard.js';
 
 // Station endpoints (called by Sunmi App via verifyPrintStation)
 export async function stationHeartbeat(req, res) {
@@ -77,12 +78,13 @@ export async function stationReportResult(req, res) {
 // Admin endpoints
 export async function getStatus(req, res) {
   try {
+    const warnings = await getAccountingGuardWarnings(prisma);
     const station = await prisma.printStation.findFirst({
       where: { is_active: true, is_default: true }
     });
 
     if (!station) {
-      return res.json({ station: null });
+      return res.json({ station: null, warnings });
     }
 
     const now = Date.now();
@@ -102,7 +104,8 @@ export async function getStatus(req, res) {
         accepting: station.accepting,
         queued: queuedCount,
         failed: failedCount
-      }
+      },
+      warnings
     });
   } catch (error) {
     console.error('[getStatus] Error:', error);
