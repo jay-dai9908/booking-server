@@ -4,6 +4,11 @@ import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
 import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
 import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
+import {
+  PERMISSION_LABELS,
+  findSettingGroupForField,
+  canAdminPermission,
+} from '../middlewares/permissionGroups.js';
 
 export async function ensureKioskSetting(txOrPrisma = prisma) {
   let ks = await txOrPrisma.kioskSetting.findUnique({ where: { id: 1 } });
@@ -433,6 +438,181 @@ export const getGlobalSetting = async (req, res) => {
   }
 };
 
+const READONLY_GLOBAL_META_FIELDS = new Set([
+  'id',
+  'created_at',
+  'updated_at',
+  'has_line_messaging_token',
+  'line_messaging_token_masked',
+]);
+
+const GLOBAL_BOOLEAN_FIELDS = new Set([
+  'show_price_cards',
+  'show_announcement',
+  'show_line_button',
+  'require_line_login_every_time',
+  'enable_preview_page',
+  'allow_equipment_exceed_pax',
+  'show_equipment_live_stock',
+  'equipment_discount_enabled',
+  'equipment_discount_stackable',
+  'equipment_discount2_enabled',
+  'line_auto_notify_booking',
+  'line_auto_notify_cancel',
+  'show_shop_button',
+  'shop_enabled',
+  'print_enabled',
+]);
+
+const GLOBAL_INT_FIELDS = new Set([
+  'weekday_hourly_price',
+  'weekday_unlimited_price',
+  'weekend_hourly_price',
+  'weekend_unlimited_price',
+  'default_session_capacity',
+]);
+
+const EQUIPMENT_HOUR_FALLBACKS = {
+  equipment_discount_buy_hours: 3,
+  equipment_discount_free_hours: 1,
+  equipment_discount2_buy_hours: 8,
+  equipment_discount2_free_hours: 4,
+};
+
+function normalizePaymentMethods(raw) {
+  if (!Array.isArray(raw)) return null;
+  const methods = raw
+    .filter(pm => String(pm?.key || pm?.code || '').trim().toLowerCase() !== 'pass')
+    .map(pm => {
+      const key = String(pm?.key || pm?.code || '').trim();
+      const isCash = key.toLowerCase() === 'cash';
+      return {
+        key,
+        label: pm?.label || (isCash ? '現金' : key),
+        enabled: isCash ? true : Boolean(pm?.enabled)
+      };
+    });
+  const hasCash = methods.some(m => m.key.toLowerCase() === 'cash');
+  if (!hasCash) {
+    methods.unshift({ key: 'cash', label: '現金', enabled: true });
+  }
+  return methods;
+}
+
+function normalizeBookingNoteChips(arr) {
+  if (!Array.isArray(arr)) return null;
+  return arr
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .map((s) => s.slice(0, 12))
+    .slice(0, 8);
+}
+
+function getEffectiveOldSetting(oldSetting) {
+  const rawMethods = Array.isArray(oldSetting?.payment_methods_json) && oldSetting.payment_methods_json.length > 0
+    ? oldSetting.payment_methods_json
+    : DEFAULT_PAYMENT_METHODS;
+  const lineButtonUrl = oldSetting?.line_button_url ?? 'https://lin.ee/vsZhRW5';
+  return {
+    weekday_hourly_price: oldSetting?.weekday_hourly_price ?? 100,
+    weekday_unlimited_price: oldSetting?.weekday_unlimited_price ?? 550,
+    weekend_hourly_price: oldSetting?.weekend_hourly_price ?? 150,
+    weekend_unlimited_price: oldSetting?.weekend_unlimited_price ?? 800,
+    show_price_cards: oldSetting?.show_price_cards ?? true,
+    price_notice_text: oldSetting?.price_notice_text ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品',
+    show_announcement: oldSetting?.show_announcement ?? true,
+    announcement_text: oldSetting?.announcement_text ?? '✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠',
+    show_line_button: oldSetting?.show_line_button ?? true,
+    line_button_url: lineButtonUrl,
+    official_line_url: oldSetting?.official_line_url ?? lineButtonUrl,
+    require_line_login_every_time: oldSetting?.require_line_login_every_time ?? false,
+    enable_preview_page: oldSetting?.enable_preview_page ?? true,
+    preview_disabled_text: oldSetting?.preview_disabled_text ?? '系統維護中，請點擊下方按鈕使用 LINE 進行預約',
+    allow_equipment_exceed_pax: oldSetting?.allow_equipment_exceed_pax ?? false,
+    show_equipment_live_stock: oldSetting?.show_equipment_live_stock ?? true,
+    equipment_discount_enabled: oldSetting?.equipment_discount_enabled ?? true,
+    equipment_discount_buy_hours: oldSetting?.equipment_discount_buy_hours ?? 3,
+    equipment_discount_free_hours: oldSetting?.equipment_discount_free_hours ?? 1,
+    equipment_discount_stackable: oldSetting?.equipment_discount_stackable ?? true,
+    equipment_discount2_enabled: oldSetting?.equipment_discount2_enabled ?? false,
+    equipment_discount2_buy_hours: oldSetting?.equipment_discount2_buy_hours ?? 8,
+    equipment_discount2_free_hours: oldSetting?.equipment_discount2_free_hours ?? 4,
+    line_auto_notify_booking: oldSetting?.line_auto_notify_booking ?? false,
+    line_auto_notify_cancel: oldSetting?.line_auto_notify_cancel ?? false,
+    show_shop_button: oldSetting?.show_shop_button ?? oldSetting?.shop_enabled ?? true,
+    shop_enabled: oldSetting?.shop_enabled ?? true,
+    business_hours_json: oldSetting?.business_hours_json || DEFAULT_BUSINESS_HOURS,
+    booking_note_chips: Array.isArray(oldSetting?.booking_note_chips)
+      ? normalizeBookingNoteChips(oldSetting.booking_note_chips)
+      : null,
+    guest_line_hint_text: oldSetting?.guest_line_hint_text ?? null,
+    default_session_capacity: oldSetting?.default_session_capacity ?? 16,
+    payment_methods_json: normalizePaymentMethods(rawMethods),
+    print_enabled: oldSetting?.print_enabled ?? true,
+  };
+}
+
+function didGlobalSettingFieldChange(field, incoming, oldSetting, effectiveOld) {
+  if (incoming === undefined || READONLY_GLOBAL_META_FIELDS.has(field)) return false;
+
+  if (field === 'cancel_pending_jobs' || field === 'cancel_unprinted_jobs') {
+    return Boolean(incoming);
+  }
+  if (field === 'line_messaging_token') {
+    if (typeof incoming === 'string' && (incoming.includes('•') || incoming.includes('****'))) {
+      return false;
+    }
+    if (incoming === '' || incoming === null) {
+      return Boolean(oldSetting?.line_messaging_token);
+    }
+    return String(incoming).trim() !== String(oldSetting?.line_messaging_token || '').trim();
+  }
+  if (field === 'payment_methods_json') {
+    if (!Array.isArray(incoming)) return false;
+    return JSON.stringify(normalizePaymentMethods(incoming)) !== JSON.stringify(effectiveOld.payment_methods_json);
+  }
+  if (field === 'business_hours_json') {
+    return JSON.stringify(incoming) !== JSON.stringify(effectiveOld.business_hours_json);
+  }
+  if (field === 'booking_note_chips') {
+    if (!Array.isArray(incoming)) return false;
+    return JSON.stringify(normalizeBookingNoteChips(incoming)) !== JSON.stringify(effectiveOld.booking_note_chips);
+  }
+  if (field === 'official_line_url' || field === 'line_button_url') {
+    const normalizedIn = incoming === null ? null : String(incoming).trim();
+    const normalizedOld = effectiveOld[field] === null ? null : String(effectiveOld[field]).trim();
+    return normalizedIn !== normalizedOld;
+  }
+  if (field === 'guest_line_hint_text') {
+    const normalizedIn = typeof incoming === 'string' ? incoming.trim() : null;
+    const normalizedOld = typeof effectiveOld.guest_line_hint_text === 'string'
+      ? effectiveOld.guest_line_hint_text.trim()
+      : null;
+    return normalizedIn !== normalizedOld;
+  }
+  if (GLOBAL_INT_FIELDS.has(field)) {
+    if (incoming === null || incoming === '') return false;
+    const parsed = parseInt(incoming, 10);
+    if (isNaN(parsed)) return false;
+    if (field === 'default_session_capacity' && parsed <= 0) return false;
+    return parsed !== effectiveOld[field];
+  }
+  if (Object.prototype.hasOwnProperty.call(EQUIPMENT_HOUR_FALLBACKS, field)) {
+    const parsed = Math.max(1, parseInt(incoming, 10) || EQUIPMENT_HOUR_FALLBACKS[field]);
+    return parsed !== effectiveOld[field];
+  }
+  if (GLOBAL_BOOLEAN_FIELDS.has(field)) {
+    return Boolean(incoming) !== Boolean(effectiveOld[field]);
+  }
+  if (incoming !== null && typeof incoming === 'object') {
+    return JSON.stringify(incoming) !== JSON.stringify(oldSetting?.[field] ?? null);
+  }
+  const currentVal = Object.prototype.hasOwnProperty.call(effectiveOld, field)
+    ? effectiveOld[field]
+    : oldSetting?.[field];
+  return incoming !== currentVal;
+}
+
 export const updateGlobalSetting = async (req, res) => {
   const { 
     weekday_hourly_price, 
@@ -474,6 +654,43 @@ export const updateGlobalSetting = async (req, res) => {
   } = req.body;
 
   try {
+    const oldSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
+
+    const isUnscopedLegacyMockAdmin =
+      Boolean(req.user) &&
+      !req.user.isVerifiedAdmin &&
+      req.user.isSuperAdmin === undefined &&
+      req.user.permissions === undefined;
+
+    if (!isUnscopedLegacyMockAdmin && !canAdminPermission(req.user, 'settings')) {
+      const effectiveOld = getEffectiveOldSetting(oldSetting);
+      const disallowedFields = [];
+      const missingGroups = [];
+
+      for (const field of Object.keys(req.body || {})) {
+        if (!didGlobalSettingFieldChange(field, req.body[field], oldSetting, effectiveOld)) {
+          continue;
+        }
+        const requiredGroup = findSettingGroupForField(field);
+        if (!canAdminPermission(req.user, requiredGroup)) {
+          disallowedFields.push(field);
+          if (!missingGroups.includes(requiredGroup)) {
+            missingGroups.push(requiredGroup);
+          }
+        }
+      }
+
+      if (disallowedFields.length > 0) {
+        const labels = missingGroups.map((g) => PERMISSION_LABELS[g] || g);
+        return res.status(403).json({
+          code: 'PERMISSION_REQUIRED',
+          fields: disallowedFields,
+          required: missingGroups,
+          error: `修改這些欄位需要「${labels.join('、')}」權限`,
+        });
+      }
+    }
+
     const dataToUpdate = {};
     if (print_enabled !== undefined) {
       dataToUpdate.print_enabled = Boolean(print_enabled);
@@ -599,8 +816,6 @@ export const updateGlobalSetting = async (req, res) => {
     if (line_auto_notify_cancel !== undefined) dataToUpdate.line_auto_notify_cancel = Boolean(line_auto_notify_cancel);
     if (show_shop_button !== undefined) dataToUpdate.show_shop_button = Boolean(show_shop_button);
     if (shop_enabled !== undefined) dataToUpdate.shop_enabled = Boolean(shop_enabled);
-
-    const oldSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
 
     const setting = await prisma.globalSetting.upsert({
       where: { id: 1 },

@@ -30,6 +30,7 @@ import api from '../../api/axios';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import AdminLoginGuardCard from '../../components/admin/AdminLoginGuardCard';
 import { setPrintGloballyEnabled } from '../../utils/sunmiPrinter';
+import { useAdminPermissions } from '../../hooks/admin/useAdminPermissions';
 
 const DEFAULT_PREVIEW_DISABLED_TEXT = '系統維護中，請點擊下方按鈕使用 LINE 進行預約';
 const DEFAULT_ANNOUNCEMENT_TEXT = '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
@@ -39,6 +40,11 @@ const DEFAULT_BOOKING_NOTE_CHIPS = ['第一次玩', '有小孩同行', '生日�
 const DEFAULT_GUEST_LINE_HINT_TEXT = '會打開拾光製所的官方 LINE，從選單點『預約』就能登入';
 
 export default function SettingsPage() {
+  const { can } = useAdminPermissions();
+  const canSettings = can('settings');
+  const canSessions = can('sessions') || canSettings;
+  const canEquipment = can('equipment') || canSettings;
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
@@ -400,11 +406,21 @@ export default function SettingsPage() {
         </button>
       </div>
 
+      {!canSettings && (
+        <div
+          data-testid="settings-readonly-banner"
+          className="px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm font-bold flex items-center gap-2"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>目前僅有營業時段或智能板權限：系統全域設定欄位為唯讀（僅可修改對應分組）</span>
+        </div>
+      )}
+
       {/* SuperAdmin-only Admin Login Guard */}
       <AdminLoginGuardCard />
 
       {/* SECTION 1: 登入驗證機制與空位預覽頁開關 */}
-      <div className="bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-6">
+      <fieldset disabled={!canSettings} className={`bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-6 ${!canSettings ? 'opacity-65' : ''}`}>
         <div className="flex items-center justify-between border-b border-gray-100 pb-4">
           <div>
             <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
@@ -527,7 +543,7 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       {/* SECTION 2: 顧客預約首頁與預覽頁區塊顯示設定 (Moved from SessionsPage) */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8]">
@@ -553,7 +569,7 @@ export default function SettingsPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
           {/* Switch 1: Announcement */}
-          <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4">
+          <fieldset disabled={!canSessions} className={`bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4 ${!canSessions ? 'opacity-65' : ''}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
@@ -589,10 +605,10 @@ export default function SettingsPage() {
             <div className="text-[12px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showAnnouncement ? '目前狀態：顧客端顯示頂部系統公告欄' : '目前狀態：顧客端隱藏公告欄'}
             </div>
-          </div>
+          </fieldset>
 
           {/* Switch 2: Price Cards */}
-          <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4">
+          <fieldset disabled={!canSessions} className={`bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4 ${!canSessions ? 'opacity-65' : ''}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
@@ -628,10 +644,10 @@ export default function SettingsPage() {
             <div className="text-[12px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showPriceCards ? '目前狀態：顧客端顯示平假日價格說明卡' : '目前狀態：顧客端隱藏價格說明卡'}
             </div>
-          </div>
+          </fieldset>
 
           {/* Switch 3: LINE Button */}
-          <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4">
+          <fieldset disabled={!canSettings} className={`bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4 ${!canSettings ? 'opacity-65' : ''}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
@@ -677,10 +693,10 @@ export default function SettingsPage() {
             <div className="text-[12px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showLineButton ? '目前狀態：顧客端頂部顯示官方 LINE 按鈕' : '目前狀態：顧客端頂部隱藏官方 LINE 按鈕'}
             </div>
-          </div>
+          </fieldset>
 
           {/* Switch 4: Shop Preorder Button */}
-          <div className="bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4">
+          <fieldset disabled={!canSettings} className={`bg-[#FAF7F2] p-5 rounded-2xl border border-[#E8DEC8] flex flex-col justify-between space-y-4 ${!canSettings ? 'opacity-65' : ''}`}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <span className="font-bold text-sm text-[#3E332B] flex items-center gap-1.5">
@@ -704,12 +720,12 @@ export default function SettingsPage() {
             <div className="text-[12px] text-[#6D5D52] bg-white p-2 rounded-lg border border-[#E8DEC8]">
               {showShopButton ? '目前狀態：顧客預約頁頂部顯示「商品預購」按鈕' : '目前狀態：顧客預約頁頂部隱藏此按鈕'}
             </div>
-          </div>
+          </fieldset>
         </div>
       </div>
 
       {/* SECTION 2.5: 預約備註快速選項 (Round 9 Section 2) */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8]">
+      <fieldset disabled={!canSettings} className={`bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] ${!canSettings ? 'opacity-65' : ''}`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-gray-100">
           <div>
             <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
@@ -865,12 +881,12 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       {/* SECTION 3: 全店預設入場收費與智能拼豆板全域規則 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 3A: Store Default Pricing */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] flex flex-col justify-between space-y-5">
+        <fieldset disabled={!canSessions} className={`bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] flex flex-col justify-between space-y-5 ${!canSessions ? 'opacity-65' : ''}`}>
           <div>
             <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2 mb-1">
               <CreditCard className="w-5 h-5 text-[#8B5B43]" />
@@ -928,10 +944,10 @@ export default function SettingsPage() {
           >
             儲存全店預設價格
           </button>
-        </div>
+        </fieldset>
 
         {/* 3B: Smart Board Global Rules */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] flex flex-col justify-between space-y-4">
+        <fieldset disabled={!canEquipment} className={`bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] flex flex-col justify-between space-y-4 ${!canEquipment ? 'opacity-65' : ''}`}>
           <div>
             <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2 mb-1">
               <Cpu className="w-5 h-5 text-[#8B5B43]" />
@@ -1065,11 +1081,11 @@ export default function SettingsPage() {
           >
             儲存智能板全域規則
           </button>
-        </div>
+        </fieldset>
       </div>
 
       {/* SECTION 4.1: 營業時間預設（時段快選範本） */}
-      <div className="bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-5" data-testid="business-hours-setting-card">
+      <fieldset disabled={!canSettings} className={`bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-5 ${!canSettings ? 'opacity-65' : ''}`} data-testid="business-hours-setting-card">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
           <div>
             <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2 mb-1">
@@ -1222,10 +1238,10 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       {/* SECTION 5: LINE 官方帳號推播 (Messaging API) 與自動通知 */}
-      <div className="bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-6">
+      <fieldset disabled={!canSettings} className={`bg-white rounded-2xl shadow-sm border border-[#E8DEC8] p-6 space-y-6 ${!canSettings ? 'opacity-65' : ''}`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
           <div>
             <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
@@ -1356,10 +1372,10 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       {/* 6. Checkout & Timer Settings (Spec 6.25) */}
-      <div className="bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden">
+      <fieldset disabled={!canSettings} className={`bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden ${!canSettings ? 'opacity-65' : ''}`}>
         <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-gray-200">
           <div className="flex items-center gap-2 text-[#8B5B43] font-bold text-base mb-1">
             <Clock className="w-5 h-5" />
@@ -1576,10 +1592,10 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       {/* 7. Printing & Station Settings (Spec 6.25) */}
-      <div className="bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden">
+      <fieldset disabled={!canSettings} className={`bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden ${!canSettings ? 'opacity-65' : ''}`}>
         <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-gray-200">
           <div className="flex items-center gap-2 text-[#8B5B43] font-bold text-base mb-1">
             <Printer className="w-5 h-5" />
@@ -1755,7 +1771,7 @@ export default function SettingsPage() {
           </div>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       {confirmDisablePrint && (
         <ConfirmPanel

@@ -24,6 +24,7 @@ async function run() {
   const suffix = Date.now().toString().slice(-6);
   const seatingPassPlain = `R33Seating_${suffix}_Pass!`;
   const accountingPassPlain = `R33Account_${suffix}_Pass!`;
+  const sessionsPassPlain = `R33Session_${suffix}_Pass!`;
 
   const seatingStaff = await prisma.adminUser.create({
     data: {
@@ -39,6 +40,15 @@ async function run() {
       password: accountingPassPlain,
       name: `帳務專員R33_${suffix}`,
       permissions: ['accounting'],
+      is_active: true
+    }
+  });
+
+  const sessionsStaff = await prisma.adminUser.create({
+    data: {
+      password: sessionsPassPlain,
+      name: `時段專員R33_${suffix}`,
+      permissions: ['sessions'],
       is_active: true
     }
   });
@@ -252,6 +262,57 @@ async function run() {
 
     await ctx2.close();
     console.log('Scenario 2 PASS');
+
+    // =========================================================================
+    // Scenario 3: Staff with ONLY ['sessions'] opens SessionsPage (/admin/sessions)
+    // =========================================================================
+    console.log('Scenario 3: Logging in as sessions-only staff...');
+    const ctx3 = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    const page3 = await ctx3.newPage();
+
+    await page3.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
+    await page3.locator('input[type="password"]').first().fill(sessionsPassPlain);
+    await page3.locator('button[type="submit"]').click();
+
+    await page3.waitForTimeout(1200);
+    await page3.waitForLoadState('networkidle');
+
+    await page3.goto(`${BASE_URL}/admin/sessions`, { waitUntil: 'networkidle' });
+
+    const displayCard = page3.locator('[data-testid="sessions-display-settings-card"]');
+    await displayCard.waitFor({ state: 'visible', timeout: 10000 });
+    await displayCard.scrollIntoViewIfNeeded();
+
+    // Verify Kiosk card is read-only for sessions-only staff
+    await page3.locator('[data-testid="kiosk-settings-readonly-notice"]').waitFor({ state: 'visible', timeout: 10000 });
+    assert.strictEqual(await page3.locator('[data-testid="save-kiosk-settings-btn"]').count(), 0, 'Kiosk save button should be hidden for sessions-only staff');
+
+    // Verify LINE button URL input & toggle are disabled/read-only and show notice
+    await page3.locator('[data-testid="sessions-line-readonly-notice"]').waitFor({ state: 'visible', timeout: 10000 });
+    const lineUrlInput = page3.locator('[data-testid="sessions-line-url-input"]');
+    assert.strictEqual(await lineUrlInput.isDisabled(), true, 'LINE URL input should be disabled for sessions-only staff');
+    const lineToggle = page3.locator('[data-testid="sessions-line-toggle"]');
+    assert.strictEqual(await lineToggle.isDisabled(), true, 'LINE button toggle should be disabled for sessions-only staff');
+
+    // Verify announcement is editable and saves cleanly (200)
+    const announcementInput = page3.locator('[data-testid="sessions-announcement-input"]');
+    assert.strictEqual(await announcementInput.isDisabled(), false, 'Announcement input should be enabled for sessions-only staff');
+    const testAnnouncementText = `歡迎來到拾光製所！R33時段人員公告更新_${suffix}`;
+    await announcementInput.fill(testAnnouncementText);
+
+    const [putGlobalResp] = await Promise.all([
+      page3.waitForResponse((res) => res.url().includes('/api/daily-settings/global') && res.request().method() === 'PUT'),
+      page3.locator('[data-testid="save-display-settings-btn"]').click()
+    ]);
+    assert.strictEqual(putGlobalResp.status(), 200, `Expected 200 saving display settings for sessions-only staff, got ${putGlobalResp.status()}`);
+    await page3.locator('text=顧客端首頁顯示設定已成功更新').waitFor({ state: 'visible', timeout: 10000 });
+
+    const shot3Path = path.join(SCREENSHOT_DIR, 'round33_shot3_sessions_readonly.png');
+    await page3.screenshot({ path: shot3Path, fullPage: false });
+    console.log(`Saved screenshot 3: ${shot3Path}`);
+
+    await ctx3.close();
+    console.log('Scenario 3 PASS');
     console.log('--- Round 33 Permissions Playwright Test PASSED ---');
   } finally {
     await browser.close();
@@ -261,7 +322,7 @@ async function run() {
     await prisma.user.deleteMany({ where: { id: testUser.id } }).catch(() => {});
     await prisma.promoCode.deleteMany({ where: { id: seededPromo.id } }).catch(() => {});
     await prisma.adminUser.deleteMany({
-      where: { id: { in: [seatingStaff.id, accountingStaff.id] } }
+      where: { id: { in: [seatingStaff.id, accountingStaff.id, sessionsStaff.id] } }
     }).catch(() => {});
     await prisma.$disconnect();
   }
