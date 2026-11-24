@@ -654,6 +654,15 @@ export function buildClosingSlip(closing = {}, opts = {}) {
     bold: true
   });
 
+  const shopCashIncome = Number(totals.shop_cash_income || 0);
+  if (shopCashIncome > 0) {
+    commands.push({
+      type: 'text',
+      text: fitLine('商城現金（不計入營收）', formatReceiptMoney(shopCashIncome)),
+      size: 20
+    });
+  }
+
   const passAmount = totals.pass_amount ?? totals.pass_value ?? 0;
   const passCount = totals.pass_count ?? 0;
   if (passAmount > 0) {

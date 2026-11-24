@@ -108,6 +108,7 @@ export default function AccountingPage() {
   const [loadingPrintJobs, setLoadingPrintJobs] = useState(false);
 
   // Tab 4: Closing state
+  const [closingDate, setClosingDate] = useState(todayStr);
   const [closingPreview, setClosingPreview] = useState(null);
   const [closingsList, setClosingsList] = useState([]);
   const [countedCash, setCountedCash] = useState('');
@@ -208,14 +209,15 @@ export default function AccountingPage() {
   const fetchClosing = async () => {
     try {
       const [prevRes, listRes] = await Promise.all([
-        api.get('/accounting/closing/preview', { params: { date: dateFrom } }),
-        api.get('/accounting/closings', { params: { date: dateFrom } })
+        api.get('/accounting/closing/preview', { params: { date: closingDate } }),
+        api.get('/accounting/closings', { params: { date: closingDate } })
       ]);
       setClosingPreview(prevRes.data);
       setClosingFloat(prevRes.data?.float_amount ?? 2000);
       setClosingsList(listRes.data?.closings || []);
     } catch (err) {
       console.error(err);
+      showToast(err.response?.data?.error || '無法載入日結資料', true);
     }
   };
 
@@ -238,7 +240,7 @@ export default function AccountingPage() {
     else if (activeTab === 'print-jobs') fetchPrintJobs();
     else if (activeTab === 'closing') fetchClosing();
     else if (activeTab === 'unpaid') fetchUnpaid();
-  }, [activeTab, dateFrom, dateTo, paymentKindFilter, paymentMethodFilter, eventCategoryFilter, printStatusFilter, selectedStaff]);
+  }, [activeTab, dateFrom, dateTo, closingDate, paymentKindFilter, paymentMethodFilter, eventCategoryFilter, printStatusFilter, selectedStaff]);
 
   // Void payment
   const handleConfirmVoid = async () => {
@@ -309,7 +311,7 @@ export default function AccountingPage() {
     try {
       setClosingSubmitting(true);
       const res = await api.post('/accounting/closing', {
-        date: dateFrom,
+        date: closingDate,
         float_amount: closingFloat,
         counted_cash: countedCash,
         note: closingNote,
@@ -330,21 +332,13 @@ export default function AccountingPage() {
     try {
       const diff = (countedCash || 0) - (closingPreview.expected_cash || 0);
       const cmds = buildClosingSlip(
-        dateFrom,
         {
+          business_date: closingDate,
           float_amount: closingFloat,
           expected_cash: closingPreview.expected_cash,
           counted_cash: countedCash,
-          difference: diff
-        },
-        {
-          net_revenue: closingPreview.net_revenue,
-          by_method: closingPreview.by_method,
-          refunds: closingPreview.refunds,
-          void_count: closingPreview.voids?.count,
-          void_amount: closingPreview.voids?.amount,
-          unpaid_count: closingPreview.unpaid?.count,
-          unpaid_amount: closingPreview.unpaid?.amount
+          difference: diff,
+          totals_json: closingPreview
         }
       );
       setClosingSlipHtml(commandsToPreviewHtml(cmds));
@@ -1293,6 +1287,27 @@ export default function AccountingPage() {
           </div>
         ) : (
         <div className="space-y-6">
+          <div className="bg-white px-5 py-3.5 rounded-3xl border border-sg-line shadow-xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <label htmlFor="closing-date-input" className="text-[13px] font-bold text-sg-ink">
+                交班營業日
+              </label>
+              <input
+                id="closing-date-input"
+                data-testid="closing-date-input"
+                type="date"
+                value={closingDate}
+                max={todayStr}
+                onChange={(e) => {
+                  const val = e.target.value || todayStr;
+                  setClosingDate(val > todayStr ? todayStr : val);
+                }}
+                className="px-3 py-1.5 rounded-xl border border-sg-line text-[13px] font-num font-bold text-sg-ink"
+              />
+            </div>
+            <span className="text-[12px] text-sg-muted">與上方報表篩選分開，預設今天（不可交未來日期）</span>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left: Financial summary */}
             <div className="bg-white p-5 rounded-3xl border border-sg-line shadow-xs space-y-4">
@@ -1304,6 +1319,10 @@ export default function AccountingPage() {
               </div>
 
               <div className="divide-y divide-sg-line text-[13px] pt-2">
+                <div className="py-2 flex justify-between text-sg-muted">
+                  <span>商城現金（不計入營收）</span>
+                  <span className="font-num">{formatMoney(closingPreview.shop_cash_income || 0)}</span>
+                </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-sg-ink">現金收款（{closingPreview.by_method?.cash?.count || 0} 筆）</span>
                   <span className="font-num font-bold">{formatMoney(closingPreview.by_method?.cash?.amount || 0)}</span>
@@ -1457,7 +1476,7 @@ export default function AccountingPage() {
                 {closingsList.map((c) => (
                   <div key={c.id} className="p-2.5 rounded-2xl bg-sg-paper/40 border border-sg-line flex items-center justify-between text-[12px]">
                     <div>
-                      <span className="font-bold text-sg-ink mr-2">{new Date(c.closed_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
+                      <span className="font-bold text-sg-ink mr-2">{new Date(c.period_end_at || c.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
                       <span className="text-sg-muted">{c.staff_name}</span>
                     </div>
                     <div>

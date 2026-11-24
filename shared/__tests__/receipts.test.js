@@ -387,3 +387,54 @@ test('Receipt width budgeting with Taipei date serial numbers (R-261110-0001 <= 
     }
   }
 });
+
+test('Round 36 Item 4: buildClosingSlip renders complete totals_json snapshot and hides 0 shop cash row', () => {
+  const closing = {
+    business_date: '2026-11-24',
+    created_at: '2026-11-24T13:30:00Z',
+    staff_name: '店員小明',
+    float_amount: 2000,
+    expected_cash: 2400,
+    counted_cash: 2400,
+    difference: 0,
+    totals_json: {
+      by_method: {
+        cash: { count: 1, amount: 500 },
+        line_pay: { count: 1, amount: 300 }
+      },
+      actual_received: 700,
+      refund_amount: 100,
+      refund_count: 1,
+      pass_amount: 800,
+      pass_count: 1,
+      void_amount: 200,
+      void_count: 1,
+      unpaid_amount: 450,
+      unpaid_count: 1,
+      shop_cash_income: 0
+    }
+  };
+
+  const cmds = buildClosingSlip(closing);
+  const text = cmds.map(c => c.text || '').join('\n');
+  assert.ok(text.includes('今日實收') && text.includes('NT$700'));
+  assert.ok(text.includes('退款 1 筆'));
+  assert.ok(text.includes('卡券折抵 1 筆（不計入）'));
+  assert.ok(text.includes('未結 1 筆'));
+  assert.ok(!text.includes('商城現金'));
+
+  // With non-zero shop_cash_income, reserved shop cash line renders and respects 31-col width
+  const withShop = buildClosingSlip({
+    ...closing,
+    totals_json: { ...closing.totals_json, shop_cash_income: 350 }
+  });
+  const shopText = withShop.map(c => c.text || '').join('\n');
+  assert.ok(shopText.includes('商城現金') && shopText.includes('NT$350'));
+  for (const cmd of withShop) {
+    if (cmd.type === 'text' || cmd.type === 'title') {
+      for (const line of cmd.text.split('\n')) {
+        assert.ok(strWidth(line) <= 31, `Closing slip line exceeds 31: "${line}" (width: ${strWidth(line)})`);
+      }
+    }
+  }
+});

@@ -4,6 +4,7 @@ import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { queuePrintJob } from '../services/print/printService.js';
 import { getShiftLock, canVoidPayment } from '../services/billing/shiftLock.js';
+import { computeClosingStats } from '../services/billing/closingStats.js';
 
 export const getAccountingSummary = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -271,7 +272,12 @@ export const getPrintJobsList = async (req, res) => {
 };
 
 export const getClosingPreview = async (req, res) => {
-  const targetDateStr = req.query.date || toTaipeiDateString(new Date());
+  const todayStr = toTaipeiDateString(new Date());
+  const targetDateStr = req.query.date || todayStr;
+
+  if (targetDateStr > todayStr) {
+    return res.status(422).json({ error: '不能交未來日期' });
+  }
 
   try {
     const start = new Date(`${targetDateStr}T00:00:00+08:00`);
@@ -280,80 +286,14 @@ export const getClosingPreview = async (req, res) => {
     const globalSetting = await prisma.globalSetting.findFirst() || {};
     const floatAmount = globalSetting.cash_float_amount ?? 2000;
 
-    const payments = await prisma.payment.findMany({
-      where: { created_at: { gte: start, lte: end } }
-    });
-
-    const validPayments = payments.filter(p => p.status === 'valid');
-    const charges = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
-    const passes = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method === 'pass');
-    const refunds = validPayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
-    const passRefunds = validPayments.filter(p => p.kind === 'refund' && p.method === 'pass');
-    const voids = payments.filter(p => p.status === 'voided');
-
-    const byMethod = {};
-    for (const p of charges) {
-      if (!byMethod[p.method]) byMethod[p.method] = { count: 0, amount: 0 };
-      byMethod[p.method].count += 1;
-      byMethod[p.method].amount += p.amount;
-    }
-
-    const refundsByMethod = {};
-    for (const p of refunds) {
-      if (!refundsByMethod[p.method]) refundsByMethod[p.method] = { count: 0, amount: 0 };
-      refundsByMethod[p.method].count += 1;
-      refundsByMethod[p.method].amount += p.amount;
-    }
-
-    const totalIncome = charges.reduce((sum, p) => sum + p.amount, 0);
-    const totalRefund = refunds.reduce((sum, p) => sum + p.amount, 0);
-    const netRevenue = totalIncome - totalRefund;
-
-    const cashIncome = charges.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
-    const cashRefund = refunds.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
-    const expectedCash = floatAmount + cashIncome - cashRefund;
-
-    // Unpaid today
-    const unpaidRes = await prisma.reservation.findMany({
-      where: {
-        status: { not: 'cancelled' },
-        session: { session_date: dateOnly(targetDateStr) },
-        billing_status: { in: ['unpaid', 'partial'] }
-      }
-    });
-
-    const unpaidMap = new Map();
-    for (const r of unpaidRes) {
-      if (!unpaidMap.has(r.booking_ref)) {
-        unpaidMap.set(r.booking_ref, (r.amount_due || 0) - (r.amount_received || 0));
-      }
-    }
-    const unpaidCount = unpaidMap.size;
-    const unpaidAmount = Array.from(unpaidMap.values()).reduce((sum, amt) => sum + Math.max(0, amt), 0);
+    const stats = await computeClosingStats({ start, end, businessDate: targetDateStr, txOrPrisma: prisma });
+    const expectedCash = floatAmount + stats.cash_income - stats.cash_refund + stats.shop_cash_income - stats.shop_cash_refund;
 
     return res.json({
       date: targetDateStr,
       float_amount: floatAmount,
       expected_cash: expectedCash,
-      net_revenue: netRevenue,
-      by_method: byMethod,
-      refunds: refundsByMethod,
-      voids: {
-        count: voids.length,
-        amount: voids.reduce((sum, p) => sum + p.amount, 0)
-      },
-      passes: {
-        count: passes.length,
-        amount: passes.reduce((sum, p) => sum + p.amount, 0)
-      },
-      pass_refunds: {
-        count: passRefunds.length,
-        amount: passRefunds.reduce((sum, p) => sum + p.amount, 0)
-      },
-      unpaid: {
-        count: unpaidCount,
-        amount: unpaidAmount
-      }
+      ...stats
     });
   } catch (error) {
     console.error('[getClosingPreview] Error:', error);
@@ -368,63 +308,86 @@ export const postClosing = async (req, res) => {
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
-    const targetDateStr = date || toTaipeiDateString(new Date());
-    const previewData = await (async () => {
-      const start = new Date(`${targetDateStr}T00:00:00+08:00`);
-      const end = new Date(`${targetDateStr}T23:59:59.999+08:00`);
-      const payments = await prisma.payment.findMany({
-        where: { created_at: { gte: start, lte: end } }
-      });
-      const validPayments = payments.filter(p => p.status === 'valid');
-      const charges = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
-      const refunds = validPayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
-      const cashIncome = charges.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
-      const cashRefund = refunds.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
-      const floatAmt = Number(float_amount);
-      const expCash = floatAmt + cashIncome - cashRefund;
-      return { expCash, floatAmt };
-    })();
-
-    const counted = Number(counted_cash);
-    const difference = counted - previewData.expCash;
-    const trimmedNote = note ? String(note).trim() : '';
-
-    if (difference !== 0 && !trimmedNote) {
-      return res.status(422).json({ error: '有差額，請先填寫備註' });
+    const todayStr = toTaipeiDateString(new Date());
+    const targetDateStr = date || todayStr;
+    if (targetDateStr > todayStr) {
+      return res.status(422).json({ error: '不能交未來日期' });
     }
 
-    const closing = await prisma.$transaction(async (tx) => {
+    if (counted_cash === undefined || counted_cash === null || counted_cash === '') {
+      return res.status(422).json({ error: '請填寫實點現金金額' });
+    }
+    const countedNum = Number(counted_cash);
+    if (!Number.isInteger(countedNum) || countedNum < 0) {
+      return res.status(422).json({ error: '實點現金必須為非負整數' });
+    }
+
+    const start = new Date(`${targetDateStr}T00:00:00+08:00`);
+    const end = new Date(`${targetDateStr}T23:59:59.999+08:00`);
+
+    const txResult = await prisma.$transaction(async (tx) => {
+      const globalSetting = await tx.globalSetting.findFirst() || {};
+      const parsedFloat = (float_amount !== undefined && float_amount !== null && float_amount !== '' && Number.isFinite(Number(float_amount)))
+        ? Math.round(Number(float_amount))
+        : (globalSetting.cash_float_amount ?? 2000);
+      if (parsedFloat < 0) {
+        return { errorStatus: 422, errorBody: { error: '起始零用金不能為負數' } };
+      }
+
+      const stats = await computeClosingStats({ start, end, businessDate: targetDateStr, txOrPrisma: tx });
+      const expCash = parsedFloat + stats.cash_income - stats.cash_refund + stats.shop_cash_income - stats.shop_cash_refund;
+      const difference = countedNum - expCash;
+      const trimmedNote = note ? String(note).trim() : '';
+
+      if (difference !== 0 && !trimmedNote) {
+        return { errorStatus: 422, errorBody: { error: '有差額，請先填寫備註' } };
+      }
+
+      const snapshotTotals = {
+        ...stats,
+        date: targetDateStr,
+        float_amount: parsedFloat,
+        expected_cash: expCash,
+        counted_cash: countedNum,
+        difference,
+        note: trimmedNote || null,
+        snapshot_at: new Date().toISOString()
+      };
+
       const created = await tx.cashClosing.create({
         data: {
           business_date: dateOnly(targetDateStr),
-          float_amount: previewData.floatAmt,
-          expected_cash: previewData.expCash,
-          counted_cash: counted,
+          float_amount: parsedFloat,
+          expected_cash: expCash,
+          counted_cash: countedNum,
           difference,
-          totals_json: {
-            date: targetDateStr,
-            difference,
-            snapshot_at: new Date().toISOString()
-          },
+          totals_json: snapshotTotals,
           note: trimmedNote || null,
           staff_name: staffName,
           device_label: deviceInfo.device_label
         }
       });
 
+      const diffLabel = difference === 0 ? '無差額' : `差額 ${difference > 0 ? '+' : ''}${difference}`;
       await auditLog(tx, {
         event_type: 'day_closed',
         category: 'closing',
-        summary: `日結交班完成 · 實點現金 NT$${counted}（${difference >= 0 ? '+' : ''}${difference}）`,
-        amount: counted,
+        summary: `日結交班完成 · 應有 NT$${expCash} / 實點 NT$${countedNum}（${diffLabel}）`,
+        amount: countedNum,
+        reason: difference !== 0 ? trimmedNote : null,
         staff_name: staffName,
         staff_id: staffId,
         device_id: deviceInfo.device_id,
         device_label: deviceInfo.device_label
       });
 
-      return created;
+      return { closing: created };
     });
+
+    if (txResult.errorStatus) {
+      return res.status(txResult.errorStatus).json(txResult.errorBody);
+    }
+    const closing = txResult.closing;
 
     let printJob = null;
     if (print) {
@@ -449,8 +412,10 @@ export const postClosing = async (req, res) => {
 
 export const getClosingsList = async (req, res) => {
   try {
+    const { date } = req.query;
     const closings = await prisma.cashClosing.findMany({
-      orderBy: { business_date: 'desc' },
+      where: date ? { business_date: dateOnly(date) } : undefined,
+      orderBy: [{ business_date: 'desc' }, { created_at: 'desc' }, { id: 'desc' }],
       take: 60
     });
     return res.json({ closings });
