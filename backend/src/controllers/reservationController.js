@@ -7,6 +7,7 @@ import {
   getActiveLayoutForDate,
   loadSeatedOccupants,
   lockDaySeats,
+  lockDaySessionsAndSeats,
   loadActiveSeatHolds,
   seatHoldsToPinnedReservations,
   syncWalkInSeatHolds
@@ -478,21 +479,19 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         throw new Error('BLACKLISTED_USER');
       }
 
-      // 1. Get the requested sessions
-      const requestedSessions = await tx.$queryRaw`
-        SELECT id, max_capacity, session_date, start_time, end_time
-        FROM "Session" 
-        WHERE id IN (${Prisma.join(session_ids)}) 
-        FOR UPDATE
-      `;
+      // 1. Read requested sessions without row lock first to resolve Taipei date & validate
+      const preRequestedSessions = await tx.session.findMany({
+        where: { id: { in: session_ids } },
+        select: { id: true, max_capacity: true, session_date: true, start_time: true, end_time: true }
+      });
 
-      if (requestedSessions.length !== session_ids.length) {
+      if (preRequestedSessions.length !== session_ids.length) {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
       }
 
       // 檢查是否跨日期：一筆預約只能包含同一天的時段
       const uniqueDates = new Set(
-        requestedSessions.map(s => {
+        preRequestedSessions.map(s => {
           return s.session_date instanceof Date
             ? s.session_date.toISOString().slice(0, 10)
             : String(s.session_date).slice(0, 10);
@@ -502,17 +501,12 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         throw new Error('CROSS_DATE_SESSIONS');
       }
 
-      const sessionDate = requestedSessions[0].session_date;
+      const sessionDate = preRequestedSessions[0].session_date;
 
-      // Lock ALL sessions for the same date to prevent race conditions across the day
-      const dateStr = toTaipeiDateString(sessionDate);
-      const allSessionsOfDay = await tx.$queryRaw`
-        SELECT id
-        FROM "Session"
-        WHERE session_date = ${dateStr}::date
-        FOR UPDATE
-      `;
-      await lockDaySeats(tx, dateStr);
+      // Lock ALL sessions for the same date in canonical id ASC order, then lockDaySeats
+      const { dateStr, sessions: allSessionsOfDay } = await lockDaySessionsAndSeats(tx, sessionDate);
+      const reqSessionIdSet = new Set(session_ids.map(Number));
+      const requestedSessions = allSessionsOfDay.filter(s => reqSessionIdSet.has(s.id));
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
 
       // Fetch all confirmed reservations and active walk-in holds for the day
@@ -1963,7 +1957,7 @@ export const moveSeat = async (req, res) => {
     const dateStr = toTaipeiDateString(preTarget.session.session_date);
 
     const { singleUpdated, displacedCount } = await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, dateStr);
+      await lockDaySessionsAndSeats(tx, dateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${preTarget.booking_ref}))`;
 
       const group = await tx.reservation.findMany({
@@ -2028,7 +2022,7 @@ export const swapSeats = async (req, res) => {
     const dateStr = toTaipeiDateString(preSource[0].session.session_date);
 
     const displacedCount = await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, dateStr);
+      await lockDaySessionsAndSeats(tx, dateStr);
       const refsSorted = [...new Set([source_booking_ref, target_booking_ref])].sort();
       for (const ref of refsSorted) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${ref}))`;
@@ -2311,21 +2305,19 @@ export const adminCreateReservation = async (req, res) => {
         });
       }
 
-      // 1. Get the requested sessions
-      const requestedSessions = await tx.$queryRaw`
-        SELECT id, max_capacity, session_date, start_time, end_time
-        FROM "Session" 
-        WHERE id IN (${Prisma.join(session_ids)}) 
-        FOR UPDATE
-      `;
+      // 1. Read requested sessions without row lock first to resolve Taipei date & validate
+      const preRequestedSessions = await tx.session.findMany({
+        where: { id: { in: session_ids } },
+        select: { id: true, max_capacity: true, session_date: true, start_time: true, end_time: true }
+      });
 
-      if (requestedSessions.length !== session_ids.length) {
+      if (preRequestedSessions.length !== session_ids.length) {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
       }
 
       // 檢查是否跨日期：一筆預約只能包含同一天的時段
       const uniqueDates = new Set(
-        requestedSessions.map(s => {
+        preRequestedSessions.map(s => {
           return s.session_date instanceof Date
             ? s.session_date.toISOString().slice(0, 10)
             : String(s.session_date).slice(0, 10);
@@ -2335,17 +2327,12 @@ export const adminCreateReservation = async (req, res) => {
         throw new Error('CROSS_DATE_SESSIONS');
       }
 
-      const sessionDate = requestedSessions[0].session_date;
+      const sessionDate = preRequestedSessions[0].session_date;
 
-      // Lock ALL sessions for the same date to prevent race conditions across the day
-      const dateStr = toTaipeiDateString(sessionDate);
-      const allSessionsOfDay = await tx.$queryRaw`
-        SELECT id
-        FROM "Session"
-        WHERE session_date = ${dateStr}::date
-        FOR UPDATE
-      `;
-      await lockDaySeats(tx, dateStr);
+      // Lock ALL sessions for the same date in canonical id ASC order, then lockDaySeats
+      const { dateStr, sessions: allSessionsOfDay } = await lockDaySessionsAndSeats(tx, sessionDate);
+      const reqSessionIdSet = new Set(session_ids.map(Number));
+      const requestedSessions = allSessionsOfDay.filter(s => reqSessionIdSet.has(s.id));
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
 
       // Fetch all confirmed reservations for the day
@@ -2729,13 +2716,7 @@ export const extendReservation = async (req, res) => {
     const extendDateStr = toTaipeiDateString(sessionsPre[0].session_date);
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`
-        SELECT id
-        FROM "Session"
-        WHERE session_date = ${extendDateStr}::date
-        FOR UPDATE
-      `;
-      await lockDaySeats(tx, extendDateStr);
+      await lockDaySessionsAndSeats(tx, extendDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       // Find existing reservation details with session info
