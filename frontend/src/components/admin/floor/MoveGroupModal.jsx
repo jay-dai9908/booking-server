@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { X, ArrowRight, ArrowRightLeft, AlertCircle } from 'lucide-react';
 import api from '../../../api/axios';
+import { useFloorOffline } from '../../../contexts/FloorOfflineContext';
 
 export default function MoveGroupModal({
   isOpen,
@@ -11,6 +12,7 @@ export default function MoveGroupModal({
   onSuccess,
   showToast
 }) {
+  const { offline: floorOffline, reason: offlineReason } = useFloorOffline();
   const [selectedTableId, setSelectedTableId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -219,7 +221,8 @@ export default function MoveGroupModal({
           </button>
           <button
             type="button"
-            disabled={!selectedTableId || submitting}
+            disabled={floorOffline || !selectedTableId || submitting}
+            title={floorOffline ? offlineReason : undefined}
             onClick={handleSubmit}
             data-testid="confirm-move-group-btn"
             className="flex-1 py-2.5 rounded-2xl bg-sg-brown text-white font-bold text-[13px] hover:bg-sg-brown/90 transition shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"

@@ -383,6 +383,16 @@ export function matchesFilter(seatInfo, filterMode = 'all', alertBookingRefs = n
   return true;
 }
 
+/**
+ * Determine next selectedDate across a Taipei midnight rollover.
+ * Only advances automatically when the user was still viewing the previous "today".
+ */
+export function nextSelectedDate({ selectedDate, prevToday, newToday }) {
+  if (!newToday) return selectedDate;
+  if (!selectedDate || selectedDate === prevToday) return newToday;
+  return selectedDate;
+}
+
 export function isSessionPast(session, now = new Date()) {
   if (!session) return false;
   const nowTaipeiStr = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });

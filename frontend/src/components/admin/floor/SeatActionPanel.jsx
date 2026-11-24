@@ -21,6 +21,7 @@ import { displayBoardName } from '../../../../../shared/billing.js';
 import { getPersonStatusText, getPersonTimerElapsedForRemove } from '../../../utils/admin/floorSelectors.js';
 import PersonTimeline from './PersonTimeline';
 import RemovePersonConfirmDialog from './RemovePersonConfirmDialog';
+import { useFloorOffline } from '../../../contexts/FloorOfflineContext';
 
 function formatTimeHHMM(val) {
   if (!val) return '';
@@ -64,6 +65,7 @@ export default function SeatActionPanel({
   onRefund,
   serverNow = null
 }) {
+  const { offline: floorOffline, reason: offlineReason } = useFloorOffline();
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
 
@@ -209,13 +211,15 @@ export default function SeatActionPanel({
     <>
       <button
         type="button"
+        disabled={floorOffline}
+        title={floorOffline ? offlineReason : undefined}
         data-testid="seat-panel-board-pause-btn"
         onClick={() => {
           if (onBoardPauseToggle && booking) {
             onBoardPauseToggle(booking.booking_ref, personBoard.unit_group, Boolean(activeBoardPause));
           }
         }}
-        className={`rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition cursor-pointer whitespace-nowrap ${
+        className={`rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed ${
           activeBoardPause
             ? 'bg-sg-brown text-white border-sg-brown hover:bg-sg-brown/90 shadow-2xs'
             : 'bg-white text-sg-ink border-sg-line hover:bg-sg-bg'
@@ -225,6 +229,8 @@ export default function SeatActionPanel({
       </button>
       <button
         type="button"
+        disabled={floorOffline}
+        title={floorOffline ? offlineReason : undefined}
         data-testid="seat-panel-board-return-btn"
         onClick={() => {
           if (onBoardReturn && booking && personBoard) {
@@ -236,7 +242,7 @@ export default function SeatActionPanel({
             });
           }
         }}
-        className="rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition cursor-pointer whitespace-nowrap bg-white text-sg-danger border-sg-line hover:bg-sg-danger-soft/40"
+        className="rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition cursor-pointer whitespace-nowrap bg-white text-sg-danger border-sg-line hover:bg-sg-danger-soft/40 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         不用了，歸還
       </button>
@@ -244,7 +250,7 @@ export default function SeatActionPanel({
   ) : null;
 
   const actionTileClass =
-    'rounded-2xl border border-sg-line bg-white hover:bg-sg-paper active:scale-[0.98] text-sg-ink py-3 px-2 flex flex-col items-center justify-center gap-1.5 text-[12px] font-bold transition cursor-pointer shadow-2xs';
+    'rounded-2xl border border-sg-line bg-white hover:bg-sg-paper active:scale-[0.98] text-sg-ink py-3 px-2 flex flex-col items-center justify-center gap-1.5 text-[12px] font-bold transition cursor-pointer shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white';
 
   const renderOtherPersonsSection = () => {
     if (otherPersons.length === 0) return null;
@@ -276,14 +282,15 @@ export default function SeatActionPanel({
                 {!p.timer?.timer_ended_at && (
                   <button
                     type="button"
+                    disabled={floorOffline}
                     aria-label={isPaused ? `繼續第 ${p.person_no} 位計時` : `暫停第 ${p.person_no} 位計時`}
-                    title={isPaused ? '繼續計時' : '暫停計時'}
+                    title={floorOffline ? offlineReason : (isPaused ? '繼續計時' : '暫停計時')}
                     onClick={() => {
                       if (onTimerAction && booking) {
                         onTimerAction(booking.booking_ref, [p.person_no], isPaused ? 'resume' : 'pause');
                       }
                     }}
-                    className="w-9 h-9 rounded-full bg-sg-brown hover:bg-sg-brown/90 active:scale-95 text-white flex items-center justify-center shrink-0 shadow-2xs transition cursor-pointer"
+                    className="w-9 h-9 rounded-full bg-sg-brown hover:bg-sg-brown/90 active:scale-95 text-white flex items-center justify-center shrink-0 shadow-2xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isPaused ? <Play className="w-4 h-4 ml-0.5" /> : <Pause className="w-4 h-4" />}
                   </button>
@@ -304,9 +311,11 @@ export default function SeatActionPanel({
       {canShowRemove && (
         <button
           type="button"
+          disabled={floorOffline}
+          title={floorOffline ? offlineReason : undefined}
           data-testid="seat-panel-remove-person-btn"
           onClick={() => setShowRemoveDialog(true)}
-          className="px-2 py-1 rounded-lg text-[11px] font-bold text-sg-danger bg-sg-danger-soft/80 hover:bg-sg-danger-soft border border-sg-danger/25 transition whitespace-nowrap cursor-pointer"
+          className="px-2 py-1 rounded-lg text-[11px] font-bold text-sg-danger bg-sg-danger-soft/80 hover:bg-sg-danger-soft border border-sg-danger/25 transition whitespace-nowrap cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           這位不玩了
         </button>
@@ -330,13 +339,15 @@ export default function SeatActionPanel({
           >
             <button
               type="button"
+              disabled={floorOffline}
+              title={floorOffline ? offlineReason : undefined}
               data-testid="seat-panel-move-wait-btn"
               onClick={() => {
                 if (onMoveToWait && booking && seat) {
                   onMoveToWait(booking, seat.code);
                 }
               }}
-              className="w-full text-left px-3 py-2 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
+              className="w-full text-left px-3 py-2 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ArrowRightLeft className="w-3.5 h-3.5 text-sg-muted" />
               移到等待區
@@ -365,6 +376,8 @@ export default function SeatActionPanel({
               variant="primary"
               size="lg"
               className="w-full font-bold"
+              disabled={floorOffline}
+              title={floorOffline ? offlineReason : undefined}
               data-testid="seat-panel-checkin-btn"
               onClick={() => {
                 if (onCheckIn && booking) onCheckIn(booking);
@@ -379,6 +392,8 @@ export default function SeatActionPanel({
               variant="primary"
               size="lg"
               className="w-full font-bold"
+              disabled={floorOffline}
+              title={floorOffline ? offlineReason : undefined}
               data-testid="seat-panel-force-add-btn"
               onClick={() => {
                 if (onForceAdd && seat) onForceAdd(seat.code);
@@ -421,22 +436,26 @@ export default function SeatActionPanel({
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
+                      disabled={floorOffline}
+                      title={floorOffline ? offlineReason : undefined}
                       onClick={() => {
                         if (onMoveSeat && gBooking) onMoveSeat(gBooking, seat.code, cg.personNo);
                       }}
-                      className="px-2 py-1 rounded-lg bg-sg-paper border border-sg-line text-[11px] font-bold text-sg-ink hover:border-sg-brown cursor-pointer"
+                      className="px-2 py-1 rounded-lg bg-sg-paper border border-sg-line text-[11px] font-bold text-sg-ink hover:border-sg-brown cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       換位
                     </button>
                     <button
                       type="button"
+                      disabled={floorOffline}
+                      title={floorOffline ? offlineReason : undefined}
                       onClick={() => {
                         if (onTimerAction && gBooking) {
                           onTimerAction(gBooking.booking_ref, [cg.personNo], 'end');
                           onClose?.();
                         }
                       }}
-                      className="px-2 py-1 rounded-lg bg-sg-danger-soft text-[11px] font-bold text-sg-danger hover:bg-sg-danger hover:text-white cursor-pointer"
+                      className="px-2 py-1 rounded-lg bg-sg-danger-soft text-[11px] font-bold text-sg-danger hover:bg-sg-danger hover:text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       離場
                     </button>
@@ -472,6 +491,8 @@ export default function SeatActionPanel({
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={floorOffline}
+                title={floorOffline ? offlineReason : undefined}
                 data-testid="seat-panel-move-btn"
                 onClick={() => {
                   if (onMoveSeat && booking && seat) {
@@ -515,6 +536,8 @@ export default function SeatActionPanel({
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
+                disabled={floorOffline}
+                title={floorOffline ? offlineReason : undefined}
                 data-testid="seat-panel-timer-toggle-btn"
                 className={actionTileClass}
                 onClick={() => {
@@ -530,6 +553,8 @@ export default function SeatActionPanel({
               {activeBoardSegment ? (
                 <button
                   type="button"
+                  disabled={floorOffline}
+                  title={floorOffline ? offlineReason : undefined}
                   data-testid="seat-panel-swap-board-btn"
                   className={actionTileClass}
                   onClick={() => {
@@ -549,6 +574,8 @@ export default function SeatActionPanel({
               ) : (
                 <button
                   type="button"
+                  disabled={floorOffline}
+                  title={floorOffline ? offlineReason : undefined}
                   data-testid="seat-panel-add-board-btn"
                   className={actionTileClass}
                   onClick={() => {
@@ -562,6 +589,8 @@ export default function SeatActionPanel({
 
               <button
                 type="button"
+                disabled={floorOffline}
+                title={floorOffline ? offlineReason : undefined}
                 data-testid="seat-panel-move-btn"
                 className={actionTileClass}
                 onClick={() => {
@@ -582,6 +611,8 @@ export default function SeatActionPanel({
 
               <button
                 type="button"
+                disabled={floorOffline}
+                title={floorOffline ? offlineReason : undefined}
                 data-testid="seat-panel-extend-btn"
                 className={actionTileClass}
                 onClick={() => {
@@ -606,11 +637,13 @@ export default function SeatActionPanel({
 
               <button
                 type="button"
+                disabled={floorOffline}
+                title={floorOffline ? offlineReason : undefined}
                 data-testid="seat-panel-checkout-btn"
                 onClick={() => {
                   if (onCheckout && booking) onCheckout(booking.booking_ref);
                 }}
-                className="rounded-2xl border border-sg-brown bg-sg-brown hover:bg-sg-brown/90 active:scale-[0.98] text-white py-3 px-2 flex flex-col items-center justify-center gap-1.5 text-[12px] font-bold transition cursor-pointer shadow-xs"
+                className="rounded-2xl border border-sg-brown bg-sg-brown hover:bg-sg-brown/90 active:scale-[0.98] text-white py-3 px-2 flex flex-col items-center justify-center gap-1.5 text-[12px] font-bold transition cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Receipt className="w-4 h-4" />
                 <span>結帳</span>
@@ -640,6 +673,8 @@ export default function SeatActionPanel({
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={floorOffline}
+                title={floorOffline ? offlineReason : undefined}
                 data-testid="seat-panel-leave-btn"
                 onClick={() => {
                   if (onLeave && booking) onLeave(booking.booking_ref, personNo);
@@ -652,6 +687,8 @@ export default function SeatActionPanel({
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={floorOffline}
+                title={floorOffline ? offlineReason : undefined}
                 data-testid="seat-panel-supplement-btn"
                 onClick={() => {
                   if (onSupplement && booking) onSupplement(booking.booking_ref);
@@ -664,6 +701,8 @@ export default function SeatActionPanel({
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={floorOffline}
+                title={floorOffline ? offlineReason : undefined}
                 data-testid="seat-panel-refund-btn"
                 onClick={() => {
                   if (onRefund && booking) onRefund(booking.booking_ref);
@@ -677,6 +716,8 @@ export default function SeatActionPanel({
                 <Button
                   variant="secondary"
                   size="sm"
+                  disabled={floorOffline}
+                  title={floorOffline ? offlineReason : undefined}
                   data-testid="seat-panel-add-board-btn"
                   onClick={() => {
                     if (onAddBoard && booking) onAddBoard(booking, personNo, currentPerson);

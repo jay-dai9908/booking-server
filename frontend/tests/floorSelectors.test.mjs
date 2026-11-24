@@ -15,7 +15,8 @@ import {
   getPersonStatusText,
   isSeatOccupied,
   groupBookingsByAttendance,
-  matchesFilter
+  matchesFilter,
+  nextSelectedDate
 } from '../src/utils/admin/floorSelectors.js';
 
 test('floorSelectors pure function tests', async (t) => {
@@ -772,6 +773,25 @@ test('floorSelectors pure function tests', async (t) => {
     // empty
     assert.strictEqual(matchesFilter({ state: 'empty', isActive: true }, 'empty', alertRefs), true);
     assert.strictEqual(matchesFilter({ state: 'empty', isActive: false }, 'empty', alertRefs), false);
+  });
+
+  await t.test('23. Round 42 Item 3: nextSelectedDate advances yesterday-today on rollover but preserves future date', () => {
+    assert.strictEqual(
+      nextSelectedDate({
+        selectedDate: '2026-11-22',
+        prevToday: '2026-11-22',
+        newToday: '2026-11-23'
+      }),
+      '2026-11-23'
+    );
+    assert.strictEqual(
+      nextSelectedDate({
+        selectedDate: '2026-11-25',
+        prevToday: '2026-11-22',
+        newToday: '2026-11-23'
+      }),
+      '2026-11-25'
+    );
   });
 });
 

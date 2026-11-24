@@ -5,6 +5,7 @@ import api from '../../../api/axios';
 import { bookingTimeRange, extractTimeHHMM, isSeatOccupied } from '../../../utils/admin/floorSelectors';
 import { shortBoardName } from '../../../utils/customer/pricing';
 import { Clock, Info, AlertTriangle } from 'lucide-react';
+import { useFloorOffline } from '../../../contexts/FloorOfflineContext';
 
 export default function CheckInPanel({
   isOpen,
@@ -16,6 +17,7 @@ export default function CheckInPanel({
   onSuccess,
   showToast: propShowToast
 }) {
+  const { offline: floorOffline, reason: offlineReason } = useFloorOffline();
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [boardAssign, setBoardAssign] = useState({});
   const [startTimer, setStartTimer] = useState(true);
@@ -321,8 +323,10 @@ export default function CheckInPanel({
           <div className="flex items-center justify-between">
             <button
               type="button"
+              disabled={floorOffline || isSubmitting}
+              title={floorOffline ? offlineReason : undefined}
               onClick={() => handleSubmit(true)}
-              className="text-[13px] text-sg-brown font-bold hover:underline"
+              className={`text-[13px] text-sg-brown font-bold ${floorOffline ? 'opacity-50 cursor-not-allowed' : 'hover:underline'}`}
             >
               只報到，稍後再帶位
             </button>
@@ -331,7 +335,8 @@ export default function CheckInPanel({
               size="md"
               onClick={() => handleSubmit(false)}
               loading={isSubmitting}
-              disabled={selectedSeats.length === 0}
+              disabled={floorOffline || selectedSeats.length === 0}
+              title={floorOffline ? offlineReason : undefined}
             >
               {startTimer ? '入座並開始計時' : '入座'}
             </Button>

@@ -3,8 +3,10 @@ import { XCircle, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
 import api from '../api/axios';
 import ResponsivePanel from './admin/ResponsivePanel';
 import Button from './customer/Button';
+import { useFloorOffline } from '../contexts/FloorOfflineContext';
 
 const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
+  const { offline: floorOffline, reason: offlineReason } = useFloorOffline();
   const [sessions, setSessions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedSessions, setSelectedSessions] = useState([]);
@@ -139,7 +141,8 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
             variant="primary"
             size="sm"
             onClick={handleSubmit}
-            disabled={isSubmitting || selectedSessions.length === 0}
+            disabled={floorOffline || isSubmitting || selectedSessions.length === 0}
+            title={floorOffline ? offlineReason : undefined}
           >
             {isSubmitting ? '處理中...' : '確認加時'}
           </Button>

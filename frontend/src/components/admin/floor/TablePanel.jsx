@@ -5,6 +5,7 @@ import { formatTimeHHmm } from '../../../../../shared/time.js';
 import { formatElapsedText, getPersonTimerElapsedForRemove } from '../../../utils/admin/floorSelectors';
 import RemovePersonConfirmDialog from './RemovePersonConfirmDialog';
 import ConfirmPanel from '../ConfirmPanel';
+import { useFloorOffline } from '../../../contexts/FloorOfflineContext';
 
 export default function TablePanel({
   isOpen,
@@ -29,6 +30,7 @@ export default function TablePanel({
   serverNow,
   showToast
 }) {
+  const { offline: floorOffline, reason: offlineReason } = useFloorOffline();
   const [addingPersonForRef, setAddingPersonForRef] = useState(null);
   const [menuOpenKey, setMenuOpenKey] = useState(null);
   const [removeConfirmTarget, setRemoveConfirmTarget] = useState(null);
@@ -217,11 +219,13 @@ export default function TablePanel({
                       <>
                         <button
                           type="button"
+                          disabled={floorOffline}
+                          title={floorOffline ? offlineReason : undefined}
                           onClick={() => {
                             onClose();
                             onCheckout?.(group.booking_ref);
                           }}
-                          className="px-3 py-1.5 rounded-xl font-bold text-[12px] bg-sg-brown text-white hover:bg-sg-brown/90 shadow-2xs transition flex items-center gap-1 cursor-pointer"
+                          className="px-3 py-1.5 rounded-xl font-bold text-[12px] bg-sg-brown text-white hover:bg-sg-brown/90 shadow-2xs transition flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <CreditCard className="w-3.5 h-3.5" />
                           <span>結帳</span>
@@ -229,11 +233,13 @@ export default function TablePanel({
 
                         <button
                           type="button"
+                          disabled={floorOffline}
+                          title={floorOffline ? offlineReason : undefined}
                           onClick={() => {
                             const personNos = activePersons.map(p => p.person_no);
                             onTimerAction?.(group.booking_ref, personNos, allPaused ? 'resume' : 'pause');
                           }}
-                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-paper border border-sg-line text-sg-ink hover:bg-sg-paper/80 transition flex items-center gap-1 cursor-pointer"
+                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-paper border border-sg-line text-sg-ink hover:bg-sg-paper/80 transition flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {allPaused ? <Play className="w-3.5 h-3.5 text-sg-sage" /> : <Pause className="w-3.5 h-3.5 text-sg-vent" />}
                           <span>{allPaused ? '全組繼續' : '全組暫停'}</span>
@@ -241,11 +247,13 @@ export default function TablePanel({
 
                         <button
                           type="button"
+                          disabled={floorOffline}
+                          title={floorOffline ? offlineReason : undefined}
                           onClick={() => {
                             onClose();
                             onExtendTime?.(group);
                           }}
-                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-paper border border-sg-line text-sg-ink hover:bg-sg-paper/80 transition flex items-center gap-1 cursor-pointer"
+                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-paper border border-sg-line text-sg-ink hover:bg-sg-paper/80 transition flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <Clock className="w-3.5 h-3.5 text-sg-honey" />
                           <span>加時</span>
@@ -253,8 +261,10 @@ export default function TablePanel({
 
                         <button
                           type="button"
+                          disabled={floorOffline}
+                          title={floorOffline ? offlineReason : undefined}
                           onClick={() => onMoveGroup?.(group)}
-                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-paper border border-sg-line text-sg-ink hover:bg-sg-paper/80 transition flex items-center gap-1 cursor-pointer"
+                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-paper border border-sg-line text-sg-ink hover:bg-sg-paper/80 transition flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <ArrowRightLeft className="w-3.5 h-3.5 text-sg-brown" />
                           <span>整組換桌</span>
@@ -274,10 +284,12 @@ export default function TablePanel({
 
                         <button
                           type="button"
+                          disabled={floorOffline}
+                          title={floorOffline ? offlineReason : undefined}
                           onClick={() => {
                             setLeaveConfirmGroupRef(group.booking_ref);
                           }}
-                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-danger-soft border border-sg-danger/30 text-sg-danger hover:bg-sg-danger/10 transition flex items-center gap-1 cursor-pointer"
+                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-danger-soft border border-sg-danger/30 text-sg-danger hover:bg-sg-danger/10 transition flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <LogOut className="w-3.5 h-3.5" />
                           <span>全組離場</span>
@@ -289,11 +301,13 @@ export default function TablePanel({
                       <>
                         <button
                           type="button"
+                          disabled={floorOffline}
+                          title={floorOffline ? offlineReason : undefined}
                           onClick={() => {
                             onClose();
                             onCheckIn?.(group);
                           }}
-                          className="px-3 py-1.5 rounded-xl font-bold text-[12px] bg-sg-brown text-white hover:bg-sg-brown/90 shadow-2xs transition flex items-center gap-1 cursor-pointer"
+                          className="px-3 py-1.5 rounded-xl font-bold text-[12px] bg-sg-brown text-white hover:bg-sg-brown/90 shadow-2xs transition flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <UserCheck className="w-3.5 h-3.5" />
                           <span>報到並帶位</span>
@@ -301,8 +315,10 @@ export default function TablePanel({
 
                         <button
                           type="button"
+                          disabled={floorOffline}
+                          title={floorOffline ? offlineReason : undefined}
                           onClick={() => onMoveGroup?.(group)}
-                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-paper border border-sg-line text-sg-ink hover:bg-sg-paper/80 transition flex items-center gap-1 cursor-pointer"
+                          className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-paper border border-sg-line text-sg-ink hover:bg-sg-paper/80 transition flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <ArrowRightLeft className="w-3.5 h-3.5 text-sg-brown" />
                           <span>整組換桌</span>
@@ -374,9 +390,11 @@ export default function TablePanel({
                             {!isEnded && !hasStarted && !isPersonPaid && (
                               <button
                                 type="button"
+                                disabled={floorOffline}
+                                title={floorOffline ? offlineReason : undefined}
                                 data-testid={`table-panel-start-btn-${person.person_no}`}
                                 onClick={() => onTimerAction?.(group.booking_ref, [person.person_no], 'start')}
-                                className="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-sg-brown text-white hover:opacity-90 transition cursor-pointer"
+                                className="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-sg-brown text-white hover:opacity-90 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 開始
                               </button>
@@ -384,10 +402,12 @@ export default function TablePanel({
                             {!isEnded && hasStarted && !isPersonPaid && (
                               <button
                                 type="button"
+                                disabled={floorOffline}
+                                title={floorOffline ? offlineReason : undefined}
                                 onClick={() => {
                                   onTimerAction?.(group.booking_ref, [person.person_no], isPaused ? 'resume' : 'pause');
                                 }}
-                                className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                                className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                                   isPaused
                                     ? 'bg-sg-sage/15 text-sg-sage border border-sg-sage/30'
                                     : 'bg-white text-sg-muted border border-sg-line hover:text-sg-ink'
@@ -414,6 +434,8 @@ export default function TablePanel({
                                 <div className="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-lg border border-sg-line py-1 z-30 text-[12px] space-y-0.5 animate-fade-in">
                                   <button
                                     type="button"
+                                    disabled={floorOffline}
+                                    title={floorOffline ? offlineReason : undefined}
                                     onClick={() => {
                                       const needsSeat = !person.seat_code || String(person.seat_code).startsWith('WAIT-');
                                       setMenuOpenKey(null);
@@ -425,20 +447,22 @@ export default function TablePanel({
                                         isSeatAssign: needsSeat
                                       });
                                     }}
-                                    className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition"
+                                    className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     {(!person.seat_code || String(person.seat_code).startsWith('WAIT-')) ? '帶位' : '換座位'}
                                   </button>
                                   {personHasBoard && (
                                     <button
                                       type="button"
+                                      disabled={floorOffline}
+                                      title={floorOffline ? offlineReason : undefined}
                                       data-testid={`table-panel-swap-board-btn-${person.person_no}`}
                                       onClick={() => {
                                         setMenuOpenKey(null);
                                         onClose();
                                         onSwapBoard?.({ booking: group, personNo: person.person_no, seatCode: person.seat_code || '未排座' });
                                       }}
-                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition"
+                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                       換板
                                     </button>
@@ -446,30 +470,36 @@ export default function TablePanel({
                                   {!isEnded && person.status === 'active' && (
                                     <button
                                       type="button"
+                                      disabled={floorOffline}
+                                      title={floorOffline ? offlineReason : undefined}
                                       data-testid={`table-panel-add-board-btn-${person.person_no}`}
                                       onClick={() => {
                                         setMenuOpenKey(null);
                                         onClose();
                                         onAddBoard?.({ booking: group, personNo: person.person_no });
                                       }}
-                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition"
+                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                       加租板
                                     </button>
                                   )}
                                   <button
                                     type="button"
+                                    disabled={floorOffline}
+                                    title={floorOffline ? offlineReason : undefined}
                                     onClick={() => {
                                       setMenuOpenKey(null);
                                       onTimerAction?.(group.booking_ref, [person.person_no], 'end');
                                     }}
-                                    className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-medium transition"
+                                    className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     離場
                                   </button>
                                   {canRemovePerson && (
                                     <button
                                       type="button"
+                                      disabled={floorOffline}
+                                      title={floorOffline ? offlineReason : undefined}
                                       data-testid={`table-panel-remove-person-btn-${person.person_no}`}
                                       onClick={() => {
                                         setMenuOpenKey(null);
@@ -480,7 +510,7 @@ export default function TablePanel({
                                           hasBoard: personHasBoard
                                         });
                                       }}
-                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-bold transition"
+                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                       這位不玩了
                                     </button>
@@ -498,10 +528,11 @@ export default function TablePanel({
                   <div className="pt-1">
                     <button
                       type="button"
-                      disabled={addingPersonForRef === group.booking_ref}
+                      disabled={floorOffline || addingPersonForRef === group.booking_ref}
+                      title={floorOffline ? offlineReason : undefined}
                       onClick={() => handleAddPersonToGroup(group)}
                       data-testid={`add-person-btn-${idx + 1}`}
-                      className="w-full py-2 rounded-xl border border-dashed border-sg-brown/50 bg-sg-brown-soft/40 hover:bg-sg-brown-soft text-sg-brown font-bold text-[12px] flex items-center justify-center gap-1 transition cursor-pointer disabled:opacity-50"
+                      className="w-full py-2 rounded-xl border border-dashed border-sg-brown/50 bg-sg-brown-soft/40 hover:bg-sg-brown-soft text-sg-brown font-bold text-[12px] flex items-center justify-center gap-1 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>{addingPersonForRef === group.booking_ref ? '加人中…' : '為這組加人'}</span>
@@ -518,6 +549,8 @@ export default function TablePanel({
           <div className="p-4 border-t border-sg-line/70 bg-sg-paper/50 shrink-0">
             <button
               type="button"
+              disabled={floorOffline}
+              title={floorOffline ? offlineReason : undefined}
               onClick={() => {
                 onClose();
                 onForceAdd?.(null, emptySeatsAtTable.map(s => s.code));

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Wind, Check, Pause } from 'lucide-react';
+import { useFloorOffline } from '../../../contexts/FloorOfflineContext';
 
 const STATE_STYLES = {
   in_use: 'bg-sg-sage-soft text-sg-sage-ink border-sg-sage/40',
@@ -34,7 +35,9 @@ export default function SeatTile({
   onClick = null,
   className = ''
 }) {
+  const { offline } = useFloorOffline();
   const isCard = variant === 'card';
+  const showOfflineTimerSuffix = offline && ['in_use', 'run', 'warn', 'over', 'paused', 'pause', 'running', 'soon', 'overtime', 'paid_seated'].includes(state);
   const baseStateClass = isConflict
     ? `${STATE_STYLES[state] || STATE_STYLES.empty} !border-sg-danger ring-2 ring-sg-danger`
     : (STATE_STYLES[state] || STATE_STYLES.empty);
@@ -132,6 +135,9 @@ export default function SeatTile({
         {/* Bottom row: timer / status */}
         <div className="text-[12px] font-medium font-num text-sg-ink/75 truncate w-full leading-none">
           {displayTimer}
+          {showOfflineTimerSuffix && (
+            <span className="text-sg-muted font-normal">（離線）</span>
+          )}
         </div>
       </div>
     )
@@ -183,6 +189,9 @@ export default function SeatTile({
         <div className="flex items-center justify-between w-full leading-none">
           <span className="text-[10px] font-bold text-sg-muted truncate">
             {displayTimer}
+            {showOfflineTimerSuffix && (
+              <span className="font-normal">（離線）</span>
+            )}
           </span>
           {isVent && <Wind className="w-2.5 h-2.5 text-sg-vent flex-shrink-0 ml-0.5" />}
         </div>

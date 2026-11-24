@@ -6,6 +6,7 @@ import Button from './customer/Button';
 import { isSessionPast } from '../utils/admin/floorSelectors';
 import { walkInBillingEndAt } from '../../../shared/floorSelectors.js';
 import { formatTimeHHmm } from '../../../shared/time.js';
+import { useFloorOffline } from '../contexts/FloorOfflineContext';
 
 export default function ForceAddModal({
   isOpen,
@@ -17,6 +18,7 @@ export default function ForceAddModal({
   now = null,
   onSuccess
 }) {
+  const { offline: floorOffline, reason: offlineReason } = useFloorOffline();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [pax, setPax] = useState(() => (initialPax || (preselectedSeats.length > 0 ? preselectedSeats.length : 1)));
@@ -233,6 +235,8 @@ export default function ForceAddModal({
               size="md"
               onClick={handleSubmit}
               loading={isSubmitting}
+              disabled={floorOffline}
+              title={floorOffline ? offlineReason : undefined}
             >
               {isForceWait ? '放入等待區' : '下一步：安排座位'}
             </Button>

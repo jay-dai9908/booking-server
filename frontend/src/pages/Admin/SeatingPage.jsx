@@ -77,8 +77,10 @@ import {
   groupBookingsByAttendance,
   isSeatOccupied,
   buildSeatStates,
-  matchesFilter
+  matchesFilter,
+  nextSelectedDate
 } from '../../utils/admin/floorSelectors';
+import { FloorOfflineContext, FLOOR_OFFLINE_MSG } from '../../contexts/FloorOfflineContext';
 
 function getBookingHourSlots(booking) {
   if (!booking?.start_at || !booking?.end_at) return [];
@@ -112,15 +114,14 @@ export default function SeatingPage() {
     localStorage.setItem('shiguang_seating_tab', tab);
   };
 
-  // Date selection state
-  const todayStr = useMemo(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }, []);
-  const [selectedDate, setSelectedDate] = useState(todayStr);
+  // Date selection & live data polling (server clock drives midnight auto-switch)
+  const { getServerNow, syncWithServerNow } = useServerClock();
+  const [clockTick, setClockTick] = useState(0);
+  const todayStr = toTaipeiDateString(getServerNow());
+  const [selectedDate, setSelectedDate] = useState(() => toTaipeiDateString(new Date()));
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [isMonthExpanded, setIsMonthExpanded] = useState(false);
-  const [calendarMonth, setCalendarMonth] = useState(() => parseYMD(todayStr));
+  const [calendarMonth, setCalendarMonth] = useState(() => parseYMD(selectedDate));
 
   const { rangeStartStr, rangeEndStr } = useMemo(() => {
     const addDays = (baseStr, delta) => {
@@ -179,9 +180,20 @@ export default function SeatingPage() {
   const [filterMode, setFilterMode] = useState('all');
 
   // Live data polling
-  const { data: floorData, loading, error, refresh, setData: setFloorData } = useLiveFloor(selectedDate, 8000);
-  const { getServerNow } = useServerClock(floorData?.server_now);
-  const [, setClockTick] = useState(0);
+  const {
+    data: floorData,
+    loading,
+    error,
+    lastOkAt,
+    offline: floorOffline,
+    refresh,
+    setData: setFloorData
+  } = useLiveFloor(selectedDate, 8000, { syncWithServerNow, getServerNow });
+
+  const offlineContextValue = useMemo(() => ({
+    offline: floorOffline,
+    reason: FLOOR_OFFLINE_MSG
+  }), [floorOffline]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -189,6 +201,25 @@ export default function SeatingPage() {
     }, 60000);
     return () => clearInterval(timer);
   }, []);
+
+  const prevTodayRef = useRef(todayStr);
+  useEffect(() => {
+    const prevToday = prevTodayRef.current;
+    if (todayStr && prevToday && todayStr !== prevToday) {
+      prevTodayRef.current = todayStr;
+      setSelectedDate(cur => {
+        const next = nextSelectedDate({ selectedDate: cur, prevToday, newToday: todayStr });
+        if (next !== cur) {
+          setCalendarMonth(parseYMD(next));
+          const [, m, d] = next.split('-');
+          setToastMessage(`已切換到今天（${Number(m)}/${Number(d)}）`);
+        }
+        return next;
+      });
+    } else {
+      prevTodayRef.current = todayStr;
+    }
+  }, [todayStr, clockTick]);
 
   // Modals & Panels
   const [checkoutBookingRef, setCheckoutBookingRef] = useState(null);
@@ -1097,7 +1128,19 @@ export default function SeatingPage() {
   };
 
   return (
+    <FloorOfflineContext.Provider value={offlineContextValue}>
     <div className="space-y-4 max-w-7xl mx-auto pb-12">
+      {/* Fixed Offline Banner (Round 42 Item 3) */}
+      {floorOffline && (
+        <div
+          data-testid="floor-offline-banner"
+          className="sticky top-0 z-40 rounded-2xl bg-sg-danger text-white px-4 py-2.5 shadow-md text-[13px] font-bold flex items-center gap-2"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>連線中斷，資料停在 {formatTimeHHmm(lastOkAt || getServerNow())}。恢復後會自動更新。</span>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-4 right-4 z-50 bg-sg-ink text-white px-4 py-2.5 rounded-2xl shadow-lg text-[13px] font-bold flex items-center gap-2 animate-fade-in">
@@ -1195,6 +1238,8 @@ export default function SeatingPage() {
             <Button
               variant="secondary"
               size="sm"
+              disabled={floorOffline}
+              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
               data-testid="seating-clear-display-msg-btn"
               onClick={handleClearDisplayMessage}
               className="border-sg-honey bg-sg-honey-soft text-sg-honey-ink"
@@ -1206,6 +1251,8 @@ export default function SeatingPage() {
             <Button
               variant="secondary"
               size="sm"
+              disabled={floorOffline}
+              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
               data-testid="seating-push-display-msg-btn"
               onClick={() => {
                 setDisplayMsgError('');
@@ -1219,6 +1266,8 @@ export default function SeatingPage() {
           <Button
             variant="secondary"
             size="sm"
+            disabled={floorOffline}
+            title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
             onClick={() => setShowForceAdd(true)}
           >
             <Plus className="w-4 h-4 mr-1 text-sg-brown" />
@@ -1273,6 +1322,8 @@ export default function SeatingPage() {
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={floorOffline}
+                title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                 data-testid="seating-mobile-clear-display-msg-btn"
                 onClick={handleClearDisplayMessage}
                 className="border-sg-honey bg-sg-honey-soft text-sg-honey-ink"
@@ -1284,6 +1335,8 @@ export default function SeatingPage() {
               <Button
                 variant="secondary"
                 size="sm"
+                disabled={floorOffline}
+                title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                 data-testid="seating-mobile-push-display-msg-btn"
                 onClick={() => {
                   setDisplayMsgError('');
@@ -1297,6 +1350,8 @@ export default function SeatingPage() {
             <Button
               variant="secondary"
               size="sm"
+              disabled={floorOffline}
+              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
               onClick={() => setShowForceAdd(true)}
             >
               <Plus className="w-4 h-4 mr-0.5 text-sg-brown" />
@@ -1349,6 +1404,8 @@ export default function SeatingPage() {
               <div className="px-2.5 pb-2.5 max-h-[240px] overflow-y-auto" data-testid="mobile-alerts-list">
                 <AlertList
                   alerts={alerts}
+                  disabled={floorOffline}
+                  disabledMessage={FLOOR_OFFLINE_MSG}
                   onSelectAlert={handleSelectAlert}
                   onMarkNoShow={handleMarkNoShow}
                   onMarkLeftAll={(ref) => handleTimerAction(ref, 'all', 'end')}
@@ -1520,6 +1577,8 @@ export default function SeatingPage() {
                         <Button
                           variant={isFirst ? 'primary' : 'secondary'}
                           size="sm"
+                          disabled={floorOffline}
+                          title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                           onClick={() => setCheckInTarget(b)}
                         >
                           報到並帶位
@@ -1550,41 +1609,49 @@ export default function SeatingPage() {
                               </button>
                               <button
                                 type="button"
+                                disabled={floorOffline}
+                                title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                                 onClick={() => {
                                   setCardMenuBookingRef(null);
                                   setLineMsgReservation(b);
                                 }}
-                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium"
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 傳 LINE 訊息
                               </button>
                               <button
                                 type="button"
+                                disabled={floorOffline}
+                                title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                                 onClick={() => {
                                   setCardMenuBookingRef(null);
                                   setExtendReservation(b);
                                 }}
-                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium"
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 加時
                               </button>
                               <button
                                 type="button"
+                                disabled={floorOffline}
+                                title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                                 onClick={() => {
                                   setCardMenuBookingRef(null);
                                   handleMarkNoShow(b.booking_ref);
                                 }}
-                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium"
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 標記未到
                               </button>
                               <button
                                 type="button"
+                                disabled={floorOffline}
+                                title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                                 onClick={() => {
                                   setCardMenuBookingRef(null);
                                   setCancelReservationTarget(b);
                                 }}
-                                className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-medium"
+                                className="w-full text-left px-3 py-1.5 hover:bg-sg-danger-soft text-sg-danger font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 取消預約
                               </button>
@@ -1660,6 +1727,7 @@ export default function SeatingPage() {
                               <>
                                 <span className={`text-[11px] px-2 py-0.5 rounded-lg ${timerPill.pillClass}`}>
                                   {timerPill.label}
+                                  {floorOffline && <span className="text-sg-muted font-normal">（離線）</span>}
                                 </span>
                                 <StatusPill status={b.billing?.status || 'unpaid'} />
                               </>
@@ -1698,6 +1766,8 @@ export default function SeatingPage() {
                             <Button
                               variant="primary"
                               size="sm"
+                              disabled={floorOffline}
+                              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setCheckInTarget(b);
@@ -1736,6 +1806,8 @@ export default function SeatingPage() {
                           <Button
                             variant="primary"
                             size="sm"
+                            disabled={floorOffline}
+                            title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                             onClick={() => setCheckoutBookingRef(b.booking_ref)}
                           >
                             結帳
@@ -1778,7 +1850,8 @@ export default function SeatingPage() {
                         size="sm"
                         data-testid={`revert-no-show-btn-${b.booking_ref}`}
                         loading={revertingNoShowRef === b.booking_ref}
-                        disabled={Boolean(revertingNoShowRef)}
+                        disabled={floorOffline || Boolean(revertingNoShowRef)}
+                        title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                         onClick={() => handleRevertNoShow(b)}
                       >
                         改為報到
@@ -1825,6 +1898,8 @@ export default function SeatingPage() {
                             <Button
                               variant="secondary"
                               size="sm"
+                              disabled={floorOffline}
+                              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                               data-testid={`undo-leave-all-btn-${b.booking_ref}`}
                               onClick={() => setUndoLeaveTarget(b)}
                             >
@@ -1835,6 +1910,8 @@ export default function SeatingPage() {
                             <Button
                               variant="secondary"
                               size="sm"
+                              disabled={floorOffline}
+                              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                               onClick={() => setCheckoutBookingRef(b.booking_ref)}
                             >
                               結帳
@@ -2067,6 +2144,8 @@ export default function SeatingPage() {
                   </div>
                   <AlertList
                     alerts={alerts}
+                    disabled={floorOffline}
+                    disabledMessage={FLOOR_OFFLINE_MSG}
                     onSelectAlert={handleSelectAlert}
                     onMarkNoShow={handleMarkNoShow}
                     onMarkLeftAll={(ref) => handleTimerAction(ref, 'all', 'end')}
@@ -2109,6 +2188,8 @@ export default function SeatingPage() {
                           <Button
                             variant="secondary"
                             size="sm"
+                            disabled={floorOffline}
+                            title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                             onClick={() => setCheckInTarget(b)}
                           >
                             帶位
@@ -2204,6 +2285,8 @@ export default function SeatingPage() {
                     <Button
                       variant="secondary"
                       size="sm"
+                      disabled={floorOffline}
+                      title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                       data-testid="all-start-timer-btn"
                       onClick={() => {
                         handleTimerAction(
@@ -2219,7 +2302,8 @@ export default function SeatingPage() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={!hasActive}
+                    disabled={floorOffline || !hasActive}
+                    title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                     onClick={() => {
                       handleTimerAction(
                         timerTarget.booking_ref,
@@ -2234,6 +2318,8 @@ export default function SeatingPage() {
                   <Button
                     variant="secondary"
                     size="sm"
+                    disabled={floorOffline}
+                    title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                     data-testid="all-leave-btn"
                     onClick={() => setShowAllLeaveConfirm(true)}
                   >
@@ -2244,6 +2330,8 @@ export default function SeatingPage() {
                   data-testid="timer-checkout-btn"
                   variant="primary"
                   size="md"
+                  disabled={floorOffline}
+                  title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                   onClick={() => {
                     const bRef = timerTarget.booking_ref;
                     setTimerTarget(null);
@@ -2268,6 +2356,8 @@ export default function SeatingPage() {
               <Button
                 variant="primary"
                 size="sm"
+                disabled={floorOffline}
+                title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                 onClick={() => {
                   const b = timerTarget;
                   setTimerTarget(null);
@@ -2300,6 +2390,8 @@ export default function SeatingPage() {
             <Button
               variant="secondary"
               size="sm"
+              disabled={floorOffline}
+              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
               data-testid="extend-time-btn"
               onClick={() => setExtendReservation(timerTarget)}
               className="ml-2 whitespace-nowrap font-bold"
@@ -2334,12 +2426,14 @@ export default function SeatingPage() {
               <span className="text-[13px] font-bold text-sg-ink">每位計時</span>
               <button
                 type="button"
+                disabled={floorOffline}
+                title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                 data-testid="add-person-btn"
                 onClick={() => {
                   setShowAddPersonModalTarget(timerTarget);
                   setSelectedAddPersonSeat(null);
                 }}
-                className="text-[13px] font-bold text-sg-brown hover:underline cursor-pointer"
+                className="text-[13px] font-bold text-sg-brown hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ＋ 加人
               </button>
@@ -2584,6 +2678,7 @@ export default function SeatingPage() {
                           )}
                         </>
                       )}
+                      {floorOffline && <span className="text-sg-muted ml-1">（離線）</span>}
                     </div>
 
                     <div className="flex items-center gap-1.5">
@@ -2593,6 +2688,8 @@ export default function SeatingPage() {
                             <Button
                               variant="primary"
                               size="sm"
+                              disabled={floorOffline}
+                              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                               data-testid={`person-start-btn-${p.person_no}`}
                               onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'start')}
                             >
@@ -2603,6 +2700,8 @@ export default function SeatingPage() {
                             <Button
                               variant="secondary"
                               size="sm"
+                              disabled={floorOffline}
+                              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                               onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'resume')}
                             >
                               <Play className="w-3.5 h-3.5 mr-1" />
@@ -2612,6 +2711,8 @@ export default function SeatingPage() {
                             <Button
                               variant="secondary"
                               size="sm"
+                              disabled={floorOffline}
+                              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                               onClick={() => setPausePersonTarget(p)}
                             >
                               <Pause className="w-3.5 h-3.5 mr-1" />
@@ -2640,6 +2741,8 @@ export default function SeatingPage() {
                               >
                                 <button
                                   type="button"
+                                  disabled={floorOffline}
+                                  title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                                   data-testid={`person-move-seat-btn-${p.person_no}`}
                                   onClick={() => {
                                     const needsSeat = !p.seat_code || String(p.seat_code).startsWith('WAIT-');
@@ -2651,7 +2754,7 @@ export default function SeatingPage() {
                                       isSeatAssign: needsSeat
                                     });
                                   }}
-                                  className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
+                                  className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   <ArrowRightLeft className="w-3.5 h-3.5 text-sg-muted" />
                                   {(!p.seat_code || String(p.seat_code).startsWith('WAIT-')) ? '帶位' : '換位'}
@@ -2660,6 +2763,8 @@ export default function SeatingPage() {
                                 {hasBoard ? (
                                   <button
                                     type="button"
+                                    disabled={floorOffline}
+                                    title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                                     data-testid={`person-swap-board-btn-${p.person_no}`}
                                     onClick={() => {
                                       setPersonMenuOpen(null);
@@ -2670,7 +2775,7 @@ export default function SeatingPage() {
                                         seatCode: p.seat_code
                                       });
                                     }}
-                                    className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
+                                    className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     <RotateCcw className="w-3.5 h-3.5 text-sg-muted" />
                                     換板
@@ -2678,12 +2783,14 @@ export default function SeatingPage() {
                                 ) : (
                                   <button
                                     type="button"
+                                    disabled={floorOffline}
+                                    title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                                     data-testid={`person-add-board-btn-${p.person_no}`}
                                     onClick={() => {
                                       setPersonMenuOpen(null);
                                       openAddBoardModal(timerTarget, p.person_no, p);
                                     }}
-                                    className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
+                                    className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     <Plus className="w-3.5 h-3.5 text-sg-muted" />
                                     加租智能板
@@ -2692,12 +2799,14 @@ export default function SeatingPage() {
 
                                 <button
                                   type="button"
+                                  disabled={floorOffline}
+                                  title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                                   data-testid={`person-leave-btn-${p.person_no}`}
                                   onClick={() => {
                                     setPersonMenuOpen(null);
                                     handleTimerAction(timerTarget.booking_ref, [p.person_no], 'end');
                                   }}
-                                  className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft flex items-center gap-2 cursor-pointer"
+                                  className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   <LogOut className="w-3.5 h-3.5" />
                                   離場
@@ -2711,6 +2820,8 @@ export default function SeatingPage() {
                           <Button
                             variant="secondary"
                             size="sm"
+                            disabled={floorOffline}
+                            title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                             data-testid={`person-restart-btn-${p.person_no}`}
                             onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'restart')}
                           >
@@ -3133,7 +3244,8 @@ export default function SeatingPage() {
                   variant={selectedSwapSize === 'return' ? 'danger' : 'primary'}
                   size="md"
                   onClick={handleConfirmSwap}
-                  disabled={!selectedSwapSize || swapSubmitting}
+                  disabled={floorOffline || !selectedSwapSize || swapSubmitting}
+                  title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                 >
                   {swapSubmitting ? '處理中...' : (selectedSwapSize === 'return' ? '確認歸還' : '確認換板')}
                 </Button>
@@ -3337,6 +3449,7 @@ export default function SeatingPage() {
         isOpen={Boolean(cancelReservationTarget)}
         onClose={() => setCancelReservationTarget(null)}
         onConfirm={handleCancelReservation}
+        disabled={floorOffline}
         title="取消預約"
         message={`確定要取消「${cancelReservationTarget?.name || '客人'}」的預約（${cancelReservationTarget?.booking_ref}）嗎？`}
       />
@@ -3346,6 +3459,7 @@ export default function SeatingPage() {
         isOpen={Boolean(markNoShowTarget)}
         onClose={() => setMarkNoShowTarget(null)}
         onConfirm={confirmMarkNoShow}
+        disabled={floorOffline}
         title={`標記${markNoShowTarget?.name || '客人'}未到？`}
         message={`${
           markNoShowTarget?.start_at
@@ -3397,7 +3511,8 @@ export default function SeatingPage() {
               variant="primary"
               size="md"
               data-testid="confirm-add-person-btn"
-              disabled={!selectedAddPersonSeat || addPersonSubmitting}
+              disabled={floorOffline || !selectedAddPersonSeat || addPersonSubmitting}
+              title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
               onClick={() => handleAddPersonSubmit(false)}
             >
               {addPersonSubmitting ? '處理中...' : '確認入座並計時'}
@@ -3490,7 +3605,8 @@ export default function SeatingPage() {
                   variant="primary"
                   size="md"
                   data-testid="confirm-add-board-btn"
-                  disabled={!selectedAddBoardEqId || isSelectedOutOfStock || allBoardsOutOfStock || addBoardSubmitting || addBoardHours <= 0}
+                  disabled={floorOffline || !selectedAddBoardEqId || isSelectedOutOfStock || allBoardsOutOfStock || addBoardSubmitting || addBoardHours <= 0}
+                  title={floorOffline ? FLOOR_OFFLINE_MSG : undefined}
                   onClick={handleAddBoardSubmit}
                 >
                   {addBoardSubmitting ? '處理中...' : '確認加租'}
@@ -3720,5 +3836,6 @@ export default function SeatingPage() {
         </form>
       </ResponsivePanel>
     </div>
+    </FloorOfflineContext.Provider>
   );
 }
