@@ -12,6 +12,7 @@ import {
   sendSelfServiceTransferPendingNotification
 } from '../utils/lineMessaging.js';
 import { markUnpaid, collectPayment, saveDraft, getBookingBill, refreshBillingCache, buildInitialDraft } from '../services/billing/billService.js';
+import { redeemPromo, releasePromo } from '../services/promo/redemption.js';
 import { deductPass, restorePass } from '../services/billing/passTender.js';
 import { assignPoolAccount, releasePoolAccount } from '../services/selfService/poolAccountService.js';
 import { log as auditLog } from '../services/audit/auditService.js';
@@ -654,10 +655,16 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         const appliedPromoCode = quote.promo?.code || null;
         const appliedDiscountAmount = quote.promo?.discount || 0;
         if (quote.promo?.promo_row?.id) {
-          await tx.promoCode.update({
-            where: { id: quote.promo.promo_row.id },
-            data: { used_count: { increment: 1 } }
-          });
+          try {
+            await redeemPromo(tx, {
+              promo: quote.promo.promo_row,
+              booking_ref,
+              user_id: userId,
+              channel: 'self'
+            });
+          } catch (redeemErr) {
+            throw makePrepayError('PROMO_ERROR', redeemErr.error || redeemErr.message || '優惠碼已達使用上限', 400);
+          }
         }
 
         for (const update of allocResult.updates) {
@@ -956,10 +963,16 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         appliedPromoCode = promoEval.promo.code;
         appliedPromoRule = promoEval.rule;
         appliedDiscountAmount = promoEval.discount_amount;
-        await tx.promoCode.update({
-          where: { id: promoEval.promo.id },
-          data: { used_count: { increment: 1 } }
-        });
+        try {
+          await redeemPromo(tx, {
+            promo: promoEval.promo,
+            booking_ref,
+            user_id: userId,
+            channel: 'online'
+          });
+        } catch (redeemErr) {
+          throw new Error(`PROMO_ERROR:${redeemErr.error || redeemErr.message || '優惠碼已達使用上限'}`);
+        }
       }
 
       const totalAmount = Math.max(0, subtotalAmount - appliedDiscountAmount);
@@ -1597,16 +1610,8 @@ async function cancelReservationCore(req, res, { actor }) {
         }
       });
 
-      // Return promo code usage quota if order used promo codes
-      if (reservations[0].promo_code) {
-        const promoCodes = reservations[0].promo_code.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
-        for (const code of promoCodes) {
-          await tx.promoCode.updateMany({
-            where: { code, used_count: { gt: 0 } },
-            data: { used_count: { decrement: 1 } }
-          });
-        }
-      }
+      // Release promo code redemptions for this booking
+      await releasePromo(tx, { booking_ref, reason: 'reservation_cancelled' });
 
       return { cancelledRes, reservations };
     });

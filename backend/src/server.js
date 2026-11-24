@@ -199,10 +199,27 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "max_uses_per_user" INTEGER`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "is_pos_quick_select" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "is_active" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "archived_at" TIMESTAMP(3)`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "start_date" DATE`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "end_date" DATE`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "PromoCode_code_key" ON "PromoCode"("code")`,
+
+    `CREATE TABLE IF NOT EXISTS "PromoRedemption" (
+      "id" SERIAL NOT NULL,
+      "promo_id" INTEGER NOT NULL,
+      "code" TEXT NOT NULL,
+      "booking_ref" TEXT NOT NULL,
+      "user_id" INTEGER,
+      "channel" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'active',
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "released_at" TIMESTAMP(3),
+      "released_reason" TEXT,
+      CONSTRAINT "PromoRedemption_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "PromoRedemption_promo_id_booking_ref_key" ON "PromoRedemption"("promo_id", "booking_ref")`,
+    `CREATE INDEX IF NOT EXISTS "PromoRedemption_promo_id_user_id_status_idx" ON "PromoRedemption"("promo_id", "user_id", "status")`,
 
     `CREATE TABLE IF NOT EXISTS "AddonItem" (
       "id" SERIAL NOT NULL,

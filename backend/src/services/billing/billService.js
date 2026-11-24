@@ -4,6 +4,7 @@ import { computeBill, billingStatus, calculatePersonRefundInfo } from '../../../
 import { toTaipeiDateString, blocksBy1030, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 import { evaluatePromoCode } from '../../controllers/checkoutController.js';
+import { redeemPromo, releasePromo } from '../promo/redemption.js';
 import { log as auditLog } from '../audit/auditService.js';
 import { deductPass, restorePass, validatePassUsage } from './passTender.js';
 import { buildBillInput } from './billInput.js';
@@ -455,6 +456,7 @@ export async function addPromoToBill(booking_ref, { code, base_rev }, staffUser,
       user_id: reservations[0].user_id,
       is_pos: true,
       skip_usage_check: false,
+      exclude_booking_ref: booking_ref,
       seating_amount: unpaidSeating,
       equipment_amount: unpaidBoard,
       persons: unpaidPersons.map((p) => ({
@@ -590,6 +592,29 @@ export async function removePromoFromBill(booking_ref, { code, base_rev }, staff
       where: { booking_ref },
       data: { promo_code: nextPromoCodeStr }
     });
+
+    // Release PromoRedemption if no frozen paid person's snapshot references this promo
+    const usedInFrozenPaid = (currentData.bill?.persons || [])
+      .filter((p) => p.is_frozen || p.is_paid)
+      .some(
+        (p) =>
+          (p.promos || []).some((pr) => String(pr?.code || '').trim().toUpperCase() === cleanCode) ||
+          (p.shares || []).some((sh) => sh?.source_key === `promo:${cleanCode}`)
+      );
+    if (!usedInFrozenPaid) {
+      let targetPromoId = targetPromo.promo_id ?? null;
+      if (targetPromoId == null) {
+        const foundPromo = await tx.promoCode.findUnique({ where: { code: cleanCode }, select: { id: true } });
+        targetPromoId = foundPromo?.id ?? null;
+      }
+      if (targetPromoId != null) {
+        await releasePromo(tx, {
+          booking_ref,
+          promo_id: targetPromoId,
+          reason: 'promo_removed_from_bill'
+        });
+      }
+    }
 
     await auditLog(tx, {
       booking_ref,
@@ -1017,18 +1042,30 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       });
     }
 
-    // First time covered by payment: increment promo used_count (Section 3.6)
+    // First time covered by payment: record PromoRedemption (channel='pos'; idempotent if already active from online/self)
     if (priorValidCount === 0 && createdPayments.length > 0) {
       const promoCodes = [];
       for (const op of draft?.order_promos || []) if (op.code) promoCodes.push(op.code);
       for (const p of draft?.persons || []) {
         for (const pr of p.promos || []) if (pr.code) promoCodes.push(pr.code);
       }
-      for (const c of [...new Set(promoCodes)]) {
-        await tx.promoCode.updateMany({
-          where: { code: c },
-          data: { used_count: { increment: 1 } }
+      const uniqueCodes = [...new Set(promoCodes.map((c) => String(c).trim().toUpperCase()).filter(Boolean))];
+      if (uniqueCodes.length > 0) {
+        const bookingMeta = await tx.reservation.findFirst({
+          where: { booking_ref },
+          select: { user_id: true }
         });
+        for (const c of uniqueCodes) {
+          const promoRow = await tx.promoCode.findUnique({ where: { code: c } });
+          if (promoRow) {
+            await redeemPromo(tx, {
+              promo: promoRow,
+              booking_ref,
+              user_id: bookingMeta?.user_id ?? null,
+              channel: 'pos'
+            });
+          }
+        }
       }
     }
 
@@ -1461,27 +1498,16 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
       });
     }
 
-    // Decrement promo used_count if all payments on this booking are voided (Section 3.6)
+    // Release POS promo redemptions when all valid payments are voided (online/self redemptions stay active until reservation cancel)
     const remainingValid = await tx.payment.count({
       where: { booking_ref: payment.booking_ref, status: 'valid' }
     });
     if (remainingValid === 0) {
-      const billData = await getBookingBill(payment.booking_ref, tx);
-      const draft = billData.draft || {};
-      const codes = [];
-      for (const op of draft.order_promos || []) if (op.code) codes.push(op.code);
-      for (const p of draft.persons || []) {
-        for (const pr of p.promos || []) if (pr.code) codes.push(pr.code);
-      }
-      for (const c of [...new Set(codes)]) {
-        const promo = await tx.promoCode.findUnique({ where: { code: c } });
-        if (promo && promo.used_count > 0) {
-          await tx.promoCode.update({
-            where: { code: c },
-            data: { used_count: Math.max(0, promo.used_count - 1) }
-          });
-        }
-      }
+      await releasePromo(tx, {
+        booking_ref: payment.booking_ref,
+        reason: 'payment_voided',
+        channels: ['pos']
+      });
     }
 
     const { bill, status } = await refreshBillingCache(tx, payment.booking_ref);
@@ -1556,23 +1582,12 @@ export async function markUnpaid(booking_ref, reason, staffUser, deviceInfo) {
       }
     }
 
-    // Decrement promo used_count on full mark unpaid (Section 3.6)
-    const billData = await getBookingBill(booking_ref, tx);
-    const draft = billData.draft || {};
-    const codes = [];
-    for (const op of draft.order_promos || []) if (op.code) codes.push(op.code);
-    for (const p of draft.persons || []) {
-      for (const pr of p.promos || []) if (pr.code) codes.push(pr.code);
-    }
-    for (const c of [...new Set(codes)]) {
-      const promo = await tx.promoCode.findUnique({ where: { code: c } });
-      if (promo && promo.used_count > 0) {
-        await tx.promoCode.update({
-          where: { code: c },
-          data: { used_count: Math.max(0, promo.used_count - 1) }
-        });
-      }
-    }
+    // Release POS promo redemptions on full mark unpaid (online/self redemptions remain until reservation cancel)
+    await releasePromo(tx, {
+      booking_ref,
+      reason: 'marked_unpaid',
+      channels: ['pos']
+    });
 
     await auditLog(tx, {
       booking_ref,

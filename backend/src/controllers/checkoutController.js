@@ -124,7 +124,8 @@ export const evaluatePromoCode = async (txOrPrisma, {
   skip_usage_check = false,
   seating_amount,
   equipment_amount,
-  persons = null
+  persons = null,
+  exclude_booking_ref = null
 }) => {
   const cleanCode = (code || '').trim().toUpperCase();
   if (!cleanCode) {
@@ -168,22 +169,30 @@ export const evaluatePromoCode = async (txOrPrisma, {
     }
   }
 
-  // 3. Usage limits
-  if (!skip_usage_check && promo.max_uses != null && promo.used_count >= promo.max_uses) {
-    return { valid: false, error: '此優惠碼已達總使用次數上限' };
+  // 3. Usage limits (derived from PromoRedemption active records)
+  if (!skip_usage_check && promo.max_uses != null) {
+    const activeTotal = await txOrPrisma.promoRedemption.count({
+      where: {
+        promo_id: promo.id,
+        status: 'active',
+        ...(exclude_booking_ref ? { booking_ref: { not: exclude_booking_ref } } : {})
+      }
+    });
+    if (activeTotal >= promo.max_uses) {
+      return { valid: false, error: '此優惠碼已達總使用次數上限' };
+    }
   }
 
   if (!skip_usage_check && user_id && promo.max_uses_per_user != null) {
-    const userUsedReservations = await txOrPrisma.reservation.findMany({
+    const activeUserCount = await txOrPrisma.promoRedemption.count({
       where: {
+        promo_id: promo.id,
         user_id: parseInt(user_id, 10),
-        promo_code: { contains: cleanCode },
-        status: 'confirmed'
-      },
-      select: { booking_ref: true }
+        status: 'active',
+        ...(exclude_booking_ref ? { booking_ref: { not: exclude_booking_ref } } : {})
+      }
     });
-    const uniqueRefs = new Set(userUsedReservations.map(r => r.booking_ref));
-    if (uniqueRefs.size >= promo.max_uses_per_user) {
+    if (activeUserCount >= promo.max_uses_per_user) {
       return { valid: false, error: `每位會員限用 ${promo.max_uses_per_user} 次，您已達使用上限` };
     }
   }
@@ -337,8 +346,11 @@ export const adminValidatePromoCode = (req, res) => {
 // GET /api/checkout/promo-codes
 export const getPromoCodes = async (req, res) => {
   try {
-    const { pos_only, active_only, channel } = req.query;
+    const { pos_only, active_only, channel, include_archived } = req.query;
     const where = {};
+    if (include_archived !== 'true') {
+      where.archived_at = null;
+    }
     if (pos_only === 'true') {
       where.is_active = true;
       where.is_pos_quick_select = true;
@@ -400,7 +412,7 @@ export const createPromoCode = async (req, res) => {
 
     const existing = await prisma.promoCode.findUnique({ where: { code: cleanCode } });
     if (existing) {
-      return res.status(400).json({ error: `優惠碼代號 ${cleanCode} 已存在` });
+      return res.status(409).json({ error: `優惠碼代號 ${cleanCode} 已存在` });
     }
 
     const startDateVal = start_date || valid_from;
@@ -432,6 +444,10 @@ export const createPromoCode = async (req, res) => {
 
     res.status(201).json(created);
   } catch (error) {
+    if (error?.code === 'P2002') {
+      const cleanCode = (req.body?.code || '').trim().toUpperCase();
+      return res.status(409).json({ error: `優惠碼代號 ${cleanCode} 已存在` });
+    }
     console.error('Error creating promo code:', error);
     res.status(500).json({ error: '新增優惠券失敗' });
   }
@@ -441,6 +457,11 @@ export const createPromoCode = async (req, res) => {
 export const updatePromoCode = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const existingPromo = await prisma.promoCode.findUnique({ where: { id } });
+    if (!existingPromo) {
+      return res.status(404).json({ error: '找不到此優惠碼' });
+    }
+
     const {
       code,
       name,
@@ -468,7 +489,23 @@ export const updatePromoCode = async (req, res) => {
     } = req.body;
 
     const data = {};
-    if (code !== undefined) data.code = code.trim().toUpperCase();
+    if (code !== undefined) {
+      const nextCode = String(code).trim().toUpperCase();
+      if (!nextCode) {
+        return res.status(422).json({ error: '優惠碼代號不可為空' });
+      }
+      if (nextCode !== existingPromo.code) {
+        const usedAnyCount = await prisma.promoRedemption.count({ where: { promo_id: id } });
+        if (usedAnyCount > 0) {
+          return res.status(422).json({ error: '已有使用紀錄，請停用後另建新碼' });
+        }
+        const dup = await prisma.promoCode.findUnique({ where: { code: nextCode } });
+        if (dup && dup.id !== id) {
+          return res.status(409).json({ error: `優惠碼代號 ${nextCode} 已存在` });
+        }
+      }
+      data.code = nextCode;
+    }
     if (name !== undefined) data.name = name.trim();
     if (description !== undefined) data.description = description ? description.trim() : null;
     if (discount_type !== undefined) data.discount_type = discount_type;
@@ -493,7 +530,10 @@ export const updatePromoCode = async (req, res) => {
       data.end_date = v ? new Date(v) : null;
     }
     if (is_pos_quick_select !== undefined) data.is_pos_quick_select = Boolean(is_pos_quick_select);
-    if (is_active !== undefined) data.is_active = Boolean(is_active);
+    if (is_active !== undefined) {
+      data.is_active = Boolean(is_active);
+      if (data.is_active) data.archived_at = null;
+    }
 
     const updated = await prisma.promoCode.update({
       where: { id },
@@ -501,20 +541,30 @@ export const updatePromoCode = async (req, res) => {
     });
     res.json(updated);
   } catch (error) {
+    if (error?.code === 'P2002') {
+      const nextCode = (req.body?.code || '').trim().toUpperCase();
+      return res.status(409).json({ error: `優惠碼代號 ${nextCode} 已存在` });
+    }
     console.error('Error updating promo code:', error);
     res.status(500).json({ error: '更新優惠券失敗' });
   }
 };
 
-// DELETE /api/checkout/promo-codes/:id
+// DELETE /api/checkout/promo-codes/:id (archive/deactivate instead of deleting)
 export const deletePromoCode = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    await prisma.promoCode.delete({ where: { id } });
-    res.json({ message: '優惠券已刪除' });
+    const updated = await prisma.promoCode.update({
+      where: { id },
+      data: {
+        is_active: false,
+        archived_at: new Date()
+      }
+    });
+    res.json({ message: '優惠券已停用', promo: updated });
   } catch (error) {
     console.error('Error deleting promo code:', error);
-    res.status(500).json({ error: '刪除優惠券失敗' });
+    res.status(500).json({ error: '停用優惠券失敗' });
   }
 };
 

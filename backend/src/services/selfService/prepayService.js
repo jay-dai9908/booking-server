@@ -16,6 +16,7 @@ import {
   buildInitialDraft
 } from '../billing/billService.js';
 import { log as auditLog } from '../audit/auditService.js';
+import { releasePromo } from '../promo/redemption.js';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
 import { resolveEquipmentWindow } from '../../utils/equipmentWindow.js';
 import { evaluatePromoCode } from '../../controllers/checkoutController.js';
@@ -1080,19 +1081,10 @@ export async function releaseExpiredPrepays(now = new Date()) {
           }
         }
 
-        const promoCodeStr = reservations[0]?.promo_code;
-        if (promoCodeStr) {
-          const codes = promoCodeStr
-            .split(',')
-            .map((c) => c.trim().toUpperCase())
-            .filter(Boolean);
-          for (const code of codes) {
-            await tx.promoCode.updateMany({
-              where: { code, used_count: { gt: 0 } },
-              data: { used_count: { decrement: 1 } }
-            });
-          }
-        }
+        await releasePromo(tx, {
+          booking_ref: lockedPrepay.booking_ref,
+          reason: 'prepay_expired'
+        });
 
         const sortedSess = reservations
           .map((r) => r.session)

@@ -295,10 +295,27 @@ model PromoCode {
   used_count          Int       @default(0)
   is_pos_quick_select Boolean   @default(false)
   is_active           Boolean   @default(true)
+  archived_at         DateTime?
   start_date          DateTime? @db.Date
   end_date            DateTime? @db.Date
   created_at          DateTime  @default(now())
   updated_at          DateTime  @default(now()) @updatedAt
+}
+
+model PromoRedemption {
+  id              Int       @id @default(autoincrement())
+  promo_id        Int
+  code            String
+  booking_ref     String
+  user_id         Int?
+  channel         String
+  status          String    @default("active")
+  created_at      DateTime  @default(now())
+  released_at     DateTime?
+  released_reason String?
+
+  @@unique([promo_id, booking_ref])
+  @@index([promo_id, user_id, status])
 }
 
 model AddonItem {

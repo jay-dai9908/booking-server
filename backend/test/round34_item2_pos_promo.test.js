@@ -57,6 +57,7 @@ test('Round 34 Item 2: server-side POS billing promos, validation limits, duplic
   t.after(async () => {
     if (srv) await srv.close().catch(() => {});
     const refs = [refWeekday, refSaturday, refPrevUsed];
+    await prisma.promoRedemption.deleteMany({ where: { booking_ref: { in: refs } } }).catch(() => {});
     await prisma.payment.deleteMany({ where: { booking_ref: { in: refs } } }).catch(() => {});
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: refs } } }).catch(() => {});
     await prisma.reservation.deleteMany({ where: { booking_ref: { in: refs } } }).catch(() => {});
@@ -186,6 +187,16 @@ test('Round 34 Item 2: server-side POS billing promos, validation limits, duplic
   });
   const pOnce = await prisma.promoCode.create({
     data: { code: onceUserCode, name: '每人一次', discount_type: 'fixed_order', discount_value: 50, max_uses_per_user: 1, channel: 'all', is_active: true }
+  });
+  await prisma.promoRedemption.create({
+    data: {
+      promo_id: pOnce.id,
+      code: onceUserCode,
+      booking_ref: refPrevUsed,
+      user_id: customer.id,
+      channel: 'online',
+      status: 'active'
+    }
   });
   const pPct10 = await prisma.promoCode.create({
     data: { code: pct10Code, name: '九折', discount_type: 'percentage', discount_value: 10, channel: 'all', is_active: true }
