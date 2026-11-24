@@ -332,6 +332,16 @@ export const getEffectiveDailyRates = async (tx, sessionDate) => {
   return { hourly_price, unlimited_price, allow_unlimited, is_weekend: isWeekend };
 };
 
+function computeBookedHours(sortedSessions = [], fallbackCount = 1) {
+  if (!Array.isArray(sortedSessions) || sortedSessions.length === 0) return fallbackCount;
+  const first = sortedSessions[0];
+  const last = sortedSessions[sortedSessions.length - 1];
+  const startDt = new Date(`2000-01-01T${first.start_time}:00+08:00`);
+  const endDt = new Date(`2000-01-01T${last.end_time}:00+08:00`);
+  const mins = Math.max(0, Math.floor((endDt.getTime() - startDt.getTime()) / 60000));
+  return mins > 0 ? mins / 60 : fallbackCount;
+}
+
 // Helper function to calculate total amount based on pricing rules
 export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlimited) => {
   const { hourly_price, unlimited_price, allow_unlimited } = await getEffectiveDailyRates(tx, sessionDate);
@@ -937,7 +947,8 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       }
 
       const { hourly_price } = await getEffectiveDailyRates(tx, sessionDate);
-      const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
+      const bookedHours = computeBookedHours(sortedRequestedSessions, session_ids.length);
+      const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), bookedHours, is_unlimited);
       let subtotalAmount = baseSeatingPrice + totalEquipmentFee;
 
       // Promo code evaluation if provided by customer
@@ -2207,6 +2218,8 @@ export const adminCreateReservation = async (req, res) => {
       }
 
       // Smart Pegboard / Equipment fee calculation
+      const sortedRequestedSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+      const bookedHours = computeBookedHours(sortedRequestedSessions, session_ids.length);
       const equipments = req.body.equipments;
       let totalEquipmentFee = 0;
       const newEquipmentRecords = [];
@@ -2228,7 +2241,6 @@ export const adminCreateReservation = async (req, res) => {
         };
 
         const totalHours = session_ids.length;
-        const sortedRequestedSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
 
         for (const eq of equipments) {
           const qty = parseInt(eq.quantity, 10) || 0;
@@ -2268,7 +2280,7 @@ export const adminCreateReservation = async (req, res) => {
 
       const newReservationsData = [];
       const is_unlimited = req.body.isUnlimited === true || req.body.isUnlimited === 'true' || req.body.is_unlimited === true || req.body.is_unlimited === 'true';
-      const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
+      const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), bookedHours, is_unlimited);
       const totalAmount = baseSeatingPrice + totalEquipmentFee;
 
       const shouldAutoCheckIn = attendance === 'checked_in' || autoCheckIn === true || autoCheckIn === 'true' || isWalkIn === true || isWalkIn === 'true';

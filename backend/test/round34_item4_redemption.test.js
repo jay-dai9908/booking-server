@@ -9,7 +9,7 @@ import reservationsRoutes from '../src/routes/reservations.js';
 import checkoutRoutes from '../src/routes/checkout.js';
 import billingRoutes from '../src/routes/billing.js';
 import { generateToken } from '../src/middlewares/authMiddleware.js';
-import { ensureTestPublishedLayout } from './helpers/seedTestLayout.js';
+import { ensureTestPublishedLayout, cleanupTestPublishedLayout } from './helpers/seedTestLayout.js';
 import { getBookingBill } from '../src/services/billing/billService.js';
 import { runBackfillPromoRedemptions } from '../scripts/backfill-promo-redemptions.mjs';
 import { dateOnly } from '../../shared/time.js';
@@ -50,6 +50,7 @@ test('Round 34 Item 4: PromoRedemption concurrency, exact code match, lifecycle 
   let sessions = [];
   let dailyWd = null;
   let srv = null;
+  let createdLayoutId = null;
   const createdPromoIds = [];
   const createdRefs = [];
 
@@ -71,9 +72,10 @@ test('Round 34 Item 4: PromoRedemption concurrency, exact code match, lifecycle 
     if (cust1?.id) await prisma.user.delete({ where: { id: cust1.id } }).catch(() => {});
     if (cust2?.id) await prisma.user.delete({ where: { id: cust2.id } }).catch(() => {});
     if (adminUser?.id) await prisma.adminUser.delete({ where: { id: adminUser.id } }).catch(() => {});
+    await cleanupTestPublishedLayout(prisma, createdLayoutId);
   });
 
-  await ensureTestPublishedLayout(prisma);
+  createdLayoutId = await ensureTestPublishedLayout(prisma);
   srv = await startLocalApp();
 
   cust1 = await prisma.user.create({

@@ -147,6 +147,7 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
     const bookingRef = `BK-CACHE-${Date.now()}-2`;
     const promoCodeStr = `PROMO_STEP4_${Date.now()}`;
 
+    await prisma.promoRedemption.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.printJob.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.payment.deleteMany({ where: { booking_ref: bookingRef } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: bookingRef } });
@@ -171,6 +172,7 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
         pax: 2,
         assigned_seats: ['1-1', '1-2'],
         status: 'confirmed',
+        promo_code: promoCodeStr,
         checkout_details: {
           version: 2,
           order_promos: [
@@ -434,13 +436,14 @@ test('Step 4 Billing Tests (Sections 3.5 - 3.8)', async (t) => {
   });
 
   t.after(async () => {
+    await prisma.promoRedemption.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
     await prisma.printJob.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
     await prisma.payment.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
     await prisma.reservation.deleteMany({ where: { booking_ref: { startsWith: 'BK-' } } });
     await prisma.userPass.deleteMany({ where: { pass_code: { startsWith: 'PASS-' } } });
     await prisma.passPlan.deleteMany({ where: { code: 'TEST_PLAN' } });
-    await prisma.promoCode.deleteMany({ where: { code: { startsWith: 'TEST_PROMO_' } } });
+    await prisma.promoCode.deleteMany({ where: { OR: [{ code: { startsWith: 'TEST_PROMO_' } }, { code: { startsWith: 'PROMO_STEP4_' } }] } });
     await prisma.dailyCounter.deleteMany();
   });
 });

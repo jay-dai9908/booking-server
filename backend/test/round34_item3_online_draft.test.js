@@ -8,7 +8,7 @@ import authRoutes from '../src/routes/auth.js';
 import reservationRoutes from '../src/routes/reservations.js';
 import billingRoutes from '../src/routes/billing.js';
 import { generateToken } from '../src/middlewares/authMiddleware.js';
-import { ensureTestPublishedLayout } from './helpers/seedTestLayout.js';
+import { ensureTestPublishedLayout, cleanupTestPublishedLayout } from './helpers/seedTestLayout.js';
 import { getBookingBill } from '../src/services/billing/billService.js';
 import { runBackfillOnlineDrafts } from '../scripts/backfill-online-drafts.mjs';
 import { dateOnly } from '../../shared/time.js';
@@ -46,10 +46,12 @@ test('Round 34 Item 3: normal online booking & walk-in write initial draft, pres
   let dailyWd = null;
   let promo = null;
   let srv = null;
+  let createdLayoutId = null;
   const createdRefs = [legacyNoDraftRef, legacyPaidRef];
 
   t.after(async () => {
     if (srv) await srv.close().catch(() => {});
+    await prisma.promoRedemption.deleteMany({ where: { booking_ref: { in: createdRefs } } }).catch(() => {});
     await prisma.printJob.deleteMany({ where: { booking_ref: { in: createdRefs } } }).catch(() => {});
     await prisma.payment.deleteMany({ where: { booking_ref: { in: createdRefs } } }).catch(() => {});
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: { in: createdRefs } } }).catch(() => {});
@@ -59,9 +61,10 @@ test('Round 34 Item 3: normal online booking & walk-in write initial draft, pres
     if (promo?.id) await prisma.promoCode.delete({ where: { id: promo.id } }).catch(() => {});
     if (customer?.id) await prisma.user.delete({ where: { id: customer.id } }).catch(() => {});
     if (adminUser?.id) await prisma.adminUser.delete({ where: { id: adminUser.id } }).catch(() => {});
+    await cleanupTestPublishedLayout(prisma, createdLayoutId);
   });
 
-  await ensureTestPublishedLayout(prisma);
+  createdLayoutId = await ensureTestPublishedLayout(prisma);
   srv = await startLocalApp();
 
   customer = await prisma.user.create({
