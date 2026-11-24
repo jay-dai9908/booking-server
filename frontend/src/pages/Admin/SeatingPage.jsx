@@ -24,7 +24,8 @@ import {
   UserX,
   MoreHorizontal,
   LogOut,
-  Monitor
+  Monitor,
+  DoorOpen
 } from 'lucide-react';
 import api from '../../api/axios';
 import { useLiveFloor } from '../../hooks/admin/useLiveFloor';
@@ -52,6 +53,7 @@ import SeatActionPanel from '../../components/admin/floor/SeatActionPanel';
 import TablePanel from '../../components/admin/floor/TablePanel';
 import MoveGroupModal from '../../components/admin/floor/MoveGroupModal';
 import AlertList from '../../components/admin/floor/AlertList';
+import KioskQuickPanel from '../../components/admin/floor/KioskQuickPanel';
 
 // Modals
 import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
@@ -231,6 +233,8 @@ export default function SeatingPage() {
   const [lineMsgReservation, setLineMsgReservation] = useState(null);
   const [cardMenuBookingRef, setCardMenuBookingRef] = useState(null);
   const [cancelReservationTarget, setCancelReservationTarget] = useState(null);
+  const [kioskQuickOpen, setKioskQuickOpen] = useState(false);
+  const [kioskQuickInitialBooking, setKioskQuickInitialBooking] = useState(null);
 
   // Round 29 Item 3: Staff message push to store display
   const [activeDisplayMsg, setActiveDisplayMsg] = useState(null);
@@ -1234,6 +1238,20 @@ export default function SeatingPage() {
             activeTab={activeTab}
             onChange={handleTabChange}
           />
+          {floorData?.is_self_service_day && (
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="seating-kiosk-btn"
+              onClick={() => {
+                setKioskQuickInitialBooking(null);
+                setKioskQuickOpen(true);
+              }}
+            >
+              <DoorOpen className="w-4 h-4 mr-1 text-sg-brown" />
+              報到機
+            </Button>
+          )}
           {activeDisplayMsg ? (
             <Button
               variant="secondary"
@@ -1318,6 +1336,20 @@ export default function SeatingPage() {
             onChange={handleTabChange}
           />
           <div className="flex items-center gap-1.5">
+            {floorData?.is_self_service_day && (
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="seating-mobile-kiosk-btn"
+                onClick={() => {
+                  setKioskQuickInitialBooking(null);
+                  setKioskQuickOpen(true);
+                }}
+              >
+                <DoorOpen className="w-4 h-4 mr-0.5 text-sg-brown" />
+                報到機
+              </Button>
+            )}
             {activeDisplayMsg ? (
               <Button
                 variant="secondary"
@@ -1597,6 +1629,20 @@ export default function SeatingPage() {
 
                           {cardMenuBookingRef === b.booking_ref && (
                             <div className="absolute right-0 bottom-full mb-1 sm:bottom-auto sm:top-full sm:mt-1 w-36 bg-white border border-sg-line rounded-2xl shadow-lg z-30 py-1 text-[13px] animate-fade-in">
+                              {(b.is_self_service || floorData?.is_self_service_day) && (
+                                <button
+                                  type="button"
+                                  data-testid={`check-kiosk-status-btn-${b.booking_ref}`}
+                                  onClick={() => {
+                                    setCardMenuBookingRef(null);
+                                    setKioskQuickInitialBooking(b);
+                                    setKioskQuickOpen(true);
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-brown font-bold"
+                                >
+                                  查報到狀態
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -3835,6 +3881,17 @@ export default function SeatingPage() {
           )}
         </form>
       </ResponsivePanel>
+
+      {/* Kiosk Quick Tool Panel (Round 42 Item 5) */}
+      <KioskQuickPanel
+        isOpen={kioskQuickOpen}
+        onClose={() => {
+          setKioskQuickOpen(false);
+          setKioskQuickInitialBooking(null);
+        }}
+        bookings={bookings}
+        initialBooking={kioskQuickInitialBooking}
+      />
     </div>
     </FloorOfflineContext.Provider>
   );

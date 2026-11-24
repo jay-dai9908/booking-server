@@ -15,13 +15,17 @@ import {
   reassignBoard,
   addBoardRental,
   pauseBoard,
-  resumeBoard
+  resumeBoard,
+  getFloorKioskRecent,
+  getFloorKioskBookingStatus
 } from '../controllers/floorController.js';
 
 const router = express.Router();
 const floorAuth = [verifyToken, requireAnyPermission(['reservations', 'seating', 'weekly'])];
 
 router.get('/live', ...floorAuth, getLive);
+router.get('/kiosk/recent', ...floorAuth, getFloorKioskRecent);
+router.get('/kiosk/booking/:booking_ref', ...floorAuth, getFloorKioskBookingStatus);
 router.post('/:booking_ref/check-in', ...floorAuth, checkIn);
 router.post('/:booking_ref/move-seat', ...floorAuth, moveSeat);
 router.post('/:booking_ref/persons/:person_no/seat', ...floorAuth, seatPerson);

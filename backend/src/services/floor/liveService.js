@@ -160,10 +160,11 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
   // 1. Layout
   const layout = await getActiveLayoutForDate(prisma, targetDate);
 
-  // 2. Pricing & global equipment discount rules
-  const [{ hourly_price, unlimited_price, allow_unlimited }, globalSetting] = await Promise.all([
+  // 2. Pricing, global equipment discount rules & day self-service flag
+  const [{ hourly_price, unlimited_price, allow_unlimited }, globalSetting, daySetting] = await Promise.all([
     getEffectiveDailyRates(prisma, targetDate),
-    prisma.globalSetting.findFirst()
+    prisma.globalSetting.findFirst(),
+    prisma.dailySetting.findUnique({ where: { date: targetDate }, select: { is_self_service: true } })
   ]);
   const pricing = {
     hourly: hourly_price,
@@ -787,6 +788,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
   return {
     server_now: serverNow.toISOString(),
     date: targetDateStr,
+    is_self_service_day: Boolean(daySetting?.is_self_service),
     layout,
     pricing,
     equipment_discount: equipmentDiscount,

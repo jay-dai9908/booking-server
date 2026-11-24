@@ -14,7 +14,9 @@ import {
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { refreshBillingCache, getBookingBill, saveDraft } from '../services/billing/billService.js';
-import { swapBoundaryOptions, toTaipeiDateString } from '../../../shared/time.js';
+import { swapBoundaryOptions, toTaipeiDateString, formatTimeHHmm } from '../../../shared/time.js';
+import { formatBookingRef } from '../../../shared/receipts.js';
+import { getReservationEntryPass } from '../services/kiosk/entryService.js';
 import { calculateBoardTotal } from '../../../shared/boardPricing.js';
 import { resolveCoveredSessions, formatCoveredSessions } from '../utils/equipmentWindow.js';
 import displayBus from '../services/display/displayBus.js';
@@ -2773,6 +2775,110 @@ export async function resumeBoard(req, res) {
   }
 }
 
+export async function getFloorKioskRecent(req, res) {
+  try {
+    const rawNow = process.env.NODE_ENV === 'test' && req.query.now ? new Date(String(req.query.now)) : null;
+    const now = rawNow && !Number.isNaN(rawNow.getTime()) ? rawNow : new Date();
+    const dateStr = toTaipeiDateString(now);
+    const startAt = new Date(`${dateStr}T00:00:00+08:00`);
+    const endAt = new Date(startAt.getTime() + 86400000);
+
+    const rows = await prisma.kioskAccessLog.findMany({
+      where: {
+        at: { gte: startAt, lt: endAt }
+      },
+      select: {
+        at: true,
+        at_unknown: true,
+        method: true,
+        result: true,
+        open_door: true,
+        booking_ref: true,
+        user_id: true,
+        hint: true
+      },
+      orderBy: [{ at: 'desc' }, { id: 'desc' }],
+      take: 20
+    });
+
+    const userIds = [...new Set(rows.map(r => r.user_id).filter(Boolean))];
+    const users = userIds.length > 0
+      ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } })
+      : [];
+    const userNameById = new Map(users.map(u => [u.id, u.name]));
+
+    const logs = rows.map(l => ({
+      at: l.at ? l.at.toISOString() : null,
+      at_unknown: Boolean(l.at_unknown),
+      method: l.method,
+      result: l.result,
+      open_door: Boolean(l.open_door),
+      booking_ref_display: l.booking_ref ? formatBookingRef(l.booking_ref) : null,
+      user_name: (l.user_id ? userNameById.get(l.user_id) : null) || null,
+      hint: l.hint || null
+    }));
+
+    return res.json({ date: dateStr, logs });
+  } catch (error) {
+    console.error('[getFloorKioskRecent] Error:', error);
+    return res.status(500).json({ error: '無法取得報到機紀錄' });
+  }
+}
+
+function buildFloorKioskStatusReason(pass) {
+  switch (pass.state) {
+    case 'unpaid':
+      return '還沒付款';
+    case 'reported':
+      return '已回報末五碼，等對帳';
+    case 'mismatch':
+      return '金額不符';
+    case 'confirmed':
+      return `已付款，還沒到可進場時間（${pass.open_at} 起）`;
+    case 'open':
+      return '現在掃碼可以開門';
+    case 'in': {
+      const hm = pass.first_checkin_at ? formatTimeHHmm(pass.first_checkin_at) : '';
+      return hm ? `已進場（${hm} 首次報到）` : '已進場';
+    }
+    case 'ended':
+      return '今天的使用時間已結束';
+    case 'cancelled':
+      return '這筆預約已取消';
+    default:
+      return '狀態未知';
+  }
+}
+
+export async function getFloorKioskBookingStatus(req, res) {
+  try {
+    const { booking_ref } = req.params;
+    const rawNow = process.env.NODE_ENV === 'test' && req.query.now ? new Date(String(req.query.now)) : null;
+    const now = rawNow && !Number.isNaN(rawNow.getTime()) ? rawNow : new Date();
+
+    const pass = await getReservationEntryPass(prisma, {
+      bookingRef: booking_ref,
+      userId: null,
+      now
+    });
+
+    return res.json({
+      state: pass.state,
+      open_at: pass.open_at,
+      until: pass.until,
+      first_checkin_at: pass.first_checkin_at,
+      seats: pass.seats,
+      reason: buildFloorKioskStatusReason(pass)
+    });
+  } catch (error) {
+    if (error.statusCode === 404 || error.message === 'RESERVATION_NOT_FOUND') {
+      return res.status(404).json({ error: '找不到這筆預約' });
+    }
+    console.error('[getFloorKioskBookingStatus] Error:', error);
+    return res.status(500).json({ error: '無法查詢報到狀態' });
+  }
+}
+
 export default {
   getLive,
   checkIn,
@@ -2786,5 +2892,7 @@ export default {
   reassignBoard,
   addBoardRental,
   pauseBoard,
-  resumeBoard
+  resumeBoard,
+  getFloorKioskRecent,
+  getFloorKioskBookingStatus
 };
