@@ -22,8 +22,9 @@ export const getAccountingSummary = async (req, res) => {
 
     const validPayments = payments.filter(p => p.status === 'valid');
     const charges = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
-    const passes = validPayments.filter(p => p.method === 'pass');
-    const refunds = validPayments.filter(p => p.kind === 'refund');
+    const passes = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method === 'pass');
+    const refunds = validPayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
+    const passRefunds = validPayments.filter(p => p.kind === 'refund' && p.method === 'pass');
     const voids = payments.filter(p => p.status === 'voided');
 
     const totalIncome = charges.reduce((sum, p) => sum + p.amount, 0);
@@ -77,6 +78,10 @@ export const getAccountingSummary = async (req, res) => {
         amount: voids.reduce((sum, p) => sum + p.amount, 0)
       },
       pass_value: passValue,
+      pass_refunds: {
+        count: passRefunds.length,
+        amount: passRefunds.reduce((sum, p) => sum + p.amount, 0)
+      },
       unpaid: {
         count: unpaidCount,
         amount: unpaidAmount
@@ -274,8 +279,9 @@ export const getClosingPreview = async (req, res) => {
 
     const validPayments = payments.filter(p => p.status === 'valid');
     const charges = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
-    const passes = validPayments.filter(p => p.method === 'pass');
-    const refunds = validPayments.filter(p => p.kind === 'refund');
+    const passes = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method === 'pass');
+    const refunds = validPayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
+    const passRefunds = validPayments.filter(p => p.kind === 'refund' && p.method === 'pass');
     const voids = payments.filter(p => p.status === 'voided');
 
     const byMethod = {};
@@ -333,6 +339,10 @@ export const getClosingPreview = async (req, res) => {
         count: passes.length,
         amount: passes.reduce((sum, p) => sum + p.amount, 0)
       },
+      pass_refunds: {
+        count: passRefunds.length,
+        amount: passRefunds.reduce((sum, p) => sum + p.amount, 0)
+      },
       unpaid: {
         count: unpaidCount,
         amount: unpaidAmount
@@ -360,7 +370,7 @@ export const postClosing = async (req, res) => {
       });
       const validPayments = payments.filter(p => p.status === 'valid');
       const charges = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
-      const refunds = validPayments.filter(p => p.kind === 'refund');
+      const refunds = validPayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
       const cashIncome = charges.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
       const cashRefund = refunds.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
       const floatAmt = Number(float_amount);

@@ -86,6 +86,7 @@ export default function SplitCollectView({
     [addonPresets[0]?.name || '鑰匙圈']: 1
   }));
   const [refundMethod, setRefundMethod] = useState('cash');
+  const [selectedPassPaymentId, setSelectedPassPaymentId] = useState(null);
   const [actionReason, setActionReason] = useState('');
   const [actionAmount, setActionAmount] = useState(() => {
     if (initialSupplementPerson?.pending_supplement > 0) return initialSupplementPerson.pending_supplement;
@@ -177,10 +178,17 @@ export default function SplitCollectView({
 
   const handleOpenRefund = (p) => {
     setRefundTarget(p);
+    const passOpts = Array.isArray(p.pass_refundable) ? p.pass_refundable : [];
+    const firstRefundablePass = passOpts.find(pr => pr.remaining_units > 0) || passOpts[0] || null;
+    setSelectedPassPaymentId(firstRefundablePass?.payment_id || null);
+
     const pPayments = (billData?.payments || []).filter(
       pay => pay.status === 'valid' && (pay.person_nos || []).includes(p.person_no)
     );
-    const origPayment = [...pPayments].reverse().find(pay => pay.kind === 'charge' || pay.kind === 'supplement') || pPayments[0];
+    const nonPassOrig = [...pPayments].reverse().find(
+      pay => (pay.kind === 'charge' || pay.kind === 'supplement') && pay.method !== 'pass'
+    );
+    const origPayment = nonPassOrig || [...pPayments].reverse().find(pay => pay.kind === 'charge' || pay.kind === 'supplement') || pPayments[0];
     const origMethod = origPayment?.method || 'cash';
     const initialMethod = (origMethod === 'line_pay') ? 'linepay' : origMethod;
     setRefundMethod(initialMethod);
@@ -189,16 +197,13 @@ export default function SplitCollectView({
     setActionReason('');
   };
 
-  const refundTargetPayments = refundTarget
-    ? (billData?.payments || []).filter(
-        pay => pay.status === 'valid' && (pay.person_nos || []).includes(refundTarget.person_no)
-      )
-    : [];
   const refundTargetMaxRefundable = refundTarget?.max_refundable ?? 0;
-
-  const hasPassPayment = refundTargetPayments.some(
-    pay => pay.method === 'pass' || (Array.isArray(pay.pass_json) && pay.pass_json.length > 0)
-  );
+  const passRefundableList = Array.isArray(refundTarget?.pass_refundable) ? refundTarget.pass_refundable : [];
+  const hasPassPayment = passRefundableList.length > 0;
+  const selectedPassRefundItem = passRefundableList.find(pr => pr.payment_id === selectedPassPaymentId) || passRefundableList.find(pr => pr.remaining_units > 0) || null;
+  const selectedPassRefundAmount = selectedPassRefundItem && selectedPassRefundItem.remaining_units > 0
+    ? Math.round(selectedPassRefundItem.value * selectedPassRefundItem.remaining_units / selectedPassRefundItem.units)
+    : 0;
 
   const refundMethodOptions = [
     { code: 'cash', label: '現金退回' },
@@ -443,12 +448,17 @@ export default function SplitCollectView({
       setErrorMessage('請填寫退款原因');
       return;
     }
+    if (refundMethod === 'pass' && (!selectedPassRefundItem || selectedPassRefundItem.remaining_units <= 0)) {
+      setErrorMessage('請選擇一筆可退回的卡券付款紀錄');
+      return;
+    }
     try {
       setLoading(true);
       await api.post(`/billing/${bookingRef}/refund`, {
         person_no: refundTarget.person_no,
-        amount: actionAmount,
+        amount: refundMethod === 'pass' ? selectedPassRefundAmount : actionAmount,
         method: refundMethod,
+        ...(refundMethod === 'pass' ? { payment_id: selectedPassRefundItem.payment_id } : {}),
         reason: actionReason,
         print: autoPrint
       });
@@ -1191,14 +1201,21 @@ export default function SplitCollectView({
           isOpen={Boolean(refundTarget)}
           onClose={() => setRefundTarget(null)}
           title={`退款：第 ${refundTarget.person_no} 位`}
-          subtitle={`已付 NT$${refundTargetMaxRefundable}`}
+          subtitle={refundMethod === 'pass' ? `卡券可退 NT$${selectedPassRefundAmount}` : `已付 NT$${refundTargetMaxRefundable}`}
           footer={
             <div className="flex items-center justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={() => setRefundTarget(null)}>
                 取消
               </Button>
-              <Button variant="danger" size="sm" onClick={handleRefund} loading={loading}>
-                確認退款 NT${actionAmount}
+              <Button
+                variant="danger"
+                size="sm"
+                data-testid="confirm-refund-btn"
+                onClick={handleRefund}
+                loading={loading}
+                disabled={refundMethod === 'pass' && (!selectedPassRefundItem || selectedPassRefundItem.remaining_units <= 0)}
+              >
+                確認退款 NT${refundMethod === 'pass' ? selectedPassRefundAmount : actionAmount}
               </Button>
             </div>
           }
@@ -1219,7 +1236,13 @@ export default function SplitCollectView({
                       key={opt.code}
                       type="button"
                       data-testid={`refund-method-${opt.code}`}
-                      onClick={() => setRefundMethod(opt.code)}
+                      onClick={() => {
+                        setRefundMethod(opt.code);
+                        if (opt.code === 'pass') {
+                          const firstAvailable = passRefundableList.find(pr => pr.remaining_units > 0) || passRefundableList[0];
+                          if (firstAvailable) setSelectedPassPaymentId(firstAvailable.payment_id);
+                        }
+                      }}
                       className={`min-h-[40px] p-2 rounded-xl border text-[13px] font-bold flex items-center justify-center text-center transition active:scale-[0.98] ${
                         isSelected
                           ? 'bg-sg-brown text-white border-sg-brown shadow-sm'
@@ -1233,25 +1256,74 @@ export default function SplitCollectView({
               </div>
             </div>
 
-            <div>
-              <label className="block text-[12px] font-bold text-sg-ink mb-1">退款金額</label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <MoneyInput value={actionAmount} onChange={setActionAmount} />
+            {refundMethod === 'pass' ? (
+              <div className="space-y-2.5">
+                <label className="block text-[12px] font-bold text-sg-ink">選擇要退回的卡券付款</label>
+                <div className="space-y-1.5">
+                  {passRefundableList.map((pr) => {
+                    const isPassSelected = selectedPassRefundItem?.payment_id === pr.payment_id;
+                    const isFullyRefunded = pr.remaining_units <= 0;
+                    const itemServerVal = isFullyRefunded
+                      ? 0
+                      : Math.round(pr.value * pr.remaining_units / pr.units);
+                    return (
+                      <button
+                        key={pr.payment_id}
+                        type="button"
+                        disabled={isFullyRefunded}
+                        data-testid={`refund-pass-option-${pr.payment_id}`}
+                        onClick={() => setSelectedPassPaymentId(pr.payment_id)}
+                        className={`w-full text-left p-2.5 rounded-xl border transition flex items-center justify-between text-[12px] ${
+                          isFullyRefunded
+                            ? 'bg-sg-paper/50 border-sg-line/60 text-sg-muted opacity-60 cursor-not-allowed'
+                            : isPassSelected
+                            ? 'bg-sg-brown-soft border-sg-brown text-sg-ink'
+                            : 'bg-white border-sg-line hover:border-sg-muted text-sg-ink'
+                        }`}
+                      >
+                        <div>
+                          <div className="font-bold">{pr.plan_name}</div>
+                          <div className="text-[11px] text-sg-muted mt-0.5">
+                            使用 {pr.units} 單位 · 已退 {pr.units_refunded} 單位{isFullyRefunded ? '（已全退）' : ` · 可退 ${pr.remaining_units} 單位`}
+                          </div>
+                        </div>
+                        <span className="font-bold font-num text-sg-brown">NT${itemServerVal}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-                <button
-                  type="button"
-                  data-testid="refund-full-amount-btn"
-                  onClick={() => setActionAmount(refundTargetMaxRefundable)}
-                  className="min-h-[44px] px-3 rounded-xl border border-sg-line bg-white hover:bg-sg-paper text-sg-ink text-[12px] font-bold whitespace-nowrap active:scale-[0.98] transition"
-                >
-                  全額 NT${refundTargetMaxRefundable}
-                </button>
+                <div>
+                  <label className="block text-[12px] font-bold text-sg-ink mb-1">退回金額（伺服器依紀錄試算）</label>
+                  <input
+                    type="text"
+                    readOnly
+                    data-testid="refund-pass-readonly-amount"
+                    value={`NT$${selectedPassRefundAmount}`}
+                    className="w-full px-3 py-2 rounded-xl border border-sg-line bg-sg-paper text-[14px] font-bold font-num text-sg-ink cursor-not-allowed"
+                  />
+                </div>
               </div>
-              <div className="text-[12px] text-sg-muted mt-1">
-                最多可退 NT${refundTargetMaxRefundable}
+            ) : (
+              <div>
+                <label className="block text-[12px] font-bold text-sg-ink mb-1">退款金額</label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <MoneyInput value={actionAmount} onChange={setActionAmount} />
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="refund-full-amount-btn"
+                    onClick={() => setActionAmount(refundTargetMaxRefundable)}
+                    className="min-h-[44px] px-3 rounded-xl border border-sg-line bg-white hover:bg-sg-paper text-sg-ink text-[12px] font-bold whitespace-nowrap active:scale-[0.98] transition"
+                  >
+                    全額 NT${refundTargetMaxRefundable}
+                  </button>
+                </div>
+                <div className="text-[12px] text-sg-muted mt-1">
+                  最多可退 NT${refundTargetMaxRefundable}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="block text-[12px] font-bold text-sg-ink">退款原因</label>

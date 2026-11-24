@@ -652,6 +652,25 @@ test('Round 21 Item 1: calculatePersonRefundInfo per-person paid and max_refunda
   assert.equal(part1.paid_amount + part2.paid_amount, 300);
   assert.equal(part1.paid_amount, 200);
   assert.equal(part2.paid_amount, 100);
+
+  // 7. Round 35 Item 3: cash 200 + pass 800 -> max_refundable 200, pass_refundable has 1 item units 1
+  const cash200 = { kind: 'charge', status: 'valid', method: 'cash', amount: 200, person_nos: [1] };
+  const pass800 = {
+    id: 901,
+    payment_no: 'P-TEST-901',
+    kind: 'charge',
+    status: 'valid',
+    method: 'pass',
+    amount: 800,
+    person_nos: [1],
+    pass_json: [{ user_pass_id: 55, plan_name: '單次入場', units: 1, value: 800, person_no: 1 }]
+  };
+  const mixedR35 = calculatePersonRefundInfo([cash200, pass800], 1);
+  assert.equal(mixedR35.paid_amount, 200);
+  assert.equal(mixedR35.max_refundable, 200);
+  assert.equal(mixedR35.pass_refundable.length, 1);
+  assert.equal(mixedR35.pass_refundable[0].units, 1);
+  assert.equal(mixedR35.pass_refundable[0].value, 800);
 });
 
 test('Round 25 Item 1: orderPromos person_nos targets only listed unpaid persons', () => {

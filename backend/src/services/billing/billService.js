@@ -239,6 +239,7 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
     ep.paid_amount = rInfo.paid_amount;
     ep.refunded_amount = rInfo.refunded_amount;
     ep.max_refundable = rInfo.max_refundable;
+    ep.pass_refundable = rInfo.pass_refundable;
   }
 
   return {
@@ -1405,14 +1406,18 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
 export async function refundPayment(booking_ref, payload, staffUser, deviceInfo) {
   const staffName = staffUser?.name || '門市人員';
   const staffId = staffUser?.id || null;
-  const { person_no, amount, method = 'cash', reason, note = '' } = payload;
+  const { person_no, amount, method = 'cash', reason, note = '', payment_id } = payload;
   const pNo = Number(person_no);
   const refundAmt = Math.round(Number(amount));
 
   if (!reason || !String(reason).trim()) {
     throw { status: 422, message: '退款請填寫原因' };
   }
-  if (!(refundAmt > 0)) {
+  if (method === 'pass') {
+    if (!payment_id) {
+      throw { status: 422, message: '卡券退回必須指定要退回的卡券收款紀錄' };
+    }
+  } else if (!(refundAmt > 0)) {
     throw { status: 400, message: '退款金額必須大於 0' };
   }
 
@@ -1426,10 +1431,55 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       }
     });
 
-    const refundInfo = calculatePersonRefundInfo(priorPayments, pNo);
-    const maxRefundable = refundInfo.max_refundable;
-    if (refundAmt > maxRefundable) {
-      throw { status: 400, message: `退款金額超過此顧客已付金額上限（最多可退 NT$${maxRefundable}）` };
+    let effectiveRefundAmt = refundAmt;
+    let relatedPaymentId = null;
+    let passRestoreTarget = null;
+    let extraBreakdown = {};
+
+    if (method === 'pass') {
+      const targetPassPay = priorPayments.find(
+        p => p.id === Number(payment_id) && p.kind === 'charge' && p.method === 'pass'
+      );
+      if (!targetPassPay || !Array.isArray(targetPassPay.person_nos) || !targetPassPay.person_nos.includes(pNo)) {
+        throw { status: 422, message: '找不到該位顧客的有效卡券收款紀錄' };
+      }
+
+      const pj = Array.isArray(targetPassPay.pass_json)
+        ? (targetPassPay.pass_json.find(x => Number(x?.person_no) === pNo) || targetPassPay.pass_json[0])
+        : null;
+      if (!pj || !pj.user_pass_id) {
+        throw { status: 422, message: '該筆收款紀錄缺少卡券明細' };
+      }
+
+      const origUnits = Math.max(1, Number(pj.units || 1));
+      const origValue = Number(pj.value ?? targetPassPay.amount) || 0;
+      const alreadyRefundedUnits = priorPayments
+        .filter(r => r.kind === 'refund' && r.method === 'pass' && r.related_payment_id === targetPassPay.id)
+        .reduce((s, r) => s + (Number(r.breakdown_json?.restored_units ?? origUnits) || 0), 0);
+      const remainingUnits = Math.max(0, origUnits - alreadyRefundedUnits);
+
+      if (remainingUnits <= 0) {
+        throw { status: 409, message: '這筆卡券已經退回過' };
+      }
+
+      effectiveRefundAmt = Math.round(origValue * remainingUnits / origUnits);
+      relatedPaymentId = targetPassPay.id;
+      passRestoreTarget = {
+        user_pass_id: pj.user_pass_id,
+        plan_name: pj.plan_name,
+        units: remainingUnits
+      };
+      extraBreakdown = {
+        restored_units: remainingUnits,
+        orig_units: origUnits,
+        user_pass_id: pj.user_pass_id
+      };
+    } else {
+      const refundInfo = calculatePersonRefundInfo(priorPayments, pNo);
+      const maxRefundable = refundInfo.max_refundable;
+      if (effectiveRefundAmt > maxRefundable) {
+        throw { status: 400, message: `退款金額超過此顧客已付金額上限（最多可退 NT$${maxRefundable}）` };
+      }
     }
 
     const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
@@ -1443,12 +1493,14 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
         kind: 'refund',
         status: 'valid',
         method,
-        amount: refundAmt,
+        amount: effectiveRefundAmt,
+        related_payment_id: relatedPaymentId,
         person_nos: [pNo],
         breakdown_json: {
-          refund_amount: refundAmt,
+          refund_amount: effectiveRefundAmt,
           reason,
-          snapshot_at: new Date().toISOString()
+          snapshot_at: new Date().toISOString(),
+          ...extraBreakdown
         },
         reason: String(reason).trim(),
         note: note ? String(note).trim() : null,
@@ -1465,8 +1517,8 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       booking_ref,
       event_type: 'refund_created',
       category: 'refund',
-      summary: `退款 第 ${pNo} 位 NT$${refundAmt} · ${refundMethodName}。原因「${reason}」`,
-      amount: refundAmt,
+      summary: `退款 第 ${pNo} 位 NT$${effectiveRefundAmt} · ${refundMethodName}。原因「${reason}」`,
+      amount: effectiveRefundAmt,
       payment_id: payment.id,
       reason,
       staff_name: staffName,
@@ -1475,34 +1527,27 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       device_label: deviceInfo?.device_label
     });
 
-    // Restore pass if this was refunding a pass payment (Section 3.7)
-    if (method === 'pass') {
-      const passPayment = priorPayments.find(p => p.method === 'pass' && Array.isArray(p.pass_json));
-      if (passPayment) {
-        for (const pj of passPayment.pass_json) {
-          if (pj.user_pass_id) {
-            await restorePass(tx, {
-              user_pass_id: pj.user_pass_id,
-              units: pj.units || 1,
-              booking_ref,
-              payment_no: payNo,
-              person_no: pNo,
-              staff_name: staffName
-            });
-            await auditLog(tx, {
-              booking_ref,
-              event_type: 'pass_restored',
-              category: 'pass',
-              summary: `卡券退款退回 · ${pj.plan_name || '卡券'} · ${pj.units || 1} 單位`,
-              payment_id: payment.id,
-              staff_name: staffName,
-              staff_id: staffId,
-              device_id: deviceInfo?.device_id,
-              device_label: deviceInfo?.device_label
-            });
-          }
-        }
-      }
+    // Restore only the targeted pass payment (Round 35 Item 3)
+    if (method === 'pass' && passRestoreTarget) {
+      await restorePass(tx, {
+        user_pass_id: passRestoreTarget.user_pass_id,
+        units: passRestoreTarget.units,
+        booking_ref,
+        payment_no: payNo,
+        person_no: pNo,
+        staff_name: staffName
+      });
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'pass_restored',
+        category: 'pass',
+        summary: `卡券退款退回 · ${passRestoreTarget.plan_name || '卡券'} · ${passRestoreTarget.units} 單位`,
+        payment_id: payment.id,
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id,
+        device_label: deviceInfo?.device_label
+      });
     }
 
     // Automatic print receipt (Section 3.8)

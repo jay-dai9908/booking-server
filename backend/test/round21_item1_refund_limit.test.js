@@ -394,9 +394,10 @@ test('Round 21 Item 1: Per-person refund limits and legacy splitAmount fallback'
   const billAfterMixed = await getBookingBill(bookingRef3);
   const p1Mixed = billAfterMixed.bill.persons.find(p => p.person_no === 1);
   const p2Mixed = billAfterMixed.bill.persons.find(p => p.person_no === 2);
-  assert.equal(p1Mixed.paid_amount, 200, 'Person 1 paid 200 via pass');
+  assert.equal(p1Mixed.paid_amount, 0, 'Person 1 paid via pass only, so cash paid_amount is 0');
   assert.equal(p2Mixed.paid_amount, 200, 'Person 2 paid 200 via cash');
-  assert.equal(p1Mixed.max_refundable, 200);
+  assert.equal(p1Mixed.max_refundable, 0, 'Pass discount cannot be refunded as cash');
+  assert.equal(p1Mixed.pass_refundable?.length, 1, 'Person 1 has 1 pass payment available to restore');
   assert.equal(p2Mixed.max_refundable, 200);
 
   // Person 2 refunds 200 cash -> succeeds

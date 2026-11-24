@@ -78,10 +78,36 @@ export function calculatePersonRefundInfo(payments = [], personNo) {
 
   let paidTotal = 0;
   let refundedTotal = 0;
+  const passRefundable = [];
 
   for (const p of validPayments) {
     const personNos = Array.isArray(p.person_nos) ? p.person_nos : [];
     if (!personNos.includes(pNo)) continue;
+
+    if (p.method === 'pass') {
+      if (p.kind === 'charge') {
+        const pj = Array.isArray(p.pass_json)
+          ? (p.pass_json.find(x => Number(x?.person_no) === pNo) || p.pass_json[0])
+          : null;
+        const origUnits = Math.max(1, Number(pj?.units || 1));
+        const origValue = Number(pj?.value ?? p.amount) || 0;
+        const unitsRefunded = validPayments
+          .filter(r => r.kind === 'refund' && r.method === 'pass' && r.related_payment_id === p.id)
+          .reduce((s, r) => s + (Number(r.breakdown_json?.restored_units ?? origUnits) || 0), 0);
+        const clampedRefunded = Math.min(origUnits, Math.max(0, unitsRefunded));
+        passRefundable.push({
+          payment_id: p.id,
+          payment_no: p.payment_no || null,
+          user_pass_id: pj?.user_pass_id || null,
+          plan_name: pj?.plan_name || '卡券',
+          units: origUnits,
+          units_refunded: clampedRefunded,
+          remaining_units: Math.max(0, origUnits - clampedRefunded),
+          value: origValue
+        });
+      }
+      continue;
+    }
 
     if (p.kind === 'refund') {
       refundedTotal += Number(p.amount) || 0;
@@ -126,7 +152,8 @@ export function calculatePersonRefundInfo(payments = [], personNo) {
   return {
     paid_amount: paidTotal,
     refunded_amount: refundedTotal,
-    max_refundable: maxRefundable
+    max_refundable: maxRefundable,
+    pass_refundable: passRefundable
   };
 }
 
@@ -640,6 +667,7 @@ export function computeBill({
     p.paid_amount = refundInfo.paid_amount;
     p.refunded_amount = refundInfo.refunded_amount;
     p.max_refundable = refundInfo.max_refundable;
+    p.pass_refundable = refundInfo.pass_refundable;
   }
 
   // 5. Aggregate order totals

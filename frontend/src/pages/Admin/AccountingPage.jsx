@@ -765,6 +765,11 @@ export default function AccountingPage() {
               <span className="text-[18px] font-bold text-sg-brown font-num">
                 {formatMoney(summary?.pass_value || 0)}
               </span>
+              {(summary?.pass_refunds?.count || 0) > 0 && (
+                <span className="text-[11px] text-sg-muted block mt-0.5">
+                  卡券退回 {summary.pass_refunds.count} 筆（不計入營收）
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -805,6 +810,11 @@ export default function AccountingPage() {
                 <span className="text-[18px] font-bold text-sg-brown font-num">
                   {formatMoney(summary.pass_value || 0)}
                 </span>
+                {(summary.pass_refunds?.count || 0) > 0 && (
+                  <span className="text-[11px] text-sg-muted block mt-0.5">
+                    卡券退回 {summary.pass_refunds.count} 筆（不計入營收）
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -1306,6 +1316,10 @@ export default function AccountingPage() {
                 <div className="py-2 flex justify-between text-sg-muted">
                   <span>卡券折抵（{closingPreview.passes?.count || 0} 筆，不計入）</span>
                   <span className="font-num">{formatMoney(closingPreview.passes?.amount || 0)}</span>
+                </div>
+                <div className="py-2 flex justify-between text-sg-muted">
+                  <span>卡券退回 {closingPreview.pass_refunds?.count || 0} 筆（不計入營收）</span>
+                  <span className="font-num">{formatMoney(closingPreview.pass_refunds?.amount || 0)}</span>
                 </div>
                 <div className="py-2 flex justify-between text-sg-muted">
                   <span>作廢（{closingPreview.voids?.count || 0} 筆，不計入）</span>
