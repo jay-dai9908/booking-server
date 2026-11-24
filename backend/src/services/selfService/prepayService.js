@@ -1069,13 +1069,26 @@ export async function releaseExpiredPrepays(now = new Date()) {
         let passRestored = false;
         for (const h of holds) {
           if (h?.user_pass_id && (Number(h.units) || 0) > 0) {
-            await restorePass(tx, {
+            const restoredPass = await restorePass(tx, {
               user_pass_id: Number(h.user_pass_id),
               units: Number(h.units),
               booking_ref: lockedPrepay.booking_ref,
               payment_no: null,
               person_no: null,
               staff_name: 'system:prepay_expired'
+            });
+            await auditLog(tx, {
+              booking_ref: lockedPrepay.booking_ref,
+              event_type: 'pass_restored',
+              category: 'pass',
+              summary: `半自助卡券退回（逾期未付款）· ${h.plan_name || '計次卡'} · ${Number(h.units)} 次`,
+              after_json: {
+                user_pass_id: Number(h.user_pass_id),
+                units: Number(h.units),
+                remaining_after: restoredPass?.remaining_quota ?? null
+              },
+              staff_name: '系統',
+              device_label: '系統排程'
             });
             passRestored = true;
           }

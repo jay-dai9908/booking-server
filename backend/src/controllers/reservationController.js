@@ -642,6 +642,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
 
         // Deduct punch card holds immediately upon reservation submission
         const passHolds = [];
+        const holdUseDateStr = toTaipeiDateString(sessionDate);
         for (const hold of quote.pass_holds_plan) {
           const updatedPass = await deductPass(tx, {
             user_pass_id: hold.user_pass_id,
@@ -652,6 +653,19 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
             staff_name: '半自助預約',
             source: 'self_service_prepay',
             date: sessionDate
+          });
+          await auditLog(tx, {
+            booking_ref,
+            event_type: 'pass_held',
+            category: 'pass',
+            summary: `半自助預約扣卡 · ${hold.plan_name || '計次卡'} · ${hold.units} 次 · 使用日 ${holdUseDateStr}`,
+            after_json: {
+              user_pass_id: hold.user_pass_id,
+              units: hold.units,
+              remaining_after: updatedPass.remaining_quota
+            },
+            staff_name: 'customer',
+            device_label: '線上預約'
           });
           passHolds.push({
             user_pass_id: hold.user_pass_id,
@@ -1599,13 +1613,26 @@ async function cancelReservationCore(req, res, { actor }) {
             const holds = Array.isArray(lockedPrepay.pass_holds) ? lockedPrepay.pass_holds : [];
             for (const h of holds) {
               if (h?.user_pass_id && (Number(h.units) || 0) > 0) {
-                await restorePass(tx, {
+                const restoredPass = await restorePass(tx, {
                   user_pass_id: Number(h.user_pass_id),
                   units: Number(h.units),
                   booking_ref,
                   payment_no: null,
                   person_no: null,
                   staff_name: operatorName
+                });
+                await auditLog(tx, {
+                  booking_ref,
+                  event_type: 'pass_restored',
+                  category: 'pass',
+                  summary: `半自助卡券退回（取消預約）· ${h.plan_name || '計次卡'} · ${Number(h.units)} 次`,
+                  after_json: {
+                    user_pass_id: Number(h.user_pass_id),
+                    units: Number(h.units),
+                    remaining_after: restoredPass?.remaining_quota ?? null
+                  },
+                  staff_name: operatorName,
+                  device_label: '線上預約'
                 });
               }
             }
