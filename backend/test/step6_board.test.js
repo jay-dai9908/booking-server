@@ -380,11 +380,12 @@ test('Step 6 Board Swap and Return Tests (Section 4.4)', async (t) => {
       }
     });
 
-    // Return at 15:15 (during sess15)
+    // Return at 15:15 (during sess15; suggested 15:30 via 10/30 rule)
     const { req, res } = createMockReqRes({
       params: { booking_ref: bookingRef, unit_group: unitGroup },
       body: {
-        at: '2026-11-06T15:15:00+08:00'
+        at: '2026-11-06T15:30:00+08:00',
+        now: '2026-11-06T15:15:00+08:00'
       }
     });
 

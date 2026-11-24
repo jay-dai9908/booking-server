@@ -81,13 +81,13 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
 
   await prisma.equipmentConfig.upsert({
     where: { id: 'pegboard_s' },
-    update: { name: '小板 (52×52)', hourly_rate: 90, total_stock: 10, visibility_status: 'ACTIVE', min_contiguous_hours: 1 },
-    create: { id: 'pegboard_s', name: '小板 (52×52)', hourly_rate: 90, total_stock: 10, visibility_status: 'ACTIVE', min_contiguous_hours: 1 }
+    update: { name: '小板 (52×52)', hourly_rate: 90, daily_cap: null, total_stock: 10, visibility_status: 'ACTIVE', min_contiguous_hours: 1 },
+    create: { id: 'pegboard_s', name: '小板 (52×52)', hourly_rate: 90, daily_cap: null, total_stock: 10, visibility_status: 'ACTIVE', min_contiguous_hours: 1 }
   });
   await prisma.equipmentConfig.upsert({
     where: { id: 'pegboard_m' },
-    update: { name: '中板 (78×78)', hourly_rate: 120, total_stock: 10, visibility_status: 'ACTIVE', min_contiguous_hours: 1 },
-    create: { id: 'pegboard_m', name: '中板 (78×78)', hourly_rate: 120, total_stock: 10, visibility_status: 'ACTIVE', min_contiguous_hours: 1 }
+    update: { name: '中板 (78×78)', hourly_rate: 120, daily_cap: null, total_stock: 10, visibility_status: 'ACTIVE', min_contiguous_hours: 1 },
+    create: { id: 'pegboard_m', name: '中板 (78×78)', hourly_rate: 120, daily_cap: null, total_stock: 10, visibility_status: 'ACTIVE', min_contiguous_hours: 1 }
   });
 
   // Pre-clean any leftover test records on dateStr from aborted runs
@@ -261,6 +261,7 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
         data: {
           name: prevPegboardS.name,
           hourly_rate: prevPegboardS.hourly_rate,
+          daily_cap: prevPegboardS.daily_cap,
           total_stock: prevPegboardS.total_stock,
           visibility_status: prevPegboardS.visibility_status,
           min_contiguous_hours: prevPegboardS.min_contiguous_hours
@@ -273,6 +274,7 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
         data: {
           name: prevPegboardM.name,
           hourly_rate: prevPegboardM.hourly_rate,
+          daily_cap: prevPegboardM.daily_cap,
           total_stock: prevPegboardM.total_stock,
           visibility_status: prevPegboardM.visibility_status,
           min_contiguous_hours: prevPegboardM.min_contiguous_hours
@@ -357,7 +359,7 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
     // Release stock at end of Item 1 via returnBoard API
     const { req: ret1Req, res: ret1Res } = createMockReqRes({
       params: { booking_ref, unit_group: rentedEq.unit_group },
-      body: { at: `${dateStr}T20:30:00+08:00` }
+      body: { at: `${dateStr}T20:30:00+08:00`, now: `${dateStr}T20:15:00+08:00` }
     });
     await returnBoard(ret1Req, ret1Res);
     assert.equal(ret1Res.getStatusCode(), 200);
@@ -408,7 +410,7 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
     // Return at 20:30 (during 20:00-21:00) -> 21:00-22:00 released from covered_sessions
     const { req: retReq, res: retRes } = createMockReqRes({
       params: { booking_ref, unit_group: ug },
-      body: { at: `${dateStr}T20:30:00+08:00` }
+      body: { at: `${dateStr}T20:30:00+08:00`, now: `${dateStr}T20:15:00+08:00` }
     });
     await returnBoard(retReq, retRes);
     assert.equal(retRes.getStatusCode(), 200, `returnBoard failed: ${JSON.stringify(retRes.getResponseData())}`);
@@ -419,7 +421,8 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
     });
     assert.equal(afterRetSegs[1].ended_reason, 'returned');
     assert.deepEqual(afterRetSegs[1].covered_sessions, ['20:00-21:00']);
-    assert.equal(retRes.getResponseData().bill.summary.board_total, 330);
+    // Round 37 Item 3: 1h small (90) + 0.5h medium until actual return 20:30 (60) = 150
+    assert.equal(retRes.getResponseData().bill.summary.board_total, 150);
   });
 
   await t.test('Item 2b: board added at reservation creation swaps & returns cleanly with HH:MM-HH:MM covered_sessions', async () => {
@@ -461,7 +464,7 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
 
     const { req: retReq, res: retRes } = createMockReqRes({
       params: { booking_ref, unit_group: ug },
-      body: { at: `${dateStr}T20:45:00+08:00` }
+      body: { at: `${dateStr}T20:30:00+08:00`, now: `${dateStr}T20:45:00+08:00` }
     });
     await returnBoard(retReq, retRes);
     assert.equal(retRes.getStatusCode(), 200);
@@ -532,7 +535,7 @@ test('Round 23b Board Fixes (Items 1-3)', async (t) => {
 
     const { req: retReq, res: retRes } = createMockReqRes({
       params: { booking_ref, unit_group: seg.unit_group },
-      body: { at: `${dateStr}T20:30:00+08:00` }
+      body: { at: `${dateStr}T20:30:00+08:00`, now: `${dateStr}T20:15:00+08:00` }
     });
     await returnBoard(retReq, retRes);
     assert.equal(retRes.getStatusCode(), 200, `returnBoard on legacy ID format failed: ${JSON.stringify(retRes.getResponseData())}`);

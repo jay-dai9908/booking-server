@@ -517,12 +517,24 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
       const dbSelfRes = await prisma.reservation.findFirst({ where: { booking_ref: refSelf } });
       assert.equal(dbSelfRes.billing_status, 'paid');
 
-      // Normal-day booking F still follows the updated GlobalSetting price
+      // New normal-day booking F also locks pricing_snapshot at creation (R37 Item 2)
       const normalBill = await getBookingBill(refNormal);
       const isNormalWknd = normalBill.pricing.day_type === 'weekend';
-      assert.equal(normalBill.pricing.unlimited, isNormalWknd ? 990 : 920);
-      assert.equal(normalBill.pricing.hourly, isNormalWknd ? 260 : 220);
-      assert.equal(normalBill.bill.summary.amount_due, 2 * (isNormalWknd ? 260 : 220));
+      const origHourly = savedGlobal ? (isNormalWknd ? savedGlobal.weekend_hourly_price : savedGlobal.weekday_hourly_price) : (isNormalWknd ? 200 : 150);
+      const origUnlimited = savedGlobal ? (isNormalWknd ? savedGlobal.weekend_unlimited_price : savedGlobal.weekday_unlimited_price) : (isNormalWknd ? 900 : 750);
+      assert.equal(normalBill.pricing.unlimited, origUnlimited);
+      assert.equal(normalBill.pricing.hourly, origHourly);
+      assert.equal(normalBill.bill.summary.amount_due, 2 * origHourly);
+
+      // Legacy booking without pricing_snapshot still follows updated GlobalSetting prices
+      await prisma.reservation.updateMany({
+        where: { booking_ref: refNormal },
+        data: { pricing_snapshot: null }
+      });
+      const legacyBill = await getBookingBill(refNormal);
+      assert.equal(legacyBill.pricing.unlimited, isNormalWknd ? 990 : 920);
+      assert.equal(legacyBill.pricing.hourly, isNormalWknd ? 260 : 220);
+      assert.equal(legacyBill.bill.summary.amount_due, 2 * (isNormalWknd ? 260 : 220));
     }
   } finally {
     if (savedTransferMethod) {

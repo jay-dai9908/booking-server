@@ -259,15 +259,16 @@ test('Round 28 Item 3: Display state timer parity, privacy scan, heartbeat, and 
       data: { booking_ref: refPaused, person_no: 1, seat_code: seatCodes[2], status: 'active', billing_start_at: t1, timer_started_at: t1, paused_seconds: 900 }
     });
 
-    // 4. Booked (future session or late session that hasn't ended yet; use a dynamic end time 2h from now if needed)
-    const futureHour = (now.getUTCHours() + 8 + 2) % 24;
-    const futureSession = futureHour >= 22
-      ? sessions[3]
-      : await prisma.session.upsert({
-          where: { session_date_start_time: { session_date: todayDate, start_time: '22:00' } },
-          update: {},
-          create: { session_date: todayDate, start_time: '22:00', end_time: '23:59', max_capacity: 20 }
-        });
+    // 4. Booked (future session or late session that hasn't ended yet)
+    const nowHourTpe = (now.getUTCHours() + 8) % 24;
+    const futureSlot = nowHourTpe < 22
+      ? ['22:00', '23:59']
+      : (nowHourTpe === 22 ? ['23:00', '23:59'] : ['23:58', '23:59']);
+    const futureSession = await prisma.session.upsert({
+      where: { session_date_start_time: { session_date: todayDate, start_time: futureSlot[0] } },
+      update: {},
+      create: { session_date: todayDate, start_time: futureSlot[0], end_time: futureSlot[1], max_capacity: 20 }
+    });
     await prisma.reservation.create({
       data: {
         booking_ref: refBooked, session_id: futureSession.id, user_id: user.id, pax: 1,

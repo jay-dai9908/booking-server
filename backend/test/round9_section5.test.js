@@ -299,7 +299,9 @@ test('Round 9 Section 5: POST /floor/:ref/boards validation and creation', async
     assert.strictEqual(res6Res.getStatusCode(), 200, `Expected 200 for overnight rental, got: ${res6Res.getStatusCode()} ${JSON.stringify(res6Res.getResponseData())}`);
     const overnightEq = res6Res.getResponseData().booking_equipment;
     assert.strictEqual(overnightEq.rental_hours, 2);
-    assert.strictEqual(overnightEq.subtotal_price, 180);
+    assert.strictEqual(overnightEq.subtotal_price, 0);
+    assert.strictEqual(overnightEq.is_price_fixed, false);
+    assert.strictEqual(overnightEq.unit_rate, 90);
 
     await prisma.bookingEquipment.deleteMany({ where: { booking_ref: overnightRef } });
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: overnightRef } });
