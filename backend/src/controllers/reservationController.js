@@ -2,7 +2,7 @@ import prisma from '../prismaClient.js';
 import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
-import { loadAllocatorContext, getActiveLayoutForDate } from '../services/seating/layoutService.js';
+import { loadAllocatorContext, getActiveLayoutForDate, loadSeatedOccupants } from '../services/seating/layoutService.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { evaluatePromoCode } from './checkoutController.js';
@@ -2125,7 +2125,8 @@ export const getSessionSeats = async (req, res) => {
 };
 
 export const adminCreateReservation = async (req, res) => {
-  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, attendance, autoCheckIn } = req.body || {};
+  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, is_walk_in, attendance, autoCheckIn } = req.body || {};
+  const effectiveWalkIn = isWalkIn === true || isWalkIn === 'true' || is_walk_in === true || is_walk_in === 'true';
   
   const parsedPax = parseInt(pax, 10);
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !Number.isInteger(parsedPax) || parsedPax < 1) {
@@ -2241,7 +2242,26 @@ export const adminCreateReservation = async (req, res) => {
         }
       } else {
         const ctx = await loadAllocatorContext(tx, sessionDate);
-        const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true || forceSplit === 'true', ctx);
+        const allocCurrentReservations = [...currentReservations];
+        if (effectiveWalkIn) {
+          const seatedOccupants = await loadSeatedOccupants(tx, dateStr);
+          for (const sCode of Object.keys(seatedOccupants)) {
+            for (const sId of session_ids) {
+              allocCurrentReservations.push({
+                booking_ref: `__SEATED_${seatedOccupants[sCode].booking_ref}_${sCode}__`,
+                session_id: sId,
+                assigned_seats: [sCode],
+                pax: 1,
+                status: 'confirmed',
+                attendance: 'checked_in',
+                is_seat_locked: true,
+                seat_source: 'staff',
+                is_pinned: true
+              });
+            }
+          }
+        }
+        const allocResult = allocateSeats(allocCurrentReservations, newReservationBlock, forceSplit === true || forceSplit === 'true', ctx);
 
         if (!allocResult.success) {
           if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
@@ -2362,7 +2382,7 @@ export const adminCreateReservation = async (req, res) => {
           checked_in_at: checkInTime,
           assigned_seats: mySeats,
           is_force_split: forceSplit === true || forceSplit === 'true',
-          is_walk_in: isWalkIn === true || isWalkIn === 'true',
+          is_walk_in: effectiveWalkIn,
           is_unlimited: is_unlimited,
           total_amount: totalAmount,
           checkout_details: initialAdminDraft,

@@ -1,9 +1,15 @@
 /**
  * Floor selectors and pure calculation functions for SeatingPage & Checkout
  */
-import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
+import { isBookingCompleted, isPersonOnSeat } from '../../../../shared/floorSelectors.js';
 import { formatTimerHMM, formatDiffMinutesText } from '../../../../shared/time.js';
 import { displayBoardName } from '../../../../shared/billing.js';
+
+export const OCCUPIED_SEAT_STATES = ['in_use', 'warn', 'over', 'paused'];
+
+export function isSeatOccupied(seatInfo) {
+  return Boolean(seatInfo && OCCUPIED_SEAT_STATES.includes(seatInfo.state));
+}
 
 export function extractTimeHHMM(isoString) {
   if (!isoString) return '';
@@ -467,7 +473,13 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
     }
   }
 
-  // 1. Populate checked-in active bookings (ALWAYS PRIORITY, cannot be overwritten)
+  // 1. Populate checked-in active bookings (ALWAYS PRIORITY, sorted earliest checked_in_at first, cannot be overwritten)
+  checkedInActiveBookings.sort((a, b) => {
+    const ta = a.checked_in_at ? new Date(a.checked_in_at).getTime() : (a.start_at ? new Date(a.start_at).getTime() : 0);
+    const tb = b.checked_in_at ? new Date(b.checked_in_at).getTime() : (b.start_at ? new Date(b.start_at).getTime() : 0);
+    return ta - tb;
+  });
+
   for (const b of checkedInActiveBookings) {
     const isPaid =
       b.billing?.status === 'paid' ||
@@ -478,12 +490,35 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
       b.status === 'waived' ||
       Boolean(b.is_paid);
 
-    const bSeats = b.assigned_seats || [];
-    bSeats.forEach((seatCode, idx) => {
-      if (!seatCode || seatCode.startsWith('WAIT-')) return;
-      if (!map[seatCode]) return;
+    const hasPersons = Array.isArray(b.persons) && b.persons.length > 0;
+    const entries = hasPersons
+      ? b.persons
+          .filter(person => isPersonOnSeat(person, b))
+          .map(person => ({ seatCode: person.seat_code, person, personNo: person.person_no }))
+      : (b.assigned_seats || [])
+          .map((seatCode, idx) => ({ seatCode, person: null, personNo: idx + 1 }));
 
-      const person = (b.persons || [])[idx];
+    for (const { seatCode, person, personNo: personNoForSeat } of entries) {
+      if (!seatCode || seatCode.startsWith('WAIT-')) continue;
+      if (!map[seatCode]) continue;
+
+      // Never overwrite an earlier seated booking; mark conflict on the seat instead
+      if (isSeatOccupied(map[seatCode]) && map[seatCode].bookingRef !== b.booking_ref) {
+        map[seatCode].conflict = true;
+        if (!Array.isArray(map[seatCode].conflictWith)) {
+          map[seatCode].conflictWith = [];
+        }
+        if (!map[seatCode].conflictWith.some(c => c.bookingRef === b.booking_ref && c.personNo === personNoForSeat)) {
+          map[seatCode].conflictWith.push({
+            bookingRef: b.booking_ref,
+            paxName: b.name || '客人',
+            booking: b,
+            personNo: personNoForSeat
+          });
+        }
+        continue;
+      }
+
       let timerText = '計時中';
       let state = 'in_use';
 
@@ -512,7 +547,6 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
         }
       }
 
-      const personNoForSeat = person?.person_no || (idx + 1);
       const personBoards = (b.boards || []).filter(bd => bd.person_no === personNoForSeat);
       let maxSoloPauseMins = 0;
       for (const bd of personBoards) {
@@ -544,9 +578,11 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
         booking: b,
         boards: boardLabels,
         boardPauseAlert,
-        personNo: personNoForSeat
+        personNo: personNoForSeat,
+        conflict: false,
+        conflictWith: []
       };
-    });
+    }
   }
 
   // 2. Populate pending candidate bookings for empty seats only
@@ -586,22 +622,43 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
     }
   }
 
-  // 3. Build attention list for un-checked-in past bookings
-  const attentionList = unattendedPastBookings.map(b => {
-    const startTimeStr = extractTimeHHMM(b.start_at || b.start_time || (b.sessions && b.sessions[0]?.start_time)) ||
-      (b.start_at ? new Date(b.start_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : '12:00');
-    const title = `${b.name || '客人'} ${startTimeStr} 的預約沒有報到`;
-    return {
-      type: 'unattended_past',
-      booking_ref: b.booking_ref,
-      title,
-      subtitle: '預約時段已過，尚未報到',
-      text: title,
-      hint: '提供標記未到',
-      action: 'mark_no_show',
-      booking: b
-    };
-  });
+  // 3. Build attention list for conflicts and un-checked-in past bookings
+  const conflictAlerts = [];
+  for (const [seatCode, info] of Object.entries(map)) {
+    if (info && info.conflict && Array.isArray(info.conflictWith) && info.conflictWith.length > 0) {
+      const names = [info.paxName || '客人', ...info.conflictWith.map(c => c.paxName || '客人')];
+      const title = `座位衝突：${seatCode} 同時有 ${names.join('、')}`;
+      conflictAlerts.push({
+        type: 'seat_conflict',
+        seat_code: seatCode,
+        booking_ref: info.bookingRef,
+        conflict_refs: [info.bookingRef, ...info.conflictWith.map(c => c.bookingRef)],
+        title,
+        subtitle: '同一座位有兩組在座，請各自換位或離場',
+        text: title,
+        hint: '點選處理座位衝突'
+      });
+    }
+  }
+
+  const attentionList = [
+    ...conflictAlerts,
+    ...unattendedPastBookings.map(b => {
+      const startTimeStr = extractTimeHHMM(b.start_at || b.start_time || (b.sessions && b.sessions[0]?.start_time)) ||
+        (b.start_at ? new Date(b.start_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : '12:00');
+      const title = `${b.name || '客人'} ${startTimeStr} 的預約沒有報到`;
+      return {
+        type: 'unattended_past',
+        booking_ref: b.booking_ref,
+        title,
+        subtitle: '預約時段已過，尚未報到',
+        text: title,
+        hint: '提供標記未到',
+        action: 'mark_no_show',
+        booking: b
+      };
+    })
+  ];
 
   map.attentionList = attentionList;
 

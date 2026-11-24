@@ -65,3 +65,19 @@ export function isBookingCompleted(booking, now = new Date()) {
 
   return false;
 }
+
+/**
+ * Checks whether a person is physically seated on an active seat (Item 2 / Round 41 Item 2 hook)
+ * @param {object} person
+ * @param {object} booking
+ * @returns {boolean}
+ */
+export function isPersonOnSeat(person, booking) {
+  if (!person || !booking) return false;
+  if (booking.attendance !== 'checked_in') return false;
+  if (person.status != null && person.status !== 'active') return false;
+  const seatCode = person.seat_code ? String(person.seat_code) : '';
+  if (!seatCode || seatCode.startsWith('WAIT-')) return false;
+  const endedAt = person.timer ? person.timer.timer_ended_at : person.timer_ended_at;
+  return endedAt == null;
+}

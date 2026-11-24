@@ -374,6 +374,62 @@ export default function SeatActionPanel({
       }
     >
       <div className="space-y-4 py-1" data-testid="seat-action-panel-content">
+        {seatInfo.conflict && Array.isArray(seatInfo.conflictWith) && seatInfo.conflictWith.length > 0 && booking && seat && (
+          <div
+            data-testid="seat-panel-conflict-box"
+            className="p-3 rounded-2xl border-2 border-sg-danger bg-sg-danger-soft/60 space-y-2.5"
+          >
+            <div className="text-[12px] font-bold text-sg-danger">
+              此座位同時有 {1 + seatInfo.conflictWith.length} 組在座，請各自換位或離場
+            </div>
+            {[
+              { bookingRef: booking.booking_ref, paxName: booking.name || '客人', booking, personNo },
+              ...seatInfo.conflictWith
+            ].map((cg) => {
+              const gBooking = cg.booking;
+              const gStart = gBooking?.start_at ? formatTimeHHMM(gBooking.start_at) : (gBooking?.start_time || '');
+              const gEnd = gBooking?.end_at ? formatTimeHHMM(gBooking.end_at) : (gBooking?.end_time || '');
+              const gRange = gStart && gEnd ? `${gStart}–${gEnd}` : '';
+              return (
+                <div
+                  key={`${cg.bookingRef}-${cg.personNo}`}
+                  className="bg-white rounded-xl border border-sg-danger/30 p-2.5 flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-bold text-sg-ink truncate">
+                      {cg.paxName} · 第 {cg.personNo} 位
+                    </div>
+                    {gRange && <div className="text-[11px] text-sg-muted font-num">{gRange}</div>}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onMoveSeat && gBooking) onMoveSeat(gBooking, seat.code, cg.personNo);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-sg-paper border border-sg-line text-[11px] font-bold text-sg-ink hover:border-sg-brown cursor-pointer"
+                    >
+                      換位
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onTimerAction && gBooking) {
+                          onTimerAction(gBooking.booking_ref, [cg.personNo], 'end');
+                          onClose?.();
+                        }
+                      }}
+                      className="px-2 py-1 rounded-lg bg-sg-danger-soft text-[11px] font-bold text-sg-danger hover:bg-sg-danger hover:text-white cursor-pointer"
+                    >
+                      離場
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {mode === 'inactive' && (
           <div className="py-6 text-center space-y-3">
             <p className="text-[13px] text-sg-muted">這個座位已暫停使用</p>

@@ -73,6 +73,7 @@ import {
   groupTimerPill,
   formatBookingRef,
   isBookingCompleted,
+  isSeatOccupied,
   buildSeatStates
 } from '../../utils/admin/floorSelectors';
 
@@ -654,10 +655,7 @@ export default function SeatingPage() {
 
       const zoneSeats = allSeats.filter(s => s.zone_id === zone.id && s.is_active);
       const totalSeats = zoneSeats.length;
-      const inUseSeats = zoneSeats.filter(s => {
-        const state = seatStatesMap[s.code]?.state;
-        return state === 'in_use' || state === 'paused';
-      }).length;
+      const inUseSeats = zoneSeats.filter(s => isSeatOccupied(seatStatesMap[s.code])).length;
 
       const prefix = (zone.sort_order != null && !zone.name.startsWith(String(zone.sort_order + 1)))
         ? `${zone.sort_order + 1} `
@@ -683,10 +681,7 @@ export default function SeatingPage() {
         zone: null,
         zoneTitle: '其他區域',
         totalSeats: unzonedSeats.length,
-        inUseSeats: unzonedSeats.filter(s => {
-          const state = seatStatesMap[s.code]?.state;
-          return state === 'in_use' || state === 'paused';
-        }).length,
+        inUseSeats: unzonedSeats.filter(s => isSeatOccupied(seatStatesMap[s.code])).length,
         tables: unzonedTables
       });
     }
@@ -1715,6 +1710,13 @@ export default function SeatingPage() {
                           <div
                             key={idx}
                             onClick={() => {
+                              if (al.type === 'seat_conflict' && al.seat_code) {
+                                const seatObj = (layout.seats || []).find(s => s.code === al.seat_code);
+                                if (seatObj) {
+                                  handleSeatClick(seatObj);
+                                  return;
+                                }
+                              }
                               const b = bookings.find(bk => bk.booking_ref === al.booking_ref);
                               if (b) {
                                 if (b.attendance === 'checked_in') setTimerTarget(b);
@@ -2424,7 +2426,7 @@ export default function SeatingPage() {
               {activeSeats.map(s => {
                 const isCurrent = s.code === moveSeatModalTarget?.fromSeat;
                 const occupant = seatStatesMap[s.code]?.booking;
-                const isOccupied = seatStatesMap[s.code]?.state === 'in_use';
+                const isOccupied = isSeatOccupied(seatStatesMap[s.code]) && occupant?.booking_ref !== moveSeatModalTarget?.booking?.booking_ref;
 
                 return (
                   <button
@@ -2966,7 +2968,7 @@ export default function SeatingPage() {
 
           <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
             {activeSeats.map(s => {
-              const isOccupied = seatStatesMap[s.code]?.state === 'in_use';
+              const isOccupied = isSeatOccupied(seatStatesMap[s.code]);
               const isAssigned = (showAddPersonModalTarget?.assigned_seats || []).includes(s.code);
               const isUnavailable = isOccupied || isAssigned;
               const isSelected = selectedAddPersonSeat === s.code;

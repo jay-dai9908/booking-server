@@ -2,8 +2,8 @@
 import prisma from '../../prismaClient.js';
 import { resolveLayoutGeometry } from '../../../../shared/allocator/geometry.js';
 import { allocate } from '../../../../shared/allocator/score.js';
-import { dateOnly } from '../../../../shared/time.js';
-import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
+import { dateOnly, toTaipeiDateString } from '../../../../shared/time.js';
+import { isBookingCompleted, isPersonOnSeat } from '../../../../shared/floorSelectors.js';
 
 export function getLegacyFallbackLayout() {
   const zones = [
@@ -196,4 +196,136 @@ export async function occupancyForSessions(client = prisma, sessionIds = [], exc
   }
 
   return occupancy;
+}
+
+/**
+ * Load physical seats currently occupied by seated (checked-in, not departed) guests on a date,
+ * regardless of which sessions the current reservation covers.
+ * Returns { [seatCode]: { booking_ref, name, end_time } }
+ */
+export async function loadSeatedOccupants(client = prisma, dateStr, { excludeBookingRef = null } = {}) {
+  const targetDateStr = typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)
+    ? dateStr.slice(0, 10)
+    : toTaipeiDateString(dateStr);
+  const targetDate = dateOnly(targetDateStr);
+
+  const whereRes = {
+    session: { session_date: targetDate },
+    status: { not: 'cancelled' },
+    attendance: 'checked_in'
+  };
+  if (excludeBookingRef) {
+    whereRes.booking_ref = { not: excludeBookingRef };
+  }
+
+  const reservations = await client.reservation.findMany({
+    where: whereRes,
+    include: {
+      user: { select: { name: true } },
+      session: { select: { start_time: true, end_time: true } }
+    },
+    orderBy: [{ checked_in_at: 'asc' }, { session: { start_time: 'asc' } }]
+  });
+
+  if (!reservations.length) return {};
+
+  const bookingMetaMap = new Map();
+  for (const r of reservations) {
+    const existing = bookingMetaMap.get(r.booking_ref);
+    if (!existing) {
+      bookingMetaMap.set(r.booking_ref, {
+        booking_ref: r.booking_ref,
+        attendance: r.attendance,
+        status: r.status,
+        name: r.user?.name || '客人',
+        end_time: r.session?.end_time || '',
+        checked_in_at: r.checked_in_at ? new Date(r.checked_in_at).getTime() : Number.MAX_SAFE_INTEGER
+      });
+    } else if (r.session?.end_time && r.session.end_time > existing.end_time) {
+      existing.end_time = r.session.end_time;
+    }
+  }
+
+  const bookingRefs = Array.from(bookingMetaMap.keys());
+  const persons = await client.bookingPerson.findMany({
+    where: { booking_ref: { in: bookingRefs } },
+    orderBy: { person_no: 'asc' }
+  });
+
+  const occupants = {};
+  for (const p of persons) {
+    const booking = bookingMetaMap.get(p.booking_ref);
+    if (!booking || !isPersonOnSeat(p, booking)) continue;
+    if (!occupants[p.seat_code]) {
+      occupants[p.seat_code] = {
+        booking_ref: booking.booking_ref,
+        name: booking.name,
+        end_time: booking.end_time
+      };
+    }
+  }
+
+  return occupants;
+}
+
+/**
+ * Guard against two distinct checked-in groups occupying the same physical seat at the same time on a date.
+ */
+export async function assertNoSeatedCollisions(tx, dateStr) {
+  const targetDateStr = typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)
+    ? dateStr.slice(0, 10)
+    : toTaipeiDateString(dateStr);
+  const targetDate = dateOnly(targetDateStr);
+
+  const reservations = await tx.reservation.findMany({
+    where: {
+      session: { session_date: targetDate },
+      status: { not: 'cancelled' },
+      attendance: 'checked_in'
+    },
+    select: {
+      booking_ref: true,
+      attendance: true,
+      status: true
+    }
+  });
+  if (!reservations.length) return;
+
+  const bookingMap = new Map();
+  for (const r of reservations) {
+    if (!bookingMap.has(r.booking_ref)) {
+      bookingMap.set(r.booking_ref, r);
+    }
+  }
+
+  const bookingRefs = Array.from(bookingMap.keys());
+  const persons = await tx.bookingPerson.findMany({
+    where: { booking_ref: { in: bookingRefs } },
+    select: { booking_ref: true, person_no: true, status: true, seat_code: true, timer_ended_at: true }
+  });
+
+  const seatBookingSets = new Map();
+  for (const p of persons) {
+    const booking = bookingMap.get(p.booking_ref);
+    if (!booking || !isPersonOnSeat(p, booking)) continue;
+    if (!seatBookingSets.has(p.seat_code)) {
+      seatBookingSets.set(p.seat_code, new Set());
+    }
+    seatBookingSets.get(p.seat_code).add(p.booking_ref);
+  }
+
+  const collisions = [];
+  for (const [seatCode, refs] of seatBookingSets.entries()) {
+    if (refs.size > 1) {
+      collisions.push(`${seatCode}`);
+    }
+  }
+
+  if (collisions.length > 0) {
+    throw {
+      status: 409,
+      code: 'SEAT_COLLISION',
+      message: `座位衝突：檢測到同一座位同時有多組在座（${collisions.join('、')}）`
+    };
+  }
 }

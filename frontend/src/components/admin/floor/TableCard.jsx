@@ -246,6 +246,7 @@ export default function TableCard({
           state={state}
           isVent={seat.priority === 'last'}
           isPaid={Boolean(seatInfo.isPaid)}
+          isConflict={Boolean(seatInfo.conflict)}
           boards={seatInfo.boards || []}
           boardPauseAlert={Boolean(seatInfo.boardPauseAlert)}
           timerText={seatInfo.timerText}

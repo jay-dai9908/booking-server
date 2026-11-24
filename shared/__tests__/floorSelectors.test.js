@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isBookingCompleted } from '../floorSelectors.js';
+import { isBookingCompleted, isPersonOnSeat } from '../floorSelectors.js';
 
 test('isBookingCompleted shared selector tests', async (t) => {
   await t.test('1. Completed attendance returns true', () => {
@@ -86,6 +86,40 @@ test('isBookingCompleted shared selector tests', async (t) => {
     };
     assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T17:30:00+08:00')), false);
     assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T18:05:00+08:00')), true);
+  });
+
+  await t.test('9. Round 39 Item 2: isPersonOnSeat detects physically seated active persons', () => {
+    const checkedInBooking = { attendance: 'checked_in' };
+    const pendingBooking = { attendance: null };
+    assert.strictEqual(
+      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: null }, checkedInBooking),
+      true
+    );
+    // Ended timer (departed) -> false
+    assert.strictEqual(
+      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: '2026-11-08T16:00:00Z' }, checkedInBooking),
+      false
+    );
+    // Removed -> false
+    assert.strictEqual(
+      isPersonOnSeat({ status: 'removed', seat_code: 'A1-1', timer_ended_at: null }, checkedInBooking),
+      false
+    );
+    // No seat_code -> false
+    assert.strictEqual(
+      isPersonOnSeat({ status: 'active', seat_code: null, timer_ended_at: null }, checkedInBooking),
+      false
+    );
+    // WAIT-1 -> false
+    assert.strictEqual(
+      isPersonOnSeat({ status: 'active', seat_code: 'WAIT-1', timer_ended_at: null }, checkedInBooking),
+      false
+    );
+    // Not checked in -> false
+    assert.strictEqual(
+      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: null }, pendingBooking),
+      false
+    );
   });
 });
 

@@ -25,6 +25,7 @@ export default function SeatTile({
   variant = 'canvas', // canvas (fixed size for FloorPlan) | card (full-width responsive tile for TableCard)
   isVent = false,
   isPaid = false,
+  isConflict = false,
   boards = [], // e.g. ['小板'] or ['小→中']
   boardPauseAlert = false,
   timerText = null,
@@ -33,7 +34,9 @@ export default function SeatTile({
   className = ''
 }) {
   const isCard = variant === 'card';
-  const baseStateClass = STATE_STYLES[state] || STATE_STYLES.empty;
+  const baseStateClass = isConflict
+    ? `${STATE_STYLES[state] || STATE_STYLES.empty} !border-sg-danger ring-2 ring-sg-danger`
+    : (STATE_STYLES[state] || STATE_STYLES.empty);
   const stateClass = isCard && state === 'empty'
     ? 'bg-white/80 text-sg-muted border-dashed border-sg-line hover:border-sg-brown/50'
     : baseStateClass;
@@ -92,6 +95,14 @@ export default function SeatTile({
         {/* Top row: seat code + optional compact board badge + status icons */}
         <div className="flex items-center justify-center gap-1 w-full leading-none min-h-[16px]">
           <span className="font-num text-[12px] font-bold tracking-tight text-sg-ink/80">{code}</span>
+          {isConflict && (
+            <span
+              data-testid={`seat-conflict-badge-${code}`}
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sg-danger text-white leading-none shadow-2xs"
+            >
+              衝突
+            </span>
+          )}
           {boardTag && (
             <span
               className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full truncate leading-none ${
@@ -145,8 +156,17 @@ export default function SeatTile({
             </span>
           )}
         </div>
-        {isPaid && size !== 'mini' && size !== 'map' && (
-          <Check className="w-3 h-3 text-sg-sage-ink flex-shrink-0" />
+        {isConflict && size === 'full' ? (
+          <span
+            data-testid={`seat-conflict-badge-${code}`}
+            className="text-[9px] font-bold px-1 py-0.5 rounded bg-sg-danger text-white leading-none flex-shrink-0"
+          >
+            衝突
+          </span>
+        ) : (
+          isPaid && size !== 'mini' && size !== 'map' && (
+            <Check className="w-3 h-3 text-sg-sage-ink flex-shrink-0" />
+          )
         )}
       </div>
 

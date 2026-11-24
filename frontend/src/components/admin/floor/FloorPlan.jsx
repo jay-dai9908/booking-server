@@ -235,7 +235,13 @@ export default function FloorPlan({
     : (hasTileOverlap ? 'demo' : size);
 
   // Filter alert bookings
-  const alertBookingRefs = new Set((alerts || []).map(a => a.booking_ref));
+  const alertBookingRefs = new Set();
+  for (const a of (alerts || [])) {
+    if (a.booking_ref) alertBookingRefs.add(a.booking_ref);
+    if (Array.isArray(a.conflict_refs)) {
+      for (const cr of a.conflict_refs) alertBookingRefs.add(cr);
+    }
+  }
 
   return (
     <div
@@ -465,7 +471,7 @@ export default function FloorPlan({
           // Filter opacity check (Spec: 篩選 chip 選了「需要注意」「待入座」「空位」時，不符合的座位加 opacity: .35)
           let isDimmed = false;
           if (filterMode === 'alert') {
-            isDimmed = !alertBookingRefs.has(seatInfo.bookingRef);
+            isDimmed = !alertBookingRefs.has(seatInfo.bookingRef) && !seatInfo.conflict;
           } else if (filterMode === 'pending') {
             isDimmed = state !== 'reserved' && state !== 'resv';
           } else if (filterMode === 'empty') {
@@ -489,6 +495,7 @@ export default function FloorPlan({
                 size={effectiveSize}
                 isVent={isVent}
                 isPaid={Boolean(seatInfo.isPaid)}
+                isConflict={Boolean(seatInfo.conflict)}
                 boards={seatInfo.boards || []}
                 boardPauseAlert={Boolean(seatInfo.boardPauseAlert)}
                 timerText={seatInfo.timerText}

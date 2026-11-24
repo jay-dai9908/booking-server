@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ResponsivePanel from '../ResponsivePanel';
 import Button from '../../customer/Button';
 import api from '../../../api/axios';
-import { bookingTimeRange, extractTimeHHMM } from '../../../utils/admin/floorSelectors';
+import { bookingTimeRange, extractTimeHHMM, isSeatOccupied } from '../../../utils/admin/floorSelectors';
 import { shortBoardName } from '../../../utils/customer/pricing';
 import { Clock, Info, AlertTriangle } from 'lucide-react';
 
@@ -407,7 +407,7 @@ export default function CheckInPanel({
                           <div className="text-[10px] text-sg-muted font-bold text-center">左側</div>
                           {t.left.map((s) => {
                             const isSelected = selectedSeats.includes(s.code);
-                            const isOccupied = seatStatesMap[s.code]?.state === 'in_use' && !target.assigned_seats?.includes(s.code);
+                            const isOccupied = isSeatOccupied(seatStatesMap[s.code]) && !target.assigned_seats?.includes(s.code);
                             const isConflict = conflictSeat === s.code;
 
                             return (
@@ -441,7 +441,7 @@ export default function CheckInPanel({
                           {t.right.length > 0 ? (
                             t.right.map((s) => {
                               const isSelected = selectedSeats.includes(s.code);
-                              const isOccupied = seatStatesMap[s.code]?.state === 'in_use' && !target.assigned_seats?.includes(s.code);
+                              const isOccupied = isSeatOccupied(seatStatesMap[s.code]) && !target.assigned_seats?.includes(s.code);
                               const isConflict = conflictSeat === s.code;
 
                               return (

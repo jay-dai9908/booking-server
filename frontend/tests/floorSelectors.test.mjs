@@ -12,7 +12,8 @@ import {
   isBookingCompleted,
   isSessionPast,
   buildSeatStates,
-  getPersonStatusText
+  getPersonStatusText,
+  isSeatOccupied
 } from '../src/utils/admin/floorSelectors.js';
 
 test('floorSelectors pure function tests', async (t) => {
@@ -592,6 +593,76 @@ test('floorSelectors pure function tests', async (t) => {
       }
     };
     assert.strictEqual(getPersonStatusText(pausedPerson, unpaidBooking), '已暫停');
+  });
+
+  await t.test('17. Round 39 Item 2: isSeatOccupied & buildSeatStates preserves earlier seated group on conflict', () => {
+    assert.strictEqual(isSeatOccupied({ state: 'in_use' }), true);
+    assert.strictEqual(isSeatOccupied({ state: 'warn' }), true);
+    assert.strictEqual(isSeatOccupied({ state: 'over' }), true);
+    assert.strictEqual(isSeatOccupied({ state: 'paused' }), true);
+    assert.strictEqual(isSeatOccupied({ state: 'reserved' }), false);
+    assert.strictEqual(isSeatOccupied({ state: 'empty' }), false);
+    assert.strictEqual(isSeatOccupied({ state: 'off' }), false);
+
+    const layout = {
+      seats: [
+        { id: 1, code: 'A1-1', is_active: true },
+        { id: 2, code: 'A1-2', is_active: true }
+      ]
+    };
+    const bookingA = {
+      booking_ref: 'BK-A-FIRST',
+      name: '早入座A',
+      attendance: 'checked_in',
+      checked_in_at: '2026-11-10T14:00:00+08:00',
+      start_at: '2026-11-10T14:00:00+08:00',
+      end_at: '2026-11-10T16:00:00+08:00',
+      assigned_seats: ['A1-1'],
+      persons: [
+        {
+          person_no: 1,
+          status: 'active',
+          seat_code: 'A1-1',
+          timer: {
+            timer_started_at: '2026-11-10T14:00:00+08:00',
+            billing_start_at: '2026-11-10T14:00:00+08:00',
+            timer_ended_at: null,
+            paused_at: null
+          }
+        }
+      ]
+    };
+    const bookingB = {
+      booking_ref: 'BK-B-SECOND',
+      name: '後入座B',
+      attendance: 'checked_in',
+      checked_in_at: '2026-11-10T16:05:00+08:00',
+      start_at: '2026-11-10T16:00:00+08:00',
+      end_at: '2026-11-10T18:00:00+08:00',
+      assigned_seats: ['A1-1'],
+      persons: [
+        {
+          person_no: 1,
+          status: 'active',
+          seat_code: 'A1-1',
+          timer: {
+            timer_started_at: '2026-11-10T16:05:00+08:00',
+            billing_start_at: '2026-11-10T16:05:00+08:00',
+            timer_ended_at: null,
+            paused_at: null
+          }
+        }
+      ]
+    };
+
+    // Pass B before A deliberately to verify checked_in_at ordering + non-overwrite
+    const states = buildSeatStates(layout, [bookingB, bookingA], new Date('2026-11-10T16:10:00+08:00'));
+    assert.strictEqual(states['A1-1'].bookingRef, 'BK-A-FIRST');
+    assert.strictEqual(states['A1-1'].paxName, '早入座A');
+    assert.strictEqual(states['A1-1'].conflict, true);
+    assert.strictEqual(states['A1-1'].conflictWith.length, 1);
+    assert.strictEqual(states['A1-1'].conflictWith[0].bookingRef, 'BK-B-SECOND');
+    assert.ok(states.attentionList.some(a => a.type === 'seat_conflict' && a.seat_code === 'A1-1'));
   });
 });
 

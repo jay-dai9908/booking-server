@@ -3,7 +3,7 @@ import prisma from '../prismaClient.js';
 import { getLiveFloorData, splitBoardUnits } from '../services/floor/liveService.js';
 import { applyCheckInRecords } from '../services/floor/checkInService.js';
 import { reseatBookings, assertNoSeatCollisions } from '../services/seating/allocator.js';
-import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
+import { getActiveLayoutForDate, loadSeatedOccupants, assertNoSeatedCollisions } from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { refreshBillingCache, getBookingBill } from '../services/billing/billService.js';
@@ -89,6 +89,21 @@ export async function checkIn(req, res) {
         }
       }
 
+      // Check physical seated occupants across all sessions (no auto-reseating for already-seated guests)
+      const dateStr = toTaipeiDateString(firstRes.session.session_date);
+      const seatedOccupants = await loadSeatedOccupants(tx, dateStr, { excludeBookingRef: booking_ref });
+      for (const s of seats) {
+        if (seatedOccupants[s]) {
+          const occ = seatedOccupants[s];
+          throw {
+            status: 409,
+            code: 'SEAT_OCCUPIED',
+            conflict_seat: s,
+            message: `${s} 還有客人（${occ.name}，預約到 ${occ.end_time}），請選其他座位或先讓上一組離場`
+          };
+        }
+      }
+
       // Check conflicts for seats
       const sessionIds = reservations.map(r => r.session_id);
       const conflictReservations = await tx.reservation.findMany({
@@ -123,7 +138,9 @@ export async function checkIn(req, res) {
         primaryBookingRef: booking_ref
       });
 
-      const now = new Date();
+      const now = (process.env.NODE_ENV === 'test' && (req.body?.now || req.body?.at))
+        ? new Date(req.body.now || req.body.at)
+        : new Date();
       await applyCheckInRecords(tx, {
         booking_ref,
         reservations,
@@ -136,6 +153,8 @@ export async function checkIn(req, res) {
         now,
         touchedSessionIds: displaced?.touchedSessionIds || []
       });
+
+      await assertNoSeatedCollisions(tx, dateStr);
 
       return {
         booking_ref,
@@ -178,6 +197,7 @@ export async function moveSeat(req, res) {
       if (!reservations.length) throw { status: 404, message: '找不到此筆預約' };
 
       const sessionIds = reservations.map(r => r.session_id);
+      const dateStr = toTaipeiDateString(reservations[0].session.session_date);
 
       // Validate to_seat exists and is active on layout (WAIT- seats bypass layout check)
       const isWaitSeat = to_seat.startsWith('WAIT-');
@@ -218,6 +238,20 @@ export async function moveSeat(req, res) {
           return;
         } else {
           throw { status: 400, message: `座位 ${to_seat} 已被本筆預約的其他人員佔用` };
+        }
+      }
+
+      // Check seated occupants across all sessions (swap mode handles two-way swap separately)
+      if (!isWaitSeat && mode !== 'swap') {
+        const seatedOccupants = await loadSeatedOccupants(tx, dateStr, { excludeBookingRef: booking_ref });
+        if (seatedOccupants[to_seat]) {
+          const occ = seatedOccupants[to_seat];
+          throw {
+            status: 409,
+            code: 'SEAT_OCCUPIED',
+            conflict_seat: to_seat,
+            message: `${to_seat} 還有客人（${occ.name}，預約到 ${occ.end_time}），請選其他座位或先讓上一組離場`
+          };
         }
       }
 
@@ -304,13 +338,20 @@ export async function moveSeat(req, res) {
       // Assert no collisions across all touched sessions
       const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
       await assertNoSeatCollisions(tx, allSessionsToCheck);
+      await assertNoSeatedCollisions(tx, dateStr);
     });
 
     displayBus.floorChanged();
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[moveSeat] Error:', error);
-    if (error.status) return res.status(error.status).json({ error: error.message });
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.conflict_seat ? { conflict_seat: error.conflict_seat } : {})
+      });
+    }
     return res.status(500).json({ error: '換位失敗' });
   }
 }
@@ -340,6 +381,8 @@ export async function moveGroup(req, res) {
 
       const sessionIds = reservations.map(r => r.session_id);
       const sessionDate = reservations[0].session.session_date;
+      const dateStr = toTaipeiDateString(sessionDate);
+      const seatedOccupants = await loadSeatedOccupants(tx, dateStr, { excludeBookingRef: booking_ref });
 
       const activeLayout = await getActiveLayoutForDate(tx, sessionDate);
       const targetTable = (activeLayout?.tables || []).find(t => t.id === targetTableId);
@@ -370,6 +413,9 @@ export async function moveGroup(req, res) {
         for (const s of cr.assigned_seats || []) {
           occupiedSeatCodes.add(s);
         }
+      }
+      for (const s of Object.keys(seatedOccupants)) {
+        occupiedSeatCodes.add(s);
       }
 
       const availableTargetSeats = targetSeats.filter(s => !occupiedSeatCodes.has(s.code));
@@ -404,6 +450,15 @@ export async function moveGroup(req, res) {
           }
           if (!seatObj.is_active) {
             throw { status: 422, message: `座位 ${code} 目前未啟用` };
+          }
+          if (seatedOccupants[code]) {
+            const occ = seatedOccupants[code];
+            throw {
+              status: 409,
+              code: 'SEAT_OCCUPIED',
+              conflict_seat: code,
+              message: `${code} 還有客人（${occ.name}，預約到 ${occ.end_time}），請選其他座位或先讓上一組離場`
+            };
           }
           if (occupiedSeatCodes.has(code)) {
             throw { status: 422, message: `座位 ${code} 已被其他訂單佔用` };
@@ -454,6 +509,7 @@ export async function moveGroup(req, res) {
 
       // Assert no collisions
       await assertNoSeatCollisions(tx, sessionIds);
+      await assertNoSeatedCollisions(tx, dateStr);
 
       result = {
         success: true,
@@ -467,7 +523,14 @@ export async function moveGroup(req, res) {
     return res.json(result);
   } catch (error) {
     console.error('[moveGroup] Error:', error);
-    if (error.status) return res.status(error.status).json({ error: error.message, message: error.message });
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        message: error.message,
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.conflict_seat ? { conflict_seat: error.conflict_seat } : {})
+      });
+    }
     return res.status(500).json({ error: '整組換桌失敗' });
   }
 }
@@ -730,6 +793,7 @@ export async function addPerson(req, res) {
 
       const firstRes = reservations[0];
       const sessionIds = reservations.map(r => r.session_id);
+      const dateStr = toTaipeiDateString(firstRes.session.session_date);
       let displaced = null;
 
       if (seat_code) {
@@ -743,6 +807,17 @@ export async function addPerson(req, res) {
         const targetSeatObj = (activeLayout?.seats || []).find(ls => ls.code === seat_code);
         if (!targetSeatObj || !targetSeatObj.is_active) {
           throw { status: 400, message: `座位 ${seat_code} 不存在或未啟用` };
+        }
+
+        const seatedOccupants = await loadSeatedOccupants(tx, dateStr, { excludeBookingRef: booking_ref });
+        if (seatedOccupants[seat_code]) {
+          const occ = seatedOccupants[seat_code];
+          throw {
+            status: 409,
+            code: 'SEAT_OCCUPIED',
+            conflict_seat: seat_code,
+            message: `${seat_code} 還有客人（${occ.name}，預約到 ${occ.end_time}），請選其他座位或先讓上一組離場`
+          };
         }
 
         const conflictReservations = await tx.reservation.findMany({
@@ -806,6 +881,7 @@ export async function addPerson(req, res) {
       if (seat_code) {
         const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
         await assertNoSeatCollisions(tx, allSessionsToCheck);
+        await assertNoSeatedCollisions(tx, dateStr);
       }
 
       const existingPersons = await tx.bookingPerson.findMany({

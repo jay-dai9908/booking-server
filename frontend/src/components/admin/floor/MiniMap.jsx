@@ -299,10 +299,11 @@ export default function MiniMap({
                 {t.seats.map((s) => {
                   const k = catOf(s.code); if (!k) return null;
                   const st = STATES[k];
+                  const isConflict = Boolean(seatStates[s.code]?.conflict);
                   return (
                     <circle key={s.code} cx={s.x} cy={s.y} r={dotR} fill={st.fill}
-                      stroke={st.stroke || 'none'} strokeWidth={st.stroke ? px(1.5) : 0}
-                      opacity={filter && filter !== k ? 0.18 : 1} />
+                      stroke={isConflict ? '#DC2626' : (st.stroke || 'none')} strokeWidth={isConflict ? px(2.2) : (st.stroke ? px(1.5) : 0)}
+                      opacity={filter && filter !== k && !isConflict ? 0.18 : 1} />
                   );
                 })}
                 {showLabels && !dim && (
