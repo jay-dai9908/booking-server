@@ -214,7 +214,7 @@ export default function SeatActionPanel({
             onBoardReturn({
               booking,
               board: personBoard,
-              personNo: primaryPerson?.person_no ?? personNo,
+              personNo: currentPerson?.person_no ?? personNo,
               seatCode: seat?.code
             });
           }
