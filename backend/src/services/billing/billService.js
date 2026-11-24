@@ -8,6 +8,7 @@ import { evaluatePromoCode } from '../../controllers/checkoutController.js';
 import { redeemPromo, releasePromo } from '../promo/redemption.js';
 import { log as auditLog } from '../audit/auditService.js';
 import { deductPass, restorePass, validatePassUsage } from './passTender.js';
+import { getShiftLock, canVoidPayment } from './shiftLock.js';
 import { buildBillInput } from './billInput.js';
 import { queuePrintJob } from '../print/printService.js';
 
@@ -233,7 +234,13 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
     hasRefund
   });
 
-  const validPayments = payments.filter(p => p.status === 'valid');
+  const shiftLockAt = await getShiftLock(tx, now);
+  const paymentsWithVoidFlag = payments.map(p => ({
+    ...p,
+    can_void: canVoidPayment(p, { shiftLockAt, now })
+  }));
+
+  const validPayments = paymentsWithVoidFlag.filter(p => p.status === 'valid');
   for (const ep of (billInput.effectivePersons || [])) {
     const rInfo = calculatePersonRefundInfo(validPayments, ep.person_no);
     ep.paid_amount = rInfo.paid_amount;
@@ -272,7 +279,7 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
     billInput,
     persons: billInput.effectivePersons,
     boards: billInput.boards,
-    payments,
+    payments: paymentsWithVoidFlag,
     status
   };
 }
@@ -1637,6 +1644,19 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
       }
     });
 
+    // Cross-day / post-shift void lock check (Round 36 Item 2)
+    const now = new Date();
+    const shiftLockAt = await getShiftLock(tx, now);
+    for (const bp of batchPayments) {
+      if (!canVoidPayment(bp, { shiftLockAt, now })) {
+        throw {
+          status: 409,
+          code: 'VOID_LOCKED',
+          message: '這筆收款已跨日或已交班，請改用退款'
+        };
+      }
+    }
+
     // Block voiding charge/supplement if any covered person still has an active cash-like refund (including legacy unlinked refunds)
     const nonRefundBatch = batchPayments.filter((bp) => bp.kind !== 'refund');
     if (nonRefundBatch.length > 0) {
@@ -1664,13 +1684,13 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
       }
     }
 
-    const now = new Date();
+    const nowVoidedAt = new Date();
     for (const bp of batchPayments) {
       await tx.payment.update({
         where: { id: bp.id },
         data: {
           status: 'voided',
-          voided_at: now,
+          voided_at: nowVoidedAt,
           voided_by_name: staffName,
           void_reason: String(reason).trim()
         }
@@ -1760,7 +1780,19 @@ export async function markUnpaid(booking_ref, reason, staffUser, deviceInfo) {
       where: { booking_ref, status: 'valid' }
     });
 
+    // Cross-day / post-shift void lock check (Round 36 Item 2)
     const now = new Date();
+    const shiftLockAt = await getShiftLock(tx, now);
+    for (const p of validPayments) {
+      if (!canVoidPayment(p, { shiftLockAt, now })) {
+        throw {
+          status: 409,
+          code: 'VOID_LOCKED',
+          message: '這筆收款已跨日或已交班，請改用退款'
+        };
+      }
+    }
+
     let voidedTotal = 0;
 
     for (const p of validPayments) {

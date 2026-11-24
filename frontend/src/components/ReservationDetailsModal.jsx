@@ -76,6 +76,7 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
   const [editAmountValue, setEditAmountValue] = useState('');
   const [showEquipmentModal, setShowEquipmentModal] = useState(false);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [checkoutRefundPayment, setCheckoutRefundPayment] = useState(null);
   const [showLineModal, setShowLineModal] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showMarkUnpaidModal, setShowMarkUnpaidModal] = useState(false);
@@ -83,6 +84,7 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
   const [unpaidLoading, setUnpaidLoading] = useState(false);
   const [payments, setPayments] = useState([]);
   const [voidPaymentTarget, setVoidPaymentTarget] = useState(null);
+  const [voidLockedTarget, setVoidLockedTarget] = useState(null);
   const [voidReason, setVoidReason] = useState('收錯付款方式');
   const [voidLoading, setVoidLoading] = useState(false);
   const [activePaymentMenuId, setActivePaymentMenuId] = useState(null);
@@ -874,12 +876,19 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                                 canMoneyWrite ? (
                                   <button
                                     type="button"
+                                    data-testid={`details-void-btn-${p.id}`}
                                     onClick={() => {
                                       setActivePaymentMenuId(null);
+                                      if (p.can_void === false) {
+                                        setVoidLockedTarget(p);
+                                        return;
+                                      }
                                       setVoidPaymentTarget(p);
                                       setVoidReason('收錯付款方式');
                                     }}
-                                    className="w-full text-left px-3 py-1.5 hover:bg-gray-50 text-red-600 font-bold"
+                                    className={`w-full text-left px-3 py-1.5 hover:bg-gray-50 ${
+                                      p.can_void === false ? 'text-gray-400 font-medium' : 'text-red-600 font-bold'
+                                    }`}
                                   >
                                     作廢
                                   </button>
@@ -1057,8 +1066,12 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
         {showCheckoutModal && (
           <CheckoutWorkbench
             isOpen={showCheckoutModal}
-            onClose={() => setShowCheckoutModal(false)}
+            onClose={() => {
+              setShowCheckoutModal(false);
+              setCheckoutRefundPayment(null);
+            }}
             bookingRef={reservation.booking_ref}
+            initialRefundPayment={checkoutRefundPayment}
             onPaymentSuccess={async () => {
               try {
                 const res = await api.get(`/reservations/admin/${reservation.booking_ref}/details`);
@@ -1124,6 +1137,24 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
           required={true}
         />
       </ConfirmPanel>
+
+      {/* Void Locked Modal (Cross-day or post-shift) */}
+      <ConfirmPanel
+        isOpen={Boolean(voidLockedTarget)}
+        onClose={() => setVoidLockedTarget(null)}
+        onConfirm={() => {
+          const target = voidLockedTarget;
+          setVoidLockedTarget(null);
+          if (target) {
+            setCheckoutRefundPayment(target);
+            setShowCheckoutModal(true);
+          }
+        }}
+        title="無法作廢此筆收款"
+        message="已跨日或已交班，請用退款"
+        confirmText="改用退款"
+        cancelText="關閉"
+      />
 
       {/* Void Payment Modal */}
       {voidPaymentTarget && (

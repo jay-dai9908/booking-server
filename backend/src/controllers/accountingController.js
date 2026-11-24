@@ -3,6 +3,7 @@ import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { queuePrintJob } from '../services/print/printService.js';
+import { getShiftLock, canVoidPayment } from '../services/billing/shiftLock.js';
 
 export const getAccountingSummary = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -183,7 +184,13 @@ export const getPaymentsList = async (req, res) => {
     });
 
     const hasMore = payments.length > take;
-    const items = hasMore ? payments.slice(0, take) : payments;
+    const rawItems = hasMore ? payments.slice(0, take) : payments;
+    const nowTs = new Date();
+    const shiftLockAt = await getShiftLock(prisma, nowTs);
+    const items = rawItems.map(p => ({
+      ...p,
+      can_void: canVoidPayment(p, { shiftLockAt, now: nowTs })
+    }));
     const nextCursor = hasMore ? items[items.length - 1].id : null;
 
     return res.json({ payments: items, next_cursor: nextCursor });

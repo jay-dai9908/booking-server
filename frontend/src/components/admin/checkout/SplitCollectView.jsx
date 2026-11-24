@@ -25,6 +25,7 @@ export default function SplitCollectView({
   initialPersonNo = null,
   onOpenSharedSplit = null,
   initialSupplementPerson = null,
+  initialRefundPayment = null,
   displaySyncEnabled = true,
   onDisplayPaid = null,
   onDisplayNextPerson = null
@@ -66,7 +67,9 @@ export default function SplitCollectView({
   const [supplementTarget, setSupplementTarget] = useState(initialSupplementPerson || null);
   const [refundTarget, setRefundTarget] = useState(null);
   const [voidTargetPayment, setVoidTargetPayment] = useState(null);
+  const [voidLockedTarget, setVoidLockedTarget] = useState(null);
   const [showWaiveModal, setShowWaiveModal] = useState(false);
+  const hasAutoOpenedRefundRef = useRef(false);
 
   // Sub-modal form states
   const [supplementMethod, setSupplementMethod] = useState('cash');
@@ -199,6 +202,34 @@ export default function SplitCollectView({
     setActionAmount(maxRef);
     setActionReason('');
   };
+
+  const openRefundForPayment = (pay) => {
+    if (!pay || persons.length === 0) return;
+    const pNos = Array.isArray(pay.person_nos) ? pay.person_nos : [];
+    const targetPerson =
+      persons.find(p => pNos.includes(p.person_no)) ||
+      persons.find(p => (p.max_refundable || 0) > 0 || (p.pass_refundable?.some(pr => pr.remaining_units > 0))) ||
+      persons[0];
+    if (!targetPerson) return;
+    handleOpenRefund(targetPerson);
+    if (pay.method === 'pass') {
+      setRefundMethod('pass');
+      setSelectedPassPaymentId(pay.id);
+    } else if (pay.kind === 'charge' || pay.kind === 'supplement') {
+      setSelectedCashPaymentId(pay.id);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen || !initialRefundPayment) {
+      hasAutoOpenedRefundRef.current = false;
+      return;
+    }
+    if (persons.length > 0 && !hasAutoOpenedRefundRef.current) {
+      hasAutoOpenedRefundRef.current = true;
+      openRefundForPayment(initialRefundPayment);
+    }
+  }, [isOpen, initialRefundPayment, persons.length]);
 
   const refundTargetMaxRefundable = refundTarget?.max_refundable ?? 0;
   const cashChargePaymentsForTarget = refundTarget
@@ -911,11 +942,18 @@ export default function SplitCollectView({
                         canMoneyWrite ? (
                           <button
                             type="button"
+                            data-testid={`split-void-btn-${pay.id}`}
                             onClick={() => {
+                              if (pay.can_void === false) {
+                                setVoidLockedTarget(pay);
+                                return;
+                              }
                               setVoidTargetPayment(pay);
                               setActionReason('');
                             }}
-                            className="text-sg-danger hover:underline font-bold"
+                            className={pay.can_void === false
+                              ? 'px-2 py-0.5 rounded-lg border border-sg-line bg-sg-paper text-sg-muted text-[11px] font-medium'
+                              : 'text-sg-danger hover:underline font-bold'}
                           >
                             作廢
                           </button>
@@ -1384,6 +1422,38 @@ export default function SplitCollectView({
           title="確認作廢收款"
           message={`確定要作廢收款 ${voidTargetPayment.payment_no} (NT$${voidTargetPayment.amount}) 嗎？作廢後不可復原。`}
         />
+      )}
+
+      {/* Void Locked Modal (Cross-day or post-shift) */}
+      {voidLockedTarget && (
+        <ResponsivePanel
+          isOpen={Boolean(voidLockedTarget)}
+          onClose={() => setVoidLockedTarget(null)}
+          title="無法作廢此筆收款"
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setVoidLockedTarget(null)}>
+                關閉
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                data-testid="switch-to-refund-btn"
+                onClick={() => {
+                  const target = voidLockedTarget;
+                  setVoidLockedTarget(null);
+                  openRefundForPayment(target);
+                }}
+              >
+                改用退款
+              </Button>
+            </div>
+          }
+        >
+          <div className="py-2 text-[13px] text-sg-ink font-medium" data-testid="void-locked-message">
+            已跨日或已交班，請用退款
+          </div>
+        </ResponsivePanel>
       )}
 
       {/* Mark Unpaid Modal */}

@@ -123,11 +123,13 @@ export default function AccountingPage() {
 
   // Void payment modal state
   const [voidPaymentTarget, setVoidPaymentTarget] = useState(null);
+  const [voidLockedTarget, setVoidLockedTarget] = useState(null);
   const [voidReason, setVoidReason] = useState('收錯付款方式');
   const [voidLoading, setVoidLoading] = useState(false);
 
   // Modals
   const [checkoutBookingRef, setCheckoutBookingRef] = useState(null);
+  const [checkoutRefundPayment, setCheckoutRefundPayment] = useState(null);
   const [detailsBookingRef, setDetailsBookingRef] = useState(null);
 
   // Toast
@@ -943,11 +945,18 @@ export default function AccountingPage() {
                             canMoneyWrite ? (
                               <button
                                 type="button"
+                                data-testid={`accounting-void-btn-${p.id}`}
                                 onClick={() => {
+                                  if (p.can_void === false) {
+                                    setVoidLockedTarget(p);
+                                    return;
+                                  }
                                   setVoidPaymentTarget(p);
                                   setVoidReason('收錯付款方式');
                                 }}
-                                className="text-sg-danger font-bold text-[12px] hover:underline"
+                                className={p.can_void === false
+                                  ? 'px-2 py-0.5 rounded-lg border border-sg-line bg-sg-paper text-sg-muted font-medium text-[12px]'
+                                  : 'text-sg-danger font-bold text-[12px] hover:underline'}
                               >
                                 作廢
                               </button>
@@ -1554,6 +1563,24 @@ export default function AccountingPage() {
         />
       </ConfirmPanel>
 
+      {/* Void Locked Modal (Cross-day or post-shift) */}
+      <ConfirmPanel
+        isOpen={Boolean(voidLockedTarget)}
+        onClose={() => setVoidLockedTarget(null)}
+        onConfirm={() => {
+          const target = voidLockedTarget;
+          setVoidLockedTarget(null);
+          if (target?.booking_ref) {
+            setCheckoutRefundPayment(target);
+            setCheckoutBookingRef(target.booking_ref);
+          }
+        }}
+        title="無法作廢此筆收款"
+        message="已跨日或已交班，請用退款"
+        confirmText="改用退款"
+        cancelText="關閉"
+      />
+
       {/* Closing Slip Preview Modal */}
       <ResponsivePanel
         isOpen={showClosingPreviewModal}
@@ -1726,8 +1753,12 @@ export default function AccountingPage() {
       {checkoutBookingRef && (
         <CheckoutWorkbench
           isOpen={Boolean(checkoutBookingRef)}
-          onClose={() => setCheckoutBookingRef(null)}
+          onClose={() => {
+            setCheckoutBookingRef(null);
+            setCheckoutRefundPayment(null);
+          }}
           bookingRef={checkoutBookingRef}
+          initialRefundPayment={checkoutRefundPayment}
           onPaymentSuccess={() => {
             if (activeTab === 'payments') fetchPayments();
             else if (activeTab === 'unpaid') fetchUnpaid();

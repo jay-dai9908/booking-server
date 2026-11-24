@@ -162,7 +162,7 @@ export async function postSupplement(req, res) {
     });
   } catch (error) {
     console.error('[postSupplement] Error:', error);
-    if (error.status) return res.status(error.status).json({ error: error.message });
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
     return res.status(500).json({ error: '補收失敗' });
   }
 }
@@ -182,7 +182,7 @@ export async function postRefund(req, res) {
     });
   } catch (error) {
     console.error('[postRefund] Error:', error);
-    if (error.status) return res.status(error.status).json({ error: error.message });
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
     return res.status(500).json({ error: '退款失敗' });
   }
 }
@@ -202,7 +202,7 @@ export async function postWaive(req, res) {
     });
   } catch (error) {
     console.error('[postWaive] Error:', error);
-    if (error.status) return res.status(error.status).json({ error: error.message });
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
     return res.status(500).json({ error: '免收失敗' });
   }
 }
@@ -223,7 +223,7 @@ export async function postVoid(req, res) {
     });
   } catch (error) {
     console.error('[postVoid] Error:', error);
-    if (error.status) return res.status(error.status).json({ error: error.message });
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
     return res.status(500).json({ error: '作廢收款失敗' });
   }
 }
@@ -244,7 +244,7 @@ export async function postMarkUnpaid(req, res) {
     });
   } catch (error) {
     console.error('[postMarkUnpaid] Error:', error);
-    if (error.status) return res.status(error.status).json({ error: error.message });
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
     return res.status(500).json({ error: '標記未結帳失敗' });
   }
 }

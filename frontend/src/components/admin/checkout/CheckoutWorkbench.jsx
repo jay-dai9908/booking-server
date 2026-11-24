@@ -53,7 +53,8 @@ export default function CheckoutWorkbench({
   onClose,
   bookingRef,
   onPaymentSuccess,
-  onSyncError
+  onSyncError,
+  initialRefundPayment = null
 }) {
   const { can } = useAdminPermissions();
   const canMoneyWrite = can(MONEY_WRITE);
@@ -79,6 +80,7 @@ export default function CheckoutWorkbench({
   const [previewHtml, setPreviewHtml] = useState('');
   const [showCollectModal, setShowCollectModal] = useState(false);
   const [showSplitCollect, setShowSplitCollect] = useState(false);
+  const hasAutoOpenedRefundRef = useRef(false);
   const [showSharedSplitPanel, setShowSharedSplitPanel] = useState(false);
   const [selectedSharedAddonKey, setSelectedSharedAddonKey] = useState(null);
   const [showAddonManager, setShowAddonManager] = useState(false);
@@ -348,10 +350,12 @@ export default function CheckoutWorkbench({
     displayPaidBookingRef.current = null;
     if (isOpen && bookingRef) {
       hasAutoOpenedSplitRef.current = false;
+      hasAutoOpenedRefundRef.current = false;
       loadBill();
     } else {
       setBillData(null);
       setDraftState(null);
+      hasAutoOpenedRefundRef.current = false;
     }
     return () => {
       isMountedRef.current = false;
@@ -370,6 +374,13 @@ export default function CheckoutWorkbench({
       }
     };
   }, [isOpen, bookingRef]);
+
+  useEffect(() => {
+    if (isOpen && !loading && billData && initialRefundPayment && !hasAutoOpenedRefundRef.current) {
+      hasAutoOpenedRefundRef.current = true;
+      setShowSplitCollect(true);
+    }
+  }, [isOpen, loading, billData, initialRefundPayment]);
 
   // Keepalive flush on tab switch or page close (Section 2 + Round 29 display close)
   useEffect(() => {
@@ -2585,6 +2596,7 @@ export default function CheckoutWorkbench({
           bookingRef={bookingRef}
           billData={billData}
           initialSupplementPerson={supplementPerson}
+          initialRefundPayment={initialRefundPayment}
           displaySyncEnabled={displaySyncEnabled}
           onDisplayPaid={() => {
             displayPaidBookingRef.current = bookingRef;
