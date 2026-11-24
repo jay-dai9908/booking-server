@@ -283,7 +283,7 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       console.error(err);
-      showToast('更新狀態失敗', true);
+      showToast(err.response?.data?.error || '更新狀態失敗', true);
     }
   };
 

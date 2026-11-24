@@ -31,6 +31,7 @@ import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { getReservationEntryPass } from '../services/kiosk/entryService.js';
 import { isPlainString } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
+import displayBus from '../services/display/displayBus.js';
 
 function mergeCustomerEquipments(rawList = []) {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
@@ -2738,47 +2739,144 @@ export const extendReservation = async (req, res) => {
 export const updateAttendance = async (req, res) => {
   const { id: booking_ref } = req.params;
   const { attendance } = req.body; // 'checked_in', 'no_show', or null
-  const staffName = req.user?.name || '管理員';
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+  const now = (process.env.NODE_ENV === 'test' && (req.body?.now || req.query?.now))
+    ? new Date(req.body?.now || req.query?.now)
+    : new Date();
 
   try {
     if (attendance === null || attendance === '') {
-      // Check if there is any payment
-      const payment = await prisma.payment.findFirst({
-        where: { booking_ref, status: 'valid' }
-      });
-      if (payment) {
-        return res.status(409).json({ error: '已有收款，不能取消報到' });
-      }
+      const result = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
-      await prisma.bookingPerson.deleteMany({
-        where: { booking_ref }
-      });
-
-      const updated = await prisma.reservation.updateMany({
-        where: { booking_ref },
-        data: {
-          attendance: null,
-          checked_in_at: null,
-          checked_in_by: null,
-          seat_source: 'auto'
+        const reservations = await tx.reservation.findMany({
+          where: { booking_ref, status: { not: 'cancelled' } },
+          include: { session: true },
+          orderBy: { session: { start_time: 'asc' } }
+        });
+        if (!reservations.length) {
+          throw { status: 404, message: '找不到此筆預約' };
         }
+
+        const firstRes = reservations[0];
+        const prevAttendance = firstRes.attendance;
+        if (prevAttendance !== 'checked_in' && prevAttendance !== 'no_show') {
+          throw { status: 409, code: 'INVALID_ATTENDANCE_TRANSITION', message: '這筆預約目前不能改回未報到' };
+        }
+
+        const bookingDateStr = toTaipeiDateString(firstRes.session.session_date);
+        const todayStr = toTaipeiDateString(now);
+        if (bookingDateStr !== todayStr) {
+          throw { status: 409, code: 'NOT_TODAY', message: '只能處理今天的預約' };
+        }
+
+        const payment = await tx.payment.findFirst({
+          where: { booking_ref, status: 'valid' }
+        });
+        if (payment) {
+          throw { status: 409, code: 'HAS_VALID_PAYMENT', message: '已有收款，不能取消報到' };
+        }
+
+        const equips = await tx.bookingEquipment.findMany({
+          where: { booking_ref },
+          select: { unit_group: true }
+        });
+        const unitGroups = [...new Set(equips.map(e => e.unit_group).filter(Boolean))];
+        if (unitGroups.length > 0) {
+          await tx.boardPause.updateMany({
+            where: {
+              unit_group: { in: unitGroups },
+              source: 'person',
+              ended_at: null
+            },
+            data: { ended_at: now }
+          });
+        }
+
+        await tx.bookingEquipment.updateMany({
+          where: { booking_ref },
+          data: { person_id: null }
+        });
+
+        await tx.bookingPerson.deleteMany({
+          where: { booking_ref }
+        });
+
+        const updated = await tx.reservation.updateMany({
+          where: { booking_ref, status: { not: 'cancelled' } },
+          data: {
+            attendance: null,
+            checked_in_at: null,
+            checked_in_by: null,
+            seat_source: 'auto'
+          }
+        });
+
+        await auditLog(tx, {
+          booking_ref,
+          event_type: prevAttendance === 'no_show' ? 'no_show_reverted' : 'check_in_cancelled',
+          category: 'seating',
+          summary: prevAttendance === 'no_show' ? '未到還原為未報到' : '取消報到並清除板子人員指派',
+          before_json: { attendance: prevAttendance },
+          after_json: { attendance: null },
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id || null,
+          device_label: deviceInfo?.device_label || null
+        });
+
+        await refreshBillingCache(tx, booking_ref);
+        return { count: updated.count };
       });
-      if (updated.count === 0) {
-        return res.status(404).json({ error: 'Reservation not found' });
-      }
-      return res.json({ message: '報到已取消', count: updated.count, attendance: null });
+
+      displayBus.floorChanged();
+      return res.json({ message: '報到已取消', count: result.count, attendance: null });
+    }
+
+    if (attendance === 'no_show') {
+      const result = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+        const reservations = await tx.reservation.findMany({
+          where: { booking_ref, status: { not: 'cancelled' } }
+        });
+        if (!reservations.length) {
+          throw { status: 404, message: '找不到此筆預約' };
+        }
+
+        const currentAttendance = reservations[0].attendance;
+        if (currentAttendance !== null && currentAttendance !== '' && currentAttendance !== 'pending') {
+          throw { status: 409, code: 'INVALID_ATTENDANCE_TRANSITION', message: '只有未報到的預約才能標記未到' };
+        }
+
+        const updated = await tx.reservation.updateMany({
+          where: { booking_ref, status: { not: 'cancelled' } },
+          data: { attendance: 'no_show', checked_in_at: null }
+        });
+        return { count: updated.count };
+      });
+
+      displayBus.floorChanged();
+      return res.json({
+        message: 'Attendance updated successfully',
+        count: result.count,
+        attendance: 'no_show',
+        checked_in_at: null
+      });
     }
 
     const dataToUpdate = { attendance };
     if (attendance === 'checked_in') {
-      dataToUpdate.checked_in_at = new Date();
+      dataToUpdate.checked_in_at = now;
       dataToUpdate.checked_in_by = staffName;
     } else {
       dataToUpdate.checked_in_at = null;
     }
 
     const updated = await prisma.reservation.updateMany({
-      where: { booking_ref },
+      where: { booking_ref, status: { not: 'cancelled' } },
       data: dataToUpdate
     });
 
@@ -2786,14 +2884,21 @@ export const updateAttendance = async (req, res) => {
       return res.status(404).json({ error: 'Reservation not found' });
     }
 
-    res.json({ 
-      message: 'Attendance updated successfully', 
+    displayBus.floorChanged();
+    res.json({
+      message: 'Attendance updated successfully',
       count: updated.count,
       attendance,
       checked_in_at: dataToUpdate.checked_in_at
     });
   } catch (error) {
     console.error('Error updating attendance:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
     res.status(500).json({ error: 'Failed to update attendance' });
   }
 };

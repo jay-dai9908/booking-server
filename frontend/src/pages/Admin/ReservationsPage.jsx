@@ -221,7 +221,7 @@ export default function ReservationsPage() {
       showToast('狀態已成功更新');
     } catch (err) {
       console.error(err);
-      showToast('更新狀態失敗');
+      showToast(err.response?.data?.error || '更新狀態失敗');
     }
   };
 
