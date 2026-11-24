@@ -242,7 +242,7 @@ export default function ForceAddModal({
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="0912345678"
+                placeholder={'0912345678' /* // check-secrets: fake-data */}
                 className="w-full pl-9 pr-3 py-2 rounded-xl border border-sg-line text-[13px] text-sg-ink focus:outline-none focus:border-sg-brown"
               />
             </div>

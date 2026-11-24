@@ -797,7 +797,7 @@ export default function ReservationsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">聯絡電話 <span className="text-gray-400 font-normal">(選填)</span></label>
-                  <input type="tel" value={manualPhone} onChange={e => setManualPhone(e.target.value)} placeholder="例：0912345678"
+                  <input type="tel" value={manualPhone} onChange={e => setManualPhone(e.target.value)} placeholder={'例：0912345678' /* // check-secrets: fake-data */}
                     className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-sg-brown outline-none" />
                 </div>
               </div>
