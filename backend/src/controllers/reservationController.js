@@ -3,7 +3,8 @@ import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
 import { loadAllocatorContext, getActiveLayoutForDate, loadSeatedOccupants, lockDaySeats } from '../services/seating/layoutService.js';
-import { isReservationPinned, reseatBookings, MOVABLE_RESERVATION_FILTER } from '../services/seating/allocator.js';
+import { isReservationPinned, reseatBookings, MOVABLE_RESERVATION_FILTER, assertNoSeatCollisions } from '../services/seating/allocator.js';
+import { isPersonPaid } from '../services/floor/checkInService.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { evaluatePromoCode } from './checkoutController.js';
@@ -2531,21 +2532,41 @@ export const adminCreateReservation = async (req, res) => {
   }
 };
 
+function cloneReservationRow(base, overrides = {}) {
+  const excluded = new Set(['id', 'session_id', 'created_at', 'updated_at']);
+  const row = {};
+  for (const field of Object.values(Prisma.ReservationScalarFieldEnum)) {
+    if (excluded.has(field)) continue;
+    if (base[field] !== undefined && base[field] !== null) {
+      row[field] = base[field];
+    }
+  }
+  return { ...row, ...overrides };
+}
+
 export const extendReservation = async (req, res) => {
   const { booking_ref } = req.params;
   const { session_ids, extendMode, forceSplit } = req.body;
-  
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   if (!Array.isArray(session_ids) || session_ids.length === 0) {
-    return res.status(400).json({ error: 'Valid session_ids array is required.' });
+    return res.status(400).json({ error: '請至少選擇一個加時時段' });
+  }
+
+  const uniqueSessionIds = [...new Set(session_ids.map(Number).filter(Number.isInteger))];
+  if (uniqueSessionIds.length !== session_ids.length || uniqueSessionIds.length === 0) {
+    return res.status(400).json({ error: '選取的時段格式不正確或有重複' });
   }
 
   try {
     const sessionsPre = await prisma.session.findMany({
-      where: { id: { in: session_ids } },
+      where: { id: { in: uniqueSessionIds } },
       select: { id: true, session_date: true }
     });
-    if (sessionsPre.length !== session_ids.length) {
-      return res.status(404).json({ error: 'One or more sessions not found.' });
+    if (sessionsPre.length !== uniqueSessionIds.length) {
+      return res.status(404).json({ error: '找不到指定的時段' });
     }
     const extendDateStr = toTaipeiDateString(sessionsPre[0].session_date);
 
@@ -2559,17 +2580,90 @@ export const extendReservation = async (req, res) => {
       await lockDaySeats(tx, extendDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
-      // Find the existing reservation details
+      // Find existing reservation details with session info
       const existingReservations = await tx.reservation.findMany({
         where: { booking_ref, status: 'confirmed' },
-        orderBy: { session_id: 'desc' }
+        include: { session: true },
+        orderBy: { session: { start_time: 'asc' } }
       });
 
       if (existingReservations.length === 0) {
-        throw new Error('RESERVATION_NOT_FOUND');
+        throw { status: 404, message: '找不到原本的預約' };
       }
 
       const baseReservation = existingReservations[0];
+      if (baseReservation.attendance === 'completed' || baseReservation.attendance === 'no_show') {
+        throw { status: 409, code: 'ATTENDANCE_NOT_EXTENDABLE', message: '已離場或未到的預約不能加時' };
+      }
+
+      const bookingDateStr = toTaipeiDateString(baseReservation.session.session_date);
+
+      const sessions = await tx.session.findMany({
+        where: { id: { in: uniqueSessionIds } },
+        include: {
+          reservations: {
+            where: {
+              status: 'confirmed',
+              OR: [{ attendance: null }, { attendance: { notIn: ['completed', 'no_show'] } }]
+            },
+            select: { pax: true, assigned_seats: true }
+          }
+        },
+        orderBy: { start_time: 'asc' }
+      });
+
+      if (sessions.length !== uniqueSessionIds.length) {
+        throw { status: 404, message: '找不到指定的時段' };
+      }
+
+      if (sessions.some(s => toTaipeiDateString(s.session_date) !== bookingDateStr)) {
+        throw { status: 400, code: 'CROSS_DATE_EXTEND', message: '加時只能加同一天的時段' };
+      }
+
+      const existingSessIdSet = new Set(existingReservations.map(r => r.session_id));
+      const dupSession = sessions.find(s => existingSessIdSet.has(s.id));
+      if (dupSession) {
+        throw {
+          status: 409,
+          code: 'DUPLICATE_SESSION',
+          message: `${dupSession.start_time.slice(0, 5)} 這個時段已經在這筆預約裡`
+        };
+      }
+
+      // Check contiguity: all new sessions form one block immediately before or after existing sessions
+      const allDaySessions = await tx.session.findMany({
+        where: { session_date: baseReservation.session.session_date },
+        orderBy: { start_time: 'asc' },
+        select: { id: true, start_time: true, end_time: true }
+      });
+      const indexById = new Map(allDaySessions.map((s, idx) => [s.id, idx]));
+      const existingIndices = existingReservations
+        .map(r => indexById.get(r.session_id))
+        .filter(i => i !== undefined)
+        .sort((a, b) => a - b);
+      const newIndices = sessions
+        .map(s => indexById.get(s.id))
+        .filter(i => i !== undefined)
+        .sort((a, b) => a - b);
+
+      let newIsContiguous = newIndices.length === sessions.length;
+      for (let i = 1; i < newIndices.length; i++) {
+        if (newIndices[i] !== newIndices[i - 1] + 1) {
+          newIsContiguous = false;
+          break;
+        }
+      }
+      const existMinIdx = existingIndices[0];
+      const existMaxIdx = existingIndices[existingIndices.length - 1];
+      const newMinIdx = newIndices[0];
+      const newMaxIdx = newIndices[newIndices.length - 1];
+      const attachesToExisting = existingIndices.length > 0 && (
+        newMaxIdx === existMinIdx - 1 || newMinIdx === existMaxIdx + 1
+      );
+      if (!newIsContiguous || !attachesToExisting) {
+        throw { status: 400, code: 'NON_CONTIGUOUS_EXTEND', message: '加時的時段要和原本的時段相連' };
+      }
+
       const { user_id, pax, assigned_seats, is_walk_in } = baseReservation;
 
       // Inherit attendance, checked_in_at, and payment details
@@ -2582,10 +2676,9 @@ export const extendReservation = async (req, res) => {
       const inheritedPaidAt = paidRes.paid_at || null;
       const inheritedIsAmountManual = baseReservation.is_amount_manual || false;
 
-      // Ensure all existing segments have consistent attendance & checked_in_at
       if (inheritedAttendance) {
         await tx.reservation.updateMany({
-          where: { booking_ref },
+          where: { booking_ref, status: 'confirmed' },
           data: {
             attendance: inheritedAttendance,
             checked_in_at: inheritedCheckedInAt
@@ -2593,22 +2686,15 @@ export const extendReservation = async (req, res) => {
         });
       }
 
-      // Ensure sessions exist
-      const sessions = await tx.session.findMany({
-        where: { id: { in: session_ids } },
-        include: { reservations: { where: { status: 'confirmed' }, select: { pax: true, assigned_seats: true } } }
-      });
-
-      if (sessions.length !== session_ids.length) {
-        throw new Error('SOME_SESSIONS_NOT_FOUND');
-      }
-
       let mySeats = [];
-      const sessionUpdates = [];
 
-      // Fetch current reservations for all affected sessions for allocator
+      // Fetch current active reservations in the target sessions for allocator
       const allCurrentReservations = await tx.reservation.findMany({
-        where: { session_id: { in: session_ids }, status: 'confirmed' }
+        where: {
+          session_id: { in: uniqueSessionIds },
+          status: 'confirmed',
+          OR: [{ attendance: null }, { attendance: { notIn: ['completed', 'no_show'] } }]
+        }
       });
 
       if (extendMode === 'force_wait') {
@@ -2628,89 +2714,178 @@ export const extendReservation = async (req, res) => {
           mySeats.push(`WAIT-${waitCounter++}`);
         }
       } else {
-        // Capacity check for non-wait modes against actual layout seats
         for (const session of sessions) {
-          const bookedPax = session.reservations.reduce((sum, res) => {
-            return sum + res.pax;
-          }, 0);
+          const bookedPax = session.reservations.reduce((sum, r) => sum + r.pax, 0);
           const activeLayout = await getActiveLayoutForDate(tx, session.session_date);
-          const layoutCapacity = (activeLayout?.capacity && activeLayout.capacity > 0) ? activeLayout.capacity : (activeLayout?.seats || []).filter(s => s.is_active).length || 16;
+          const layoutCapacity = (activeLayout?.capacity && activeLayout.capacity > 0)
+            ? activeLayout.capacity
+            : ((activeLayout?.seats || []).filter(s => s.is_active).length || 16);
           if (layoutCapacity - bookedPax < pax) {
-            throw new Error('INSUFFICIENT_CAPACITY');
+            throw { status: 400, code: 'INSUFFICIENT_CAPACITY', message: '加時時段座位已滿，無法加時' };
           }
         }
 
         if (extendMode === 'keep_seat') {
           mySeats = assigned_seats || [];
         } else if (extendMode === 'system_allocate') {
-          const newBlock = { booking_ref: 'NEW_RES', pax, session_ids };
+          const newBlock = { booking_ref: 'NEW_RES', pax, session_ids: uniqueSessionIds };
           const ctx = await loadAllocatorContext(tx, sessions[0]?.session_date);
           const allocResult = allocateSeats(allCurrentReservations, newBlock, forceSplit === true || forceSplit === 'true', ctx);
-          
+
           if (!allocResult.success) {
-            if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
-            if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
-            throw new Error('ALLOCATION_FAILED');
+            if (allocResult.error === 'INSUFFICIENT_SEATS') {
+              throw { status: 400, code: 'INSUFFICIENT_CAPACITY', message: '加時時段座位已滿，無法加時' };
+            }
+            if (allocResult.error === 'SPLIT_REQUIRED') {
+              throw { status: 409, code: 'SPLIT_REQUIRED', message: '連續座位不足，同行者將被拆散。是否確認預約？' };
+            }
+            throw { status: 400, message: '無法為加時時段分配座位' };
           }
 
           mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
-
           await applyMovableSeatUpdates(tx, allocResult.updates);
         }
       }
 
-      const newReservationsData = [];
-      for (const sessionId of session_ids) {
-        newReservationsData.push({
-          booking_ref,
+      const newReservationsData = uniqueSessionIds.map(sessionId =>
+        cloneReservationRow(baseReservation, {
           session_id: sessionId,
-          user_id,
-          pax,
-          status: 'confirmed',
           assigned_seats: mySeats,
           is_force_split: forceSplit === true || forceSplit === 'true',
-          is_walk_in,
-          is_unlimited: baseReservation.is_unlimited,
-          total_amount: baseReservation.total_amount,
           attendance: inheritedAttendance,
           checked_in_at: inheritedCheckedInAt,
           is_paid: inheritedIsPaid,
           paid_at: inheritedPaidAt,
-          is_amount_manual: inheritedIsAmountManual,
-          payment_method: baseReservation.payment_method,
-          checkout_unlimited_pax: baseReservation.checkout_unlimited_pax,
-          checkout_regular_hours: baseReservation.checkout_regular_hours,
-          checkout_details: baseReservation.checkout_details,
-          promo_code: baseReservation.promo_code,
-          discount_amount: baseReservation.discount_amount,
-          addons_amount: baseReservation.addons_amount,
-          customer_note: baseReservation.customer_note,
-          admin_note: baseReservation.admin_note,
-          pricing_snapshot: baseReservation.pricing_snapshot ?? undefined
-        });
-      }
+          is_amount_manual: inheritedIsAmountManual
+        })
+      );
 
-      if (sessionUpdates.length > 0) {
-        await Promise.all(sessionUpdates);
-      }
-
-      // Create the new extended reservations
       const newReservations = await tx.reservation.createMany({
         data: newReservationsData
       });
 
-      // Recalculate unified total without wiping equipment or discounts
-      const finalTotal = await recalculateReservationTotal(tx, booking_ref);
-
-      // If keep_seat, trigger transactional reshuffle inside the same tx/lock
+      // If keep_seat, trigger transactional reshuffle inside the same tx/lock then verify no collisions
       if (extendMode === 'keep_seat') {
-        await reshuffleAfterSeatChange(tx, session_ids, [booking_ref]);
+        await reshuffleAfterSeatChange(tx, uniqueSessionIds, [booking_ref]);
       }
+      if (extendMode !== 'force_wait') {
+        await assertNoSeatCollisions(tx, uniqueSessionIds);
+      }
+
+      // Compute pending supplements for already-paid non-unlimited persons
+      const activePersons = await tx.bookingPerson.findMany({
+        where: { booking_ref, status: 'active' },
+        orderBy: { person_no: 'asc' }
+      });
+      const validPayments = await tx.payment.findMany({
+        where: { booking_ref, status: 'valid', kind: { in: ['charge', 'waive'] } },
+        orderBy: { created_at: 'desc' }
+      });
+
+      let addedHours = 0;
+      for (const s of sessions) {
+        const sStart = new Date(`${bookingDateStr}T${s.start_time}:00+08:00`);
+        let sEnd = new Date(`${bookingDateStr}T${s.end_time}:00+08:00`);
+        if (sEnd <= sStart) sEnd = new Date(sEnd.getTime() + 24 * 60 * 60 * 1000);
+        addedHours += Math.max(0, (sEnd.getTime() - sStart.getTime()) / 3600000);
+      }
+
+      const dailyRates = await getEffectiveDailyRates(tx, baseReservation.session.session_date);
+      const hourlyPrice = Number(dailyRates.hourly_price ?? 150);
+      const unlimitedPrice = dailyRates.unlimited_price != null ? Number(dailyRates.unlimited_price) : null;
+      const allowUnlimited = Boolean(dailyRates.allow_unlimited);
+
+      const currentDraft = (baseReservation.checkout_details && typeof baseReservation.checkout_details === 'object')
+        ? baseReservation.checkout_details
+        : {};
+      const currentRev = Number.isInteger(currentDraft.rev) ? currentDraft.rev : 0;
+      const prevPending = Array.isArray(currentDraft.pending_supplements) ? currentDraft.pending_supplements : [];
+      const draftPersons = Array.isArray(currentDraft.persons) ? currentDraft.persons : [];
+
+      const sourceKey = `extend:${uniqueSessionIds.slice().sort((a, b) => a - b).join('-')}`;
+      const hoursText = Number.isInteger(addedHours) ? String(addedHours) : addedHours.toFixed(1);
+      const extendLabel = `加時 ${hoursText} 小時`;
+
+      const personNosToCheck = activePersons.length > 0
+        ? activePersons.map(p => p.person_no)
+        : Array.from({ length: pax }, (_, idx) => idx + 1);
+
+      const addedSupplements = [];
+      for (const pNo of personNosToCheck) {
+        const personObj = activePersons.find(p => p.person_no === pNo) || { person_no: pNo };
+        const paid = await isPersonPaid(tx, booking_ref, pNo, baseReservation);
+        if (!paid) continue;
+
+        const dPerson = draftPersons.find(dp => Number(dp.person_no) === pNo);
+        const isUnl = dPerson?.mode ? dPerson.mode === 'unlimited' : Boolean(baseReservation.is_unlimited);
+        if (isUnl) continue;
+
+        const alreadyHas = prevPending.some(
+          ps => Number(ps?.person_no) === pNo && ps?.source_key === sourceKey
+        );
+        if (alreadyHas) continue;
+
+        let snapshotEntry = null;
+        for (const pay of validPayments) {
+          const snapList = Array.isArray(pay.breakdown_json?.persons) ? pay.breakdown_json.persons : [];
+          const snapPerson = snapList.find(sp => Number(sp.person_no) === pNo);
+          if (snapPerson) {
+            snapshotEntry = Number(snapPerson.entry?.amount ?? snapPerson.total ?? 0);
+            break;
+          }
+        }
+        if (snapshotEntry === null) snapshotEntry = 0;
+
+        const rawExtended = snapshotEntry + Math.round(addedHours * hourlyPrice);
+        const cappedExtended = (allowUnlimited && unlimitedPrice != null)
+          ? Math.min(rawExtended, unlimitedPrice)
+          : rawExtended;
+        const suppAmount = Math.max(0, Math.round(cappedExtended - snapshotEntry));
+        if (suppAmount > 0) {
+          addedSupplements.push({
+            person_no: pNo,
+            source_key: sourceKey,
+            source_type: 'other',
+            label: extendLabel,
+            amount: suppAmount
+          });
+        }
+      }
+
+      if (addedSupplements.length > 0) {
+        await saveDraft(
+          booking_ref,
+          currentRev,
+          { ...currentDraft, pending_supplements: [...prevPending, ...addedSupplements] },
+          staffName,
+          staffId,
+          deviceInfo,
+          tx
+        );
+
+        const rangeStr = `${sessions[0].start_time.slice(0, 5)}–${sessions[sessions.length - 1].end_time.slice(0, 5)}`;
+        const detailText = addedSupplements.map(s => `第 ${s.person_no} 位待補收 NT$${s.amount}`).join('、');
+        await auditLog(tx, {
+          booking_ref,
+          event_type: 'amount_adjusted',
+          category: 'amount',
+          summary: `加時 ${rangeStr}，${detailText}`,
+          reason: '已付款加時待補收',
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id || null,
+          device_label: deviceInfo?.device_label || null
+        });
+      }
+
+      await recalculateReservationTotal(tx, booking_ref);
+      await refreshBillingCache(tx, booking_ref);
 
       return { count: newReservations.count };
     });
 
-    res.status(201).json({ message: 'Reservation extended successfully', result });
+    displayBus.floorChanged();
+    res.status(201).json({ message: '加時成功', result });
 
   } catch (error) {
     console.error('Extend Reservation error:', error);
@@ -2721,18 +2896,18 @@ export const extendReservation = async (req, res) => {
       });
     }
     if (error.message === 'RESERVATION_NOT_FOUND') {
-      return res.status(404).json({ error: 'Original reservation not found.' });
+      return res.status(404).json({ error: '找不到原本的預約' });
     }
     if (error.message === 'SOME_SESSIONS_NOT_FOUND') {
-      return res.status(404).json({ error: 'One or more sessions not found.' });
+      return res.status(404).json({ error: '找不到指定的時段' });
     }
     if (error.message === 'INSUFFICIENT_CAPACITY') {
-      return res.status(400).json({ error: 'Not enough capacity remaining for one or more selected sessions.' });
+      return res.status(400).json({ error: '加時時段座位已滿，無法加時' });
     }
     if (error.message === 'SPLIT_REQUIRED') {
       return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
     }
-    res.status(500).json({ error: 'Failed to extend reservation.' });
+    res.status(500).json({ error: '加時失敗，請稍後再試' });
   }
 };
 

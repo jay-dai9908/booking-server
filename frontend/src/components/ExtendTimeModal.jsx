@@ -25,16 +25,26 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
   const fetchSessions = async () => {
     setIsLoading(true);
     try {
-      // Find the session date
-      const sessionDate = reservation.session_date || reservation.session?.session_date || (reservation.start_at ? reservation.start_at.slice(0, 10) : null);
-      // Find the end time of the current booking
+      // Find the session date in Taipei timezone
+      const rawSessionDate = reservation.session_date || reservation.session?.session_date;
+      const sessionDate = rawSessionDate
+        ? String(rawSessionDate).slice(0, 10)
+        : (reservation.start_at
+            ? new Date(reservation.start_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
+            : null);
+      // Find the end time of the current booking in Taipei timezone
       let endTime = reservation.end_time || reservation.session?.end_time;
       const blocks = reservation.time_blocks || reservation.blocks || reservation.sessions || [];
       if (blocks.length > 0) {
         endTime = blocks[blocks.length - 1].end_time || endTime;
       }
       if (!endTime && reservation.end_at) {
-        endTime = reservation.end_at.slice(11, 16);
+        endTime = new Date(reservation.end_at).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+          timeZone: 'Asia/Taipei'
+        });
       }
       
       const res = await api.get(`/sessions?date=${sessionDate}`);
