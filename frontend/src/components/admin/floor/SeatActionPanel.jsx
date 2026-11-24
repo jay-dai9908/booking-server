@@ -65,13 +65,11 @@ export default function SeatActionPanel({
   serverNow = null
 }) {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [confirmReturnBoard, setConfirmReturnBoard] = useState(false);
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
 
   const resetSeatKey = target?.seat?.code || '';
   const resetBookingRef = target?.booking?.booking_ref || target?.seatInfo?.booking?.booking_ref || '';
   useEffect(() => {
-    setConfirmReturnBoard(false);
     setShowRemoveDialog(false);
   }, [isOpen, resetSeatKey, resetBookingRef]);
 
@@ -212,24 +210,18 @@ export default function SeatActionPanel({
         type="button"
         data-testid="seat-panel-board-return-btn"
         onClick={() => {
-          if (!confirmReturnBoard) {
-            setConfirmReturnBoard(true);
-            return;
-          }
-          setConfirmReturnBoard(false);
-          if (onBoardReturn && booking) {
-            onBoardReturn(booking.booking_ref, personBoard.unit_group);
+          if (onBoardReturn && booking && personBoard) {
+            onBoardReturn({
+              booking,
+              board: personBoard,
+              personNo: primaryPerson?.person_no ?? personNo,
+              seatCode: seat?.code
+            });
           }
         }}
-        className={`rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition cursor-pointer whitespace-nowrap ${
-          confirmReturnBoard
-            ? 'bg-sg-danger text-white border-sg-danger hover:bg-sg-danger/90 shadow-2xs'
-            : 'bg-white text-sg-danger border-sg-line hover:bg-sg-danger-soft/40'
-        }`}
+        className="rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition cursor-pointer whitespace-nowrap bg-white text-sg-danger border-sg-line hover:bg-sg-danger-soft/40"
       >
-        {confirmReturnBoard
-          ? `確定歸還${shortBoardSize(activeBoardSegment.name)}？再按一次`
-          : '不用了，歸還'}
+        不用了，歸還
       </button>
     </>
   ) : null;

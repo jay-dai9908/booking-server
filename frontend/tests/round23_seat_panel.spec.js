@@ -307,7 +307,7 @@ async function run() {
       assert.equal(await page.locator('.text-red-700, .bg-red-50').count(), 0, 'Expected no error banners after swap board');
       await page.waitForTimeout(350);
 
-      // Reopen A1-1 SeatActionPanel -> verify 中板 shown -> Step 4: 不用了，歸還 (twice to confirm)
+      // Reopen A1-1 SeatActionPanel -> verify 中板 shown -> Step 4: 不用了，歸還 (opens swap/return modal with suggested boundary & preview)
       await seatA11.click();
       await panelContent.waitFor({ state: 'visible', timeout: 5000 });
       await panelContent.locator('text=中板').first().waitFor({ state: 'visible', timeout: 5000 });
@@ -315,11 +315,14 @@ async function run() {
       const returnBoardBtn = panelContent.locator('[data-testid="seat-panel-board-return-btn"]');
       await returnBoardBtn.waitFor({ state: 'visible', timeout: 5000 });
       await returnBoardBtn.click();
-      await panelContent.locator('[data-testid="seat-panel-board-return-btn"]:has-text("確定歸還")').waitFor({ state: 'visible', timeout: 5000 });
+
+      const returnDialog = page.locator('[role="dialog"]:has-text("確認歸還")');
+      await returnDialog.waitFor({ state: 'visible', timeout: 5000 });
+      const confirmReturnBtn = returnDialog.locator('button:has-text("確認歸還")');
 
       const [returnResp] = await Promise.all([
         page.waitForResponse(r => r.url().includes(`/floor/${bookingRef}/boards/`) && r.url().endsWith('/return') && r.request().method() === 'POST'),
-        returnBoardBtn.click()
+        confirmReturnBtn.click()
       ]);
       assert.equal(returnResp.status(), 200, 'returnBoard POST should return 200');
       assert.equal(await page.locator('.text-red-700, .bg-red-50').count(), 0, 'Expected no error banners after return board');

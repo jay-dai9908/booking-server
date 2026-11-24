@@ -117,6 +117,7 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "unit_rate" INTEGER`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "daily_cap_snapshot" INTEGER`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "is_price_fixed" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "bill_until_return" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "ended_reason" TEXT`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "planned_end_at" TIMESTAMP(3)`,
 

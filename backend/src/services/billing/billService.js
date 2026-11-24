@@ -167,7 +167,8 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
     billing_grace_minutes: globalSetting.billing_grace_minutes ?? 10,
     billing_block_minutes: globalSetting.billing_block_minutes ?? 30,
     early_leave_mode: globalSetting.early_leave_mode || 'booked',
-    default_split_mode: globalSetting.default_split_mode || 'proportional'
+    default_split_mode: globalSetting.default_split_mode || 'proportional',
+    board_swap_grace_minutes: globalSetting.board_swap_grace_minutes ?? 10
   };
 
   // Draft from checkout_details

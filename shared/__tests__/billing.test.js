@@ -892,6 +892,87 @@ test('Round 37 Item 2: zero prices are honored and not replaced by 150/750/60 de
   assert.equal(zeroBoard.total, 0);
 });
 
+test('Round 37 Item 3: bill_until_return uses 10/30 rounding on effective minutes, with promo and dailyCap', () => {
+  const promoBuy3Get1 = { enabled: true, buy_hours: 3, free_hours: 1, stackable: true };
+
+  // Booked 14:00-18:00 unreturned -> 4h chargeable 3h -> 180
+  const fullBooked = calculateBoardTotal({
+    segments: [{
+      hours: 4,
+      rate: 60,
+      start_at: '2026-11-24T14:00:00+08:00',
+      planned_end_at: '2026-11-24T18:00:00+08:00'
+    }],
+    discountConfig: promoBuy3Get1
+  });
+  assert.equal(fullBooked.total, 180);
+
+  // Returned at 16:00 with bill_until_return -> 2h -> 120
+  const returned16 = calculateBoardTotal({
+    segments: [{
+      rate: 60,
+      start_at: '2026-11-24T14:00:00+08:00',
+      end_at: '2026-11-24T16:00:00+08:00',
+      planned_end_at: '2026-11-24T18:00:00+08:00',
+      ended_reason: 'returned',
+      bill_until_return: true
+    }],
+    discountConfig: promoBuy3Get1,
+    graceMinutes: 10
+  });
+  assert.equal(returned16.H, 2);
+  assert.equal(returned16.total, 120);
+
+  // Used 2h12m (132 mins) with grace 10 -> 2.5h -> 150
+  const returned212 = calculateBoardTotal({
+    segments: [{
+      rate: 60,
+      start_at: '2026-11-24T14:00:00+08:00',
+      end_at: '2026-11-24T16:12:00+08:00',
+      ended_reason: 'returned',
+      bill_until_return: true
+    }],
+    discountConfig: promoBuy3Get1,
+    graceMinutes: 10
+  });
+  assert.equal(returned212.H, 2.5);
+  assert.equal(returned212.total, 150);
+
+  // Returned at 16:30 with 20m pause -> 150 - 20 = 130m (10m remainder <= grace 10 -> 2h) -> 120
+  const pausedReturn = calculateBoardTotal({
+    segments: [{
+      rate: 60,
+      start_at: '2026-11-24T14:00:00+08:00',
+      end_at: '2026-11-24T16:30:00+08:00',
+      ended_reason: 'returned',
+      bill_until_return: true
+    }],
+    pauses: [{ started_at: '2026-11-24T15:00:00+08:00', ended_at: '2026-11-24T15:20:00+08:00' }],
+    discountConfig: promoBuy3Get1,
+    graceMinutes: 10
+  });
+  assert.equal(pausedReturn.H, 2);
+  assert.equal(pausedReturn.total, 120);
+
+  // Rate 100, cap 300, booked 6h, returned after 4.5h (3.5h chargeable * 100 = 350 -> capped at 300)
+  const cappedReturn = calculateBoardTotal({
+    segments: [{
+      rate: 100,
+      start_at: '2026-11-24T14:00:00+08:00',
+      end_at: '2026-11-24T18:30:00+08:00',
+      ended_reason: 'returned',
+      bill_until_return: true
+    }],
+    discountConfig: promoBuy3Get1,
+    dailyCap: 300,
+    graceMinutes: 10
+  });
+  assert.equal(cappedReturn.H, 4.5);
+  assert.equal(cappedReturn.total, 300);
+  assert.equal(cappedReturn.capped, true);
+});
+
+
 
 
 

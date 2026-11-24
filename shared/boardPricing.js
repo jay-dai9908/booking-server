@@ -1,5 +1,10 @@
 // shared/boardPricing.js
 // 智能板買送計費（支援半小時格、多層階梯、擇優計價）
+// 第 37 輪定案（提前歸還智能板）：
+// 1. 經歸還端點結束的板子段（bill_until_return = true）一律照實際歸還時間 end_at 計費。
+// 2. 時數使用與換板同一套 10/30 取整（扣掉暫停後的有效分鐘，每滿 30 分算半小時，餘數超過 graceMinutes 再加半小時）。
+// 3. 之後照常套用買送優惠與每日封頂；入場費（提早離場預設照預約收）不受影響。
+import { blocksBy1030 } from './time.js';
 
 /**
  * 計算智能板應計費時數（支援 0.5 小時步進）
@@ -149,11 +154,13 @@ function calcPausedMinutesInRange(rangeStartMs, rangeEndMs, pauses = [], nowMs =
 /**
  * 計算同一台板子（含分段換板）的金額（方案 B）
  * 每一段若有起訖時間，會先扣除與暫停重疊的分鐘數，再套用半小時取整規則。
- * @param {{ segments: Array<{ hours?: number, rate: number, name?: string, start_at?: any, end_at?: any, planned_end_at?: any, ended_reason?: string, pauses?: any[] }>, pauses?: Array<{ started_at: any, ended_at?: any }>, discountConfig: any, now?: any, dailyCap?: number|null }} params
+ * @param {{ segments: Array<{ hours?: number, rate: number, name?: string, start_at?: any, end_at?: any, planned_end_at?: any, ended_reason?: string, bill_until_return?: boolean, pauses?: any[] }>, pauses?: Array<{ started_at: any, ended_at?: any }>, discountConfig: any, now?: any, dailyCap?: number|null, graceMinutes?: number }} params
  * @returns {{ H: number, gross: number, chargeable: number, free: number, cheapest: number, discount: number, total: number, capped: boolean, pausedMinutes: number, effectiveMinutes: number }}
  */
-export function calculateBoardTotal({ segments = [], pauses = [], discountConfig, now = Date.now(), dailyCap = null }) {
+export function calculateBoardTotal({ segments = [], pauses = [], discountConfig, now = Date.now(), dailyCap = null, graceMinutes = 10 }) {
   const nowMs = toMs(now) ?? Date.now();
+  const parsedGrace = Number(graceMinutes);
+  const grace = Number.isFinite(parsedGrace) ? parsedGrace : 10;
   let totalPausedMinutes = 0;
   let totalEffectiveMinutes = 0;
 
@@ -174,9 +181,14 @@ export function calculateBoardTotal({ segments = [], pauses = [], discountConfig
       const effMinutes = Math.max(0, rawMinutes - pMins);
       totalPausedMinutes += pMins;
       totalEffectiveMinutes += effMinutes;
-      const hrs = (pMins > 0 || s?.hours == null)
-        ? Math.round((effMinutes / 60) * 2) / 2
-        : (Number(s.hours) || 0);
+      let hrs;
+      if (s?.bill_until_return) {
+        hrs = blocksBy1030(effMinutes, { grace, block: 30 }) * 0.5;
+      } else {
+        hrs = (pMins > 0 || s?.hours == null)
+          ? Math.round((effMinutes / 60) * 2) / 2
+          : (Number(s.hours) || 0);
+      }
       return { ...s, _hours: hrs };
     }
 

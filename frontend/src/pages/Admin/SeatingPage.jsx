@@ -61,7 +61,6 @@ import ExtendTimeModal from '../../components/ExtendTimeModal';
 import SendLineMessageModal from '../../components/SendLineMessageModal';
 
 import { swapBoundaryOptions, formatTimerHMM, formatTimeHHmm, formatDiffMinutesText, toTaipeiDateString } from '@shared/time.js';
-import { calculateBoardTotal } from '@shared/boardPricing.js';
 import { displayBoardName } from '@shared/billing.js';
 import {
   bookedMinutes,
@@ -307,6 +306,57 @@ export default function SeatingPage() {
   const [selectedBoundary, setSelectedBoundary] = useState(null);
   const [swapSubmitting, setSwapSubmitting] = useState(false);
   const [swapError, setSwapError] = useState(null);
+  const [boardPreview, setBoardPreview] = useState({ loading: false, data: null, error: null });
+  const previewSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (!boardSwapTarget || !selectedSwapSize) {
+      setBoardPreview({ loading: false, data: null, error: null });
+      return undefined;
+    }
+    const b = boardSwapTarget.booking;
+    const currentBoard = boardSwapTarget.board
+      || (b.boards || []).find(bd => bd.person_no === boardSwapTarget.personNo)
+      || (b.boards || [])[0];
+    const unitGroup = currentBoard?.unit_group;
+    if (!b?.booking_ref || !unitGroup) {
+      setBoardPreview({ loading: false, data: null, error: null });
+      return undefined;
+    }
+
+    const lastSeg = currentBoard?.segments ? currentBoard.segments[currentBoard.segments.length - 1] : null;
+    const segStartMs = lastSeg?.start_at
+      ? new Date(lastSeg.start_at).getTime()
+      : (b.start_at ? new Date(b.start_at).getTime() : Date.now());
+    const nowMs = getServerNow().getTime();
+    const grace = floorData?.board_swap_grace_minutes ?? 10;
+    const { suggested } = swapBoundaryOptions(segStartMs, nowMs, { grace });
+    const atIso = new Date(selectedBoundary !== null ? selectedBoundary : suggested).toISOString();
+
+    const seq = ++previewSeqRef.current;
+    setBoardPreview(prev => ({ ...prev, loading: true, error: null }));
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.post(`/floor/${b.booking_ref}/boards/${unitGroup}/preview`, {
+          action: selectedSwapSize === 'return' ? 'return' : 'swap',
+          to_equipment_id: selectedSwapSize === 'return' ? undefined : selectedSwapSize,
+          at: atIso
+        });
+        if (previewSeqRef.current !== seq) return;
+        setBoardPreview({ loading: false, data: res.data, error: null });
+      } catch (err) {
+        if (previewSeqRef.current !== seq) return;
+        setBoardPreview({
+          loading: false,
+          data: null,
+          error: err.response?.data?.error || '預覽金額失敗'
+        });
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [boardSwapTarget, selectedSwapSize, selectedBoundary]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Add person states (Section 5.2.2)
   const [showAddPersonModalTarget, setShowAddPersonModalTarget] = useState(null);
@@ -729,16 +779,17 @@ export default function SeatingPage() {
     }
   };
 
-  const handleBoardReturn = async (bookingRef, unitGroup) => {
-    try {
-      await api.post(`/floor/${bookingRef}/boards/${unitGroup}/return`, {
-        at: getServerNow().toISOString()
-      });
-      await refresh();
-      showToast('歸還智能板成功');
-    } catch (err) {
-      showToast(err.response?.data?.error || '歸還智能板失敗');
-    }
+  const handleBoardReturn = ({ booking, board, personNo, seatCode }) => {
+    setSeatActionTarget(null);
+    setBoardSwapTarget({
+      booking,
+      board,
+      personNo,
+      seatCode
+    });
+    setSelectedSwapSize('return');
+    setSelectedBoundary(null);
+    setSwapError(null);
   };
 
   const handleRemovePerson = async (bookingRef, personNo) => {
@@ -2600,27 +2651,9 @@ export default function SeatingPage() {
         const usedMins = Math.max(0, Math.floor((nowMs - segStartMs) / 60000));
         const usedText = `${Math.floor(usedMins / 60)} 小時 ${usedMins % 60} 分`;
 
-        const { options: boundaryOptions, suggested: suggestedBoundary } = swapBoundaryOptions(segStartMs, nowMs);
+        const swapGrace = floorData?.board_swap_grace_minutes ?? 10;
+        const { options: boundaryOptions, suggested: suggestedBoundary } = swapBoundaryOptions(segStartMs, nowMs, { grace: swapGrace });
         const activeBoundary = selectedBoundary !== null ? selectedBoundary : suggestedBoundary;
-
-        const bookingEndMs = b.end_at ? new Date(b.end_at).getTime() : (segStartMs + 4 * 3600000);
-        const seg1Hours = Math.max(0, (activeBoundary - segStartMs) / 3600000);
-        const seg2Hours = Math.max(0, (bookingEndMs - activeBoundary) / 3600000);
-
-        const targetOption = boardUsage.find(item => item.equipment_id === selectedSwapSize);
-
-        let segsCalc = [];
-        if (selectedSwapSize === 'return') {
-          segsCalc = [
-            { hours: seg1Hours, rate: lastSeg?.hourly_rate || 90 }
-          ];
-        } else if (targetOption) {
-          segsCalc = [
-            { hours: seg1Hours, rate: lastSeg?.hourly_rate || 90 },
-            { hours: seg2Hours, rate: targetOption.hourly_rate || 120 }
-          ];
-        }
-        const calcRes = segsCalc.length > 0 ? calculateBoardTotal(segsCalc) : null;
 
         const handleConfirmSwap = async () => {
           if (!selectedSwapSize) return;
@@ -2764,35 +2797,43 @@ export default function SeatingPage() {
                   })}
                 </div>
                 <p className="text-[11px] text-sg-muted">
-                  現在 {formatTimeHHmm(nowMs)}，以半小時取整（超過 10 分鐘才算下一個半小時）：{formatTimeHHmm(activeBoundary)} 前算{currentEqName}，之後算新尺寸。
+                  {selectedSwapSize === 'return'
+                    ? `現在 ${formatTimeHHmm(nowMs)}，以半小時取整（超過 ${swapGrace} 分鐘才算下一個半小時）：於 ${formatTimeHHmm(activeBoundary)} 歸還結算。`
+                    : `現在 ${formatTimeHHmm(nowMs)}，以半小時取整（超過 ${swapGrace} 分鐘才算下一個半小時）：${formatTimeHHmm(activeBoundary)} 前算${currentEqName}，之後算新尺寸。`}
                 </p>
               </div>
 
-              {calcRes && (
-                <div className="p-3.5 rounded-2xl bg-sg-paper/40 border border-sg-line text-[12px] space-y-1.5">
-                  <div className="flex justify-between">
-                    <span>{currentEqName} {formatTimeHHmm(segStartMs)} 到 {formatTimeHHmm(activeBoundary)} · {seg1Hours} 小時</span>
-                    <span className="font-bold">NT${Math.round(seg1Hours * (lastSeg?.hourly_rate || 90))}</span>
-                  </div>
-
-                  {selectedSwapSize !== 'return' && targetOption && (
-                    <div className="flex justify-between">
-                      <span>{targetOption.name} {formatTimeHHmm(activeBoundary)} 到 {formatTimeHHmm(bookingEndMs)} · {seg2Hours} 小時</span>
-                      <span className="font-bold">NT${Math.round(seg2Hours * (targetOption.hourly_rate || 120))}</span>
-                    </div>
-                  )}
-
-                  {calcRes.discount > 0 && (
-                    <div className="flex justify-between text-sg-green font-medium">
-                      <span>合計 {calcRes.hours} 小時買送折抵</span>
-                      <span>−NT${calcRes.discount}</span>
-                    </div>
-                  )}
-
-                  <div className="pt-2 border-t border-sg-line flex justify-between items-center text-[13px]">
-                    <span className="font-bold text-sg-ink">這台合計</span>
-                    <span className="font-num text-[16px] font-bold text-sg-ink">NT${calcRes.total}</span>
-                  </div>
+              {selectedSwapSize && (
+                <div
+                  data-testid="board-swap-preview"
+                  className="p-3.5 rounded-2xl bg-sg-paper/40 border border-sg-line text-[12px] space-y-1.5"
+                >
+                  {boardPreview.loading ? (
+                    <div className="text-sg-muted font-medium">計算帳單預覽中...</div>
+                  ) : boardPreview.error ? (
+                    <div className="text-red-700 font-medium">{boardPreview.error}</div>
+                  ) : boardPreview.data ? (
+                    <>
+                      <div className="flex items-center justify-between text-[13px]">
+                        <span className="font-bold text-sg-ink">這台板子</span>
+                        <span className="font-num text-[15px] font-bold text-sg-ink" data-testid="board-swap-preview-amounts">
+                          NT${boardPreview.data.board_amount_before} → NT${boardPreview.data.board_amount_after}
+                        </span>
+                      </div>
+                      {boardPreview.data.board?.discount > 0 && (
+                        <div className="flex justify-between text-sg-green font-medium">
+                          <span>合計 {boardPreview.data.board.H} 小時買送折抵</span>
+                          <span>−NT${boardPreview.data.board.discount}</span>
+                        </div>
+                      )}
+                      <div className="pt-2 border-t border-sg-line flex justify-between items-center text-[13px]">
+                        <span className="font-bold text-sg-ink">這位客人應收合計</span>
+                        <span className="font-num text-[16px] font-bold text-sg-ink">
+                          NT${boardPreview.data.person_total_after}
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               )}
             </div>

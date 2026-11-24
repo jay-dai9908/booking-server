@@ -104,7 +104,9 @@ export function buildBillInput({
     const segments = items.map(be => {
       const startDt = be.start_at ? new Date(be.start_at) : bookingStartDt;
       let endDt;
-      if (be.ended_reason === 'returned') {
+      if (be.bill_until_return && be.end_at) {
+        endDt = new Date(be.end_at);
+      } else if (be.ended_reason === 'returned') {
         endDt = be.planned_end_at ? new Date(be.planned_end_at) : (be.end_at ? new Date(be.end_at) : bookingEndDt);
       } else if (be.end_at) {
         endDt = new Date(be.end_at);
@@ -132,7 +134,8 @@ export function buildBillInput({
         effective_start_at: startDt.toISOString(),
         effective_end_at: endDt.toISOString(),
         ended_reason: be.ended_reason,
-        planned_end_at: be.planned_end_at
+        planned_end_at: be.planned_end_at,
+        bill_until_return: Boolean(be.bill_until_return)
       };
     });
 
@@ -173,7 +176,8 @@ export function buildBillInput({
     grace: globalSetting.billing_grace_minutes ?? 10,
     block: globalSetting.billing_block_minutes ?? 30,
     early_leave_mode: globalSetting.early_leave_mode || 'booked',
-    default_split_mode: globalSetting.default_split_mode || 'proportional'
+    default_split_mode: globalSetting.default_split_mode || 'proportional',
+    board_swap_grace_minutes: globalSetting.board_swap_grace_minutes ?? 10
   };
 
   // 5. Pricing

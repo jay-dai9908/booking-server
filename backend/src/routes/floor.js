@@ -10,6 +10,7 @@ import {
   removePerson,
   swapBoard,
   returnBoard,
+  previewBoardChange,
   reassignBoard,
   addBoardRental,
   pauseBoard,
@@ -27,6 +28,7 @@ router.post('/:booking_ref/timer', ...floorAuth, handleTimer);
 router.post('/:booking_ref/persons', ...floorAuth, addPerson);
 router.delete('/:booking_ref/persons/:person_no', ...floorAuth, removePerson);
 router.post('/:booking_ref/boards', ...floorAuth, addBoardRental);
+router.post('/:booking_ref/boards/:unit_group/preview', ...floorAuth, previewBoardChange);
 router.post('/:booking_ref/boards/:unit_group/swap', ...floorAuth, swapBoard);
 router.post('/:booking_ref/boards/:unit_group/return', ...floorAuth, returnBoard);
 router.post('/:booking_ref/boards/:unit_group/pause', ...floorAuth, pauseBoard);

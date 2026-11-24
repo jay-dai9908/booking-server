@@ -313,7 +313,8 @@ export function computeBill({
       pauses: b.pauses || [],
       discountConfig,
       now,
-      dailyCap: b.daily_cap ?? b.dailyCap ?? null
+      dailyCap: b.daily_cap ?? b.dailyCap ?? null,
+      graceMinutes: rules?.board_swap_grace_minutes ?? pricing?.board_swap_grace_minutes ?? 10
     });
     const total = b.fixed_total != null ? b.fixed_total : calc.total;
     const activeSegs = normalizedSegs.filter(s => s?.ended_reason !== 'person_removed');
