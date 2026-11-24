@@ -13,7 +13,8 @@ import {
   isSessionPast,
   buildSeatStates,
   getPersonStatusText,
-  isSeatOccupied
+  isSeatOccupied,
+  groupBookingsByAttendance
 } from '../src/utils/admin/floorSelectors.js';
 
 test('floorSelectors pure function tests', async (t) => {
@@ -735,6 +736,21 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(states['A1-1'].state, 'paid_seated');
     assert.strictEqual(states['A1-1'].timerText, '已結清');
     assert.strictEqual(isSeatOccupied(states['A1-1']), true);
+  });
+
+  await t.test('21. Round 42 Item 1: groupBookingsByAttendance places no_show in noShow and excludes from other buckets', () => {
+    const now = new Date('2026-11-10T15:00:00+08:00');
+    const grouped = groupBookingsByAttendance([
+      { booking_ref: 'BK-NO-SHOW', attendance: 'no_show', start_at: '2026-11-10T12:00:00+08:00', end_at: '2026-11-10T14:00:00+08:00' },
+      { booking_ref: 'BK-PENDING', attendance: 'pending', start_at: '2026-11-10T16:00:00+08:00', end_at: '2026-11-10T18:00:00+08:00' },
+      { booking_ref: 'BK-IN', attendance: 'checked_in', start_at: '2026-11-10T14:00:00+08:00', end_at: '2026-11-10T17:00:00+08:00' },
+      { booking_ref: 'BK-DONE', attendance: 'completed', start_at: '2026-11-10T10:00:00+08:00', end_at: '2026-11-10T12:00:00+08:00' }
+    ], now);
+
+    assert.deepStrictEqual(grouped.noShow.map(b => b.booking_ref), ['BK-NO-SHOW']);
+    assert.deepStrictEqual(grouped.pending.map(b => b.booking_ref), ['BK-PENDING']);
+    assert.deepStrictEqual(grouped.checkedIn.map(b => b.booking_ref), ['BK-IN']);
+    assert.deepStrictEqual(grouped.completed.map(b => b.booking_ref), ['BK-DONE']);
   });
 });
 

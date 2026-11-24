@@ -333,6 +333,33 @@ export function groupTimerPill(booking, now = new Date()) {
 
 export { isBookingCompleted };
 
+/**
+ * Group today's bookings into active / waiting / no-show / completed buckets.
+ * `no_show` bookings are separated first so they appear in the "未到" accordion
+ * rather than falling into completed or vanishing from the floor page.
+ */
+export function groupBookingsByAttendance(bookings = [], now = new Date()) {
+  const completed = [];
+  const checkedIn = [];
+  const pending = [];
+  const noShow = [];
+
+  for (const b of (bookings || [])) {
+    if (!b) continue;
+    if (b.attendance === 'no_show') {
+      noShow.push(b);
+    } else if (isBookingCompleted(b, now)) {
+      completed.push(b);
+    } else if (b.attendance === 'checked_in') {
+      checkedIn.push(b);
+    } else if (b.attendance === 'pending' || !b.attendance) {
+      pending.push(b);
+    }
+  }
+
+  return { completed, checkedIn, pending, noShow };
+}
+
 export function isSessionPast(session, now = new Date()) {
   if (!session) return false;
   const nowTaipeiStr = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });

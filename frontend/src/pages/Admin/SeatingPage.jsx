@@ -73,6 +73,7 @@ import {
   groupTimerPill,
   formatBookingRef,
   isBookingCompleted,
+  groupBookingsByAttendance,
   isSeatOccupied,
   buildSeatStates
 } from '../../utils/admin/floorSelectors';
@@ -490,8 +491,12 @@ export default function SeatingPage() {
     return () => window.removeEventListener('sg-sync-error', handleSyncError);
   }, []);
 
-  // Collapsed state for completed bookings
+  // Collapsed state for completed & no-show bookings
   const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
+  const [isNoShowExpanded, setIsNoShowExpanded] = useState(false);
+  const [markNoShowTarget, setMarkNoShowTarget] = useState(null);
+  const [markNoShowLoading, setMarkNoShowLoading] = useState(false);
+  const [revertingNoShowRef, setRevertingNoShowRef] = useState(null);
 
   const layout = floorData?.layout || {};
   const bookings = floorData?.bookings || [];
@@ -573,9 +578,15 @@ export default function SeatingPage() {
   }, [layout, selectedTableForPanel]);
 
   // Group bookings by attendance
-  const completedBookings = bookings.filter(b => isBookingCompleted(b));
-  const checkedInBookings = bookings.filter(b => b.attendance === 'checked_in' && !isBookingCompleted(b));
-  const pendingBookings = bookings.filter(b => (b.attendance === 'pending' || !b.attendance) && !isBookingCompleted(b));
+  const {
+    completed: completedBookings,
+    checkedIn: checkedInBookings,
+    pending: pendingBookings,
+    noShow: noShowBookings
+  } = useMemo(
+    () => groupBookingsByAttendance(bookings, getServerNow()),
+    [bookings, getServerNow]
+  );
 
   // In-use pax & empty count
   const inUsePax = checkedInBookings.reduce((sum, b) => sum + (b.pax || 0), 0);
@@ -777,6 +788,7 @@ export default function SeatingPage() {
   const searchedPending = useMemo(() => filterBySearch(pendingBookings), [pendingBookings, searchQuery]);
   const searchedCheckedIn = useMemo(() => filterBySearch(checkedInBookings), [checkedInBookings, searchQuery]);
   const searchedCompleted = useMemo(() => filterBySearch(completedBookings), [completedBookings, searchQuery]);
+  const searchedNoShow = useMemo(() => filterBySearch(noShowBookings), [noShowBookings, searchQuery]);
 
   // Timer controls
   const handleTimerAction = async (bookingRef, personNos, action, reason = null) => {
@@ -883,14 +895,42 @@ export default function SeatingPage() {
     }
   };
 
-  // Mark no-show
-  const handleMarkNoShow = async (bookingRef) => {
+  // Mark no-show (opens confirmation panel first)
+  const handleMarkNoShow = (targetOrRef) => {
+    const target = typeof targetOrRef === 'string'
+      ? bookings.find(b => b.booking_ref === targetOrRef) || { booking_ref: targetOrRef }
+      : targetOrRef;
+    if (!target?.booking_ref) return;
+    setMarkNoShowTarget(target);
+  };
+
+  const confirmMarkNoShow = async () => {
+    if (!markNoShowTarget?.booking_ref) return;
+    setMarkNoShowLoading(true);
     try {
-      await api.patch(`/reservations/${bookingRef}/attendance`, { attendance: 'no_show' });
+      await api.patch(`/reservations/${markNoShowTarget.booking_ref}/attendance`, { attendance: 'no_show' });
       showToast('已標記為未到');
+      setMarkNoShowTarget(null);
       refresh();
     } catch (err) {
       showToast(err.response?.data?.error || '標記未到失敗');
+    } finally {
+      setMarkNoShowLoading(false);
+    }
+  };
+
+  // Revert no-show back to pending and open CheckInPanel
+  const handleRevertNoShow = async (booking) => {
+    if (!booking?.booking_ref) return;
+    setRevertingNoShowRef(booking.booking_ref);
+    try {
+      await api.patch(`/reservations/${booking.booking_ref}/attendance`, { attendance: null });
+      await refresh();
+      setCheckInTarget({ ...booking, attendance: null });
+    } catch (err) {
+      showToast(err.response?.data?.error || '還原未到失敗');
+    } finally {
+      setRevertingNoShowRef(null);
     }
   };
 
@@ -1524,6 +1564,47 @@ export default function SeatingPage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+
+          {/* Section: 未到 (Accordion) */}
+          <div className="border border-sg-line rounded-3xl bg-white overflow-hidden shadow-xs" data-testid="no-show-accordion">
+            <button
+              type="button"
+              onClick={() => setIsNoShowExpanded(!isNoShowExpanded)}
+              className="w-full px-5 py-3.5 flex items-center justify-between bg-sg-paper/40 hover:bg-sg-paper/60 text-left transition"
+            >
+              <span className="font-bold text-[14px] text-sg-ink">
+                未到 {searchedNoShow.length} 組
+              </span>
+              <ChevronDown className={`w-4 h-4 text-sg-muted transition-transform ${isNoShowExpanded ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isNoShowExpanded && (
+              <div className="p-4 divide-y divide-sg-line">
+                {searchedNoShow.length === 0 ? (
+                  <div className="py-4 text-center text-sg-muted text-[13px]">尚無未到紀錄</div>
+                ) : (
+                  searchedNoShow.map((b) => (
+                    <div key={b.booking_ref} data-booking-ref={b.booking_ref} className="py-2.5 flex items-center justify-between text-[13px] gap-2">
+                      <div>
+                        <span className="font-bold text-sg-ink mr-2">{b.name}</span>
+                        <span className="text-sg-muted">{bookingTimeRange(b.start_at, b.end_at)} · {b.pax} 位</span>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        data-testid={`revert-no-show-btn-${b.booking_ref}`}
+                        loading={revertingNoShowRef === b.booking_ref}
+                        disabled={Boolean(revertingNoShowRef)}
+                        onClick={() => handleRevertNoShow(b)}
+                      >
+                        改為報到
+                      </Button>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
@@ -3115,6 +3196,23 @@ export default function SeatingPage() {
         onConfirm={handleCancelReservation}
         title="取消預約"
         message={`確定要取消「${cancelReservationTarget?.name || '客人'}」的預約（${cancelReservationTarget?.booking_ref}）嗎？`}
+      />
+
+      {/* Mark No-Show Confirmation (Round 42 Item 1) */}
+      <ConfirmPanel
+        isOpen={Boolean(markNoShowTarget)}
+        onClose={() => setMarkNoShowTarget(null)}
+        onConfirm={confirmMarkNoShow}
+        title={`標記${markNoShowTarget?.name || '客人'}未到？`}
+        message={`${
+          markNoShowTarget?.start_at
+            ? `${formatTimeHHmm(markNoShowTarget.start_at)} · `
+            : (markNoShowTarget?.start_time ? `${String(markNoShowTarget.start_time).slice(0, 5)} · ` : '')
+        }${markNoShowTarget?.pax || 0} 位。標記後可以在下方『未到』區塊改回來。`}
+        confirmText="標記未到"
+        cancelText="先不要"
+        danger
+        loading={markNoShowLoading}
       />
 
       {/* ExtendTime Modal */}
