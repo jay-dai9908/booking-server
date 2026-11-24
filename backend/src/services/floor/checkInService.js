@@ -1,5 +1,48 @@
 import { splitBoardUnits } from './liveService.js';
 import { assertNoSeatCollisions } from '../seating/allocator.js';
+import { toTaipeiDateString } from '../../../../shared/time.js';
+
+export function resolveBillingStartAt(firstRes, now = new Date()) {
+  if (firstRes?.is_walk_in) return now;
+  const sessionDate = firstRes?.session?.session_date;
+  const startTime = firstRes?.session?.start_time;
+  if (!sessionDate || !startTime) return now;
+  const dStr = typeof sessionDate === 'string'
+    ? sessionDate.slice(0, 10)
+    : toTaipeiDateString(sessionDate);
+  return new Date(`${dStr}T${startTime}:00+08:00`);
+}
+
+export async function isPersonPaid(tx, booking_ref, person_no, preloadedFirstRes = null) {
+  const firstRes = preloadedFirstRes || await tx.reservation.findFirst({
+    where: { booking_ref, status: { not: 'cancelled' } },
+    include: { session: true },
+    orderBy: { session: { start_time: 'asc' } }
+  });
+  if (!firstRes) return false;
+  if (
+    firstRes.is_paid === true ||
+    firstRes.billing_status === 'paid' ||
+    firstRes.billing_status === 'waived'
+  ) {
+    return true;
+  }
+
+  const pNo = Number(person_no);
+  const validPay = await tx.payment.findFirst({
+    where: {
+      booking_ref,
+      status: 'valid',
+      kind: { in: ['charge', 'waive'] },
+      OR: [
+        { person_nos: { has: pNo } },
+        { person_nos: { equals: [] } }
+      ]
+    },
+    select: { id: true }
+  });
+  return Boolean(validPay);
+}
 
 /**
  * 報到共用的交易寫入步驟（門市店員帶位與門口報到機報到共用）：
@@ -32,10 +75,7 @@ export async function applyCheckInRecords(tx, {
     orderBy: { person_no: 'asc' }
   });
 
-  const dStr = typeof firstRes.session.session_date === 'string'
-    ? firstRes.session.session_date.slice(0, 10)
-    : firstRes.session.session_date.toISOString().slice(0, 10);
-  const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
+  const billingStartDefault = resolveBillingStartAt(firstRes, now);
 
   const validPayments = await tx.payment.findMany({
     where: {
@@ -58,7 +98,7 @@ export async function applyCheckInRecords(tx, {
     const seatCode = seats[i] || null;
     const exPerson = existingPersons.find((p) => p.person_no === personNo);
 
-    const isPersonPaid =
+    const isPaidPerson =
       isBookingPaid ||
       validPayments.some((pay) => Array.isArray(pay.person_nos) && pay.person_nos.includes(personNo));
 
@@ -67,12 +107,12 @@ export async function applyCheckInRecords(tx, {
       status: 'active'
     };
 
-    if (start_timer && !isPersonPaid) {
+    if (start_timer && !isPaidPerson) {
       if (!exPerson?.timer_started_at) {
         personData.timer_started_at = now;
       }
       if (!exPerson?.billing_start_at) {
-        personData.billing_start_at = firstRes.is_walk_in ? now : bookingStartDt;
+        personData.billing_start_at = billingStartDefault;
       }
     }
 

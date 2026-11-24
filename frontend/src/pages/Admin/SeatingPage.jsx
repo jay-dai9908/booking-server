@@ -1870,6 +1870,17 @@ export default function SeatingPage() {
               const tm = p.timer || p;
               return Boolean(tm.timer_started_at && !tm.timer_ended_at);
             });
+            const startablePersons = (timerTarget?.persons || []).filter(p => {
+              if (p.status === 'removed') return false;
+              const tm = p.timer || p;
+              const isPaid = Boolean(
+                p.paid ||
+                timerTarget?.is_paid ||
+                timerTarget?.billing?.status === 'paid' ||
+                timerTarget?.billing?.status === 'waived'
+              );
+              return !tm.timer_started_at && !tm.timer_ended_at && !isPaid;
+            });
             const isAnyRunning = activePersons.some(p => !(p.timer?.paused_at || p.paused_at));
             const isAllPaused = activePersons.length > 0 && activePersons.every(p => Boolean(p.timer?.paused_at || p.paused_at));
             const hasActive = activePersons.length > 0;
@@ -1877,7 +1888,23 @@ export default function SeatingPage() {
 
             return (
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {startablePersons.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      data-testid="all-start-timer-btn"
+                      onClick={() => {
+                        handleTimerAction(
+                          timerTarget.booking_ref,
+                          startablePersons.map(p => p.person_no),
+                          'start'
+                        );
+                      }}
+                    >
+                      全組開始計時
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     size="sm"
@@ -2011,7 +2038,8 @@ export default function SeatingPage() {
               const tm = p.timer || p;
               const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
               const isEnded = Boolean(tm.timer_ended_at);
-              const elapsedMins = personElapsedMinutes(p, getServerNow());
+              const hasStarted = Boolean(tm.timer_started_at);
+              const elapsedMins = hasStarted ? personElapsedMinutes(p, getServerNow()) : 0;
               const seatLabel = p.seat_code
                 ? (p.seat_code.startsWith('WAIT-') ? '等待區' : p.seat_code)
                 : '未帶位';
@@ -2043,14 +2071,14 @@ export default function SeatingPage() {
               const timerEndedMs = tm.timer_ended_at ? new Date(tm.timer_ended_at).getTime() : nowMs;
 
               // Green played bar
-              const playedLeftPercent = Math.max(0, Math.min(100, ((timerStartedMs - timelineStartMs) / totalDurationMs) * 100));
+              const playedLeftPercent = hasStarted ? Math.max(0, Math.min(100, ((timerStartedMs - timelineStartMs) / totalDurationMs) * 100)) : 0;
               const normalPlayEndMs = Math.min(bookedEndMs, timerEndedMs);
-              const playedWidthPercent = Math.max(0, Math.min(100 - playedLeftPercent, ((normalPlayEndMs - Math.max(timerStartedMs, timelineStartMs)) / totalDurationMs) * 100));
+              const playedWidthPercent = hasStarted ? Math.max(0, Math.min(100 - playedLeftPercent, ((normalPlayEndMs - Math.max(timerStartedMs, timelineStartMs)) / totalDurationMs) * 100)) : 0;
 
               // Red overtime bar
               let overtimeLeftPercent = 0;
               let overtimeWidthPercent = 0;
-              if (timerEndedMs > bookedEndMs) {
+              if (hasStarted && timerEndedMs > bookedEndMs) {
                 overtimeLeftPercent = Math.max(0, Math.min(100, ((bookedEndMs - timelineStartMs) / totalDurationMs) * 100));
                 overtimeWidthPercent = Math.max(0, Math.min(100 - overtimeLeftPercent, ((timerEndedMs - bookedEndMs) / totalDurationMs) * 100));
               }
@@ -2126,6 +2154,8 @@ export default function SeatingPage() {
                 ? { label: '已付', cls: 'bg-sg-sage-soft text-sg-sage-ink' }
                 : isEnded
                 ? { label: '已離場', cls: 'bg-gray-100 text-gray-500' }
+                : !hasStarted
+                ? { label: '待計時', cls: 'bg-sg-paper text-sg-muted border border-sg-line' }
                 : isPaused
                 ? { label: '已暫停', cls: 'bg-amber-100 text-amber-800' }
                 : { label: '計時中', cls: 'bg-sg-sage-soft text-sg-sage-ink font-bold' };
@@ -2225,18 +2255,34 @@ export default function SeatingPage() {
                   {/* Third row: Info & Action Buttons */}
                   <div className="flex items-center justify-between pt-1 border-t border-sg-line/40">
                     <div className="text-[12px] text-sg-muted">
-                      <span className="font-bold text-sg-ink">已計 {formatTimerHMM(elapsedMins)}</span>
-                      <span className="mx-1">·</span>
-                      <span>收費 {billedHours} 小時</span>
-                      {pausedMins > 0 && (
-                        <span className="text-sg-muted ml-1">（已扣暫停 {pausedMins} 分）</span>
+                      {!hasStarted && !isEnded ? (
+                        <span className="font-bold text-sg-muted">待計時</span>
+                      ) : (
+                        <>
+                          <span className="font-bold text-sg-ink">已計 {formatTimerHMM(elapsedMins)}</span>
+                          <span className="mx-1">·</span>
+                          <span>收費 {billedHours} 小時</span>
+                          {pausedMins > 0 && (
+                            <span className="text-sg-muted ml-1">（已扣暫停 {pausedMins} 分）</span>
+                          )}
+                        </>
                       )}
                     </div>
 
                     <div className="flex items-center gap-1.5">
                       {!isEnded ? (
                         <>
-                          {isPaused ? (
+                          {!hasStarted && !isPaidOrWaived ? (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              data-testid={`person-start-btn-${p.person_no}`}
+                              onClick={() => handleTimerAction(timerTarget.booking_ref, [p.person_no], 'start')}
+                            >
+                              <Play className="w-3.5 h-3.5 mr-1" />
+                              開始計時
+                            </Button>
+                          ) : hasStarted && isPaused ? (
                             <Button
                               variant="secondary"
                               size="sm"
@@ -2245,7 +2291,7 @@ export default function SeatingPage() {
                               <Play className="w-3.5 h-3.5 mr-1" />
                               繼續
                             </Button>
-                          ) : (
+                          ) : hasStarted ? (
                             <Button
                               variant="secondary"
                               size="sm"
@@ -2254,7 +2300,7 @@ export default function SeatingPage() {
                               <Pause className="w-3.5 h-3.5 mr-1" />
                               暫停
                             </Button>
-                          )}
+                          ) : null}
 
                           {/* ⋯ Menu */}
                           <div className="relative">

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { getLiveFloorData, splitBoardUnits } from '../services/floor/liveService.js';
-import { applyCheckInRecords } from '../services/floor/checkInService.js';
+import { applyCheckInRecords, resolveBillingStartAt, isPersonPaid } from '../services/floor/checkInService.js';
 import { reseatBookings, assertNoSeatCollisions } from '../services/seating/allocator.js';
 import { getActiveLayoutForDate, loadSeatedOccupants, assertNoSeatedCollisions, lockDaySeats } from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
@@ -506,21 +506,7 @@ export async function seatPerson(req, res) {
         ? new Date(req.body.now || req.body.at)
         : new Date();
 
-      const validPayments = await tx.payment.findMany({
-        where: {
-          booking_ref,
-          status: 'valid',
-          kind: { in: ['charge', 'waive'] }
-        }
-      });
-      const isBookingPaid =
-        firstRes.is_paid === true ||
-        firstRes.billing_status === 'paid' ||
-        firstRes.billing_status === 'waived' ||
-        validPayments.some((pay) => !pay.person_nos || pay.person_nos.length === 0);
-      const personPaid =
-        isBookingPaid ||
-        validPayments.some((pay) => Array.isArray(pay.person_nos) && pay.person_nos.includes(pNo));
+      const personPaid = await isPersonPaid(tx, booking_ref, pNo, firstRes);
 
       const personUpdate = { seat_code: cleanSeatCode };
       if (start_timer && !personPaid) {
@@ -528,11 +514,7 @@ export async function seatPerson(req, res) {
           personUpdate.timer_started_at = now;
         }
         if (!person.billing_start_at) {
-          const dStr = typeof firstRes.session.session_date === 'string'
-            ? firstRes.session.session_date.slice(0, 10)
-            : firstRes.session.session_date.toISOString().slice(0, 10);
-          const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
-          personUpdate.billing_start_at = firstRes.is_walk_in ? now : bookingStartDt;
+          personUpdate.billing_start_at = resolveBillingStartAt(firstRes, now);
         }
       }
 
@@ -783,7 +765,7 @@ export async function moveGroup(req, res) {
   }
 }
 
-export const TIMER_ACTION_WHITELIST = ['pause', 'resume', 'end', 'restart'];
+export const TIMER_ACTION_WHITELIST = ['pause', 'resume', 'end', 'restart', 'start'];
 
 async function closeOpenPersonPausesTx(tx, person, closeAtDt) {
   const openPauses = (person.pauses || []).filter((pa) => !pa.ended_at);
@@ -803,6 +785,8 @@ export async function handleTimer(req, res) {
   const { booking_ref } = req.params;
   const { action, person_nos = 'all', reason } = req.body;
   const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
 
   if (!TIMER_ACTION_WHITELIST.includes(action)) {
     return res.status(400).json({ error: '不認得的計時動作', code: 'UNKNOWN_TIMER_ACTION' });
@@ -836,6 +820,19 @@ export async function handleTimer(req, res) {
         });
       }
 
+      let firstResForStart = null;
+      if (action === 'start') {
+        firstResForStart = await tx.reservation.findFirst({
+          where: { booking_ref, status: { not: 'cancelled' } },
+          include: { session: true },
+          orderBy: { session: { start_time: 'asc' } }
+        });
+        if (!firstResForStart || firstResForStart.attendance !== 'checked_in') {
+          throw { status: 409, message: '請先報到' };
+        }
+      }
+
+      const startedPersonNos = [];
       let affectedCount = 0;
       for (const p of persons) {
         if (action === 'pause') {
@@ -945,6 +942,22 @@ export async function handleTimer(req, res) {
               }
             }
           }
+        } else if (action === 'start') {
+          if (p.status === 'active' && !p.timer_started_at && !p.timer_ended_at) {
+            const paid = await isPersonPaid(tx, booking_ref, p.person_no, firstResForStart);
+            if (!paid) {
+              affectedCount++;
+              startedPersonNos.push(p.person_no);
+              const startUpdate = { timer_started_at: now };
+              if (!p.billing_start_at) {
+                startUpdate.billing_start_at = resolveBillingStartAt(firstResForStart, now);
+              }
+              await tx.bookingPerson.update({
+                where: { id: p.id },
+                data: startUpdate
+              });
+            }
+          }
         } else if (action === 'restart') {
           // Spec 2.2 item 1: 只限當天而且還沒付款
           const firstRes = await tx.reservation.findFirst({
@@ -989,6 +1002,21 @@ export async function handleTimer(req, res) {
       }
       if (action === 'resume' && affectedCount === 0) {
         throw { status: 409, code: 'NOTHING_TO_RESUME', message: '這幾位沒有正在計時的人' };
+      }
+      if (action === 'start') {
+        if (startedPersonNos.length === 0) {
+          throw { status: 409, code: 'NOTHING_TO_START', message: '這幾位已經在計時或已付款' };
+        }
+        await auditLog(tx, {
+          booking_ref,
+          event_type: 'timer_started',
+          category: 'seating',
+          summary: `第 ${startedPersonNos.join('、')} 位開始計時`,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id || null,
+          device_label: deviceInfo?.device_label || null
+        });
       }
 
       if (action === 'end') {

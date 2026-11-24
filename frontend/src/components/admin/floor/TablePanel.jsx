@@ -356,6 +356,16 @@ export default function TablePanel({
                             className="flex items-center gap-1 shrink-0"
                             onClick={(e) => e.stopPropagation()}
                           >
+                            {!isEnded && !hasStarted && !isPersonPaid && (
+                              <button
+                                type="button"
+                                data-testid={`table-panel-start-btn-${person.person_no}`}
+                                onClick={() => onTimerAction?.(group.booking_ref, [person.person_no], 'start')}
+                                className="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-sg-brown text-white hover:opacity-90 transition cursor-pointer"
+                              >
+                                開始
+                              </button>
+                            )}
                             {!isEnded && hasStarted && (
                               <button
                                 type="button"
