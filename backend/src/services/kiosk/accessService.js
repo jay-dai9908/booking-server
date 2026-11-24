@@ -3,7 +3,7 @@ import { dateOnly, toTaipeiDateString } from '../../../../shared/time.js';
 import { earliestEntry, ironText } from '../../../../shared/selfService.js';
 import { qrKeyFrom, parseQr, bookingRefPrefix, verifyQrMac } from './sgk1.js';
 import { ensureKioskSetting } from '../selfService/prepayService.js';
-import { getActiveLayoutForDate } from '../seating/layoutService.js';
+import { getActiveLayoutForDate, lockDaySeats } from '../seating/layoutService.js';
 import { reseatBookings } from '../seating/allocator.js';
 import { applyCheckInRecords } from '../floor/checkInService.js';
 import { sendSelfServiceFirstCheckinNotification } from '../../utils/lineMessaging.js';
@@ -314,7 +314,9 @@ export async function processKioskAccess(db = prisma, {
   }
 
   // 7 & 8. 在同一筆 booking_ref 的交易鎖內判斷是否首次報到或再次進門
+  const preBookingDateStr = toTaipeiDateString(firstRes.session.session_date);
   const txOutcome = await db.$transaction(async (tx) => {
+    await lockDaySeats(tx, preBookingDateStr);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${targetRef}))`;
 
     const lockedRows = await tx.reservation.findMany({

@@ -464,11 +464,23 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
         !newSeats.every(s => origSeats.includes(s));
       if (!hasChanged) continue;
 
-      // Update reservation seats across ALL sessions of this booking
-      await tx.reservation.updateMany({
-        where: { booking_ref: uRef, status: { not: 'cancelled' } },
+      // Update reservation seats across ALL sessions of this booking (only movable rows)
+      const moveUpdate = await tx.reservation.updateMany({
+        where: {
+          booking_ref: uRef,
+          status: 'confirmed',
+          is_seat_locked: false,
+          attendance: null,
+          OR: [{ seat_source: null }, { seat_source: { not: 'staff' } }]
+        },
         data: { assigned_seats: newSeats }
       });
+      if (moveUpdate.count !== targetResvs.length) {
+        const raceErr = new Error('座位剛被其他店員調整，請重新整理後再試');
+        raceErr.status = 409;
+        raceErr.code = 'SEAT_RACE';
+        throw raceErr;
+      }
 
       // Sync booking person seats if any exist
       const bPersons = await tx.bookingPerson.findMany({

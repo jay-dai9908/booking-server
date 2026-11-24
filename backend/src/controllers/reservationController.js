@@ -2,7 +2,8 @@ import prisma from '../prismaClient.js';
 import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
-import { loadAllocatorContext, getActiveLayoutForDate, loadSeatedOccupants } from '../services/seating/layoutService.js';
+import { loadAllocatorContext, getActiveLayoutForDate, loadSeatedOccupants, lockDaySeats } from '../services/seating/layoutService.js';
+import { isReservationPinned, reseatBookings } from '../services/seating/allocator.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { evaluatePromoCode } from './checkoutController.js';
@@ -501,6 +502,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         WHERE session_date = ${dateStr}::date
         FOR UPDATE
       `;
+      await lockDaySeats(tx, dateStr);
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
 
       // Fetch all confirmed reservations for the day
@@ -534,6 +536,10 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
         if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
         throw new Error('ALLOCATION_FAILED');
+      }
+
+      if (process.env.NODE_ENV === 'test' && Number(req.body?.__testDelayAfterAllocMs) > 0) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(Number(req.body.__testDelayAfterAllocMs), 5000)));
       }
 
       // Apply Reshuffle Updates to existing reservations
@@ -693,19 +699,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
           }
         }
 
-        for (const update of allocResult.updates) {
-          if (update.booking_ref !== 'NEW_RES') {
-            sessionUpdates.push(
-              tx.reservation.updateMany({
-                where: { booking_ref: update.booking_ref },
-                data: { assigned_seats: update.assigned_seats }
-              })
-            );
-          }
-        }
-        if (sessionUpdates.length > 0) {
-          await Promise.all(sessionUpdates);
-        }
+        await applyMovableSeatUpdates(tx, allocResult.updates);
 
         const resRowsData = session_ids.map((sessionId) => ({
           booking_ref,
@@ -1039,21 +1033,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         });
       }
 
-      for (const update of allocResult.updates) {
-        if (update.booking_ref !== 'NEW_RES') {
-          // Update all session records for this reshuffled booking_ref
-          sessionUpdates.push(
-            tx.reservation.updateMany({
-              where: { booking_ref: update.booking_ref },
-              data: { assigned_seats: update.assigned_seats }
-            })
-          );
-        }
-      }
-
-      if (sessionUpdates.length > 0) {
-        await Promise.all(sessionUpdates);
-      }
+      await applyMovableSeatUpdates(tx, allocResult.updates);
 
       // Create the new reservations with their assigned seats
       const newReservations = await tx.reservation.createMany({
@@ -1757,115 +1737,182 @@ export const deleteReservationRecord = async (req, res) => {
   }
 };
 
-export const handleCollisionsAndReshuffle = async (sessionIds, updatedBookingRefs) => {
-  // Find all confirmed reservations in the affected sessions
-  const currentReservations = await prisma.reservation.findMany({
-    where: { session_id: { in: sessionIds }, status: 'confirmed' }
+export async function applyMovableSeatUpdates(tx, updates = []) {
+  for (const update of updates) {
+    if (!update?.booking_ref || update.booking_ref === 'NEW_RES') continue;
+    const expectedCount = await tx.reservation.count({
+      where: { booking_ref: update.booking_ref, status: 'confirmed' }
+    });
+    if (expectedCount === 0) continue;
+
+    const updateRes = await tx.reservation.updateMany({
+      where: {
+        booking_ref: update.booking_ref,
+        status: 'confirmed',
+        is_seat_locked: false,
+        attendance: null,
+        OR: [{ seat_source: null }, { seat_source: { not: 'staff' } }]
+      },
+      data: { assigned_seats: update.assigned_seats }
+    });
+
+    if (updateRes.count !== expectedCount) {
+      const raceErr = new Error('座位剛被其他店員調整，請重新整理後再試');
+      raceErr.status = 409;
+      raceErr.code = 'SEAT_RACE';
+      throw raceErr;
+    }
+  }
+}
+
+export async function reshuffleAfterSeatChange(tx, sessionIds, updatedBookingRefs) {
+  const currentReservations = await tx.reservation.findMany({
+    where: { session_id: { in: sessionIds }, status: 'confirmed' },
+    include: {
+      user: { select: { name: true } },
+      session: { select: { session_date: true } }
+    }
   });
 
-  // Collect newly assigned seats for the updated refs
+  const nonUpdatedRefs = [...new Set(
+    currentReservations
+      .filter((r) => !updatedBookingRefs.includes(r.booking_ref))
+      .map((r) => r.booking_ref)
+  )];
+  const seatedPersonRefs = new Set();
+  if (nonUpdatedRefs.length > 0) {
+    const bpRows = await tx.bookingPerson.findMany({
+      where: { booking_ref: { in: nonUpdatedRefs }, seat_code: { not: null }, status: 'active' },
+      select: { booking_ref: true }
+    });
+    for (const bp of bpRows) seatedPersonRefs.add(bp.booking_ref);
+  }
+
   const updatedSeatsMap = new Map();
   for (const r of currentReservations) {
     if (updatedBookingRefs.includes(r.booking_ref)) {
       if (!updatedSeatsMap.has(r.session_id)) updatedSeatsMap.set(r.session_id, new Set());
-      r.assigned_seats?.forEach(s => updatedSeatsMap.get(r.session_id).add(s));
+      for (const s of r.assigned_seats || []) {
+        if (s && !String(s).startsWith('WAIT-')) {
+          updatedSeatsMap.get(r.session_id).add(s);
+        }
+      }
     }
   }
 
-  // Find colliding reservations
   const collidingRefs = new Set();
+  const hitSeatsSet = new Set();
   for (const r of currentReservations) {
     if (updatedBookingRefs.includes(r.booking_ref)) continue;
-    
     const updatedSeatsForSession = updatedSeatsMap.get(r.session_id);
-    if (updatedSeatsForSession && r.assigned_seats) {
-      if (r.assigned_seats.some(seat => updatedSeatsForSession.has(seat))) {
-        collidingRefs.add(r.booking_ref);
+    if (!updatedSeatsForSession || !r.assigned_seats) continue;
+
+    const hitSeats = r.assigned_seats.filter(
+      (seat) => seat && !String(seat).startsWith('WAIT-') && updatedSeatsForSession.has(seat)
+    );
+    if (hitSeats.length > 0) {
+      if (isReservationPinned(r) || seatedPersonRefs.has(r.booking_ref)) {
+        const pinnedErr = new Error(
+          `${hitSeats[0]} 已被 ${r.user?.name || '客人'} 固定（已報到或店員帶位），不能自動移開`
+        );
+        pinnedErr.status = 409;
+        pinnedErr.code = 'SEAT_PINNED';
+        throw pinnedErr;
       }
+      collidingRefs.add(r.booking_ref);
+      hitSeats.forEach((s) => hitSeatsSet.add(s));
     }
   }
 
-  let displacedCount = collidingRefs.size;
-
+  const displacedCount = collidingRefs.size;
   if (displacedCount > 0) {
-    let allDayReservations = currentReservations;
-    const sampleSession = await prisma.session.findFirst({
-      where: { id: { in: sessionIds } },
-      select: { session_date: true }
-    });
-
-    if (sampleSession) {
-      const allSessionsOfDay = await prisma.session.findMany({
-        where: { session_date: sampleSession.session_date },
-        select: { id: true }
+    try {
+      await reseatBookings(tx, {
+        bookingRefs: Array.from(collidingRefs),
+        reservedSeats: Array.from(hitSeatsSet),
+        sessionIds,
+        primaryBookingRef: updatedBookingRefs[0] || null
       });
-      const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
-      allDayReservations = await prisma.reservation.findMany({
-        where: { session_id: { in: allSessionIdsOfDay }, status: 'confirmed' }
-      });
-    }
-
-    // Unpin colliding reservations in memory across allDayReservations
-    for (const r of allDayReservations) {
-      if (collidingRefs.has(r.booking_ref)) {
-        r.is_seat_locked = false;
-        r.assigned_seats = []; // Strip to force reshuffle
+    } catch (err) {
+      if (err?.code !== 'CANNOT_DISPLACE') {
+        throw err;
       }
-    }
 
-    // Run allocation algorithm (pure reshuffle)
-    const ctx = await loadAllocatorContext(prisma, sampleSession?.session_date);
-    const allocResult = allocateSeats(allDayReservations, null, false, ctx);
+      const sampleDate = currentReservations[0]?.session?.session_date;
+      let allDayReservations = currentReservations;
+      if (sampleDate) {
+        const allSessionsOfDay = await tx.session.findMany({
+          where: { session_date: sampleDate },
+          select: { id: true }
+        });
+        allDayReservations = await tx.reservation.findMany({
+          where: { session_id: { in: allSessionsOfDay.map((s) => s.id) }, status: 'confirmed' },
+          include: {
+            user: { select: { name: true } }
+          }
+        });
+      }
 
-    if (allocResult.updates && allocResult.updates.length > 0) {
-      const sessionUpdates = [];
-      for (const update of allocResult.updates) {
-        sessionUpdates.push(
-          prisma.reservation.updateMany({
-            where: { booking_ref: update.booking_ref },
-            data: { assigned_seats: update.assigned_seats }
-          })
-        );
-      }
-      if (sessionUpdates.length > 0) {
-        await prisma.$transaction(sessionUpdates);
-      }
-    } else {
-      // Very edge case: completely full, couldn't reshuffle. Put them in wait area
-      const sessionUpdates = [];
-      
       let maxWait = 0;
       for (const res of allDayReservations) {
-        if (res.assigned_seats) {
-          for (const seat of res.assigned_seats) {
-            if (seat.startsWith('WAIT-')) {
-              const num = parseInt(seat.replace('WAIT-', ''), 10);
-              if (!isNaN(num) && num > maxWait) maxWait = num;
-            }
+        for (const seat of res.assigned_seats || []) {
+          if (String(seat).startsWith('WAIT-')) {
+            const num = parseInt(String(seat).replace('WAIT-', ''), 10);
+            if (!Number.isNaN(num) && num > maxWait) maxWait = num;
           }
         }
       }
+
       let waitCounter = maxWait + 1;
       for (const ref of collidingRefs) {
-        const r = allDayReservations.find(res => res.booking_ref === ref);
+        const refRows = allDayReservations.filter((res) => res.booking_ref === ref);
+        if (!refRows.length) continue;
+
+        const stillCollides = refRows.some((r) => {
+          const updatedSet = updatedSeatsMap.get(r.session_id);
+          return updatedSet && (r.assigned_seats || []).some((s) => updatedSet.has(s));
+        });
+        if (!stillCollides) continue;
+
+        if (refRows.some((r) => isReservationPinned(r))) {
+          const pinnedErr = new Error(
+            `${Array.from(hitSeatsSet)[0] || '座位'} 已被 ${refRows[0]?.user?.name || '客人'} 固定（已報到或店員帶位），不能自動移開`
+          );
+          pinnedErr.status = 409;
+          pinnedErr.code = 'SEAT_PINNED';
+          throw pinnedErr;
+        }
+
+        const paxCount = refRows[0]?.pax || 1;
         const waitSeats = [];
-        const paxCount = r ? r.pax : 1;
         for (let i = 0; i < paxCount; i++) {
           waitSeats.push(`WAIT-${waitCounter++}`);
         }
-        sessionUpdates.push(
-          prisma.reservation.updateMany({
-            where: { booking_ref: ref },
-            data: { assigned_seats: waitSeats }
-          })
-        );
+        const expectedCount = await tx.reservation.count({
+          where: { booking_ref: ref, status: 'confirmed' }
+        });
+        const updateRes = await tx.reservation.updateMany({
+          where: {
+            booking_ref: ref,
+            status: 'confirmed',
+            is_seat_locked: false,
+            attendance: null,
+            OR: [{ seat_source: null }, { seat_source: { not: 'staff' } }]
+          },
+          data: { assigned_seats: waitSeats }
+        });
+        if (updateRes.count !== expectedCount) {
+          const raceErr = new Error('座位剛被其他店員調整，請重新整理後再試');
+          raceErr.status = 409;
+          raceErr.code = 'SEAT_RACE';
+          throw raceErr;
+        }
       }
-      await prisma.$transaction(sessionUpdates);
     }
   }
 
   return displacedCount;
-};
+}
 
 export const moveSeat = async (req, res) => {
   const { id, assigned_seats } = req.body;
@@ -1875,36 +1922,56 @@ export const moveSeat = async (req, res) => {
   }
 
   try {
-    const targetRes = await prisma.reservation.findUnique({ where: { id: parseInt(id, 10) } });
-    if (!targetRes) {
+    const parsedId = parseInt(id, 10);
+    const preTarget = await prisma.reservation.findUnique({
+      where: { id: parsedId },
+      include: { session: true }
+    });
+    if (!preTarget) {
       return res.status(404).json({ error: 'Reservation not found' });
     }
+    const dateStr = toTaipeiDateString(preTarget.session.session_date);
 
-    const group = await prisma.reservation.findMany({ 
-      where: { booking_ref: targetRes.booking_ref }
-    });
-    const sessionIds = group.map(r => r.session_id);
+    const { singleUpdated, displacedCount } = await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, dateStr);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${preTarget.booking_ref}))`;
 
-    // Force update the target reservation
-    await prisma.reservation.updateMany({
-      where: { booking_ref: targetRes.booking_ref },
-      data: {
-        assigned_seats,
-        is_seat_locked: true
+      const group = await tx.reservation.findMany({
+        where: { booking_ref: preTarget.booking_ref, status: 'confirmed' }
+      });
+      if (!group.length) {
+        const notFoundErr = new Error('Reservation not found');
+        notFoundErr.status = 404;
+        throw notFoundErr;
       }
+      const sessionIds = group.map((r) => r.session_id);
+
+      await tx.reservation.updateMany({
+        where: { booking_ref: preTarget.booking_ref, status: 'confirmed' },
+        data: {
+          assigned_seats,
+          is_seat_locked: true
+        }
+      });
+
+      const dCount = await reshuffleAfterSeatChange(tx, sessionIds, [preTarget.booking_ref]);
+      const updated = await tx.reservation.findUnique({ where: { id: parsedId } });
+      return { singleUpdated: updated, displacedCount: dCount };
     });
 
-    const displacedCount = await handleCollisionsAndReshuffle(sessionIds, [targetRes.booking_ref]);
-
-    const singleUpdated = await prisma.reservation.findUnique({ where: { id: parseInt(id, 10) } });
-
-    res.json({ 
-      message: 'Seat moved successfully', 
+    res.json({
+      message: 'Seat moved successfully',
       reservation: singleUpdated,
       displacedCount
     });
   } catch (error) {
     console.error('Error moving seat:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
     res.status(500).json({ error: 'Failed to move seat' });
   }
 };
@@ -1917,28 +1984,57 @@ export const swapSeats = async (req, res) => {
   }
 
   try {
-    const sourceGroup = await prisma.reservation.findMany({ where: { booking_ref: source_booking_ref } });
-    const targetGroup = await prisma.reservation.findMany({ where: { booking_ref: target_booking_ref } });
-    
-    const sessionIdsSet = new Set([...sourceGroup.map(r => r.session_id), ...targetGroup.map(r => r.session_id)]);
-    const sessionIds = Array.from(sessionIdsSet);
+    const preSource = await prisma.reservation.findMany({
+      where: { booking_ref: source_booking_ref, status: 'confirmed' },
+      include: { session: true }
+    });
+    const preTarget = await prisma.reservation.findMany({
+      where: { booking_ref: target_booking_ref, status: 'confirmed' },
+      include: { session: true }
+    });
+    if (!preSource.length || !preTarget.length) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+    const dateStr = toTaipeiDateString(preSource[0].session.session_date);
 
-    await prisma.$transaction([
-      prisma.reservation.updateMany({
-        where: { booking_ref: source_booking_ref },
+    const displacedCount = await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, dateStr);
+      const refsSorted = [...new Set([source_booking_ref, target_booking_ref])].sort();
+      for (const ref of refsSorted) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${ref}))`;
+      }
+
+      const sourceGroup = await tx.reservation.findMany({
+        where: { booking_ref: source_booking_ref, status: 'confirmed' }
+      });
+      const targetGroup = await tx.reservation.findMany({
+        where: { booking_ref: target_booking_ref, status: 'confirmed' }
+      });
+      const sessionIds = Array.from(
+        new Set([...sourceGroup.map((r) => r.session_id), ...targetGroup.map((r) => r.session_id)])
+      );
+
+      await tx.reservation.updateMany({
+        where: { booking_ref: source_booking_ref, status: 'confirmed' },
         data: { assigned_seats: source_assigned_seats, is_seat_locked: true }
-      }),
-      prisma.reservation.updateMany({
-        where: { booking_ref: target_booking_ref },
+      });
+      await tx.reservation.updateMany({
+        where: { booking_ref: target_booking_ref, status: 'confirmed' },
         data: { assigned_seats: target_assigned_seats, is_seat_locked: true }
-      })
-    ]);
+      });
 
-    const displacedCount = await handleCollisionsAndReshuffle(sessionIds, [source_booking_ref, target_booking_ref]);
+      return await reshuffleAfterSeatChange(tx, sessionIds, [source_booking_ref, target_booking_ref]);
+    });
 
     res.json({ message: 'Seats swapped successfully', displacedCount });
   } catch (error) {
     console.error('Error swapping seats:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
     res.status(500).json({ error: 'Failed to swap seats' });
   }
 };
@@ -2205,6 +2301,7 @@ export const adminCreateReservation = async (req, res) => {
         WHERE session_date = ${dateStr}::date
         FOR UPDATE
       `;
+      await lockDaySeats(tx, dateStr);
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
 
       // Fetch all confirmed reservations for the day
@@ -2272,16 +2369,7 @@ export const adminCreateReservation = async (req, res) => {
         mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
         allocReason = allocResult.reason || null;
 
-        for (const update of allocResult.updates) {
-          if (update.booking_ref !== 'NEW_RES') {
-            sessionUpdates.push(
-              tx.reservation.updateMany({
-                where: { booking_ref: update.booking_ref },
-                data: { assigned_seats: update.assigned_seats }
-              })
-            );
-          }
-        }
+        await applyMovableSeatUpdates(tx, allocResult.updates);
       }
 
       // Smart Pegboard / Equipment fee calculation
@@ -2424,6 +2512,12 @@ export const adminCreateReservation = async (req, res) => {
 
   } catch (error) {
     console.error('Manual Reservation error:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
     if (error.message === 'CROSS_DATE_SESSIONS') {
       return res.status(400).json({ error: '一筆預約只能包含同一天的時段' });
     }
@@ -2449,7 +2543,25 @@ export const extendReservation = async (req, res) => {
   }
 
   try {
+    const sessionsPre = await prisma.session.findMany({
+      where: { id: { in: session_ids } },
+      select: { id: true, session_date: true }
+    });
+    if (sessionsPre.length !== session_ids.length) {
+      return res.status(404).json({ error: 'One or more sessions not found.' });
+    }
+    const extendDateStr = toTaipeiDateString(sessionsPre[0].session_date);
+
     const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT id
+        FROM "Session"
+        WHERE session_date = ${extendDateStr}::date
+        FOR UPDATE
+      `;
+      await lockDaySeats(tx, extendDateStr);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
       // Find the existing reservation details
       const existingReservations = await tx.reservation.findMany({
         where: { booking_ref, status: 'confirmed' },
@@ -2546,16 +2658,7 @@ export const extendReservation = async (req, res) => {
 
           mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
 
-          for (const update of allocResult.updates) {
-            if (update.booking_ref !== 'NEW_RES') {
-              sessionUpdates.push(
-                tx.reservation.updateMany({
-                  where: { booking_ref: update.booking_ref },
-                  data: { assigned_seats: update.assigned_seats }
-                })
-              );
-            }
-          }
+          await applyMovableSeatUpdates(tx, allocResult.updates);
         }
       }
 
@@ -2602,24 +2705,24 @@ export const extendReservation = async (req, res) => {
       // Recalculate unified total without wiping equipment or discounts
       const finalTotal = await recalculateReservationTotal(tx, booking_ref);
 
-      // If keep_seat, we must trigger reshuffle NOW to push colliding reservations
+      // If keep_seat, trigger transactional reshuffle inside the same tx/lock
       if (extendMode === 'keep_seat') {
-        // We do this outside the createMany but inside the tx, but handleCollisionsAndReshuffle uses its own queries/txs.
-        // Wait, handleCollisionsAndReshuffle uses `prisma` directly! We cannot run it inside `tx` if it uses `prisma`.
-        // So we just return success, and we'll run reshuffle AFTER the tx commits!
+        await reshuffleAfterSeatChange(tx, session_ids, [booking_ref]);
       }
 
       return { count: newReservations.count };
     });
 
-    if (extendMode === 'keep_seat') {
-      await handleCollisionsAndReshuffle(session_ids, [booking_ref]);
-    }
-
     res.status(201).json({ message: 'Reservation extended successfully', result });
 
   } catch (error) {
     console.error('Extend Reservation error:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
     if (error.message === 'RESERVATION_NOT_FOUND') {
       return res.status(404).json({ error: 'Original reservation not found.' });
     }

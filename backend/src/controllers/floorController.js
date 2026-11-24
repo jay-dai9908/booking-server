@@ -41,7 +41,18 @@ export async function checkIn(req, res) {
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
+    const preRes = await prisma.reservation.findFirst({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!preRes) {
+      return res.status(404).json({ error: '找不到此筆預約' });
+    }
+    const preDateStr = toTaipeiDateString(preRes.session.session_date);
+
     const result = await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -191,7 +202,18 @@ export async function moveSeat(req, res) {
   }
 
   try {
+    const preRes = await prisma.reservation.findFirst({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!preRes) {
+      return res.status(404).json({ error: '找不到此筆預約' });
+    }
+    const preDateStr = toTaipeiDateString(preRes.session.session_date);
+
     await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -584,8 +606,19 @@ export async function moveGroup(req, res) {
       return res.status(400).json({ error: '請指定目標桌' });
     }
 
+    const preRes = await prisma.reservation.findFirst({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!preRes) {
+      return res.status(404).json({ error: '找不到此筆預約' });
+    }
+    const preDateStr = toTaipeiDateString(preRes.session.session_date);
+
     let result = null;
     await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -1008,7 +1041,18 @@ export async function addPerson(req, res) {
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
+    const preRes = await prisma.reservation.findFirst({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!preRes) {
+      return res.status(404).json({ error: '找不到此筆預約' });
+    }
+    const preDateStr = toTaipeiDateString(preRes.session.session_date);
+
     const result = await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -1166,7 +1210,18 @@ export async function removePerson(req, res) {
     : new Date();
 
   try {
+    const preRes = await prisma.reservation.findFirst({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!preRes) {
+      return res.status(404).json({ error: '找不到此筆預約' });
+    }
+    const preDateStr = toTaipeiDateString(preRes.session.session_date);
+
     await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       // Check payment status of this person or whole booking
@@ -1627,7 +1682,18 @@ export async function previewBoardChange(req, res) {
   const nowDate = (process.env.NODE_ENV === 'test' && now) ? new Date(now) : new Date();
 
   try {
+    const preRes = await prisma.reservation.findFirst({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!preRes) {
+      return res.status(404).json({ error: '找不到此筆預約' });
+    }
+    const preDateStr = toTaipeiDateString(preRes.session.session_date);
+
     await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const beforeData = await getBookingBill(booking_ref, tx, nowDate);
@@ -1801,7 +1867,18 @@ export async function addBoardRental(req, res) {
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
+    const preRes = await prisma.reservation.findFirst({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!preRes) {
+      return res.status(404).json({ error: '找不到此筆預約' });
+    }
+    const preDateStr = toTaipeiDateString(preRes.session.session_date);
+
     const result = await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
