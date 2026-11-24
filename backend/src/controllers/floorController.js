@@ -123,6 +123,7 @@ export async function checkIn(req, res) {
           session_id: { in: sessionIds },
           booking_ref: { not: booking_ref },
           status: { not: 'cancelled' },
+          OR: [{ attendance: null }, { attendance: { notIn: ['completed', 'no_show'] } }],
           assigned_seats: { hasSome: seats }
         },
         include: { user: true, session: true }
@@ -476,6 +477,7 @@ export async function seatPerson(req, res) {
             session_id: { in: sessionIds },
             booking_ref: { not: booking_ref },
             status: { not: 'cancelled' },
+            OR: [{ attendance: null }, { attendance: { notIn: ['completed', 'no_show'] } }],
             assigned_seats: { has: cleanSeatCode }
           },
           include: { user: true, session: true }
@@ -766,7 +768,7 @@ export async function moveGroup(req, res) {
   }
 }
 
-export const TIMER_ACTION_WHITELIST = ['pause', 'resume', 'end', 'restart', 'start'];
+export const TIMER_ACTION_WHITELIST = ['pause', 'resume', 'end', 'restart', 'start', 'undo_leave_all'];
 
 async function closeOpenPersonPausesTx(tx, person, closeAtDt) {
   const openPauses = (person.pauses || []).filter((pa) => !pa.ended_at);
@@ -794,12 +796,143 @@ export async function handleTimer(req, res) {
   }
 
   try {
+    let preDateStr = null;
+    if (action === 'undo_leave_all') {
+      const preRes = await prisma.reservation.findFirst({
+        where: { booking_ref, status: { not: 'cancelled' } },
+        include: { session: true },
+        orderBy: { session: { start_time: 'asc' } }
+      });
+      if (!preRes) {
+        return res.status(404).json({ error: '找不到此筆預約' });
+      }
+      preDateStr = toTaipeiDateString(preRes.session.session_date);
+    }
+
     await prisma.$transaction(async (tx) => {
+      if (action === 'undo_leave_all') {
+        await lockDaySeats(tx, preDateStr);
+      }
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const now = (process.env.NODE_ENV === 'test' && (req.body?.now || req.body?.at))
         ? new Date(req.body.now || req.body.at)
         : new Date();
+
+      if (action === 'undo_leave_all') {
+        const reservations = await tx.reservation.findMany({
+          where: { booking_ref, status: { not: 'cancelled' } },
+          include: { session: true },
+          orderBy: { session: { start_time: 'asc' } }
+        });
+        if (!reservations.length) {
+          throw { status: 404, message: '找不到此筆預約' };
+        }
+        const firstRes = reservations[0];
+        const bookingDateStr = toTaipeiDateString(firstRes.session.session_date);
+        const todayStr = toTaipeiDateString(now);
+        if (bookingDateStr !== todayStr) {
+          throw { status: 409, code: 'NOT_TODAY', message: '只能取消當天的全組離場' };
+        }
+        if (firstRes.attendance !== 'completed') {
+          throw { status: 409, code: 'NOT_COMPLETED', message: '這組目前不是已離場狀態' };
+        }
+        const validPayCount = await tx.payment.count({
+          where: { booking_ref, status: 'valid', kind: { in: ['charge', 'waive'] } }
+        });
+        if (validPayCount > 0) {
+          throw { status: 409, code: 'ALREADY_PAID', message: '這組已有收款或免收紀錄，不能取消全組離場' };
+        }
+
+        const activePersons = await tx.bookingPerson.findMany({
+          where: { booking_ref, status: 'active' },
+          orderBy: { person_no: 'asc' }
+        });
+        const [lastGroupLeft, lastUndone] = await Promise.all([
+          tx.accountingEvent.findFirst({
+            where: { booking_ref, event_type: 'group_left' },
+            orderBy: { id: 'desc' }
+          }),
+          tx.accountingEvent.findFirst({
+            where: { booking_ref, event_type: 'group_leave_undone' },
+            orderBy: { id: 'desc' }
+          })
+        ]);
+
+        let restorePersonNos = [];
+        if (lastGroupLeft) {
+          const alreadyUndone = Boolean(
+            lastUndone && (
+              lastUndone.id > lastGroupLeft.id ||
+              lastUndone.after_json?.group_left_id === lastGroupLeft.id
+            )
+          );
+          if (alreadyUndone) {
+            throw { status: 409, code: 'ALREADY_UNDONE', message: '已經復原過這一次全組離場' };
+          }
+          const rawNos = Array.isArray(lastGroupLeft.after_json?.person_nos) ? lastGroupLeft.after_json.person_nos : [];
+          const activeSet = new Set(activePersons.map(ap => ap.person_no));
+          restorePersonNos = rawNos.map(Number).filter(n => activeSet.has(n));
+        } else {
+          if (lastUndone) {
+            throw { status: 409, code: 'ALREADY_UNDONE', message: '已經復原過這一次全組離場' };
+          }
+          const endedPersons = activePersons.filter(ap => ap.timer_ended_at != null);
+          if (endedPersons.length > 0) {
+            const maxSec = Math.max(...endedPersons.map(ap => Math.floor(new Date(ap.timer_ended_at).getTime() / 1000)));
+            restorePersonNos = endedPersons
+              .filter(ap => Math.floor(new Date(ap.timer_ended_at).getTime() / 1000) === maxSec)
+              .map(ap => ap.person_no);
+          }
+        }
+
+        if (restorePersonNos.length === 0) {
+          throw { status: 409, code: 'NOTHING_TO_UNDO', message: '找不到可復原的離場人員' };
+        }
+
+        const seatsToRestore = activePersons
+          .filter(ap => restorePersonNos.includes(ap.person_no) && ap.seat_code && !String(ap.seat_code).startsWith('WAIT-'))
+          .map(ap => ap.seat_code);
+        if (seatsToRestore.length > 0) {
+          const occupied = await loadSeatedOccupants(tx, bookingDateStr, { excludeBookingRef: booking_ref });
+          const conflictSeats = [...new Set(seatsToRestore.filter(sc => Boolean(occupied[sc])))];
+          if (conflictSeats.length > 0) {
+            throw {
+              status: 409,
+              code: 'SEAT_OCCUPIED',
+              conflicts: conflictSeats,
+              message: `座位 ${conflictSeats.join('、')} 已被其他組使用，無法取消全組離場`
+            };
+          }
+        }
+
+        await tx.bookingPerson.updateMany({
+          where: { booking_ref, person_no: { in: restorePersonNos }, status: 'active' },
+          data: { timer_ended_at: null }
+        });
+        await tx.reservation.updateMany({
+          where: { booking_ref, status: { not: 'cancelled' } },
+          data: { attendance: 'checked_in' }
+        });
+        await auditLog(tx, {
+          booking_ref,
+          event_type: 'group_leave_undone',
+          category: 'seating',
+          summary: `取消全組離場（第 ${restorePersonNos.join('、')} 位回到計時）`,
+          after_json: {
+            group_left_id: lastGroupLeft?.id || null,
+            person_nos: restorePersonNos,
+            at: now.toISOString()
+          },
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id || null,
+          device_label: deviceInfo?.device_label || null
+        });
+        await refreshBillingCache(tx, booking_ref);
+        return;
+      }
+
       let persons;
       if (person_nos !== 'all' && Array.isArray(person_nos)) {
         const reqNos = person_nos.map(Number);
@@ -1041,6 +1174,10 @@ export async function handleTimer(req, res) {
 
       if (action === 'end') {
         if (person_nos === 'all') {
+          const endedNowPersonNos = persons
+            .filter(p => p.status === 'active' && !p.timer_ended_at)
+            .map(p => p.person_no)
+            .sort((a, b) => a - b);
           const allBoards = await tx.bookingEquipment.findMany({
             where: { booking_ref, unit_group: { not: null } },
             select: { unit_group: true }
@@ -1059,6 +1196,22 @@ export async function handleTimer(req, res) {
           await tx.reservation.updateMany({
             where: { booking_ref },
             data: { attendance: 'completed' }
+          });
+          await auditLog(tx, {
+            booking_ref,
+            event_type: 'group_left',
+            category: 'seating',
+            summary: endedNowPersonNos.length > 0
+              ? `全組離場（第 ${endedNowPersonNos.join('、')} 位）`
+              : '全組離場',
+            after_json: {
+              person_nos: endedNowPersonNos,
+              at: now.toISOString()
+            },
+            staff_name: staffName,
+            staff_id: staffId,
+            device_id: deviceInfo?.device_id || null,
+            device_label: deviceInfo?.device_label || null
           });
         } else {
           const remainingNotEnded = await tx.bookingPerson.count({
@@ -1170,6 +1323,7 @@ export async function addPerson(req, res) {
             session_id: { in: sessionIds },
             booking_ref: { not: booking_ref },
             status: { not: 'cancelled' },
+            OR: [{ attendance: null }, { attendance: { notIn: ['completed', 'no_show'] } }],
             assigned_seats: { has: seat_code }
           },
           include: { user: true }

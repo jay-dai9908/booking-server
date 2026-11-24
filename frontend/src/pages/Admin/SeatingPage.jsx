@@ -364,6 +364,8 @@ export default function SeatingPage() {
   const [showAddPersonModalTarget, setShowAddPersonModalTarget] = useState(null);
   const [selectedAddPersonSeat, setSelectedAddPersonSeat] = useState(null);
   const [addPersonSubmitting, setAddPersonSubmitting] = useState(false);
+  const [undoLeaveTarget, setUndoLeaveTarget] = useState(null);
+  const [undoLeaveLoading, setUndoLeaveLoading] = useState(false);
   const [overCapacityTarget, setOverCapacityTarget] = useState(null);
 
   // Add board states (Section 5.2.4)
@@ -1518,26 +1520,42 @@ export default function SeatingPage() {
                 {searchedCompleted.length === 0 ? (
                   <div className="py-4 text-center text-sg-muted text-[13px]">尚無已離場紀錄</div>
                 ) : (
-                  searchedCompleted.map((b) => (
-                    <div key={b.booking_ref} data-booking-ref={b.booking_ref} className="py-2.5 flex items-center justify-between text-[13px]">
-                      <div>
-                        <span className="font-bold text-sg-ink mr-2">{b.name}</span>
-                        <span className="text-sg-muted">{bookingTimeRange(b.start_at, b.end_at)} · {b.pax} 位</span>
+                  searchedCompleted.map((b) => {
+                    const billingSt = b.billing?.status || 'unpaid';
+                    const bDateStr = b.session_date || (b.start_at ? new Date(b.start_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }) : null);
+                    const todayTaipei = getServerNow().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+                    const canUndoLeave = billingSt === 'unpaid' && (!bDateStr || bDateStr === todayTaipei);
+                    return (
+                      <div key={b.booking_ref} data-booking-ref={b.booking_ref} className="py-2.5 flex items-center justify-between text-[13px]">
+                        <div>
+                          <span className="font-bold text-sg-ink mr-2">{b.name}</span>
+                          <span className="text-sg-muted">{bookingTimeRange(b.start_at, b.end_at)} · {b.pax} 位</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <StatusPill status={billingSt} />
+                          {canUndoLeave && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              data-testid={`undo-leave-all-btn-${b.booking_ref}`}
+                              onClick={() => setUndoLeaveTarget(b)}
+                            >
+                              取消全組離場
+                            </Button>
+                          )}
+                          {billingSt !== 'paid' && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setCheckoutBookingRef(b.booking_ref)}
+                            >
+                              結帳
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <StatusPill status={b.billing?.status || 'unpaid'} />
-                        {b.billing?.status !== 'paid' && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setCheckoutBookingRef(b.booking_ref)}
-                          >
-                            結帳
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
@@ -2755,6 +2773,27 @@ export default function SeatingPage() {
       />
 
       {/* Board Swap Sheet */}
+      <ConfirmPanel
+        isOpen={Boolean(undoLeaveTarget)}
+        onClose={() => { if (!undoLeaveLoading) setUndoLeaveTarget(null); }}
+        title="取消全組離場"
+        message="把這組放回計時中？離場這段時間會照算。"
+        loading={undoLeaveLoading}
+        onConfirm={async () => {
+          if (!undoLeaveTarget) return;
+          try {
+            setUndoLeaveLoading(true);
+            await api.post(`/floor/${undoLeaveTarget.booking_ref}/timer`, { action: 'undo_leave_all' });
+            setUndoLeaveTarget(null);
+            await refresh();
+            showToast('已取消全組離場');
+          } catch (err) {
+            showToast(err.response?.data?.error || '取消全組離場失敗');
+          } finally {
+            setUndoLeaveLoading(false);
+          }
+        }}
+      />
       {boardSwapTarget && (() => {
         const b = boardSwapTarget.booking;
         const activePersons = (b.persons || []).filter(p => p.status !== 'removed');
