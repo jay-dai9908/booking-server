@@ -419,11 +419,23 @@ export function buildSupplementReceipt(payment, booking = {}, opts = {}) {
   commands.push({ type: 'text', text: `第 ${pNo} 位${seatCode}`, size: 22, bold: true });
 
   const breakdown = payment.breakdown_json || {};
+  const pendingItems = Array.isArray(breakdown.pending_items) ? breakdown.pending_items : [];
   const items = breakdown.items || [];
   for (const it of items) {
     const lbl = it.name || it.label || '補收項目';
     const qtyStr = it.qty ? ` ×${it.qty}` : '';
     commands.push({ type: 'text', text: fitLine(`  ${lbl}${qtyStr}`, formatReceiptMoney(it.amount || it.price)), size: 22 });
+  }
+  for (const pi of pendingItems) {
+    if (pi?.source_type === 'board_addon' && pi?.computed_until) {
+      const hhmm = new Date(pi.computed_until).toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Taipei',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      commands.push({ type: 'text', text: fitLine(`  ${pi.label || '智能板加租'} 算到 ${hhmm}`, formatReceiptMoney(pi.amount || 0)), size: 20 });
+    }
   }
 
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });

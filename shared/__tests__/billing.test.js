@@ -726,4 +726,96 @@ test('Round 25 Item 1: orderPromos person_nos targets only listed unpaid persons
   assert.equal(perPaxBill.persons[2].total, 550);
 });
 
+test('Round 36 Item 3: pending_supplement deducts matching valid supplements, restores on void, and computes board_addon difference', () => {
+  const pricing = { hourly: 150, unlimited: 750, allow_unlimited: true };
+  const rules = { grace: 10, block: 30, early_leave_mode: 'booked', default_split_mode: 'even' };
+  const booking = { start_at: '2026-11-04T14:00:00+08:00', end_at: '2026-11-04T16:00:00+08:00', booked_minutes: 120 };
+
+  const initialCharge = {
+    id: 101,
+    kind: 'charge',
+    status: 'valid',
+    method: 'cash',
+    amount: 300,
+    person_nos: [1],
+    breakdown_json: {
+      persons: [
+        { person_no: 1, seat_code: 'A1', entry: { mode: 'hourly', hours: 2, amount: 300 }, board: { amount: 0, units: [] }, addons: [], shares: [], promos: [], total: 300 }
+      ]
+    }
+  };
+
+  // Case A: 1 person paid, post-payment order_addon 120 -> pending_supplement 120 -> valid supplement 120 -> 0 -> voided -> 120
+  const baseParams = {
+    pricing,
+    rules,
+    booking,
+    persons: [{ person_no: 1, seat_code: 'A1', status: 'active' }],
+    orderAddons: [
+      { key: 'post_addon_1', name: '加購大包材料', price: 120, qty: 1, added_after_payment: true, include_paid: true, split: { mode: 'even' } }
+    ]
+  };
+
+  const billPending = computeBill({ ...baseParams, payments: [initialCharge] });
+  assert.equal(billPending.persons[0].pending_supplement, 120);
+  assert.equal(billPending.persons[0].pending_items[0].source_key, 'order_addon:post_addon_1');
+  assert.equal(billPending.persons[0].pending_items[0].source_type, 'order_item');
+
+  const supPaymentValid = {
+    id: 102,
+    kind: 'supplement',
+    status: 'valid',
+    method: 'cash',
+    amount: 120,
+    person_nos: [1],
+    breakdown_json: {
+      pending_items: [{ person_no: 1, source_key: 'order_addon:post_addon_1', source_type: 'order_item', amount: 120 }]
+    }
+  };
+  const billAfterSup = computeBill({ ...baseParams, payments: [initialCharge, supPaymentValid] });
+  assert.equal(billAfterSup.persons[0].pending_supplement, 0);
+  assert.equal(billAfterSup.pending_supplements.length, 0);
+
+  const billAfterVoid = computeBill({ ...baseParams, payments: [initialCharge, { ...supPaymentValid, status: 'voided' }] });
+  assert.equal(billAfterVoid.persons[0].pending_supplement, 120);
+
+  // Case B: board_addon reserved mechanism: paid person has a board computed to 16:00 = 120 (1h * 120), already supplemented 60 -> pending_supplement = 60
+  const boardAddonBill = computeBill({
+    now: '2026-11-04T16:00:00+08:00',
+    pricing,
+    rules,
+    discountConfig: { enabled: false },
+    booking,
+    persons: [{ person_no: 1, seat_code: 'A1', status: 'active' }],
+    boards: [
+      {
+        unit_group: 'ug-late-1',
+        person_no: 1,
+        added_after_payment: true,
+        segments: [
+          { name: '中板', rate: 120, start_at: '2026-11-04T15:00:00+08:00' }
+        ]
+      }
+    ],
+    payments: [
+      initialCharge,
+      {
+        id: 103,
+        kind: 'supplement',
+        status: 'valid',
+        method: 'cash',
+        amount: 60,
+        person_nos: [1],
+        breakdown_json: {
+          pending_items: [{ person_no: 1, source_key: 'board:ug-late-1', source_type: 'board_addon', amount: 60 }]
+        }
+      }
+    ]
+  });
+  assert.equal(boardAddonBill.persons[0].pending_supplement, 60);
+  assert.equal(boardAddonBill.persons[0].pending_items[0].source_type, 'board_addon');
+  assert.equal(boardAddonBill.persons[0].pending_items[0].source_key, 'board:ug-late-1');
+});
+
+
 

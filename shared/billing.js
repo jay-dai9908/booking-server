@@ -294,17 +294,46 @@ export function computeBill({
   }
 
   // Pre-calculate smart board totals for each board unit
+  const nowIso = new Date(typeof now === 'number' ? now : new Date(now).getTime()).toISOString();
   const boardUnitMap = new Map(); // unit_group -> calculated board object
   for (const b of (boards || [])) {
+    const segs = Array.isArray(b.segments) ? b.segments : [];
+    const normalizedSegs = segs.map((s) => {
+      if (s?.start_at && !s?.end_at && !s?.effective_end_at && !s?.planned_end_at && s?.hours == null && s?.ended_reason !== 'person_removed') {
+        return { ...s, effective_end_at: nowIso };
+      }
+      return s;
+    });
     const calc = calculateBoardTotal({
-      segments: b.segments || [],
+      segments: normalizedSegs,
       pauses: b.pauses || [],
       discountConfig,
       now
     });
     const total = b.fixed_total != null ? b.fixed_total : calc.total;
-    boardUnitMap.set(b.unit_group, { ...b, ...calc, total });
+    const activeSegs = normalizedSegs.filter(s => s?.ended_reason !== 'person_removed');
+    const allReturned = activeSegs.length > 0 && activeSegs.every(s => Boolean(s?.end_at || s?.ended_reason === 'returned'));
+    const computedUntil = allReturned
+      ? (activeSegs
+          .map(s => s?.end_at || s?.effective_end_at || s?.planned_end_at)
+          .filter(Boolean)
+          .sort()
+          .pop() || nowIso)
+      : nowIso;
+    const labelName = activeSegs.map(s => displayBoardName(s?.name || '智能板')).filter(Boolean).join(' / ') || '智能板加租';
+    boardUnitMap.set(b.unit_group, {
+      ...b,
+      ...calc,
+      total,
+      computed_until: computedUntil,
+      board_label: labelName
+    });
   }
+
+  const normalizedPendingSupplements = (pendingSupplements || []).map(ps => ({
+    ...ps,
+    source_type: ps.source_type || (String(ps.source_key || '').startsWith('board:') ? 'board_addon' : 'order_item')
+  }));
 
   // 1. Calculate each person's entry, board, and personal addons
   const computedPersons = [];
@@ -330,6 +359,33 @@ export function computeBill({
         is_paid: true,
         is_frozen: true
       });
+
+      // Reserved mechanism for Round 40 (`board_addon`):
+      // When a paid (frozen) person rents an extra smart board (`unit_group` not present in `frozenSnap.board.units`,
+      // or explicitly marked `added_after_payment: true`), it becomes a live `board_addon` pending supplement:
+      // - source_key = `board:${unit_group}`
+      // - Amount is NEVER frozen in a fixed snapshot: returned boards compute up to return time; unreturned boards
+      //   compute up to `now` at billing/supplement time (applying 10/30 block rounding, buy-N-get-M, and daily cap).
+      // - Step 4b below subtracts any valid supplement payments whose `breakdown_json.pending_items` match `(person_no, source_key)`.
+      const frozenBoardGroups = new Set((frozenSnap.board?.units || []).map(u => u?.unit_group).filter(Boolean));
+      const isFrozenMissingUnits = (frozenSnap.board?.amount || 0) > 0 && !(frozenSnap.board?.units?.length > 0);
+      for (const b of (boards || [])) {
+        const bPersonNo = b.person_no ?? (activePersons[0]?.person_no || 1);
+        if (bPersonNo !== pNo) continue;
+        const isPostPaymentBoard = b.added_after_payment === true || (!frozenBoardGroups.has(b.unit_group) && !isFrozenMissingUnits);
+        if (!isPostPaymentBoard) continue;
+        const bCalc = boardUnitMap.get(b.unit_group);
+        if (bCalc && bCalc.total > 0) {
+          normalizedPendingSupplements.push({
+            person_no: pNo,
+            source_key: `board:${b.unit_group}`,
+            source_type: 'board_addon',
+            label: bCalc.board_label,
+            amount: bCalc.total,
+            computed_until: bCalc.computed_until
+          });
+        }
+      }
       continue;
     }
 
@@ -471,9 +527,10 @@ export function computeBill({
       if (splitMode === 'person' && targetPersonNo != null) {
         const isPaidTarget = paidPersons.find(p => p.person_no === targetPersonNo);
         if (isPaidTarget) {
-          pendingSupplements.push({
+          normalizedPendingSupplements.push({
             person_no: targetPersonNo,
             source_key,
+            source_type: 'order_item',
             label,
             amount: totalAmount
           });
@@ -499,9 +556,10 @@ export function computeBill({
             up.shares.push({ source_key, label, amount: res.amount });
           } else {
             // Paid person: create/update pending supplement
-            pendingSupplements.push({
+            normalizedPendingSupplements.push({
               person_no: res.person_no,
               source_key,
+              source_type: 'order_item',
               label,
               amount: res.amount
             });
@@ -658,9 +716,45 @@ export function computeBill({
     }
   }
 
-  // 4b. Pending supplements per person & Refund info (Round 21 Item 1)
+  // 4b. Pending supplements per person & Refund info (Round 21 Item 1 + Round 36 Item 3 deduction)
+  const paidPendingByPersonSource = new Map();
+  for (const pay of validPayments) {
+    if (pay.kind !== 'supplement') continue;
+    const paidItems = pay.breakdown_json?.pending_items;
+    if (!Array.isArray(paidItems)) continue;
+    const fallbackPersonNo = Array.isArray(pay.person_nos) && pay.person_nos.length > 0 ? Number(pay.person_nos[0]) : null;
+    for (const pi of paidItems) {
+      if (!pi || !pi.source_key) continue;
+      const pNo = Number(pi.person_no ?? fallbackPersonNo);
+      if (!Number.isInteger(pNo)) continue;
+      const mapKey = `${pNo}::${pi.source_key}`;
+      paidPendingByPersonSource.set(mapKey, (paidPendingByPersonSource.get(mapKey) || 0) + Math.max(0, Number(pi.amount) || 0));
+    }
+  }
+
+  const activePendingSupplements = [];
+  for (const ps of normalizedPendingSupplements) {
+    const rawAmt = Math.max(0, Number(ps.amount) || 0);
+    if (rawAmt <= 0) continue;
+    const mapKey = `${Number(ps.person_no)}::${ps.source_key}`;
+    const paidAvail = paidPendingByPersonSource.get(mapKey) || 0;
+    const deducted = Math.min(rawAmt, paidAvail);
+    if (deducted > 0) {
+      paidPendingByPersonSource.set(mapKey, paidAvail - deducted);
+    }
+    const netAmt = Math.max(0, rawAmt - deducted);
+    if (netAmt > 0) {
+      activePendingSupplements.push({
+        ...ps,
+        source_type: ps.source_type || (String(ps.source_key || '').startsWith('board:') ? 'board_addon' : 'order_item'),
+        amount: netAmt
+      });
+    }
+  }
+
   for (const p of computedPersons) {
-    const personSupplements = pendingSupplements.filter(ps => ps.person_no === p.person_no);
+    const personSupplements = activePendingSupplements.filter(ps => ps.person_no === p.person_no);
+    p.pending_items = personSupplements;
     p.pending_supplement = personSupplements.reduce((sum, ps) => sum + ps.amount, 0);
 
     const refundInfo = calculatePersonRefundInfo(validPayments, p.person_no);
@@ -723,7 +817,7 @@ export function computeBill({
   const statusInfo = billingStatus({
     persons: computedPersons,
     payments: validPayments,
-    pendingSupplements,
+    pendingSupplements: activePendingSupplements,
     hasRefund
   });
 
@@ -742,7 +836,7 @@ export function computeBill({
       pass_value_total: passValueTotal
     },
     status: statusInfo,
-    pending_supplements: pendingSupplements
+    pending_supplements: activePendingSupplements
   };
 }
 

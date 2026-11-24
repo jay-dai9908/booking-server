@@ -1276,11 +1276,21 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
 export async function supplementPayment(booking_ref, payload, staffUser, deviceInfo) {
   const staffName = staffUser?.name || '門市人員';
   const staffId = staffUser?.id || null;
-  const { person_no, items = [], method = 'cash', cash_received = null, note = '' } = payload;
+  const { client_batch_id, person_no, items = [], method = 'cash', cash_received = null, note = '' } = payload;
   const pNo = Number(person_no);
 
   return await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+    if (client_batch_id) {
+      const existing = await tx.payment.findFirst({
+        where: { client_batch_id }
+      });
+      if (existing) {
+        const { bill, status } = await getBookingBill(booking_ref, tx);
+        return { payment: existing, bill, status, print_jobs: [] };
+      }
+    }
 
     // Must have prior valid charge payment
     const priorPayment = await tx.payment.findFirst({
@@ -1302,75 +1312,154 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
       throw { status: 422, message: '卡券請用卡券折抵' };
     }
 
-    const reservations = await tx.reservation.findMany({
-      where: { booking_ref, status: { not: 'cancelled' } },
-      include: { session: true }
-    });
-    const sessionDate = reservations[0]?.session?.session_date;
-    const { hourly_price, unlimited_price } = sessionDate
-      ? await getEffectiveDailyRates(tx, sessionDate)
-      : {
-          hourly_price: priorPayment.breakdown_json?.pricing?.hourly || 150,
-          unlimited_price: priorPayment.breakdown_json?.pricing?.unlimited || 750
-        };
+    const now = new Date();
+    const billData = await getBookingBill(booking_ref, tx, now);
+    const serverPricing = billData.pricing || {};
+    const targetPersonBill = (billData.bill?.persons || []).find(p => Number(p.person_no) === pNo);
+    const hourly_price = serverPricing.hourly || priorPayment.breakdown_json?.pricing?.hourly || 150;
+    const unlimited_price = serverPricing.unlimited || priorPayment.breakdown_json?.pricing?.unlimited || 750;
 
     let supplementAmount = 0;
     const itemSummaries = [];
+    const sanitizedItems = [];
+    const collectedPendingItems = [];
 
-    for (const it of items) {
+    for (const it of (Array.isArray(items) ? items : [])) {
       if (it.type === 'addon') {
-        const cost = (it.price || 0) * (it.qty || 1);
+        const addonId = Number(it.addon_id);
+        const qty = it.qty === undefined || it.qty === null ? 1 : Number(it.qty);
+        if (!Number.isInteger(addonId) || addonId <= 0) {
+          throw { status: 422, message: '加購品項必須指定有效的 addon_id' };
+        }
+        if (!Number.isInteger(qty) || qty <= 0) {
+          throw { status: 422, message: '加購數量必須為正整數' };
+        }
+        const addonRow = await tx.addonItem.findUnique({ where: { id: addonId } });
+        if (!addonRow || !addonRow.is_active) {
+          throw { status: 422, message: '找不到或已停用的加購品項' };
+        }
+        const cost = addonRow.price * qty;
         supplementAmount += cost;
-        itemSummaries.push(`${it.name} ×${it.qty || 1}`);
+        itemSummaries.push(`${addonRow.name} ×${qty}`);
+        sanitizedItems.push({
+          type: 'addon',
+          addon_id: addonRow.id,
+          name: addonRow.name,
+          price: addonRow.price,
+          qty,
+          amount: cost
+        });
       } else if (it.type === 'hours') {
-        const hourlyRate = hourly_price || priorPayment.breakdown_json?.pricing?.hourly || 150;
-        const cost = Math.round((it.hours || 0) * hourlyRate);
+        const hrs = Number(it.hours);
+        if (!Number.isFinite(hrs) || hrs <= 0 || Math.abs((hrs * 2) - Math.round(hrs * 2)) > 1e-9) {
+          throw { status: 422, message: '加時時數必須是 0.5 的正倍數' };
+        }
+        const cost = Math.round(hrs * hourly_price);
         supplementAmount += cost;
-        itemSummaries.push(`時數 +${it.hours} 小時`);
+        itemSummaries.push(`時數 +${hrs} 小時`);
+        sanitizedItems.push({
+          type: 'hours',
+          hours: hrs,
+          hourly_rate: hourly_price,
+          label: `時數 +${hrs} 小時`,
+          amount: cost
+        });
       } else if (it.type === 'unlimited_diff') {
         const targetPerson = (priorPayment.breakdown_json?.persons || []).find(
           p => Number(p.person_no) === pNo
         ) || priorPayment.breakdown_json?.persons?.[0];
         const targetEntryPaid = targetPerson?.entry?.amount || 0;
-        const targetUnlimitedPrice = it.unlimited_price || unlimited_price || 750;
-        const diff = targetUnlimitedPrice - targetEntryPaid;
+        const diff = Math.max(0, unlimited_price - targetEntryPaid);
         if (diff > 0) {
           supplementAmount += diff;
           itemSummaries.push('升級不限時差額');
+          sanitizedItems.push({
+            type: 'unlimited_diff',
+            unlimited_price,
+            entry_paid: targetEntryPaid,
+            label: '升級不限時差額',
+            amount: diff
+          });
         }
       } else if (it.type === 'other') {
-        supplementAmount += Number(it.amount || 0);
-        itemSummaries.push(it.label || '其他');
+        const amt = Number(it.amount);
+        const cleanLabel = String(it.label || '').trim();
+        if (!Number.isInteger(amt) || amt <= 0) {
+          throw { status: 422, message: '其他補收金額必須為正整數' };
+        }
+        if (!cleanLabel) {
+          throw { status: 422, message: '請填寫補收項目說明' };
+        }
+        supplementAmount += amt;
+        itemSummaries.push(cleanLabel);
+        sanitizedItems.push({
+          type: 'other',
+          label: cleanLabel,
+          amount: amt
+        });
       } else if (it.type === 'pending') {
-        supplementAmount += Number(it.amount || 0);
-        itemSummaries.push(it.label || '結清待補收');
+        const personPendingItems = Array.isArray(targetPersonBill?.pending_items) ? targetPersonBill.pending_items : [];
+        const pendingTotal = Math.max(0, Number(targetPersonBill?.pending_supplement) || 0);
+        if (pendingTotal > 0) {
+          supplementAmount += pendingTotal;
+          itemSummaries.push('結清待補收');
+          sanitizedItems.push({
+            type: 'pending',
+            label: '結清待補收',
+            amount: pendingTotal
+          });
+          for (const pi of personPendingItems) {
+            if (pi && pi.source_key && Number(pi.amount) > 0) {
+              collectedPendingItems.push({
+                person_no: pNo,
+                source_key: pi.source_key,
+                source_type: pi.source_type || 'order_item',
+                label: pi.label || '待補收項目',
+                amount: Number(pi.amount),
+                ...(pi.computed_until ? { computed_until: pi.computed_until } : {})
+              });
+            }
+          }
+        }
       }
+    }
+
+    if (!(supplementAmount > 0)) {
+      throw { status: 422, message: '沒有需要補收的金額' };
     }
 
     const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    let change = 0;
+    let effectiveCashReceived = null;
+    let change = null;
     if (method === 'cash') {
-      const cashAmt = cash_received !== null && cash_received !== undefined ? Number(cash_received) : supplementAmount;
-      change = Math.max(0, cashAmt - supplementAmount);
+      const hasCashInput = cash_received !== null && cash_received !== undefined && cash_received !== '';
+      const cashAmt = hasCashInput ? Number(cash_received) : supplementAmount;
+      if (!Number.isFinite(cashAmt) || cashAmt < supplementAmount) {
+        throw { status: 400, message: `實收現金（NT$${cashAmt}）不可小於補收金額（NT$${supplementAmount}）` };
+      }
+      effectiveCashReceived = Math.round(cashAmt);
+      change = effectiveCashReceived - supplementAmount;
     }
 
     const payment = await tx.payment.create({
       data: {
         payment_no: payNo,
         batch_no: batchNo,
+        client_batch_id: client_batch_id || null,
         booking_ref,
         kind: 'supplement',
         status: 'valid',
         method,
         amount: supplementAmount,
-        cash_received: method === 'cash' ? (cash_received ?? supplementAmount) : null,
-        change_given: method === 'cash' ? change : null,
+        cash_received: effectiveCashReceived,
+        change_given: change,
         person_nos: [pNo],
         breakdown_json: {
-          items,
-          snapshot_at: new Date().toISOString()
+          items: sanitizedItems,
+          ...(collectedPendingItems.length > 0 ? { pending_items: collectedPendingItems } : {}),
+          snapshot_at: now.toISOString()
         },
         related_payment_id: priorPayment.id,
         note: note ? String(note).trim() : null,
@@ -1420,7 +1509,7 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
 export async function refundPayment(booking_ref, payload, staffUser, deviceInfo) {
   const staffName = staffUser?.name || '門市人員';
   const staffId = staffUser?.id || null;
-  const { person_no, amount, method = 'cash', reason, note = '', payment_id } = payload;
+  const { client_batch_id, person_no, amount, method = 'cash', reason, note = '', payment_id } = payload;
   const pNo = Number(person_no);
   const refundAmt = Math.round(Number(amount));
 
@@ -1437,6 +1526,16 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
 
   return await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+    if (client_batch_id) {
+      const existing = await tx.payment.findFirst({
+        where: { client_batch_id }
+      });
+      if (existing) {
+        const { bill, status } = await getBookingBill(booking_ref, tx);
+        return { payment: existing, bill, status, print_jobs: [] };
+      }
+    }
 
     const priorPayments = await tx.payment.findMany({
       where: {
@@ -1522,6 +1621,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       data: {
         payment_no: payNo,
         batch_no: batchNo,
+        client_batch_id: client_batch_id || null,
         booking_ref,
         kind: 'refund',
         status: 'valid',

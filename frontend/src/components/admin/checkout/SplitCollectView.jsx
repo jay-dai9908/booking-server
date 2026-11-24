@@ -16,6 +16,13 @@ import PaymentCompleteView from './PaymentCompleteView';
 import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 import { useAdminPermissions, MONEY_WRITE } from '../../../hooks/admin/useAdminPermissions';
 
+function genBatchUuid() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `batch-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export default function SplitCollectView({
   isOpen = false,
   onClose,
@@ -70,6 +77,9 @@ export default function SplitCollectView({
   const [voidLockedTarget, setVoidLockedTarget] = useState(null);
   const [showWaiveModal, setShowWaiveModal] = useState(false);
   const hasAutoOpenedRefundRef = useRef(false);
+  const supplementBatchIdRef = useRef(genBatchUuid());
+  const refundBatchIdRef = useRef(genBatchUuid());
+  const [supplementCashReceived, setSupplementCashReceived] = useState(0);
 
   // Sub-modal form states
   const [supplementMethod, setSupplementMethod] = useState('cash');
@@ -181,6 +191,7 @@ export default function SplitCollectView({
   const combinedPersonTotal = supplementPersonPaid + currentSupplementAmount;
 
   const handleOpenRefund = (p) => {
+    refundBatchIdRef.current = genBatchUuid();
     setRefundTarget(p);
     const passOpts = Array.isArray(p.pass_refundable) ? p.pass_refundable : [];
     const firstRefundablePass = passOpts.find(pr => pr.remaining_units > 0) || passOpts[0] || null;
@@ -428,11 +439,16 @@ export default function SplitCollectView({
 
   const handleSupplement = async () => {
     if (!supplementTarget) return;
+    const effectiveCash = supplementCashReceived > 0 ? supplementCashReceived : currentSupplementAmount;
+    if (supplementMethod === 'cash' && effectiveCash < currentSupplementAmount) {
+      setErrorMessage('實收現金不可小於補收金額');
+      return;
+    }
     try {
       setLoading(true);
       let items = [];
       if (supplementType === 'pending') {
-        items = [{ type: 'pending', amount: currentSupplementAmount, label: '結清待補收' }];
+        items = [{ type: 'pending', label: '結清待補收' }];
       } else if (supplementType === 'addon') {
         items = Object.entries(selectedAddons)
           .filter(([_, qty]) => qty > 0)
@@ -440,8 +456,8 @@ export default function SplitCollectView({
             const preset = addonPresets.find(a => a.name === name);
             return {
               type: 'addon',
+              addon_id: preset?.id,
               name,
-              price: preset?.price || 0,
               qty
             };
           });
@@ -457,8 +473,7 @@ export default function SplitCollectView({
         }];
       } else if (supplementType === 'unlimited_diff') {
         items = [{
-          type: 'unlimited_diff',
-          unlimited_price: unlimitedPrice
+          type: 'unlimited_diff'
         }];
       } else if (supplementType === 'other') {
         items = [{
@@ -469,12 +484,15 @@ export default function SplitCollectView({
       }
 
       await api.post(`/billing/${bookingRef}/supplement`, {
+        client_batch_id: supplementBatchIdRef.current,
         person_no: supplementTarget.person_no,
         items,
         method: supplementMethod,
-        cash_received: supplementMethod === 'cash' ? currentSupplementAmount : null,
+        cash_received: supplementMethod === 'cash' ? effectiveCash : null,
         print: autoPrint
       });
+      supplementBatchIdRef.current = genBatchUuid();
+      setSupplementCashReceived(0);
       setSupplementTarget(null);
       if (onPaymentSuccess) onPaymentSuccess();
       onClose();
@@ -498,6 +516,7 @@ export default function SplitCollectView({
     try {
       setLoading(true);
       await api.post(`/billing/${bookingRef}/refund`, {
+        client_batch_id: refundBatchIdRef.current,
         person_no: refundTarget.person_no,
         amount: refundMethod === 'pass' ? selectedPassRefundAmount : actionAmount,
         method: refundMethod,
@@ -507,6 +526,7 @@ export default function SplitCollectView({
         reason: actionReason,
         print: autoPrint
       });
+      refundBatchIdRef.current = genBatchUuid();
       setRefundTarget(null);
       if (onPaymentSuccess) onPaymentSuccess();
       onClose();
@@ -781,7 +801,10 @@ export default function SplitCollectView({
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[11px] text-sg-sage-ink font-bold">已結清 NT${p.total}</span>
                                 {p.pending_supplement > 0 && (
-                                  <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                                  <span
+                                    data-testid={`pending-supplement-badge-${p.person_no}`}
+                                    className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300"
+                                  >
                                     待補收 NT${p.pending_supplement}
                                   </span>
                                 )}
@@ -794,6 +817,8 @@ export default function SplitCollectView({
                               type="button"
                               data-testid="split-person-supplement-btn"
                               onClick={() => {
+                                supplementBatchIdRef.current = genBatchUuid();
+                                setSupplementCashReceived(0);
                                 setSupplementTarget(p);
                                 setSupplementMethod('cash');
                                 if (p.pending_supplement > 0) {
@@ -1069,7 +1094,10 @@ export default function SplitCollectView({
                     key={opt.key}
                     type="button"
                     data-testid={`supplement-chip-${opt.key}`}
-                    onClick={() => setSupplementType(opt.key)}
+                    onClick={() => {
+                      setSupplementType(opt.key);
+                      setSupplementCashReceived(0);
+                    }}
                     className={`px-3 py-1.5 rounded-xl text-[12px] font-bold border transition active:scale-[0.98] ${
                       supplementType === opt.key
                         ? 'bg-sg-brown text-white border-sg-brown shadow-sm'
@@ -1228,6 +1256,16 @@ export default function SplitCollectView({
                   />
                 </div>
                 <MoneyInput label="補收金額" value={actionAmount} onChange={setActionAmount} />
+              </div>
+            )}
+
+            {supplementMethod === 'cash' && (
+              <div data-testid="supplement-cashpad">
+                <CashPad
+                  dueAmount={currentSupplementAmount}
+                  cashReceived={supplementCashReceived || currentSupplementAmount}
+                  onChange={setSupplementCashReceived}
+                />
               </div>
             )}
 
