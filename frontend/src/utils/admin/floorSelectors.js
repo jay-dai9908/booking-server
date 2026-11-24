@@ -360,6 +360,29 @@ export function groupBookingsByAttendance(bookings = [], now = new Date()) {
   return { completed, checkedIn, pending, noShow };
 }
 
+/**
+ * Filter predicate shared across desktop FloorPlan dimming, mobile TableCards, and List view.
+ * @param {object|null} seatInfo - { state, bookingRef, conflict, isActive/is_active }
+ * @param {'all'|'alert'|'pending'|'empty'} [filterMode='all']
+ * @param {Set<string>|Array<string>} [alertBookingRefs]
+ * @returns {boolean}
+ */
+export function matchesFilter(seatInfo, filterMode = 'all', alertBookingRefs = new Set()) {
+  if (!seatInfo) return false;
+  if (!filterMode || filterMode === 'all') return true;
+  if (filterMode === 'alert') {
+    const refSet = alertBookingRefs instanceof Set ? alertBookingRefs : new Set(alertBookingRefs || []);
+    return Boolean(seatInfo.conflict || (seatInfo.bookingRef && refSet.has(seatInfo.bookingRef)));
+  }
+  if (filterMode === 'pending') {
+    return seatInfo.state === 'reserved' || seatInfo.state === 'resv';
+  }
+  if (filterMode === 'empty') {
+    return seatInfo.state === 'empty' && seatInfo.isActive !== false && seatInfo.is_active !== false;
+  }
+  return true;
+}
+
 export function isSessionPast(session, now = new Date()) {
   if (!session) return false;
   const nowTaipeiStr = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });

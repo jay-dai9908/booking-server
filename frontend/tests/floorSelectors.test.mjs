@@ -14,7 +14,8 @@ import {
   buildSeatStates,
   getPersonStatusText,
   isSeatOccupied,
-  groupBookingsByAttendance
+  groupBookingsByAttendance,
+  matchesFilter
 } from '../src/utils/admin/floorSelectors.js';
 
 test('floorSelectors pure function tests', async (t) => {
@@ -751,6 +752,26 @@ test('floorSelectors pure function tests', async (t) => {
     assert.deepStrictEqual(grouped.pending.map(b => b.booking_ref), ['BK-PENDING']);
     assert.deepStrictEqual(grouped.checkedIn.map(b => b.booking_ref), ['BK-IN']);
     assert.deepStrictEqual(grouped.completed.map(b => b.booking_ref), ['BK-DONE']);
+  });
+
+  await t.test('22. Round 42 Item 2: matchesFilter handles all, alert, pending, and empty modes', () => {
+    const alertRefs = new Set(['BK-ALERT']);
+
+    // all
+    assert.strictEqual(matchesFilter({ state: 'empty' }, 'all', alertRefs), true);
+    assert.strictEqual(matchesFilter(null, 'all', alertRefs), false);
+
+    // alert
+    assert.strictEqual(matchesFilter({ state: 'overtime', bookingRef: 'BK-ALERT' }, 'alert', alertRefs), true);
+    assert.strictEqual(matchesFilter({ state: 'running', bookingRef: 'BK-OK' }, 'alert', alertRefs), false);
+
+    // pending
+    assert.strictEqual(matchesFilter({ state: 'reserved' }, 'pending', alertRefs), true);
+    assert.strictEqual(matchesFilter({ state: 'running' }, 'pending', alertRefs), false);
+
+    // empty
+    assert.strictEqual(matchesFilter({ state: 'empty', isActive: true }, 'empty', alertRefs), true);
+    assert.strictEqual(matchesFilter({ state: 'empty', isActive: false }, 'empty', alertRefs), false);
   });
 });
 

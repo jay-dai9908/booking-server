@@ -51,6 +51,7 @@ import CheckInPanel from '../../components/admin/floor/CheckInPanel';
 import SeatActionPanel from '../../components/admin/floor/SeatActionPanel';
 import TablePanel from '../../components/admin/floor/TablePanel';
 import MoveGroupModal from '../../components/admin/floor/MoveGroupModal';
+import AlertList from '../../components/admin/floor/AlertList';
 
 // Modals
 import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
@@ -75,7 +76,8 @@ import {
   isBookingCompleted,
   groupBookingsByAttendance,
   isSeatOccupied,
-  buildSeatStates
+  buildSeatStates,
+  matchesFilter
 } from '../../utils/admin/floorSelectors';
 
 function getBookingHourSlots(booking) {
@@ -494,6 +496,24 @@ export default function SeatingPage() {
   // Collapsed state for completed & no-show bookings
   const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
   const [isNoShowExpanded, setIsNoShowExpanded] = useState(false);
+  const [isMobileAlertsOpen, setIsMobileAlertsOpen] = useState(() => {
+    try {
+      return localStorage.getItem('shiguang_seating_mobile_alerts') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const toggleMobileAlerts = () => {
+    setIsMobileAlertsOpen(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('shiguang_seating_mobile_alerts', String(next));
+      } catch {
+        // Ignore storage errors (private mode / quota)
+      }
+      return next;
+    });
+  };
   const [markNoShowTarget, setMarkNoShowTarget] = useState(null);
   const [markNoShowLoading, setMarkNoShowLoading] = useState(false);
   const [revertingNoShowRef, setRevertingNoShowRef] = useState(null);
@@ -680,6 +700,23 @@ export default function SeatingPage() {
     return list;
   }, [backendAlerts, seatStatesMap]);
 
+  const { alertBookingRefs, alertSeatCodes } = useMemo(() => {
+    const refs = new Set();
+    const seats = new Set();
+    for (const a of alerts) {
+      if (a.booking_ref) refs.add(a.booking_ref);
+      if (a.seat_code) seats.add(a.seat_code);
+    }
+    for (const [code, info] of Object.entries(seatStatesMap || {})) {
+      if (code === 'attentionList') continue;
+      if (info?.conflict) {
+        seats.add(code);
+        if (info.bookingRef) refs.add(info.bookingRef);
+      }
+    }
+    return { alertBookingRefs: refs, alertSeatCodes: seats };
+  }, [alerts, seatStatesMap]);
+
   // Group tables by zone
   const zoneGroupedTables = useMemo(() => {
     const zones = [...(layout.zones || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -730,6 +767,54 @@ export default function SeatingPage() {
 
     return groups;
   }, [layout.zones, layout.tables, layout.seats, seatStatesMap]);
+
+  const filteredZoneGroupedTables = useMemo(() => {
+    if (!filterMode || filterMode === 'all') return zoneGroupedTables;
+    const allSeats = layout.seats || [];
+    return zoneGroupedTables
+      .map(grp => {
+        const filteredTables = grp.tables.filter(t => {
+          const tableSeats = allSeats.filter(s => s.table_id === t.id);
+          return tableSeats.some(s =>
+            matchesFilter(
+              { ...(seatStatesMap[s.code] || { state: s.is_active === false ? 'off' : 'empty' }), isActive: s.is_active },
+              filterMode,
+              alertBookingRefs
+            )
+          );
+        });
+        return { ...grp, tables: filteredTables };
+      })
+      .filter(grp => grp.tables.length > 0);
+  }, [zoneGroupedTables, filterMode, layout.seats, seatStatesMap, alertBookingRefs]);
+
+  const emptySeatGroups = useMemo(() => {
+    const allSeats = layout.seats || [];
+    const groups = [];
+    for (const grp of zoneGroupedTables) {
+      const tableIds = new Set(grp.tables.map(t => t.id));
+      const seatCodes = allSeats
+        .filter(s =>
+          tableIds.has(s.table_id) &&
+          s.is_active !== false &&
+          matchesFilter({ ...(seatStatesMap[s.code] || { state: 'empty' }), isActive: s.is_active }, 'empty', alertBookingRefs)
+        )
+        .map(s => s.code);
+      if (seatCodes.length > 0) {
+        groups.push({
+          key: grp.zone?.id || 'unzoned',
+          title: grp.zone?.name || grp.zoneTitle,
+          seatCodes
+        });
+      }
+    }
+    return groups;
+  }, [zoneGroupedTables, layout.seats, seatStatesMap, alertBookingRefs]);
+
+  const totalFilteredEmptySeats = useMemo(
+    () => emptySeatGroups.reduce((sum, g) => sum + g.seatCodes.length, 0),
+    [emptySeatGroups]
+  );
 
   // Scroll spy for MiniMap
   useEffect(() => {
@@ -789,6 +874,17 @@ export default function SeatingPage() {
   const searchedCheckedIn = useMemo(() => filterBySearch(checkedInBookings), [checkedInBookings, searchQuery]);
   const searchedCompleted = useMemo(() => filterBySearch(completedBookings), [completedBookings, searchQuery]);
   const searchedNoShow = useMemo(() => filterBySearch(noShowBookings), [noShowBookings, searchQuery]);
+
+  const matchesBookingAlert = (b) => (
+    alertBookingRefs.has(b.booking_ref) ||
+    (b.assigned_seats || []).some(sc => alertSeatCodes.has(sc))
+  );
+  const displayedPending = filterMode === 'alert'
+    ? searchedPending.filter(matchesBookingAlert)
+    : searchedPending;
+  const displayedCheckedIn = filterMode === 'alert'
+    ? searchedCheckedIn.filter(matchesBookingAlert)
+    : searchedCheckedIn;
 
   // Timer controls
   const handleTimerAction = async (bookingRef, personNos, action, reason = null) => {
@@ -892,6 +988,22 @@ export default function SeatingPage() {
       }
     } catch (err) {
       showToast(err.response?.data?.error || '帶位失敗');
+    }
+  };
+
+  const handleSelectAlert = (al) => {
+    if (!al) return;
+    if (al.type === 'seat_conflict' && al.seat_code) {
+      const seatObj = (layout.seats || []).find(s => s.code === al.seat_code);
+      if (seatObj) {
+        handleSeatClick(seatObj);
+        return;
+      }
+    }
+    const b = bookings.find(bk => bk.booking_ref === al.booking_ref);
+    if (b) {
+      if (b.attendance === 'checked_in') setTimerTarget(b);
+      else setCheckInTarget(b);
     }
   };
 
@@ -1136,6 +1248,9 @@ export default function SeatingPage() {
             {chip.label}
           </button>
         ))}
+        {activeTab === 'timeline' && (
+          <span className="text-[11px] text-sg-muted whitespace-nowrap shrink-0 ml-1">時間軸不篩選</span>
+        )}
       </div>
 
       {/* Mobile Sticky Header (Tabs + Filter Chips + MiniMap when on floor tab) */}
@@ -1210,7 +1325,38 @@ export default function SeatingPage() {
               {chip.label}
             </button>
           ))}
+          {activeTab === 'timeline' && (
+            <span className="text-[11px] text-sg-muted whitespace-nowrap shrink-0 ml-1">時間軸不篩選</span>
+          )}
         </div>
+
+        {/* Mobile Expandable Alerts Drawer (Round 42 Item 2) */}
+        {alerts.length > 0 && (
+          <div className="rounded-2xl bg-sg-honey-soft/50 border border-sg-honey/40 overflow-hidden">
+            <button
+              type="button"
+              data-testid="mobile-alerts-toggle"
+              onClick={toggleMobileAlerts}
+              className="w-full px-3 py-2 flex items-center justify-between text-left"
+            >
+              <span className="flex items-center gap-1.5 text-sg-honey-ink font-bold text-[12px]">
+                <AlertTriangle className="w-3.5 h-3.5 text-sg-honey" />
+                <span>需要注意 {alerts.length}</span>
+              </span>
+              <ChevronDown className={`w-4 h-4 text-sg-honey transition-transform ${isMobileAlertsOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {isMobileAlertsOpen && (
+              <div className="px-2.5 pb-2.5 max-h-[240px] overflow-y-auto" data-testid="mobile-alerts-list">
+                <AlertList
+                  alerts={alerts}
+                  onSelectAlert={handleSelectAlert}
+                  onMarkNoShow={handleMarkNoShow}
+                  onMarkLeftAll={(ref) => handleTimerAction(ref, 'all', 'end')}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {activeTab === 'floor' && (
           <div className="pt-1">
@@ -1260,19 +1406,52 @@ export default function SeatingPage() {
             )}
           </div>
 
+          {filterMode === 'empty' ? (
+            <div className="space-y-3" data-testid="list-empty-seats-view">
+              <h2 className="text-[14px] font-bold text-sg-ink">
+                <span>空位 {totalFilteredEmptySeats} 個</span>
+              </h2>
+              {emptySeatGroups.length === 0 ? (
+                <div className="p-8 text-center bg-white rounded-3xl border border-sg-line text-[13px] text-sg-muted">
+                  目前沒有空位
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {emptySeatGroups.map((grp) => (
+                    <div key={grp.key} className="bg-white rounded-3xl border border-sg-line p-4 shadow-xs space-y-2.5">
+                      <div className="text-[13px] font-bold text-sg-ink">
+                        {grp.title} ({grp.seatCodes.length})
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {grp.seatCodes.map(code => (
+                          <span
+                            key={code}
+                            className="px-2.5 py-1 rounded-xl bg-sg-paper/80 border border-sg-line text-[12px] font-bold text-sg-ink font-num"
+                          >
+                            {code}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+          <>
           {/* Section: 待入座 */}
           <div className="space-y-3">
             <h2 className="text-[14px] font-bold text-sg-ink flex items-center justify-between">
-              <span>待入座 ({searchedPending.length})</span>
+              <span>待入座 ({displayedPending.length})</span>
             </h2>
 
-            {searchedPending.length === 0 ? (
+            {displayedPending.length === 0 ? (
               <div className="p-8 text-center bg-white rounded-3xl border border-sg-line text-[13px] text-sg-muted">
                 {searchQuery ? '沒有符合搜尋條件的待入座顧客' : '目前沒有待入座的顧客'}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {searchedPending.map((b, idx) => {
+                {displayedPending.map((b, idx) => {
                   const arrival = getArrivalStatus(b.start_at);
                   const isFirst = idx === 0;
                   const timeRangeStr = bookingTimeRange(b.start_at, b.seat_hold_until || b.end_at);
@@ -1420,19 +1599,21 @@ export default function SeatingPage() {
             )}
           </div>
 
+          {filterMode !== 'pending' && (
+          <>
           {/* Section: 使用中 */}
           <div className="space-y-3">
             <h2 className="text-[14px] font-bold text-sg-ink flex items-center justify-between">
-              <span>使用中 ({searchedCheckedIn.length})</span>
+              <span>使用中 ({displayedCheckedIn.length})</span>
             </h2>
 
-            {searchedCheckedIn.length === 0 ? (
+            {displayedCheckedIn.length === 0 ? (
               <div className="p-8 text-center bg-white rounded-3xl border border-sg-line text-[13px] text-sg-muted">
                 {searchQuery ? '沒有符合搜尋條件的使用中顧客' : '目前沒有正在使用中的顧客'}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {searchedCheckedIn.map((b) => {
+                {displayedCheckedIn.map((b) => {
                   const timerPill = groupTimerPill(b, getServerNow());
                   const seatsList = b.assigned_seats || [];
                   const isWaitOnly = seatsList.length > 0 && seatsList.every(s => s && s.startsWith('WAIT-'));
@@ -1667,6 +1848,10 @@ export default function SeatingPage() {
               </div>
             )}
           </div>
+          </>
+          )}
+          </>
+          )}
         </div>
       )}
 
@@ -1778,7 +1963,11 @@ export default function SeatingPage() {
                   顯示 {selectedSlot} 的座位
                 </div>
               )}
-              {zoneGroupedTables.map((group, groupIdx) => (
+              {filteredZoneGroupedTables.length === 0 ? (
+                <div className="p-8 text-center bg-white rounded-3xl border border-sg-line text-[13px] text-sg-muted">
+                  沒有符合的桌子
+                </div>
+              ) : filteredZoneGroupedTables.map((group, groupIdx) => (
                 <div
                   key={group.zone?.id || 'unzoned'}
                   className="bg-sg-paper/75 border border-sg-line rounded-3xl p-3.5 space-y-3"
@@ -1871,65 +2060,19 @@ export default function SeatingPage() {
             <div className="hidden lg:block lg:col-span-4 space-y-4">
               {/* Alerts Card */}
               {alerts.length > 0 && (
-                    <div className="bg-sg-honey-soft/50 p-4 rounded-3xl border border-sg-honey/40 space-y-3">
-                      <div className="flex items-center gap-2 text-sg-honey font-bold text-[14px]">
-                        <AlertTriangle className="w-4 h-4" />
-                        <span>需要注意 ({alerts.length})</span>
-                      </div>
-                      <div className="space-y-2">
-                        {alerts.map((al, idx) => (
-                          <div
-                            key={idx}
-                            onClick={() => {
-                              if (al.type === 'seat_conflict' && al.seat_code) {
-                                const seatObj = (layout.seats || []).find(s => s.code === al.seat_code);
-                                if (seatObj) {
-                                  handleSeatClick(seatObj);
-                                  return;
-                                }
-                              }
-                              const b = bookings.find(bk => bk.booking_ref === al.booking_ref);
-                              if (b) {
-                                if (b.attendance === 'checked_in') setTimerTarget(b);
-                                else setCheckInTarget(b);
-                              }
-                            }}
-                            className="p-2.5 rounded-2xl bg-white border border-sg-line cursor-pointer hover:border-sg-brown text-[12px] space-y-1"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="font-bold text-sg-ink truncate">{al.title || al.text}</div>
-                              {al.action === 'mark_no_show' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleMarkNoShow(al.booking_ref);
-                                  }}
-                                  className="px-2 py-0.5 rounded-lg bg-sg-danger-soft text-sg-danger font-bold text-[11px] hover:bg-sg-danger hover:text-white transition shrink-0"
-                                >
-                                  標記未到
-                                </button>
-                              )}
-                              {al.action === 'mark_left_all' && (
-                                <button
-                                  type="button"
-                                  data-testid={`alert-leave-btn-${al.booking_ref}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleTimerAction(al.booking_ref, 'all', 'end');
-                                  }}
-                                  className="px-2 py-0.5 rounded-lg bg-sg-peach-soft text-sg-peach-ink font-bold text-[11px] hover:bg-sg-peach hover:text-sg-ink transition shrink-0"
-                                >
-                                  已離場
-                                </button>
-                              )}
-                            </div>
-                            <div className="text-sg-muted">{al.subtitle || al.hint}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                <div className="bg-sg-honey-soft/50 p-4 rounded-3xl border border-sg-honey/40 space-y-3">
+                  <div className="flex items-center gap-2 text-sg-honey font-bold text-[14px]">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>需要注意 ({alerts.length})</span>
+                  </div>
+                  <AlertList
+                    alerts={alerts}
+                    onSelectAlert={handleSelectAlert}
+                    onMarkNoShow={handleMarkNoShow}
+                    onMarkLeftAll={(ref) => handleTimerAction(ref, 'all', 'end')}
+                  />
+                </div>
+              )}
 
                   {/* Smart Board Usage */}
                   <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-2">

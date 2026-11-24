@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import SeatTile from './SeatTile';
+import { matchesFilter } from '../../../utils/admin/floorSelectors';
 
 export default function FloorPlan({
   layout = {},
@@ -470,14 +471,11 @@ export default function FloorPlan({
           const isVent = seat.priority === 'last';
 
           // Filter opacity check (Spec: 篩選 chip 選了「需要注意」「待入座」「空位」時，不符合的座位加 opacity: .35)
-          let isDimmed = false;
-          if (filterMode === 'alert') {
-            isDimmed = !alertBookingRefs.has(seatInfo.bookingRef) && !seatInfo.conflict;
-          } else if (filterMode === 'pending') {
-            isDimmed = state !== 'reserved' && state !== 'resv';
-          } else if (filterMode === 'empty') {
-            isDimmed = state !== 'empty' || seat.is_active === false;
-          }
+          const isDimmed = !matchesFilter(
+            { ...seatInfo, state, isActive: seat.is_active },
+            filterMode,
+            alertBookingRefs
+          );
 
           return (
             <div
