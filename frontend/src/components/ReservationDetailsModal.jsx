@@ -22,6 +22,7 @@ import ErrorBoundary from './common/ErrorBoundary';
 import { formatBookingRef } from '../utils/admin/floorSelectors';
 import { safeFormatDate, formatDateTime } from '../utils/format';
 import { printJobOnThisDevice, isPrintGloballyEnabled } from '../utils/sunmiPrinter';
+import { useAdminPermissions, MONEY_WRITE } from '../hooks/admin/useAdminPermissions';
 
 const ExtendTimeModal = lazy(() => import('./ExtendTimeModal'));
 const EquipmentAddonModal = lazy(() => import('./EquipmentAddonModal'));
@@ -61,6 +62,8 @@ export const getReservationStatusUI = (r) => {
 
 export default function ReservationDetailsModal({ bookingRef, reservation: reservationProp, onClose, onUpdate, readOnly = false }) {
   const navigate = useNavigate();
+  const { can } = useAdminPermissions();
+  const canMoneyWrite = can(MONEY_WRITE);
   const ref = bookingRef || (typeof reservationProp === 'string' ? reservationProp : reservationProp?.booking_ref);
   const [reservation, setReservation] = useState(
     reservationProp && typeof reservationProp === 'object' && reservationProp.session_date ? reservationProp : null
@@ -868,17 +871,23 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                                 </button>
                               )}
                               {!isVoided && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActivePaymentMenuId(null);
-                                    setVoidPaymentTarget(p);
-                                    setVoidReason('收錯付款方式');
-                                  }}
-                                  className="w-full text-left px-3 py-1.5 hover:bg-gray-50 text-red-600 font-bold"
-                                >
-                                  作廢
-                                </button>
+                                canMoneyWrite ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActivePaymentMenuId(null);
+                                      setVoidPaymentTarget(p);
+                                      setVoidReason('收錯付款方式');
+                                    }}
+                                    className="w-full text-left px-3 py-1.5 hover:bg-gray-50 text-red-600 font-bold"
+                                  >
+                                    作廢
+                                  </button>
+                                ) : (
+                                  <div className="px-3 py-1.5 text-[11px] text-gray-400">
+                                    退款與作廢需要帳務或預約權限
+                                  </div>
+                                )
                               )}
                             </div>
                           )}
@@ -958,16 +967,22 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
                           : (isPrintGloballyEnabled() ? '前往結帳 (拆帳 / POS印單)' : '前往結帳 (拆帳)')}
                       </button>
                       {reservation.is_paid && (
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            setUnpaidReason('收錯訂單');
-                            setShowMarkUnpaidModal(true);
-                          }}
-                          className="px-3 py-2 bg-white border border-gray-200 text-gray-500 hover:bg-gray-50 rounded-xl text-xs font-medium transition-colors"
-                        >
-                          標記未結帳
-                        </button>
+                        canMoneyWrite ? (
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              setUnpaidReason('收錯訂單');
+                              setShowMarkUnpaidModal(true);
+                            }}
+                            className="px-3 py-2 bg-white border border-gray-200 text-gray-500 hover:bg-gray-50 rounded-xl text-xs font-medium transition-colors"
+                          >
+                            標記未結帳
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400 self-center">
+                            退款與作廢需要帳務或預約權限
+                          </span>
+                        )
                       )}
                       <button 
                         type="button"

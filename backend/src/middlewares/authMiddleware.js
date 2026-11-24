@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
+import { PERMISSION_LABELS } from './permissionGroups.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
@@ -171,7 +172,18 @@ export const requirePermission = (permission) => {
   };
 };
 
-export const requireAnyPermission = (permissions) => {
+export const buildPermissionRequiredResponse = (requiredList, extra = {}) => {
+  const list = Array.isArray(requiredList) ? requiredList.filter(Boolean) : (requiredList ? [requiredList] : []);
+  const labels = list.map((p) => `「${PERMISSION_LABELS[p] || p}」`);
+  return {
+    code: 'PERMISSION_REQUIRED',
+    required: list,
+    ...extra,
+    error: `需要${labels.join('或')}權限`,
+  };
+};
+
+export const requireAnyPermission = (permissions, options = {}) => {
   return async (req, res, next) => {
     const verifiedAdmin = await syncAndVerifyAdminUser(req.user);
     if (!verifiedAdmin) {
@@ -186,8 +198,13 @@ export const requireAnyPermission = (permissions) => {
       const hasAny = permissions.some(p => verifiedAdmin.permissions.includes(p));
       if (hasAny) return next();
     }
+    if (options?.detailed) {
+      return res.status(403).json(buildPermissionRequiredResponse(permissions));
+    }
     return res.status(403).json({ error: '無此功能存取權限' });
   };
 };
+
+export const requirePermissionGroup = (permissions) => requireAnyPermission(permissions, { detailed: true });
 
 

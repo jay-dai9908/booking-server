@@ -25,8 +25,11 @@ import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
 import SendLineMessageModal from './SendLineMessageModal';
 import ConfirmPanel from './admin/ConfirmPanel';
+import { useAdminPermissions, PASS_GRANT } from '../hooks/admin/useAdminPermissions';
 
 export default function MemberDetailsModal({ member, onClose, onMemberUpdated, onSwitchMember, onBindRequestResolved }) {
+  const { can } = useAdminPermissions();
+  const canPassGrant = can(PASS_GRANT);
   const [memberReservations, setMemberReservations] = useState([]);
   const [loginLogs, setLoginLogs] = useState([]);
   const [isMemberLoading, setIsMemberLoading] = useState(false);
@@ -953,14 +956,16 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
                         支援燙布/熨燙計次卡、折扣券、包月暢遊卡現場扣抵核銷與發放
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowGrantModal(true)}
-                      className="px-3.5 py-2 bg-[#8B5B43] hover:bg-[#724834] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs shrink-0"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      發放卡券給此會員
-                    </button>
+                    {canPassGrant && (
+                      <button
+                        type="button"
+                        onClick={() => setShowGrantModal(true)}
+                        className="px-3.5 py-2 bg-[#8B5B43] hover:bg-[#724834] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        發放卡券給此會員
+                      </button>
+                    )}
                   </div>
 
                   {isPassesLoading ? (
@@ -971,14 +976,16 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
                     <div className="text-center py-12 text-[#8C8279] bg-[#FAF7F2] rounded-2xl border border-dashed border-[#E8DEC8] space-y-3">
                       <Ticket className="w-10 h-10 mx-auto text-[#8C8279]/50" />
                       <p className="text-sm font-bold">此會員名下尚無任何卡券或集次卡</p>
-                      <button
-                        type="button"
-                        onClick={() => setShowGrantModal(true)}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#8B5B43] text-white text-xs font-bold rounded-xl shadow-xs hover:bg-[#724834]"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        立即手動發放卡券
-                      </button>
+                      {canPassGrant && (
+                        <button
+                          type="button"
+                          onClick={() => setShowGrantModal(true)}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#8B5B43] text-white text-xs font-bold rounded-xl shadow-xs hover:bg-[#724834]"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          立即手動發放卡券
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-3">
