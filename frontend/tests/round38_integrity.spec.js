@@ -41,10 +41,11 @@ async function adminLogin(page) {
   await pwdInput.waitFor({ state: 'visible', timeout: 10000 });
   await pwdInput.fill(ADMIN_PASSWORD);
   await page.locator('button[type="submit"]').click();
-  await page.waitForURL(url => url.pathname.includes('/admin/') && !url.pathname.includes('/login'), {
+  await page.waitForURL(url => url.pathname.includes('/admin/sessions'), {
     timeout: 15000
   });
   await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(400);
 }
 
 async function run() {
