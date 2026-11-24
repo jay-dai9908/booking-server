@@ -37,11 +37,12 @@ test('Round 41 Item 3: extendReservation validates contiguity/date/dup, clones f
 
   try {
     layoutId = await ensureTestPublishedLayout(prisma, {
-      name: 'R41 Item3 Layout',
-      effectiveFrom: '2020-01-01',
+      name: `R41 Item3 Layout ${ts}`,
+      effectiveFrom: d1Str,
       effectiveDate: d1Str,
-      codePrefix: 'A',
-      seatCount: 4
+      codePrefix: 'A1-',
+      seatCount: 4,
+      alwaysCreate: true
     });
 
     await prisma.dailySetting.deleteMany({ where: { date: { in: [d1, d2] } } });

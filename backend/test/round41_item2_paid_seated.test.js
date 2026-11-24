@@ -41,11 +41,12 @@ test('Round 41 Item 2: paid guest stays paid_seated until explicit leave, alerts
 
   try {
     layoutId = await ensureTestPublishedLayout(prisma, {
-      name: 'R41 Item2 Layout',
-      effectiveFrom: '2020-01-01',
+      name: `R41 Item2 Layout ${ts}`,
+      effectiveFrom: prevDateStr,
       effectiveDate: prevDateStr,
-      codePrefix: 'A',
-      seatCount: 4
+      codePrefix: 'A1-',
+      seatCount: 4,
+      alwaysCreate: true
     });
 
     await prisma.dailySetting.deleteMany({ where: { date: { in: [prevDate, testDate] } } });

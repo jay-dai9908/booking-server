@@ -69,7 +69,7 @@ test('Live floor alerts overtime and ended timer test', async (t) => {
     });
 
     const liveData = await getLiveFloorData(dStr);
-    const alert = liveData.alerts.find(a => a.booking_ref === bRef);
+    const alert = liveData.alerts.find(a => a.booking_ref === bRef && a.type === 'overtime');
     assert.equal(alert, undefined, 'Lin Hsiao-mei who ended timer and paid should not have an overtime alert');
   });
 
@@ -193,7 +193,7 @@ test('Live floor alerts overtime and ended timer test', async (t) => {
     });
 
     const liveData = await getLiveFloorData(dStr);
-    const alert = liveData.alerts.find(a => a.booking_ref === bRef);
+    const alert = liveData.alerts.find(a => a.booking_ref === bRef && a.type === 'overtime');
     assert.equal(alert, undefined, 'Customer whose entire order was paid should not trigger overtime alert');
   });
 

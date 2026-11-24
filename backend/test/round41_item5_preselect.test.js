@@ -31,11 +31,12 @@ test('Round 41 Item 5: adminCreateReservation honors assigned_seats, rejects 409
 
   try {
     layoutId = await ensureTestPublishedLayout(prisma, {
-      name: 'R41 Item5 Layout',
-      effectiveFrom: '2020-01-01',
+      name: `R41 Item5 Layout ${ts}`,
+      effectiveFrom: dStr,
       effectiveDate: dStr,
-      codePrefix: 'A',
-      seatCount: 6
+      codePrefix: 'A1-',
+      seatCount: 6,
+      alwaysCreate: true
     });
     const layout = await getActiveLayoutForDate(prisma, d);
     const activeSeats = (layout?.seats || []).filter(s => s.is_active).map(s => s.code);

@@ -19,25 +19,28 @@ export async function ensureTestPublishedLayout(prisma, {
   effectiveFrom = '2020-01-01',
   effectiveDate = '2099-12-31',
   codePrefix = 'A',
-  seatCount = 16
+  seatCount = 16,
+  alwaysCreate = false
 } = {}) {
-  const targetDate = dateOnly(effectiveDate);
-  const existing = await prisma.seatLayout.findFirst({
-    where: {
-      status: 'published',
-      effective_from: { lte: targetDate }
-    },
-    orderBy: [
-      { effective_from: 'desc' },
-      { id: 'desc' }
-    ],
-    include: {
-      seats: { where: { is_active: true }, select: { id: true } }
-    }
-  });
+  if (!alwaysCreate) {
+    const targetDate = dateOnly(effectiveDate);
+    const existing = await prisma.seatLayout.findFirst({
+      where: {
+        status: 'published',
+        effective_from: { lte: targetDate }
+      },
+      orderBy: [
+        { effective_from: 'desc' },
+        { id: 'desc' }
+      ],
+      include: {
+        seats: { where: { is_active: true }, select: { id: true } }
+      }
+    });
 
-  if (existing && existing.seats.length > 0) {
-    return null;
+    if (existing && existing.seats.length > 0) {
+      return null;
+    }
   }
 
   const layout = await prisma.seatLayout.create({
