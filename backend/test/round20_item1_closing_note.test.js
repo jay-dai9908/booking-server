@@ -57,6 +57,7 @@ test('Round 20 Item 1: Cash closing note validation on cash difference', async (
         date: todayStr,
         float_amount: floatAmount,
         counted_cash: floatAmount - 100, // discrepancy of -100
+        handed_over_amount: 0,
         note: '',
         print: false
       }
@@ -75,6 +76,7 @@ test('Round 20 Item 1: Cash closing note validation on cash difference', async (
         date: todayStr,
         float_amount: floatAmount,
         counted_cash: floatAmount + 50,
+        handed_over_amount: 0,
         note: '   ',
         print: false
       }
@@ -91,6 +93,7 @@ test('Round 20 Item 1: Cash closing note validation on cash difference', async (
         date: todayStr,
         float_amount: floatAmount,
         counted_cash: floatAmount - 100,
+        handed_over_amount: 0,
         note: '少收100元差額已補入',
         print: false
       }
@@ -106,13 +109,14 @@ test('Round 20 Item 1: Cash closing note validation on cash difference', async (
     assert.equal(data.closing.difference, -100);
   }
 
-  // Case 3: No difference, note is empty -> 200 success
+  // Case 3: No difference (inherits previous shift left_in_drawer = floatAmount - 100), note is empty -> 200 success
   {
     const { req, res } = createMockReqRes({
       body: {
         date: todayStr,
         float_amount: floatAmount,
-        counted_cash: floatAmount, // exact match
+        counted_cash: floatAmount - 100,
+        handed_over_amount: 0,
         note: '',
         print: false
       }
