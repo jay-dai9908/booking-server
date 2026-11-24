@@ -13,7 +13,7 @@ import {
 } from '../src/controllers/printController.js';
 import { dateOnly } from '../../shared/time.js';
 
-function createMockReqRes({ params = {}, query = {}, body = {}, user = { name: '店長測試員', id: 1 }, printStation = null } = {}) {
+function createMockReqRes({ params = {}, query = {}, body = {}, user = { name: '店長測試員', id: 1, role: 'admin', isSuperAdmin: true, permissions: ['all'] }, printStation = null } = {}) {
   const req = {
     params,
     query,

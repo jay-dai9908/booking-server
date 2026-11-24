@@ -656,13 +656,7 @@ export const updateGlobalSetting = async (req, res) => {
   try {
     const oldSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
 
-    const isUnscopedLegacyMockAdmin =
-      Boolean(req.user) &&
-      !req.user.isVerifiedAdmin &&
-      req.user.isSuperAdmin === undefined &&
-      req.user.permissions === undefined;
-
-    if (!isUnscopedLegacyMockAdmin && !canAdminPermission(req.user, 'settings')) {
+    if (!canAdminPermission(req.user, 'settings')) {
       const effectiveOld = getEffectiveOldSetting(oldSetting);
       const disallowedFields = [];
       const missingGroups = [];

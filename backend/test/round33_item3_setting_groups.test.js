@@ -7,6 +7,7 @@ import prisma from '../src/prismaClient.js';
 import { generateToken } from '../src/middlewares/authMiddleware.js';
 import dailySettingsRoutes from '../src/routes/dailySettings.js';
 import kioskRoutes from '../src/routes/kiosk.js';
+import { updateGlobalSetting } from '../src/controllers/dailySettingController.js';
 
 function startLocalApp() {
   const app = express();
@@ -252,4 +253,27 @@ test('Round 33 Item 3: GlobalSetting field-group diff check and Kiosk settings s
   });
   assert.equal(resKioskPutOk.status, 200);
   assert.equal((await prisma.kioskSetting.findUnique({ where: { id: 1 } })).early_minutes, 25);
+
+  // 9. Unscoped shell req.user calling updateGlobalSetting directly must receive 403 and not modify DB
+  const capBefore = (await prisma.globalSetting.findUnique({ where: { id: 1 } })).default_session_capacity;
+  let mockStatus = 200;
+  let mockJson = null;
+  const shellReq = {
+    body: { default_session_capacity: capBefore + 7 },
+    user: { role: 'admin', isSuperAdmin: undefined, permissions: undefined },
+  };
+  const shellRes = {
+    status(c) {
+      mockStatus = c;
+      return this;
+    },
+    json(data) {
+      mockJson = data;
+      return this;
+    },
+  };
+  await updateGlobalSetting(shellReq, shellRes);
+  assert.equal(mockStatus, 403);
+  assert.equal(mockJson?.code, 'PERMISSION_REQUIRED');
+  assert.equal((await prisma.globalSetting.findUnique({ where: { id: 1 } })).default_session_capacity, capBefore);
 });

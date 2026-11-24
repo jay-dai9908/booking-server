@@ -5,7 +5,7 @@ import { updateGlobalSetting } from '../src/controllers/dailySettingController.j
 import { postCollect } from '../src/controllers/billingController.js';
 import { dateOnly } from '../../shared/time.js';
 
-function createMockReqRes({ params = {}, body = {}, user = { name: '店長測試員', id: 1 } } = {}) {
+function createMockReqRes({ params = {}, body = {}, user = { name: '店長測試員', id: 1, role: 'admin', isSuperAdmin: true, permissions: ['all'] } } = {}) {
   const req = {
     params,
     body,
