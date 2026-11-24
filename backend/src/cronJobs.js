@@ -6,6 +6,58 @@ import { releaseExpiredPrepays } from './services/selfService/prepayService.js';
 import { checkKioskOfflineAlerts } from './services/kiosk/alertService.js';
 import { solidifyDailyPrices } from './services/pricing/solidify.js';
 
+export async function markPastCheckedInAsCompleted(now = new Date()) {
+  const { dateObject: todayMidnightUtc } = getTaipeiDateParts(now);
+
+  const pastCheckedIn = await prisma.reservation.findMany({
+    where: {
+      session: {
+        session_date: {
+          lt: todayMidnightUtc
+        }
+      },
+      status: 'confirmed',
+      attendance: 'checked_in'
+    },
+    select: { booking_ref: true }
+  });
+
+  const refs = [...new Set(pastCheckedIn.map(r => r.booking_ref).filter(Boolean))];
+  if (refs.length === 0) return { bookingCount: 0, personCount: 0 };
+
+  return await prisma.$transaction(async (tx) => {
+    const resUpdated = await tx.reservation.updateMany({
+      where: {
+        booking_ref: { in: refs },
+        status: 'confirmed',
+        attendance: 'checked_in'
+      },
+      data: {
+        attendance: 'completed'
+      }
+    });
+
+    const personsToClose = await tx.bookingPerson.findMany({
+      where: {
+        booking_ref: { in: refs },
+        left_at: null
+      },
+      select: { id: true, timer_ended_at: true }
+    });
+
+    let personCount = 0;
+    for (const bp of personsToClose) {
+      await tx.bookingPerson.update({
+        where: { id: bp.id },
+        data: { left_at: bp.timer_ended_at || now }
+      });
+      personCount++;
+    }
+
+    return { bookingCount: resUpdated.count, personCount };
+  });
+}
+
 export const startCronJobs = () => {
   // 1. Run every day at midnight (00:00) Taipei time
   cron.schedule('0 0 * * *', async () => {
@@ -41,6 +93,12 @@ export const startCronJobs = () => {
         console.log(`[Cron Job] Successfully marked ${result.count} reservations as no_show.`);
       } else {
         console.log('[Cron Job] No past sessions found.');
+      }
+
+      // 2026-11-22 店主定案：前一天以前仍為 checked_in 的預約在 00:00 自動改成 completed，left_at 補為 timer_ended_at 或執行時間
+      const completedPast = await markPastCheckedInAsCompleted(new Date());
+      if (completedPast.bookingCount > 0 || completedPast.personCount > 0) {
+        console.log(`[Cron Job] Auto-completed ${completedPast.bookingCount} past checked-in bookings (${completedPast.personCount} persons left_at filled).`);
       }
 
       // 自動釋放逾期未繳費預購單與虛擬帳號

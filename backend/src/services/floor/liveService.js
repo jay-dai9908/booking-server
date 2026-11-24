@@ -487,6 +487,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
           person_no: p.person_no,
           seat_code: p.seat_code,
           status: p.status,
+          left_at: p.left_at ? p.left_at.toISOString() : null,
           pauses: (p.pauses || []).map(pa => ({
             id: pa.id,
             reason: pa.reason,
@@ -499,6 +500,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
             billing_start_at: p.billing_start_at ? p.billing_start_at.toISOString() : null,
             timer_started_at: p.timer_started_at ? p.timer_started_at.toISOString() : null,
             timer_ended_at: p.timer_ended_at ? p.timer_ended_at.toISOString() : null,
+            left_at: p.left_at ? p.left_at.toISOString() : null,
             paused_at: p.paused_at ? p.paused_at.toISOString() : null,
             paused_seconds: p.paused_seconds || 0,
             pause_reason: lastPause?.reason || null
@@ -529,7 +531,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
       // Only consider persons who are currently active (timer_started_at set, timer_ended_at null)
       // and not paid (neither booking nor person paid)
       const activeUnpaidPersons = bPersons.filter(p => {
-        if (!p.timer_started_at || p.timer_ended_at) return false;
+        if (!p.timer_started_at || p.timer_ended_at || p.left_at) return false;
         if (firstRes.is_paid || firstRes.billing_status === 'paid' || firstRes.billing_status === 'waived' || statusObj.code === 'paid' || statusObj.code === 'waived') return false;
         const isPaid = bPayments.some(pay =>
           pay.status === 'valid' &&
@@ -584,6 +586,37 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
             hint: alertHint
           });
         }
+      }
+
+      // Paid guest still physically seated > 30 minutes past booking end (2026-11-22 rule)
+      const isBookingFullyPaid =
+        firstRes.is_paid ||
+        firstRes.billing_status === 'paid' ||
+        firstRes.billing_status === 'waived' ||
+        statusObj.code === 'paid' ||
+        statusObj.code === 'waived';
+      const paidSeatedPersons = bPersons.filter((p) => {
+        if (p.status !== 'active' || p.left_at || !p.seat_code || String(p.seat_code).startsWith('WAIT-')) return false;
+        if (isBookingFullyPaid) return true;
+        return bPayments.some(pay =>
+          pay.status === 'valid' &&
+          (pay.kind === 'charge' || pay.kind === 'waive') &&
+          (pay.person_nos?.includes(p.person_no) || !pay.person_nos || pay.person_nos.length === 0)
+        );
+      });
+      if (paidSeatedPersons.length > 0 && (nowMs - endDt.getTime()) > 30 * 60000) {
+        const overMins = Math.floor((nowMs - endDt.getTime()) / 60000);
+        const alertText = `${user.name || '客人'} · ${tableDisplay} 已結清，超過預約 ${overMins} 分還在座`;
+        const alertHint = `預約到 ${lastRes.session.end_time}，如已離座請按已離場`;
+        alerts.push({
+          type: 'paid_seated_overtime',
+          action: 'mark_left_all',
+          booking_ref: bRef,
+          title: alertText,
+          subtitle: alertHint,
+          text: alertText,
+          hint: alertHint
+        });
       }
     }
 

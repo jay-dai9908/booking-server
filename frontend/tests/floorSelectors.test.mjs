@@ -702,5 +702,39 @@ test('floorSelectors pure function tests', async (t) => {
     assert.strictEqual(states['A1-2'].personNo, 2);
     assert.strictEqual(states['A1-3'].personNo, 3);
   });
+
+  await t.test('20. Round 41 Item 2: buildSeatStates returns paid_seated after slot ends when left_at is null, and isSeatOccupied is true', () => {
+    const layout = {
+      seats: [
+        { code: 'A1-1', is_active: true },
+        { code: 'A1-2', is_active: true }
+      ]
+    };
+    const paidSeatedBooking = {
+      booking_ref: 'BK-R41-PAID-SEAT',
+      name: '王在座',
+      attendance: 'checked_in',
+      billing: { status: 'paid' },
+      is_paid: true,
+      checked_in_at: '2026-11-10T14:00:00+08:00',
+      start_at: '2026-11-10T14:00:00+08:00',
+      end_at: '2026-11-10T16:00:00+08:00',
+      assigned_seats: ['A1-1'],
+      persons: [
+        {
+          person_no: 1,
+          status: 'active',
+          seat_code: 'A1-1',
+          left_at: null,
+          paid: true,
+          timer: { timer_started_at: '2026-11-10T14:00:00+08:00', timer_ended_at: '2026-11-10T15:30:00+08:00', left_at: null }
+        }
+      ]
+    };
+    const states = buildSeatStates(layout, [paidSeatedBooking], new Date('2026-11-10T16:10:00+08:00'));
+    assert.strictEqual(states['A1-1'].state, 'paid_seated');
+    assert.strictEqual(states['A1-1'].timerText, '已結清');
+    assert.strictEqual(isSeatOccupied(states['A1-1']), true);
+  });
 });
 

@@ -592,6 +592,7 @@ model BookingPerson {
   billing_start_at  DateTime?                       // 計費起點
   timer_started_at  DateTime?                       // 開始計時
   timer_ended_at    DateTime?                       // 離場或結帳時結束
+  left_at           DateTime?                       // 實際離場（釋出座位）；與 timer_ended_at 分開
   paused_at         DateTime?                       // 正在暫停時間
   paused_seconds    Int       @default(0)           // 已結束的暫停加總
   created_by_name   String?

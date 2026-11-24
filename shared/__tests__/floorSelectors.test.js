@@ -35,18 +35,32 @@ test('isBookingCompleted shared selector tests', async (t) => {
     assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T11:00:00Z')), false);
   });
 
-  await t.test('5. Paid booking whose slot has ended returns true (e.g. 心夜 236m overdue)', () => {
-    const booking = {
+  await t.test('5. Paid booking with seated guests whose slot has ended stays false until all left_at are set (2026-11-22 rule)', () => {
+    const bookingStillSeated = {
       attendance: 'checked_in',
       billing: { status: 'paid' },
       end_at: '2026-11-08T14:00:00Z',
       persons: [
-        { person_no: 1, timer: { timer_started_at: '2026-11-08T12:00:00Z', timer_ended_at: null }, paid: true },
-        { person_no: 2, timer: { timer_started_at: '2026-11-08T12:00:00Z', timer_ended_at: null }, paid: true }
+        { person_no: 1, seat_code: 'A1-1', status: 'active', left_at: null, timer: { timer_started_at: '2026-11-08T12:00:00Z', timer_ended_at: '2026-11-08T13:30:00Z' }, paid: true },
+        { person_no: 2, seat_code: 'A1-2', status: 'active', left_at: null, timer: { timer_started_at: '2026-11-08T12:00:00Z', timer_ended_at: '2026-11-08T13:30:00Z' }, paid: true }
       ]
     };
-    // Current time is 17:56 (236 min after 14:00)
-    assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T17:56:00Z')), true);
+    assert.strictEqual(isBookingCompleted(bookingStillSeated, new Date('2026-11-08T17:56:00Z')), false);
+
+    const bookingAllLeft = {
+      ...bookingStillSeated,
+      persons: bookingStillSeated.persons.map(p => ({ ...p, left_at: '2026-11-08T18:00:00Z' }))
+    };
+    assert.strictEqual(isBookingCompleted(bookingAllLeft, new Date('2026-11-08T17:56:00Z')), true);
+  });
+
+  await t.test('5b. Paid un-checked-in booking whose slot has ended still returns true', () => {
+    const unpaidCheckedInNotSeated = {
+      attendance: null,
+      billing: { status: 'paid' },
+      end_at: '2026-11-08T14:00:00Z'
+    };
+    assert.strictEqual(isBookingCompleted(unpaidCheckedInNotSeated, new Date('2026-11-08T17:56:00Z')), true);
   });
 
   await t.test('6. Paid booking whose slot has NOT ended returns false (remains in-use)', () => {
@@ -88,36 +102,41 @@ test('isBookingCompleted shared selector tests', async (t) => {
     assert.strictEqual(isBookingCompleted(booking, new Date('2026-11-08T18:05:00+08:00')), true);
   });
 
-  await t.test('9. Round 39 Item 2: isPersonOnSeat detects physically seated active persons', () => {
+  await t.test('9. Round 39 / Round 41 Item 2: isPersonOnSeat checks left_at rather than timer_ended_at', () => {
     const checkedInBooking = { attendance: 'checked_in' };
     const pendingBooking = { attendance: null };
     assert.strictEqual(
-      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: null }, checkedInBooking),
+      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: null, left_at: null }, checkedInBooking),
       true
     );
-    // Ended timer (departed) -> false
+    // Paid (timer_ended_at set) but still seated (left_at null) -> true
     assert.strictEqual(
-      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: '2026-11-08T16:00:00Z' }, checkedInBooking),
+      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: '2026-11-08T15:30:00Z', left_at: null }, checkedInBooking),
+      true
+    );
+    // Physically left (left_at set) -> false
+    assert.strictEqual(
+      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: '2026-11-08T15:30:00Z', left_at: '2026-11-08T16:00:00Z' }, checkedInBooking),
       false
     );
     // Removed -> false
     assert.strictEqual(
-      isPersonOnSeat({ status: 'removed', seat_code: 'A1-1', timer_ended_at: null }, checkedInBooking),
+      isPersonOnSeat({ status: 'removed', seat_code: 'A1-1', left_at: null }, checkedInBooking),
       false
     );
     // No seat_code -> false
     assert.strictEqual(
-      isPersonOnSeat({ status: 'active', seat_code: null, timer_ended_at: null }, checkedInBooking),
+      isPersonOnSeat({ status: 'active', seat_code: null, left_at: null }, checkedInBooking),
       false
     );
     // WAIT-1 -> false
     assert.strictEqual(
-      isPersonOnSeat({ status: 'active', seat_code: 'WAIT-1', timer_ended_at: null }, checkedInBooking),
+      isPersonOnSeat({ status: 'active', seat_code: 'WAIT-1', left_at: null }, checkedInBooking),
       false
     );
     // Not checked in -> false
     assert.strictEqual(
-      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', timer_ended_at: null }, pendingBooking),
+      isPersonOnSeat({ status: 'active', seat_code: 'A1-1', left_at: null }, pendingBooking),
       false
     );
   });

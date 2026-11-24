@@ -110,6 +110,7 @@ export default function FloorPlan({
       if (!info) return false;
       return (
         info.state === 'in_use' ||
+        info.state === 'paid_seated' ||
         info.state === 'run' ||
         info.state === 'warn' ||
         info.state === 'over' ||

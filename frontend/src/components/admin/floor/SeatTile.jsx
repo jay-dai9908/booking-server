@@ -4,6 +4,7 @@ import { Wind, Check, Pause } from 'lucide-react';
 const STATE_STYLES = {
   in_use: 'bg-sg-sage-soft text-sg-sage-ink border-sg-sage/40',
   run: 'bg-sg-sage-soft text-sg-sage-ink border-sg-sage/40',
+  paid_seated: 'bg-sg-peach-soft text-sg-peach-ink border-sg-peach',
   warn: 'bg-sg-honey-soft text-sg-honey-ink border-sg-honey/40',
   over: 'bg-sg-danger-soft text-sg-danger border-sg-danger/40 animate-pulse',
   paused: 'bg-sg-vent/15 text-sg-vent border-sg-vent/40',

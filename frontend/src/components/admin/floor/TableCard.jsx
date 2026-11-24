@@ -226,6 +226,9 @@ export default function TableCard({
     if (states.includes('paused') || states.includes('pause')) {
       return { label: '已暫停', cls: 'bg-sg-vent/15 text-sg-vent' };
     }
+    if (states.includes('paid_seated')) {
+      return { label: '已結清在座', cls: 'bg-sg-peach-soft text-sg-peach-ink' };
+    }
     if (states.includes('reserved') || states.includes('resv') || states.includes('pending')) {
       return { label: '待入座', cls: 'bg-white text-sg-brown border border-sg-brown/50' };
     }

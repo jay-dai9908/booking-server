@@ -23,17 +23,19 @@ const ANIM_MS = 220;
 
 const STATES = {
   in_use: { label: '使用中', fill: '#7E9A72', stroke: null },
+  paid_seated: { label: '已結清在座', fill: '#E7B4A2', stroke: '#8A4A36' },
   warn: { label: '快到時', fill: '#D9A441', stroke: null },
   over: { label: '超時', fill: '#B4553F', stroke: null },
   paused: { label: '暫停', fill: '#B3A79B', stroke: null },
   reserved: { label: '待入座', fill: '#FFFDF9', stroke: '#8B5B43' },
   empty: { label: '空位', fill: '#FFFDF9', stroke: '#CFC2B4' },
 };
-const ORDER = ['in_use', 'warn', 'over', 'paused', 'reserved', 'empty'];
+const ORDER = ['in_use', 'paid_seated', 'warn', 'over', 'paused', 'reserved', 'empty'];
 
 function categoryOf(state) {
   switch (state) {
     case 'in_use': case 'run': return 'in_use';
+    case 'paid_seated': return 'paid_seated';
     case 'warn': case 'expiring': return 'warn';
     case 'over': case 'overtime': return 'over';
     case 'paused': case 'pause': return 'paused';

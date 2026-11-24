@@ -5,7 +5,7 @@ import { isBookingCompleted, isPersonOnSeat } from '../../../../shared/floorSele
 import { formatTimerHMM, formatDiffMinutesText } from '../../../../shared/time.js';
 import { displayBoardName } from '../../../../shared/billing.js';
 
-export const OCCUPIED_SEAT_STATES = ['in_use', 'warn', 'over', 'paused'];
+export const OCCUPIED_SEAT_STATES = ['in_use', 'paid_seated', 'warn', 'over', 'paused'];
 
 export function isSeatOccupied(seatInfo) {
   return Boolean(seatInfo && OCCUPIED_SEAT_STATES.includes(seatInfo.state));
@@ -523,7 +523,7 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
       let state = 'in_use';
 
       if (isPaid) {
-        state = 'in_use';
+        state = 'paid_seated';
         timerText = '已結清';
       } else if (person) {
         const tm = person.timer || person;

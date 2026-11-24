@@ -320,7 +320,7 @@ export default function TablePanel({
                       const seatInfo = seatStates[person.seat_code] || {};
                       const tm = getPersonTimer(person);
                       const isPersonPaid = Boolean(person.paid || group.is_paid || group.billing?.status === 'paid' || group.billing_status === 'paid');
-                      const isEnded = Boolean((tm.timer_ended_at && !isPersonPaid) || group.attendance === 'completed');
+                      const isEnded = Boolean(tm.left_at || (tm.timer_ended_at && !isPersonPaid) || group.attendance === 'completed');
                       const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at && !isEnded);
                       const hasStarted = Boolean(tm.timer_started_at);
                       const elapsedText = isEnded

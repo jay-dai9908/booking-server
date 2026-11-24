@@ -14,6 +14,14 @@ export function isBookingCompleted(booking, now = new Date()) {
   if (booking.attendance === 'completed') return true;
   if (booking.status === 'cancelled') return true;
 
+  // 2026-11-22 店主定案：只要已經報到而且還有人實際在座（left_at 為 null），
+  // 即使已結清且預約時段結束，仍不算離場，直到按離場才釋出座位
+  if (booking.attendance === 'checked_in' && Array.isArray(booking.persons)) {
+    if (booking.persons.some(p => isPersonOnSeat(p, booking))) {
+      return false;
+    }
+  }
+
   // Paid or waived condition:
   // 已結清或免收，而且預約時段已經結束
   const isPaidOrWaived =
@@ -78,6 +86,8 @@ export function isPersonOnSeat(person, booking) {
   if (person.status != null && person.status !== 'active') return false;
   const seatCode = person.seat_code ? String(person.seat_code) : '';
   if (!seatCode || seatCode.startsWith('WAIT-')) return false;
-  const endedAt = person.timer ? person.timer.timer_ended_at : person.timer_ended_at;
-  return endedAt == null;
+  const leftAt = person.left_at !== undefined
+    ? person.left_at
+    : (person.timer ? person.timer.left_at : null);
+  return leftAt == null;
 }

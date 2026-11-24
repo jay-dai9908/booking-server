@@ -1595,8 +1595,9 @@ export default function SeatingPage() {
                     <span className="text-[12px] font-normal text-sg-muted">顯示 {selectedSlot} 的座位</span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 text-[11px] text-sg-muted">
+                <div className="flex items-center gap-3 text-[11px] text-sg-muted flex-wrap">
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-sg-sage" />計時中</span>
+                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-sg-peach border border-sg-peach-ink/30" />已結清在座</span>
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-sg-honey" />快到時</span>
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-sg-danger" />超時</span>
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-white border border-sg-brown" />待入座</span>
@@ -1800,6 +1801,19 @@ export default function SeatingPage() {
                                   className="px-2 py-0.5 rounded-lg bg-sg-danger-soft text-sg-danger font-bold text-[11px] hover:bg-sg-danger hover:text-white transition shrink-0"
                                 >
                                   標記未到
+                                </button>
+                              )}
+                              {al.action === 'mark_left_all' && (
+                                <button
+                                  type="button"
+                                  data-testid={`alert-leave-btn-${al.booking_ref}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTimerAction(al.booking_ref, 'all', 'end');
+                                  }}
+                                  className="px-2 py-0.5 rounded-lg bg-sg-peach-soft text-sg-peach-ink font-bold text-[11px] hover:bg-sg-peach hover:text-sg-ink transition shrink-0"
+                                >
+                                  已離場
                                 </button>
                               )}
                             </div>
@@ -2088,7 +2102,7 @@ export default function SeatingPage() {
                                      timerTarget?.is_paid ||
                                      Boolean(p.paid);
               const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
-              const isEnded = Boolean((tm.timer_ended_at && !isPaidOrWaived) || timerTarget?.attendance === 'completed');
+              const isEnded = Boolean(tm.left_at || (tm.timer_ended_at && !isPaidOrWaived) || timerTarget?.attendance === 'completed');
               const hasStarted = Boolean(tm.timer_started_at);
               const elapsedMins = hasStarted ? personElapsedMinutes(p, getServerNow()) : 0;
               const seatLabel = p.seat_code

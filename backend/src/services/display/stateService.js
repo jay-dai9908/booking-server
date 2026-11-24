@@ -234,7 +234,9 @@ export async function buildDisplayState(serverNow = new Date()) {
       if (persons.length > 0) {
         for (const p of persons) {
           if (p.status !== 'active' || !p.seat_code) continue;
-          if (p.timer?.timer_ended_at) continue;
+          const personLeftAt = p.left_at ?? p.timer?.left_at ?? null;
+          if (personLeftAt) continue;
+          if (!p.paid && p.timer?.timer_ended_at) continue;
 
           const pDraft = Array.isArray(resMeta.checkout_details?.persons)
             ? resMeta.checkout_details.persons.find((dp) => dp.person_no === p.person_no)

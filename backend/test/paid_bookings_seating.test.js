@@ -235,14 +235,14 @@ test('Paid bookings seating & timer tests (Spec 2.3)', async (t) => {
     const occ = await occupancyForSessions(prisma, [session.id]);
     assert.equal(occ[session.id]?.['B1-1'], ref, '同時段排位時該座位被此預約佔用');
 
-    // 3. 已結清、時段還沒結束：在使用中
+    // 3. 已結清、時段還沒結束：在使用中；依店主 2026-11-22 決定改變規格 2.3：時段結束只要未按離場（left_at=null）仍在使用中、座位仍被佔用
     assert.equal(isBookingCompleted(liveBooking, midSlotTime), false, '時段還沒結束時留在使用中');
 
-    // 時段結束後：自動移到已離場
+    // 時段結束後、尚未離場：仍維持在使用中，不會自動離場
     const afterSlotTime = new Date(`${todayStr}T22:05:00+08:00`);
-    assert.equal(isBookingCompleted(liveBooking, afterSlotTime), true, '時段結束後自動移到已離場');
+    assert.equal(isBookingCompleted(liveBooking, afterSlotTime), false, '依 2026-11-22 決定：已結清只要還沒離場，時段結束仍留在使用中');
 
-    // 4. 已結清後按全組離場：移到已離場，座位釋出
+    // 4. 已結清後按全組離場：設定 left_at、移到已離場，座位釋出
     const leaveMock = createMockReqRes({
       params: { booking_ref: ref },
       body: { action: 'end', person_nos: 'all' }

@@ -908,7 +908,7 @@ export async function handleTimer(req, res) {
 
         await tx.bookingPerson.updateMany({
           where: { booking_ref, person_no: { in: restorePersonNos }, status: 'active' },
-          data: { timer_ended_at: null }
+          data: { timer_ended_at: null, left_at: null }
         });
         await tx.reservation.updateMany({
           where: { booking_ref, status: { not: 'cancelled' } },
@@ -1030,21 +1030,26 @@ export async function handleTimer(req, res) {
           }
         } else if (action === 'end') {
           if (p.timer_ended_at) {
-            // Already departed: never overwrite timer_ended_at; close any lingering open pauses up to timer_ended_at
+            // Already has timer_ended_at (departed OR paid): never overwrite timer_ended_at; record left_at if missing
             const origEndDt = new Date(p.timer_ended_at);
             const openPauses = (p.pauses || []).filter(pa => !pa.ended_at);
-            if (openPauses.length > 0 || p.paused_at) {
-              const extraSec = await closeOpenPersonPausesTx(tx, p, origEndDt);
+            const pauseExtraSec = (openPauses.length > 0 || p.paused_at)
+              ? await closeOpenPersonPausesTx(tx, p, origEndDt)
+              : 0;
+            if (!p.left_at || pauseExtraSec > 0 || p.paused_at) {
               await tx.bookingPerson.update({
                 where: { id: p.id },
                 data: {
-                  paused_at: null,
-                  paused_seconds: (p.paused_seconds || 0) + extraSec
+                  ...(p.left_at ? {} : { left_at: now }),
+                  ...((pauseExtraSec > 0 || p.paused_at) ? {
+                    paused_at: null,
+                    paused_seconds: (p.paused_seconds || 0) + pauseExtraSec
+                  } : {})
                 }
               });
             }
           } else {
-            // Not yet departed: close all open pauses (if any) and set timer_ended_at = now
+            // Not yet departed: close all open pauses (if any) and set timer_ended_at + left_at = now
             const openPauses = (p.pauses || []).filter(pa => !pa.ended_at);
             if (p.paused_at || openPauses.length > 0) {
               const pauseDurationSec = await closeOpenPersonPausesTx(tx, p, now);
@@ -1053,13 +1058,14 @@ export async function handleTimer(req, res) {
                 data: {
                   paused_at: null,
                   paused_seconds: (p.paused_seconds || 0) + pauseDurationSec,
-                  timer_ended_at: now
+                  timer_ended_at: now,
+                  left_at: now
                 }
               });
             } else {
               await tx.bookingPerson.update({
                 where: { id: p.id },
-                data: { timer_ended_at: now }
+                data: { timer_ended_at: now, left_at: now }
               });
             }
           }
@@ -1143,7 +1149,12 @@ export async function handleTimer(req, res) {
             if (!personPaid) {
               await tx.bookingPerson.update({
                 where: { id: p.id },
-                data: { timer_ended_at: null }
+                data: { timer_ended_at: null, left_at: null }
+              });
+            } else if (p.left_at) {
+              await tx.bookingPerson.update({
+                where: { id: p.id },
+                data: { left_at: null }
               });
             }
           }
@@ -1193,6 +1204,10 @@ export async function handleTimer(req, res) {
             where: { booking_ref, timer_ended_at: null },
             data: { timer_ended_at: now }
           });
+          await tx.bookingPerson.updateMany({
+            where: { booking_ref, left_at: null },
+            data: { left_at: now }
+          });
           await tx.reservation.updateMany({
             where: { booking_ref },
             data: { attendance: 'completed' }
@@ -1214,14 +1229,14 @@ export async function handleTimer(req, res) {
             device_label: deviceInfo?.device_label || null
           });
         } else {
-          const remainingNotEnded = await tx.bookingPerson.count({
+          const remainingStillSeated = await tx.bookingPerson.count({
             where: {
               booking_ref,
-              timer_ended_at: null,
+              left_at: null,
               status: 'active'
             }
           });
-          if (remainingNotEnded === 0) {
+          if (remainingStillSeated === 0) {
             await tx.reservation.updateMany({
               where: { booking_ref },
               data: { attendance: 'completed' }
@@ -1229,15 +1244,14 @@ export async function handleTimer(req, res) {
           }
         }
       } else if (action === 'restart') {
-        const hasRunningPerson = await tx.bookingPerson.findFirst({
+        const hasSeatedPerson = await tx.bookingPerson.findFirst({
           where: {
             booking_ref,
-            timer_started_at: { not: null },
-            timer_ended_at: null,
+            left_at: null,
             status: 'active'
           }
         });
-        if (hasRunningPerson) {
+        if (hasSeatedPerson) {
           await tx.reservation.updateMany({
             where: { booking_ref, attendance: 'completed' },
             data: { attendance: 'checked_in' }
@@ -1516,7 +1530,8 @@ export async function removePerson(req, res) {
           status: 'removed',
           seat_code: null,
           paused_at: null,
-          timer_ended_at: now
+          timer_ended_at: now,
+          left_at: now
         }
       });
 
@@ -2350,6 +2365,7 @@ export async function addBoardRental(req, res) {
       const paidAfterPayment = await isPersonPaid(tx, booking_ref, pNo, firstRes);
       const hasPersonLeft = targetPerson.status !== 'active'
         || firstRes.attendance === 'completed'
+        || Boolean(targetPerson.left_at)
         || (!paidAfterPayment && Boolean(targetPerson.timer_ended_at) && new Date(targetPerson.timer_ended_at).getTime() <= actionNow.getTime());
       if (hasPersonLeft) {
         throw { status: 409, code: 'PERSON_INACTIVE', message: '此顧客已離場或已移除，不能加租智能板' };
