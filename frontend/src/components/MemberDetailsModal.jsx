@@ -1191,8 +1191,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
 
       {/* Grant Pass Modal */}
       {showGrantModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-[#E8DEC8] space-y-5">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-[#E8DEC8] space-y-5">
             <div className="flex items-center justify-between border-b border-gray-100 pb-4">
               <div>
                 <h3 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">

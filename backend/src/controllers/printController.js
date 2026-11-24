@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
-import { queuePrintJob, claimNextJob, reportJobResult } from '../services/print/printService.js';
+import { queuePrintJob, claimNextJob, localClaimJob, reportJobResult } from '../services/print/printService.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { getAccountingGuardWarnings } from '../db/accountingGuard.js';
@@ -276,9 +276,28 @@ export async function markJobPrinted(req, res) {
   }
 }
 
+export async function localClaimJobHandler(req, res) {
+  const { id } = req.params;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  try {
+    const setting = await prisma.globalSetting.findFirst();
+    if (setting?.print_enabled === false) {
+      return res.status(409).json({ error: '列印已關閉，請到系統設定開啟' });
+    }
+
+    const job = await localClaimJob(id, { deviceLabel: deviceInfo.device_label });
+    return res.json({ success: true, job });
+  } catch (error) {
+    console.error('[localClaimJobHandler] Error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    return res.status(500).json({ error: '本機領取列印失敗' });
+  }
+}
+
 export async function reportLocalJob(req, res) {
   const { id } = req.params;
-  const { result, via = 'browser', error } = req.body;
+  const { result, via = 'browser', error } = req.body || {};
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
@@ -293,11 +312,12 @@ export async function reportLocalJob(req, res) {
         success: result === 'printed',
         error_message: error
       },
-      `${via}:${deviceInfo.device_label}`
+      `local:${via}:${deviceInfo.device_label}`
     );
     return res.json({ success: true, job: updated });
-  } catch (error) {
-    console.error('[reportLocalJob] Error:', error);
+  } catch (err) {
+    console.error('[reportLocalJob] Error:', err);
+    if (err.status) return res.status(err.status).json({ error: err.message });
     return res.status(500).json({ error: '回報本機列印結果失敗' });
   }
 }

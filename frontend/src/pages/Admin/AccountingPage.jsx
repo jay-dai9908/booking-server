@@ -1272,7 +1272,8 @@ export default function AccountingPage() {
                               job.status === 'cancelled' ? 'bg-sg-paper text-sg-muted' :
                               'bg-sg-paper text-sg-muted'
                             }`}>
-                              {job.status === 'printed' || job.status === 'succeeded' ? '已印出' :
+                              {(job.status === 'printed' || job.status === 'succeeded')
+                                ? (String(job.printed_by || '').startsWith('local') ? '已印出（本機）' : '已印出') :
                                job.status === 'failed' ? '失敗' :
                                job.status === 'claimed' ? '列印中' :
                                job.status === 'cancelled' ? '已取消' : '排隊中'}

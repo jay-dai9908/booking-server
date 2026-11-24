@@ -72,16 +72,13 @@ export default function PaymentCompleteView({
     if (!primaryPay.id) return;
     try {
       setReprinting(true);
-      const res = await api.post('/print/jobs', {
+      await api.post('/print/jobs', {
         type: 'receipt',
         payment_id: primaryPay.id,
         booking_ref: bookingRef,
         is_reprint: true
       });
-      if (res.data?.job) {
-        await printJobOnThisDevice(res.data.job);
-      }
-      setPrintLocalMsg('已送出補印');
+      setPrintLocalMsg('已送出補印至列印佇列');
       setTimeout(() => setPrintLocalMsg(null), 3000);
     } catch (err) {
       console.error(err);
@@ -93,21 +90,64 @@ export default function PaymentCompleteView({
   };
 
   const handlePrintOnThisDevice = async () => {
-    if (!data?.print_jobs?.length) {
-      handleReprint();
-      return;
-    }
     try {
       setReprinting(true);
-      for (const job of data.print_jobs) {
-        await printJobOnThisDevice(job);
+      let jobsToPrint = Array.isArray(data?.print_jobs) ? [...data.print_jobs] : [];
+      if (jobsToPrint.length === 0 && primaryPay.id) {
+        const res = await api.post('/print/jobs', {
+          type: 'receipt',
+          payment_id: primaryPay.id,
+          booking_ref: bookingRef,
+          is_reprint: true
+        });
+        if (res.data?.job) jobsToPrint = [res.data.job];
       }
-      setPrintLocalMsg('本機列印已送出');
+
+      if (jobsToPrint.length === 0) {
+        setPrintLocalMsg('找不到可列印的收據');
+        return;
+      }
+
+      for (const job of jobsToPrint) {
+        try {
+          await api.post(`/print/jobs/${job.id}/local-claim`);
+        } catch (claimErr) {
+          if (claimErr.response?.status === 409) {
+            setPrintLocalMsg(claimErr.response?.data?.error || '列印站已經在印或已印出');
+          } else {
+            setPrintLocalMsg(claimErr.response?.data?.error || '無法領取本機列印');
+          }
+          return;
+        }
+
+        let printRes = { success: false, via: 'browser', message: '列印失敗' };
+        try {
+          printRes = await printJobOnThisDevice(job);
+        } catch (pErr) {
+          printRes = { success: false, via: 'browser', message: pErr.message || '列印失敗' };
+        }
+
+        try {
+          await api.post(`/print/jobs/${job.id}/local`, {
+            result: printRes?.success ? 'printed' : 'failed',
+            via: printRes?.via || 'browser',
+            error: printRes?.success ? undefined : (printRes?.message || '列印失敗')
+          });
+        } catch (repErr) {
+          console.warn('[PaymentCompleteView] report local result error:', repErr);
+        }
+
+        if (!printRes?.success) {
+          setPrintLocalMsg('換好紙，重印');
+          return;
+        }
+      }
+
+      setPrintLocalMsg('本機列印完成');
       setTimeout(() => setPrintLocalMsg(null), 3000);
     } catch (err) {
       console.error(err);
-      setPrintLocalMsg('列印失敗');
-      setTimeout(() => setPrintLocalMsg(null), 3000);
+      setPrintLocalMsg('換好紙，重印');
     } finally {
       setReprinting(false);
     }

@@ -345,6 +345,38 @@ export async function claimNextJob(stationId, waitSeconds = 20) {
 }
 
 /**
+ * Atomically claim a queued/failed job for local browser/device printing (10-min lease).
+ */
+export async function localClaimJob(jobId, { deviceLabel = '本機裝置' } = {}) {
+  const leaseUntil = new Date(Date.now() + 10 * 60 * 1000);
+  const label = String(deviceLabel || '本機裝置').trim() || '本機裝置';
+  const printedBy = `local:${label}`;
+
+  const updated = await prisma.printJob.updateMany({
+    where: {
+      id: Number(jobId),
+      status: { in: ['queued', 'failed'] }
+    },
+    data: {
+      status: 'claimed',
+      claimed_at: new Date(),
+      lease_until: leaseUntil,
+      printed_by: printedBy
+    }
+  });
+
+  if (updated.count === 0) {
+    const existing = await prisma.printJob.findUnique({ where: { id: Number(jobId) } });
+    if (!existing) {
+      throw { status: 404, message: '找不到此列印單' };
+    }
+    throw { status: 409, message: '列印站已經在印或已印出' };
+  }
+
+  return prisma.printJob.findUnique({ where: { id: Number(jobId) } });
+}
+
+/**
  * Report result of a print job
  */
 export async function reportJobResult(
@@ -360,6 +392,10 @@ export async function reportJobResult(
     if (via === 'station') {
       if (job.station_id !== stationId || job.status !== 'claimed') {
         throw { status: 409, message: '這張單不是這台列印站領取的' };
+      }
+    } else {
+      if (job.status !== 'claimed' || !String(job.printed_by || '').startsWith('local:')) {
+        throw { status: 409, message: '請先取得本機列印鎖定，或列印站已經在印或已印出' };
       }
     }
 
@@ -405,5 +441,6 @@ export async function reportJobResult(
 export default {
   queuePrintJob,
   claimNextJob,
+  localClaimJob,
   reportJobResult
 };

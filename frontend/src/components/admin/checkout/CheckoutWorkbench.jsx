@@ -41,7 +41,7 @@ import PassTenderSheet from './PassTenderSheet';
 import SharedItemsSplitPanel from './SharedItemsSplitPanel';
 import AddonItemsManageModal from './AddonItemsManageModal';
 import QuickPromoModal from './QuickPromoModal';
-import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
+import { isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours, formatTimeHHmm } from '@shared/time.js';
 import { displayBoardName, computeBill } from '@shared/billing.js';
@@ -1108,17 +1108,7 @@ export default function CheckoutWorkbench({
         print: collectAutoPrint
       });
 
-      // Print jobs created automatically by backend (Section 3.8)
-      if (res.data?.print_jobs?.length) {
-        for (const job of res.data.print_jobs) {
-          try {
-            await printJobOnThisDevice(job);
-          } catch (pErr) {
-            console.warn('[CheckoutWorkbench] Local print fallback error:', pErr);
-          }
-        }
-      }
-
+      // Backend already queues PrintJobs cleanly in transaction; never auto-print locally here.
       if (res.data?.status || res.data?.bill) {
         setBillData(prev => ({
           ...prev,
@@ -1248,19 +1238,11 @@ export default function CheckoutWorkbench({
       setIsPrintingSplit(true);
       let successCount = 0;
       for (const p of allPersons) {
-        const res = await api.post('/print/jobs', {
+        await api.post('/print/jobs', {
           type: 'person_slip',
           booking_ref: bookingRef,
           person_no: p.person_no
         });
-
-        if (res.data?.job) {
-          try {
-            await printJobOnThisDevice(res.data.job);
-          } catch (printErr) {
-            console.warn('[PrintSplit] Local print error:', printErr);
-          }
-        }
         successCount++;
       }
 

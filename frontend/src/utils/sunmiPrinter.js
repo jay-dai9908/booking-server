@@ -461,10 +461,17 @@ export const printJobOnThisDevice = async (job) => {
 
       setTimeout(() => {
         try {
-          iframe.contentWindow.focus();
-          iframe.contentWindow.print();
+          const hasCustomWindowPrint =
+            typeof window.print === 'function' &&
+            !String(window.print).includes('[native code]');
+          if (hasCustomWindowPrint) {
+            window.print();
+          } else {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+          }
           setTimeout(() => {
-            document.body.removeChild(iframe);
+            if (iframe.parentNode) document.body.removeChild(iframe);
           }, 1000);
           resolve({
             success: true,
@@ -472,7 +479,7 @@ export const printJobOnThisDevice = async (job) => {
             message: '已呼叫瀏覽器列印'
           });
         } catch (e) {
-          document.body.removeChild(iframe);
+          if (iframe.parentNode) document.body.removeChild(iframe);
           resolve({
             success: false,
             via: 'browser',

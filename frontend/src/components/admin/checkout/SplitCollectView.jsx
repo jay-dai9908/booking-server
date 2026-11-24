@@ -13,7 +13,7 @@ import PrinterStatusLine from '../PrinterStatusLine';
 import Button from '../../customer/Button';
 import PassTenderSheet from './PassTenderSheet';
 import PaymentCompleteView from './PaymentCompleteView';
-import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
+import { isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 import { useAdminPermissions, MONEY_WRITE } from '../../../hooks/admin/useAdminPermissions';
 
 function genBatchUuid() {
@@ -393,17 +393,7 @@ export default function SplitCollectView({
         print: autoPrint
       });
 
-      // Print jobs created automatically by backend
-      if (res.data?.print_jobs?.length) {
-        for (const job of res.data.print_jobs) {
-          try {
-            await printJobOnThisDevice(job);
-          } catch (printErr) {
-            console.warn('[SplitCollect] Local print trigger:', printErr);
-          }
-        }
-      }
-
+      // Backend queues print jobs automatically; never auto-print locally after collect.
       splitPaidRef.current = true;
       if (onDisplayPaid) onDisplayPaid();
       if (displaySyncEnabled) {
