@@ -52,6 +52,34 @@ export function buildInitialDraft({
   };
 }
 
+export async function assertEnabledPaymentMethod(txOrPrisma, method) {
+  const client = txOrPrisma || prisma;
+  const gs = await client.globalSetting.findUnique({ where: { id: 1 } });
+  const rawMethods = (Array.isArray(gs?.payment_methods_json) && gs.payment_methods_json.length > 0
+    ? gs.payment_methods_json
+    : [
+        { key: 'cash', label: '現金', enabled: true },
+        { key: 'linepay', label: 'LINE Pay', enabled: true },
+        { key: 'transfer', label: '銀行轉帳', enabled: true },
+        { key: 'card', label: '信用卡', enabled: true }
+      ]
+  ).filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass');
+
+  const enabledMethods = rawMethods.filter(m => {
+    const k = String(m.key || m.code || '').toLowerCase();
+    return k === 'cash' ? true : Boolean(m.enabled);
+  });
+
+  const reqMethodNorm = String(method || 'cash').toLowerCase().replace(/[-_]/g, '');
+  const isMethodAllowed = enabledMethods.some(m => {
+    const k = String(m.key || m.code || '').toLowerCase().replace(/[-_]/g, '');
+    return k === reqMethodNorm;
+  });
+  if (!isMethodAllowed) {
+    throw { status: 422, message: `付款方式「${method}」未啟用或不支援` };
+  }
+}
+
 export async function getNextDailySeq(tx, key, date = new Date()) {
   const client = tx || prisma;
   const d = dateOnly(date);
@@ -971,36 +999,8 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       throw { status: 422, message: '卡券請用卡券折抵' };
     }
 
-    // Validate payment method against GlobalSetting.payment_methods_json
-    const gs = await tx.globalSetting.findUnique({ where: { id: 1 } });
-    const rawMethods = (Array.isArray(gs?.payment_methods_json) && gs.payment_methods_json.length > 0
-      ? gs.payment_methods_json
-      : [
-          { key: 'cash', label: '現金', enabled: true },
-          { key: 'linepay', label: 'LINE Pay', enabled: true },
-          { key: 'transfer', label: '銀行轉帳', enabled: true },
-          { key: 'card', label: '信用卡', enabled: true }
-        ]
-    ).filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass');
-
-    const enabledMethods = rawMethods.filter(m => {
-      const k = String(m.key || m.code || '').toLowerCase();
-      return k === 'cash' ? true : Boolean(m.enabled);
-    });
-
-    const validateMethod = (mToValidate) => {
-      const reqMethodNorm = String(mToValidate || 'cash').toLowerCase().replace(/[-_]/g, '');
-      const isMethodAllowed = enabledMethods.some(m => {
-        const k = String(m.key || m.code || '').toLowerCase().replace(/[-_]/g, '');
-        return k === reqMethodNorm;
-      });
-      if (!isMethodAllowed) {
-        throw { status: 422, message: `付款方式「${mToValidate}」未啟用或不支援` };
-      }
-    };
-
     if (!hasPassTenders) {
-      validateMethod(method);
+      await assertEnabledPaymentMethod(tx, method);
     }
 
     const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
@@ -1123,7 +1123,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
         if (String(method || '').trim().toLowerCase() === 'pass') {
           throw { status: 422, message: '卡券請用卡券折抵' };
         }
-        validateMethod(method);
+        await assertEnabledPaymentMethod(tx, method);
       }
       const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
 
@@ -1773,6 +1773,59 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
           message: '這筆收款已跨日或已交班，請改用退款'
         };
       }
+    }
+
+    if (payment.source === 'pass_sale') {
+      const passCode = payment.source_ref || payment.booking_ref;
+      const userPass = await tx.userPass.findUnique({
+        where: { pass_code: passCode }
+      });
+      if (userPass) {
+        const logs = Array.isArray(userPass.usage_logs_json) ? userPass.usage_logs_json : [];
+        const quotaChanged = userPass.total_quota != null && userPass.remaining_quota !== userPass.total_quota;
+        if (logs.length > 0 || quotaChanged) {
+          throw { status: 409, message: '這張卡已使用，請改用退款' };
+        }
+      }
+
+      const nowVoidedAt = new Date();
+      for (const bp of batchPayments) {
+        await tx.payment.update({
+          where: { id: bp.id },
+          data: {
+            status: 'voided',
+            voided_at: nowVoidedAt,
+            voided_by_name: staffName,
+            void_reason: String(reason).trim()
+          }
+        });
+
+        await auditLog(tx, {
+          booking_ref: bp.booking_ref,
+          event_type: 'payment_voided',
+          category: 'void',
+          summary: `作廢卡券販售 ${bp.payment_no}（${passCode}）· ${bp.method === 'cash' ? '現金' : bp.method} NT$${bp.amount}。原因「${reason}」`,
+          amount: bp.amount,
+          payment_id: bp.id,
+          reason,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id,
+          device_label: deviceInfo?.device_label
+        });
+      }
+
+      if (userPass && userPass.status !== 'REVOKED') {
+        await tx.userPass.update({
+          where: { id: userPass.id },
+          data: {
+            status: 'REVOKED',
+            payment_status: 'voided'
+          }
+        });
+      }
+
+      return { voided_count: batchPayments.length, voided_source: 'pass_sale' };
     }
 
     // Block voiding charge/supplement if any covered person still has an active cash-like refund (including legacy unlinked refunds)

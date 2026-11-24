@@ -941,9 +941,11 @@ export default function AccountingPage() {
                       >
                         <td className="py-3 px-3 font-mono text-[12px] text-sg-muted">{timeStr}</td>
                         <td className="py-3 px-3 font-mono font-bold text-sg-ink text-[12px]">{p.payment_no}</td>
-                        <td className="py-3 px-3 font-mono text-[12px] text-sg-brown font-bold">{formatBookingRef(p.booking_ref)}</td>
+                        <td className="py-3 px-3 font-mono text-[12px] text-sg-brown font-bold">
+                          {p.source && p.source !== 'booking' ? (p.source_ref || p.booking_ref) : formatBookingRef(p.booking_ref)}
+                        </td>
                         <td className="py-3 px-2 font-bold text-sg-ink">
-                          {p.breakdown_json?.customer_name || '現場顧客'}
+                          {p.target_label || p.breakdown_json?.customer_name || '現場顧客'}
                         </td>
                         <td className="py-3 px-2">
                           <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
@@ -1056,8 +1058,10 @@ export default function AccountingPage() {
 
                     <div className="flex items-center justify-between text-[12px] text-sg-muted">
                       <div>
-                        <span className="font-bold text-sg-ink mr-2">{p.breakdown_json?.customer_name || '現場顧客'}</span>
-                        <span className="font-mono text-sg-brown">{formatBookingRef(p.booking_ref)}</span>
+                        <span className="font-bold text-sg-ink mr-2">{p.target_label || p.breakdown_json?.customer_name || '現場顧客'}</span>
+                        <span className="font-mono text-sg-brown">
+                          {p.source && p.source !== 'booking' ? (p.source_ref || p.booking_ref) : formatBookingRef(p.booking_ref)}
+                        </span>
                       </div>
                       <span>{getMethodLabel(p.method)}</span>
                     </div>

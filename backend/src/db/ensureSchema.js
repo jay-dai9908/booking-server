@@ -524,6 +524,9 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `CREATE INDEX IF NOT EXISTS "Payment_booking_ref_idx" ON "Payment"("booking_ref")`,
     `CREATE INDEX IF NOT EXISTS "Payment_created_at_idx" ON "Payment"("created_at")`,
     `CREATE INDEX IF NOT EXISTS "Payment_batch_no_idx" ON "Payment"("batch_no")`,
+    `ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "source" TEXT NOT NULL DEFAULT 'booking'`,
+    `ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "source_ref" TEXT`,
+    `CREATE INDEX IF NOT EXISTS "Payment_source_created_at_idx" ON "Payment"("source", "created_at")`,
 
     `CREATE TABLE IF NOT EXISTS "AccountingEvent" (
       "id" SERIAL NOT NULL,

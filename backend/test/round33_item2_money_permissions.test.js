@@ -405,7 +405,7 @@ test('Round 33 Item 2: MONEY_WRITE, COUPON_WRITE, and PASS_GRANT permission enfo
   const grantOkRes = await fetch(`${baseUrl}/api/passes/admin/grant`, {
     method: 'POST',
     headers: authHeaders('coupons'),
-    body: JSON.stringify({ user_id: customer.id, plan_id: passPlan.id }),
+    body: JSON.stringify({ user_id: customer.id, plan_id: passPlan.id, mode: 'gift', reason: '權限測試贈送' }),
   });
   assert.ok(grantOkRes.ok, `Expected coupons POST /passes/admin/grant success, got ${grantOkRes.status}`);
 });

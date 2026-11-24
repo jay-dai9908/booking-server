@@ -44,6 +44,11 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
   const [plansList, setPlansList] = useState([]);
   const [showGrantModal, setShowGrantModal] = useState(false);
   const [grantForm, setGrantForm] = useState({
+    mode: 'sale',
+    method: 'cash',
+    amount: '',
+    cash_received: '',
+    reason: '',
     plan_id: '',
     custom_quota: '',
     valid_days: '90',
@@ -52,6 +57,12 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
     max_days_per_week: '',
     note: ''
   });
+  const [paymentMethods, setPaymentMethods] = useState([
+    { key: 'cash', label: '現金' },
+    { key: 'linepay', label: 'LINE Pay' },
+    { key: 'transfer', label: '銀行轉帳' },
+    { key: 'card', label: '信用卡' }
+  ]);
   const [isGranting, setIsGranting] = useState(false);
   const [redeemingPassId, setRedeemingPassId] = useState(null);
   const [expandedLogPassId, setExpandedLogPassId] = useState(null);
@@ -89,8 +100,30 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
       fetchUserPasses(member.id);
       fetchBindRequests(member.id);
       fetchPassPlans();
+      fetchPaymentMethods();
     }
   }, [member?.id]);
+
+  const fetchPaymentMethods = async () => {
+    try {
+      const res = await api.get('/global-settings');
+      const raw = res.data?.payment_methods_json;
+      if (Array.isArray(raw) && raw.length > 0) {
+        const filtered = raw
+          .filter(m => String(m.key || m.code || '').toLowerCase() !== 'pass')
+          .filter(m => {
+            const k = String(m.key || m.code || '').toLowerCase();
+            return k === 'cash' ? true : Boolean(m.enabled);
+          })
+          .map(m => ({ key: m.key || m.code, label: m.label || m.name || m.key || m.code }));
+        if (filtered.length > 0) {
+          setPaymentMethods(filtered);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch payment methods:', err);
+    }
+  };
 
   const fetchBindRequests = async (userId) => {
     const targetId = userId || localMember?.id;
@@ -218,6 +251,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
         setGrantForm(prev => ({
           ...prev,
           plan_id: String(first.id),
+          amount: first.price != null ? String(first.price) : '',
           custom_quota: first.total_quota != null ? String(first.total_quota) : '',
           valid_days: first.valid_days != null ? String(first.valid_days) : '90',
           day_restriction: first.day_restriction || 'ALL'
@@ -233,17 +267,28 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
     if (!localMember?.id) return;
     setIsGranting(true);
     try {
-      await api.post('/passes/admin/grant', {
+      const payload = {
         user_id: localMember.id,
+        mode: grantForm.mode,
         plan_id: grantForm.plan_id ? parseInt(grantForm.plan_id, 10) : undefined,
         custom_quota: grantForm.custom_quota ? parseInt(grantForm.custom_quota, 10) : null,
         valid_days: grantForm.valid_days ? parseInt(grantForm.valid_days, 10) : null,
         day_restriction: grantForm.day_restriction || 'ALL',
         max_hours_per_day: grantForm.max_hours_per_day ? parseInt(grantForm.max_hours_per_day, 10) : null,
         max_days_per_week: grantForm.max_days_per_week ? parseInt(grantForm.max_days_per_week, 10) : null,
+        reason: grantForm.reason?.trim() || '',
         note: grantForm.note?.trim() || ''
-      });
-      showToast('已成功發放卡券！');
+      };
+      if (grantForm.mode === 'sale') {
+        payload.method = grantForm.method || 'cash';
+        payload.amount = grantForm.amount !== '' ? parseInt(grantForm.amount, 10) : undefined;
+        payload.client_batch_id = crypto.randomUUID ? crypto.randomUUID() : `ps-${Date.now()}-${Math.random()}`;
+        if (payload.method === 'cash' && grantForm.cash_received !== '') {
+          payload.cash_received = parseInt(grantForm.cash_received, 10);
+        }
+      }
+      const res = await api.post('/passes/admin/grant', payload);
+      showToast(res.data?.message || (grantForm.mode === 'sale' ? '卡券販售收款成功！' : '卡券贈送成功！'));
       setShowGrantModal(false);
       fetchUserPasses(localMember.id);
     } catch (err) {
@@ -1168,6 +1213,34 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
             </div>
 
             <form onSubmit={handleGrantPass} className="space-y-4">
+              {/* Sale vs Gift Selector */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl">
+                <button
+                  type="button"
+                  data-testid="grant-mode-sale"
+                  onClick={() => setGrantForm(prev => ({ ...prev, mode: 'sale' }))}
+                  className={`py-2 px-3 rounded-lg text-sm font-bold transition ${
+                    grantForm.mode === 'sale'
+                      ? 'bg-[#8B5B43] text-white shadow-xs'
+                      : 'text-[#6A5A4F] hover:text-[#3E332B]'
+                  }`}
+                >
+                  販售（現場收款）
+                </button>
+                <button
+                  type="button"
+                  data-testid="grant-mode-gift"
+                  onClick={() => setGrantForm(prev => ({ ...prev, mode: 'gift' }))}
+                  className={`py-2 px-3 rounded-lg text-sm font-bold transition ${
+                    grantForm.mode === 'gift'
+                      ? 'bg-[#8B5B43] text-white shadow-xs'
+                      : 'text-[#6A5A4F] hover:text-[#3E332B]'
+                  }`}
+                >
+                  贈送（不收款）
+                </button>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">選擇方案 *</label>
                 <select
@@ -1178,6 +1251,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
                     setGrantForm(prev => ({
                       ...prev,
                       plan_id: selectedId,
+                      amount: found?.price != null ? String(found.price) : prev.amount,
                       custom_quota: found?.total_quota != null ? String(found.total_quota) : '',
                       valid_days: found?.valid_days != null ? String(found.valid_days) : '90',
                       day_restriction: found?.day_restriction || 'ALL'
@@ -1193,6 +1267,98 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
                   ))}
                 </select>
               </div>
+
+              {grantForm.mode === 'sale' ? (
+                <div className="p-3.5 bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">販售金額 (NT$) *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        data-testid="grant-sale-amount"
+                        required
+                        value={grantForm.amount}
+                        onChange={(e) => setGrantForm(prev => ({ ...prev, amount: e.target.value }))}
+                        placeholder="例: 1000"
+                        className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">付款方式 *</label>
+                      <select
+                        data-testid="grant-sale-method"
+                        value={grantForm.method}
+                        onChange={(e) => setGrantForm(prev => ({ ...prev, method: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                      >
+                        {paymentMethods.map(m => (
+                          <option key={m.key} value={m.key}>{m.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {grantForm.method === 'cash' && (
+                    <div className="grid grid-cols-2 gap-3 items-end">
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">收到現金 (NT$)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          data-testid="grant-cash-received"
+                          value={grantForm.cash_received}
+                          onChange={(e) => setGrantForm(prev => ({ ...prev, cash_received: e.target.value }))}
+                          placeholder={grantForm.amount ? `預設剛好 ${grantForm.amount}` : '留空當作剛好'}
+                          className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                        />
+                      </div>
+                      <div className="py-2 px-3 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] flex items-center justify-between">
+                        <span className="text-xs text-gray-500">找零</span>
+                        <span>
+                          NT$ {(() => {
+                            const amt = Number(grantForm.amount) || 0;
+                            const recv = grantForm.cash_received !== '' ? Number(grantForm.cash_received) : amt;
+                            return Math.max(0, recv - amt);
+                          })()}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {(() => {
+                    const selectedPlan = plansList.find(p => String(p.id) === String(grantForm.plan_id));
+                    const priceChanged = selectedPlan && grantForm.amount !== '' && Number(grantForm.amount) !== Number(selectedPlan.price);
+                    return (
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                          {priceChanged ? '調整售價原因 *' : '改價 / 收款說明（與售價不同時必填）'}
+                        </label>
+                        <input
+                          type="text"
+                          data-testid="grant-sale-reason"
+                          required={Boolean(priceChanged)}
+                          value={grantForm.reason}
+                          onChange={(e) => setGrantForm(prev => ({ ...prev, reason: e.target.value }))}
+                          placeholder={priceChanged ? '請填寫與方案定價不同之原因' : '選填'}
+                          className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                        />
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <div className="p-3.5 bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl">
+                  <label className="block text-xs font-bold text-gray-700 mb-1">贈送原因 *</label>
+                  <input
+                    type="text"
+                    data-testid="grant-gift-reason"
+                    required
+                    value={grantForm.reason}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, reason: e.target.value }))}
+                    placeholder="例：活動抽獎贈送、客訴補償"
+                    className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-sm font-bold text-[#3E332B] focus:border-[#8B5B43] outline-none"
+                  />
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1294,7 +1460,7 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
                   disabled={isGranting}
                   className="px-5 py-2 bg-[#8B5B43] hover:bg-[#724834] text-white text-sm font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50"
                 >
-                  {isGranting ? '發放中...' : '確認發放卡券'}
+                  {isGranting ? '處理中...' : grantForm.mode === 'sale' ? '確認收款並發卡' : '確認贈送卡券'}
                 </button>
               </div>
             </form>

@@ -729,6 +729,45 @@ export function buildClosingSlip(closing = {}, opts = {}) {
   return commands;
 }
 
+export function buildPassSaleReceipt(payment, passInfo = {}, opts = {}) {
+  const commands = [];
+  const bd = payment?.breakdown_json || {};
+  const passCode = payment?.source_ref || payment?.booking_ref || passInfo?.pass_code || '';
+  const planName = bd.plan_name || passInfo?.plan_name_snapshot || '卡券';
+  const quotaText = bd.total_quota != null ? `${bd.total_quota} 單位` : '期限暢遊';
+  const staffName = payment?.staff_name || opts.staffName || '櫃檯';
+  const isReprint = Boolean(opts.isReprint || payment?.is_reprint);
+
+  commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
+  if (isReprint) {
+    commands.push({ type: 'text', text: '*** 補印 ***', size: 24, align: 1, bold: true });
+  }
+  commands.push({ type: 'text', text: '卡券販售收據', size: 28, align: 1, bold: true });
+  commands.push({ type: 'text', text: fitLine(`卡號 ${passCode}`, ''), size: 22 });
+
+  const payTime = new Date(payment?.created_at || Date.now()).toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Taipei',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  commands.push({ type: 'text', text: fitLine(`時間 ${payTime}`, `店員 ${staffName}`), size: 22 });
+  commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
+  commands.push({ type: 'text', text: fitLine(`${planName}`, quotaText), size: 22 });
+  commands.push({ type: 'text', text: fitLine('實收金額', formatReceiptMoney(payment?.amount || 0)), size: 26, bold: true });
+
+  const methodLabel = PAYMENT_METHOD_LABELS[payment?.method] || payment?.method || '現金';
+  commands.push({ type: 'text', text: fitLine('付款方式', methodLabel), size: 22 });
+  if (payment?.method === 'cash' && payment?.cash_received != null) {
+    commands.push({ type: 'text', text: fitLine('實收現金', formatReceiptMoney(payment.cash_received)), size: 22 });
+    commands.push({ type: 'text', text: fitLine('找零', formatReceiptMoney(payment.change_given || 0)), size: 22 });
+  }
+  commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
+  commands.push({ type: 'text', text: opts.receiptFooterText || '謝謝光臨，歡迎再次蒞臨', size: 22, align: 1 });
+  commands.push({ type: 'lineWrap', lines: 3 });
+  return commands;
+}
+
 /**
  * 測試頁列印
  */

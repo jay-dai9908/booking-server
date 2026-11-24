@@ -622,6 +622,8 @@ model Payment {
   batch_no            String
   client_batch_id     String?
   booking_ref         String
+  source              String    @default("booking") // booking | shop | pass_sale
+  source_ref          String?
   kind                String                     // charge | supplement | refund | waive
   status              String    @default("valid") // valid | voided
   method              String                     // cash | line_pay | jkopay | card | transfer | pass | other | none
@@ -649,6 +651,7 @@ model Payment {
   @@index([created_at])
   @@index([batch_no])
   @@index([client_batch_id])
+  @@index([source, created_at])
 }
 
 // -------------------------------------------------------------

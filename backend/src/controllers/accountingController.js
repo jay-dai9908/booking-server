@@ -125,10 +125,15 @@ export const getLedger = async (req, res) => {
 
     const ledger = payments.map(p => {
       const r = resMap.get(p.booking_ref);
+      const isPassSale = p.source === 'pass_sale';
+      const refStr = p.source_ref || p.booking_ref || '';
+      const passTargetLabel = isPassSale ? `卡券販售 · *${String(refStr).slice(-4)}` : null;
       return {
         id: p.id,
         payment_no: p.payment_no,
         booking_ref: p.booking_ref,
+        source: p.source,
+        source_ref: p.source_ref,
         kind: p.kind,
         status: p.status,
         method: p.method,
@@ -140,8 +145,8 @@ export const getLedger = async (req, res) => {
         created_at: p.created_at,
         staff_name: p.staff_name,
         device_label: p.device_label,
-        user_name: r?.user?.name || '客人',
-        phone: r?.user?.phone || '',
+        user_name: passTargetLabel || r?.user?.name || p.breakdown_json?.customer_name || '客人',
+        phone: r?.user?.phone || p.breakdown_json?.customer_phone || '',
         person_nos: p.person_nos
       };
     });
@@ -188,10 +193,19 @@ export const getPaymentsList = async (req, res) => {
     const rawItems = hasMore ? payments.slice(0, take) : payments;
     const nowTs = new Date();
     const shiftLockAt = await getShiftLock(prisma, nowTs);
-    const items = rawItems.map(p => ({
-      ...p,
-      can_void: canVoidPayment(p, { shiftLockAt, now: nowTs })
-    }));
+    const items = rawItems.map(p => {
+      const refStr = p.source_ref || p.booking_ref || '';
+      const target_label = p.source === 'pass_sale'
+        ? `卡券販售 · *${String(refStr).slice(-4)}`
+        : p.source === 'shop'
+          ? `商城訂單 · ${refStr}`
+          : null;
+      return {
+        ...p,
+        target_label,
+        can_void: canVoidPayment(p, { shiftLockAt, now: nowTs })
+      };
+    });
     const nextCursor = hasMore ? items[items.length - 1].id : null;
 
     return res.json({ payments: items, next_cursor: nextCursor });

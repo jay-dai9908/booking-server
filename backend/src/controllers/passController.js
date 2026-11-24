@@ -1,10 +1,13 @@
+import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { deductPass } from '../services/billing/passTender.js';
+import { assertEnabledPaymentMethod, nextSerialNo, resolveBillingDate } from '../services/billing/billService.js';
+import { queuePrintJob } from '../services/print/printService.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
 /**
- * Admin: Grant pass to a user
+ * Admin: Grant or sell pass to a user (mode: 'sale' | 'gift')
  */
 export const grantUserPass = async (req, res) => {
   const {
@@ -16,27 +19,56 @@ export const grantUserPass = async (req, res) => {
     max_hours_per_day,
     max_days_per_week,
     max_hours_per_week,
-    note
-  } = req.body;
+    note,
+    mode,
+    method,
+    amount,
+    reason,
+    client_batch_id,
+    cash_received,
+    print
+  } = req.body || {};
+
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
 
   if (!user_id) {
     return res.status(400).json({ error: '請指定欲發放卡券之會員' });
   }
 
+  if (mode !== 'sale' && mode !== 'gift') {
+    return res.status(422).json({ error: '請選擇發放方式（販售或贈送）' });
+  }
+
+  const trimmedReason = reason ? String(reason).trim() : '';
+  if (mode === 'gift' && !trimmedReason) {
+    return res.status(422).json({ error: '贈送卡券必須填寫原因' });
+  }
+
   try {
+    const targetUserId = parseInt(user_id, 10);
+    const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!targetUser) {
+      return res.status(404).json({ error: '找不到指定會員' });
+    }
+
     let plan = null;
     if (plan_id) {
       plan = await prisma.passPlan.findUnique({ where: { id: parseInt(plan_id, 10) } });
+      if (!plan) {
+        return res.status(404).json({ error: '找不到指定卡券方案' });
+      }
     }
 
-    const planName = plan ? plan.name : (note || '手動自訂卡券');
+    const planName = plan ? plan.name : (note?.trim() || '手動自訂卡券');
     const passType = plan ? plan.pass_type : 'PUNCH_CARD';
     const totalQuota = custom_quota !== undefined
-      ? (custom_quota === null ? null : parseInt(custom_quota, 10))
+      ? (custom_quota === null || custom_quota === '' ? null : parseInt(custom_quota, 10))
       : (plan ? plan.total_quota : null);
 
     const effectiveDays = valid_days !== undefined
-      ? (valid_days === null ? null : parseInt(valid_days, 10))
+      ? (valid_days === null || valid_days === '' ? null : parseInt(valid_days, 10))
       : (plan ? plan.valid_days : null);
 
     const expiresAt = effectiveDays ? new Date(Date.now() + effectiveDays * 24 * 60 * 60 * 1000) : null;
@@ -46,40 +78,245 @@ export const grantUserPass = async (req, res) => {
     const maxDaysWeek = max_days_per_week !== undefined ? (max_days_per_week ? parseInt(max_days_per_week, 10) : null) : plan?.max_days_per_week;
     const maxHoursWeek = max_hours_per_week !== undefined ? (max_hours_per_week ? parseInt(max_hours_per_week, 10) : null) : plan?.max_hours_per_week;
 
-    // Generate unique pass_code: PASS-XXXXXXXX
-    const passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
-
-    const userPass = await prisma.userPass.create({
-      data: {
-        pass_code: passCode,
-        user_id: parseInt(user_id, 10),
-        plan_id: plan ? plan.id : (await prisma.passPlan.findFirst()).id,
-        plan_name_snapshot: planName,
-        pass_type: passType,
-        remaining_quota: totalQuota,
-        total_quota: totalQuota,
-        day_restriction: effectiveDayRestriction,
-        max_hours_per_day: maxDayHours || null,
-        max_days_per_week: maxDaysWeek || null,
-        max_hours_per_week: maxHoursWeek || null,
-        payment_status: 'active',
-        expires_at: expiresAt,
-        status: 'ACTIVE',
-        usage_logs_json: []
-      },
-      include: {
-        user: { select: { id: true, name: true, phone: true } },
-        plan: true
+    if (mode === 'sale') {
+      const normalizedMethod = String(method || '').trim().toLowerCase();
+      if (!normalizedMethod) {
+        return res.status(422).json({ error: '請選擇販售付款方式' });
       }
+      if (normalizedMethod === 'pass') {
+        return res.status(422).json({ error: '販售卡券不可使用卡券付款' });
+      }
+
+      const rawAmount = (amount !== undefined && amount !== null && amount !== '')
+        ? Number(amount)
+        : (plan ? Number(plan.price) : NaN);
+
+      if (!Number.isInteger(rawAmount) || rawAmount <= 0) {
+        return res.status(422).json({ error: '販售金額必須為正整數' });
+      }
+
+      if (plan && rawAmount !== Number(plan.price) && !trimmedReason) {
+        return res.status(422).json({ error: '售價與方案定價不同時請填寫原因' });
+      }
+
+      const providedCash = (cash_received !== undefined && cash_received !== null && cash_received !== '')
+        ? Number(cash_received)
+        : rawAmount;
+      if (normalizedMethod === 'cash') {
+        if (!Number.isFinite(providedCash) || providedCash < rawAmount) {
+          return res.status(400).json({ error: `實收現金（NT$${Number.isFinite(providedCash) ? providedCash : 0}）不足（應收 NT$${rawAmount}）` });
+        }
+      }
+
+      if (client_batch_id) {
+        const existingPay = await prisma.payment.findFirst({
+          where: { client_batch_id: String(client_batch_id), source: 'pass_sale', status: 'valid' }
+        });
+        if (existingPay) {
+          const existingPass = await prisma.userPass.findUnique({
+            where: { pass_code: existingPay.source_ref || existingPay.booking_ref },
+            include: { user: { select: { id: true, name: true, phone: true } }, plan: true }
+          });
+          return res.json({
+            message: `已販售卡券「${planName}」`,
+            pass: existingPass,
+            payment: existingPay,
+            print_job: null,
+            idempotent: true
+          });
+        }
+      }
+
+      const result = await prisma.$transaction(async (tx) => {
+        await assertEnabledPaymentMethod(tx, normalizedMethod);
+
+        const defaultPlan = plan || await tx.passPlan.findFirst();
+        if (!defaultPlan) {
+          throw { status: 422, message: '尚未建立任何卡券方案，請先新增卡券方案' };
+        }
+
+        let passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
+        while (await tx.userPass.findUnique({ where: { pass_code: passCode } })) {
+          passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
+        }
+
+        const userPass = await tx.userPass.create({
+          data: {
+            pass_code: passCode,
+            user_id: targetUserId,
+            plan_id: defaultPlan.id,
+            plan_name_snapshot: planName,
+            pass_type: passType,
+            remaining_quota: totalQuota,
+            total_quota: totalQuota,
+            day_restriction: effectiveDayRestriction,
+            max_hours_per_day: maxDayHours || null,
+            max_days_per_week: maxDaysWeek || null,
+            max_hours_per_week: maxHoursWeek || null,
+            payment_status: 'active',
+            expires_at: expiresAt,
+            status: 'ACTIVE',
+            usage_logs_json: []
+          },
+          include: {
+            user: { select: { id: true, name: true, phone: true } },
+            plan: true
+          }
+        });
+
+        const payDate = resolveBillingDate(req.body);
+        const payNo = await nextSerialNo(tx, 'payment', payDate);
+        const batchNo = crypto.randomUUID();
+        const changeGiven = normalizedMethod === 'cash' ? (providedCash - rawAmount) : null;
+
+        const pay = await tx.payment.create({
+          data: {
+            payment_no: payNo,
+            batch_no: batchNo,
+            client_batch_id: client_batch_id ? String(client_batch_id) : null,
+            booking_ref: passCode,
+            source: 'pass_sale',
+            source_ref: passCode,
+            kind: 'charge',
+            status: 'valid',
+            method: normalizedMethod,
+            amount: rawAmount,
+            cash_received: normalizedMethod === 'cash' ? providedCash : null,
+            change_given: changeGiven,
+            person_nos: [],
+            breakdown_json: {
+              type: 'pass_sale',
+              user_pass_id: userPass.id,
+              pass_code: passCode,
+              plan_name: planName,
+              total_quota: totalQuota,
+              valid_days: effectiveDays,
+              expires_at: expiresAt ? expiresAt.toISOString() : null,
+              customer_name: userPass.user?.name || targetUser.name,
+              customer_phone: userPass.user?.phone || targetUser.phone
+            },
+            reason: trimmedReason || null,
+            note: note ? String(note).trim() : null,
+            staff_name: staffName,
+            staff_id: staffId,
+            device_id: deviceInfo.device_id,
+            device_label: deviceInfo.device_label || '櫃檯'
+          }
+        });
+
+        await auditLog(tx, {
+          booking_ref: passCode,
+          event_type: 'pass_sold',
+          category: 'payment',
+          summary: `販售卡券 ${planName}（${passCode}）· ${normalizedMethod === 'cash' ? '現金' : normalizedMethod} NT$${rawAmount}`,
+          amount: rawAmount,
+          payment_id: pay.id,
+          reason: trimmedReason || null,
+          after_json: {
+            user_pass_id: userPass.id,
+            pass_code: passCode,
+            plan_name: planName,
+            total_quota: totalQuota,
+            expires_at: expiresAt ? expiresAt.toISOString() : null,
+            amount: rawAmount,
+            method: normalizedMethod
+          },
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+
+        let printJob = null;
+        const globalSetting = await tx.globalSetting.findFirst() || {};
+        if (print !== false && globalSetting.print_enabled !== false && globalSetting.auto_print_receipt !== false) {
+          printJob = await queuePrintJob({
+            type: 'receipt',
+            booking_ref: passCode,
+            payment_id: pay.id,
+            user: req.user,
+            device: deviceInfo,
+            now: payDate
+          }, tx);
+        }
+
+        return { userPass, pay, printJob };
+      });
+
+      return res.json({
+        message: `卡券「${planName}」販售收款成功！`,
+        pass: result.userPass,
+        payment: result.pay,
+        print_job: result.printJob
+      });
+    }
+
+    // mode === 'gift'
+    const giftedPass = await prisma.$transaction(async (tx) => {
+      const defaultPlan = plan || await tx.passPlan.findFirst();
+      if (!defaultPlan) {
+        throw { status: 422, message: '尚未建立任何卡券方案，請先新增卡券方案' };
+      }
+
+      let passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
+      while (await tx.userPass.findUnique({ where: { pass_code: passCode } })) {
+        passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
+      }
+
+      const userPass = await tx.userPass.create({
+        data: {
+          pass_code: passCode,
+          user_id: targetUserId,
+          plan_id: defaultPlan.id,
+          plan_name_snapshot: planName,
+          pass_type: passType,
+          remaining_quota: totalQuota,
+          total_quota: totalQuota,
+          day_restriction: effectiveDayRestriction,
+          max_hours_per_day: maxDayHours || null,
+          max_days_per_week: maxDaysWeek || null,
+          max_hours_per_week: maxHoursWeek || null,
+          payment_status: 'active',
+          expires_at: expiresAt,
+          status: 'ACTIVE',
+          usage_logs_json: []
+        },
+        include: {
+          user: { select: { id: true, name: true, phone: true } },
+          plan: true
+        }
+      });
+
+      await auditLog(tx, {
+        booking_ref: passCode,
+        event_type: 'pass_gifted',
+        category: 'pass',
+        summary: `贈送卡券 ${planName}（${passCode}）給 ${userPass.user?.name || targetUser.name} · 原因「${trimmedReason}」`,
+        reason: trimmedReason,
+        after_json: {
+          user_pass_id: userPass.id,
+          pass_code: passCode,
+          plan_name: planName,
+          total_quota: totalQuota,
+          expires_at: expiresAt ? expiresAt.toISOString() : null
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      return userPass;
     });
 
-    res.json({
-      message: `卡券「${planName}」已成功發放給會員！`,
-      pass: userPass
+    return res.json({
+      message: `卡券「${planName}」已贈送給會員！`,
+      pass: giftedPass
     });
   } catch (error) {
     console.error('grantUserPass error:', error);
-    res.status(500).json({ error: error.message || '發放卡券失敗' });
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    res.status(500).json({ error: '發放卡券失敗' });
   }
 };
 
