@@ -126,9 +126,15 @@ export default function SeatingPage() {
     };
     const baseStart = addDays(todayStr, -14);
     const baseEnd = addDays(todayStr, BOOKING_LOOKAHEAD_DAYS - 1);
+    if (selectedDate && (selectedDate < baseStart || selectedDate > baseEnd)) {
+      return {
+        rangeStartStr: addDays(selectedDate, -14),
+        rangeEndStr: addDays(selectedDate, 14)
+      };
+    }
     return {
-      rangeStartStr: selectedDate && selectedDate < baseStart ? selectedDate : baseStart,
-      rangeEndStr: selectedDate && selectedDate > baseEnd ? selectedDate : baseEnd
+      rangeStartStr: baseStart,
+      rangeEndStr: baseEnd
     };
   }, [todayStr, selectedDate]);
 

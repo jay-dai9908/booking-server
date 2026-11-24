@@ -2,14 +2,24 @@ import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const isTest = process.execArgv.includes('--test') ||
-  process.env.NODE_ENV === 'test' ||
+const looksLikeTestRun =
+  process.execArgv.includes('--test') ||
   /[\/\\]test[\/\\]/.test(process.argv[1] || '') ||
-  process.argv.some(arg => typeof arg === 'string' && (arg.endsWith('.test.js') || arg.includes('/test/') || arg.includes('\\test\\')));
+  process.argv.some(
+    (arg) =>
+      typeof arg === 'string' &&
+      (arg.endsWith('.test.js') || arg.includes('/test/') || arg.includes('\\test\\'))
+  );
+
+if (looksLikeTestRun && process.env.NODE_ENV !== 'test') {
+  const errMsg = '測試必須設定 NODE_ENV=test';
+  console.error(errMsg);
+  throw new Error(errMsg);
+}
 
 let url = process.env.DATABASE_URL;
 
-if (isTest) {
+if (process.env.NODE_ENV === 'test') {
   const testUrl = process.env.TEST_DATABASE_URL;
   if (!testUrl) {
     throw new Error('TEST_DATABASE_URL is not set. Refusing to run tests on production/dev database.');
@@ -21,9 +31,6 @@ if (isTest) {
   }
   url = testUrl;
   process.env.DATABASE_URL = testUrl;
-  if (!process.env.NODE_ENV) {
-    process.env.NODE_ENV = 'test';
-  }
 }
 
 const prisma = new PrismaClient(url ? { datasources: { db: { url } } } : undefined);

@@ -3,17 +3,17 @@ import http from 'http';
 import cookieParser from 'cookie-parser';
 import authRoutes from '../../src/routes/auth.js';
 import kioskRoutes from '../../src/routes/kiosk.js';
+import { applyBodyParsers } from '../../src/middlewares/bodyParsers.js';
 
 export function createTestApp() {
   const app = express();
-  app.use('/api/kiosk/v1', express.json({ limit: '16kb' }));
-  app.use(express.json({ limit: '15mb' }));
+  applyBodyParsers(app);
   app.use(cookieParser());
   app.use('/api/auth', authRoutes);
   app.use('/api/kiosk', kioskRoutes);
   app.use((err, req, res, next) => {
     if (err?.type === 'entity.too.large' || err?.status === 413) {
-      return res.status(413).json({ error: 'Payload too large' });
+      return res.status(413).json({ error: '資料太大' });
     }
     res.status(500).json({ error: err?.message || 'Internal error' });
   });

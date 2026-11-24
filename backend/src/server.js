@@ -26,6 +26,7 @@ import { ensureDefaultEquipmentConfigs } from './controllers/equipmentController
 import { ensureDefaultCheckoutConfigs } from './controllers/checkoutController.js';
 import { ensureDefaultPaymentMethods, ensureDefaultProducts, ensureDefaultPassPlans } from './utils/shopDefaults.js';
 import { resolveTrustProxy } from './utils/trustProxy.js';
+import { applyBodyParsers } from './middlewares/bodyParsers.js';
 import { startCronJobs } from './cronJobs.js';
 
 const app = express();
@@ -825,9 +826,7 @@ app.use(cors({
   credentials: true, // Allow cookies to be sent
 }));
 app.use(checkBannedIP);
-app.use('/api/kiosk/v1', express.json({ limit: '16kb' }));
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ limit: '15mb', extended: true }));
+applyBodyParsers(app);
 app.use(cookieParser());
 
 // Routes
@@ -855,7 +854,7 @@ app.use('/api/kiosk', kioskRoutes);
 // Basic error handler
 app.use((err, req, res, next) => {
   if (err?.type === 'entity.too.large' || err?.status === 413) {
-    return res.status(413).json({ error: 'Payload too large' });
+    return res.status(413).json({ error: '資料太大' });
   }
   if (err instanceof SyntaxError && err?.status === 400 && 'body' in err) {
     if (req.originalUrl?.startsWith('/api/kiosk/v1')) {

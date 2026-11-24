@@ -75,6 +75,8 @@ export async function runSeatingTests() {
   // Today in Asia/Taipei
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
   const todayUtc = new Date(`${todayStr}T00:00:00.000Z`);
+  const future200Utc = new Date(todayUtc.getTime() + 200 * 86400000);
+  const future200Str = future200Utc.toISOString().slice(0, 10);
 
   try {
     // 0. Ensure user and sessions exist for today (10:00 to 13:00)
@@ -106,6 +108,23 @@ export async function runSeatingTests() {
       });
       sessions.push(s);
     }
+
+    // Seed a session 200 days in the future for Round 32 Item 5 check
+    await prisma.session.upsert({
+      where: {
+        session_date_start_time: {
+          session_date: future200Utc,
+          start_time: '14:00'
+        }
+      },
+      update: { max_capacity: 20, end_time: '15:00' },
+      create: {
+        session_date: future200Utc,
+        start_time: '14:00',
+        end_time: '15:00',
+        max_capacity: 20
+      }
+    });
 
     for (const vp of VIEWPORTS) {
       console.log(`\n========================================`);
@@ -442,6 +461,34 @@ export async function runSeatingTests() {
       }
       console.log('  ✔ Step 8 PASSED: Completed booking moved to "已離場" and seat released');
 
+      // Step 8b (Round 32 Item 5): Select a date 200 days in the future and verify sessions load with 0 400 errors
+      if (vp.name === 'desktop') {
+        console.log(`Step 8b: Selecting date 200 days ahead (${future200Str})...`);
+        await page.locator('[data-testid="seating-date-toggle"]').click();
+        const pickerCard = page.locator('[data-testid="seating-date-picker-card"]');
+        await pickerCard.waitFor({ state: 'visible', timeout: 5000 });
+        await pickerCard.locator('button:has-text("整月")').click();
+
+        const [curY, curM] = todayStr.split('-').map(Number);
+        const [futY, futM, futD] = future200Str.split('-').map(Number);
+        const monthsDiff = (futY - curY) * 12 + (futM - curM);
+        const nextMonthBtn = pickerCard.locator('button[aria-label="下個月"]');
+        for (let m = 0; m < monthsDiff; m++) {
+          await nextMonthBtn.click();
+        }
+        await pickerCard
+          .locator('button:not([aria-label])')
+          .filter({ has: page.locator(`span.font-num:text-is("${futD}")`) })
+          .first()
+          .click();
+
+        await page.waitForLoadState('networkidle');
+        const toggleText = await page.locator('[data-testid="seating-date-toggle"]').innerText();
+        assert.ok(toggleText.includes(future200Str), `Expected selectedDate ${future200Str}, got ${toggleText}`);
+        await page.locator('button:has-text("14:00")').first().waitFor({ state: 'visible', timeout: 8000 });
+        console.log(`  ✔ Step 8b PASSED: Future date ${future200Str} (+200d) loaded sessions cleanly`);
+      }
+
       // Step 9: Assert no errors and no forbidden patterns
       console.log('Step 9: Verifying zero page errors and no forbidden tokens...');
       const bodyFinal = await page.evaluate(() => document.body.innerText || '');
@@ -459,6 +506,7 @@ export async function runSeatingTests() {
     console.log('\n🎉 ALL SEATING PLAYWRIGHT VERIFICATIONS PASSED (mobile & desktop)!');
   } finally {
     await cleanupTestData(allRefs);
+    await prisma.session.deleteMany({ where: { session_date: future200Utc } }).catch(() => {});
     await browser.close();
     await prisma.$disconnect();
   }
