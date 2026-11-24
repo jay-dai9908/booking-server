@@ -96,16 +96,24 @@ async function run() {
   const ts = Date.now().toString().slice(-6);
 
   let layout = null;
+  let prevPublishedIds = [];
   let s1 = null;
   let s2 = null;
   const createdUserIds = [];
 
   try {
-    // Seed 4-seat layout A1-1..A1-4
-    await prisma.seatLayout.updateMany({
+    // Seed 4-seat layout A1-1..A1-4 (restore previously published layouts in finally)
+    const prevPublished = await prisma.seatLayout.findMany({
       where: { status: 'published' },
-      data: { status: 'archived' }
+      select: { id: true }
     });
+    prevPublishedIds = prevPublished.map((l) => l.id);
+    if (prevPublishedIds.length > 0) {
+      await prisma.seatLayout.updateMany({
+        where: { id: { in: prevPublishedIds } },
+        data: { status: 'archived' }
+      });
+    }
     layout = await prisma.seatLayout.create({
       data: {
         name: `R39 Playwright Layout ${ts}`,
@@ -460,6 +468,12 @@ async function run() {
       await prisma.seatTable.deleteMany({ where: { layout_id: layout.id } }).catch(() => {});
       await prisma.seatZone.deleteMany({ where: { layout_id: layout.id } }).catch(() => {});
       await prisma.seatLayout.deleteMany({ where: { id: layout.id } }).catch(() => {});
+    }
+    if (prevPublishedIds.length > 0) {
+      await prisma.seatLayout.updateMany({
+        where: { id: { in: prevPublishedIds } },
+        data: { status: 'published' }
+      }).catch(() => {});
     }
     if (createdUserIds.length > 0) {
       await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } }).catch(() => {});

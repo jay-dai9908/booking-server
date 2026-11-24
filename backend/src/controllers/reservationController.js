@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
 import { loadAllocatorContext, getActiveLayoutForDate, loadSeatedOccupants, lockDaySeats } from '../services/seating/layoutService.js';
-import { isReservationPinned, reseatBookings } from '../services/seating/allocator.js';
+import { isReservationPinned, reseatBookings, MOVABLE_RESERVATION_FILTER } from '../services/seating/allocator.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { evaluatePromoCode } from './checkoutController.js';
@@ -1749,9 +1749,7 @@ export async function applyMovableSeatUpdates(tx, updates = []) {
       where: {
         booking_ref: update.booking_ref,
         status: 'confirmed',
-        is_seat_locked: false,
-        attendance: null,
-        OR: [{ seat_source: null }, { seat_source: { not: 'staff' } }]
+        ...MOVABLE_RESERVATION_FILTER
       },
       data: { assigned_seats: update.assigned_seats }
     });
@@ -1895,9 +1893,7 @@ export async function reshuffleAfterSeatChange(tx, sessionIds, updatedBookingRef
           where: {
             booking_ref: ref,
             status: 'confirmed',
-            is_seat_locked: false,
-            attendance: null,
-            OR: [{ seat_source: null }, { seat_source: { not: 'staff' } }]
+            ...MOVABLE_RESERVATION_FILTER
           },
           data: { assigned_seats: waitSeats }
         });

@@ -5,6 +5,14 @@ import { allocate } from '../../../../shared/allocator/score.js';
 import { resolveLayoutGeometry } from '../../../../shared/allocator/geometry.js';
 import { loadAllocatorContext } from './layoutService.js';
 
+export const MOVABLE_RESERVATION_FILTER = {
+  is_seat_locked: false,
+  AND: [
+    { OR: [{ attendance: null }, { attendance: { notIn: ['checked_in', 'completed'] } }] },
+    { OR: [{ seat_source: null }, { seat_source: { not: 'staff' } }] }
+  ]
+};
+
 export function isReservationPinned(r) {
   if (!r) return false;
   if (r.is_pinned === true) return true;
@@ -468,10 +476,8 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
       const moveUpdate = await tx.reservation.updateMany({
         where: {
           booking_ref: uRef,
-          status: 'confirmed',
-          is_seat_locked: false,
-          attendance: null,
-          OR: [{ seat_source: null }, { seat_source: { not: 'staff' } }]
+          status: { not: 'cancelled' },
+          ...MOVABLE_RESERVATION_FILTER
         },
         data: { assigned_seats: newSeats }
       });
