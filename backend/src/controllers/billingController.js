@@ -7,7 +7,9 @@ import {
   refundPayment,
   voidPayment,
   markUnpaid,
-  waivePayment
+  waivePayment,
+  addPromoToBill,
+  removePromoFromBill
 } from '../services/billing/billService.js';
 import displayBus from '../services/display/displayBus.js';
 import { validatePassUsage } from '../services/billing/passTender.js';
@@ -67,6 +69,51 @@ export async function putDraft(req, res) {
     console.error('[putDraft] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
     return res.status(500).json({ error: '儲存草稿失敗' });
+  }
+}
+
+export async function postAddPromo(req, res) {
+  const { booking_ref } = req.params;
+  const staffUser = req.user;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  try {
+    const result = await addPromoToBill(booking_ref, req.body || {}, staffUser, deviceInfo);
+    return res.json({
+      success: true,
+      server_now: new Date().toISOString(),
+      bill: result.bill,
+      draft: result.draft,
+      billInput: result.billInput,
+      rev: result.rev
+    });
+  } catch (error) {
+    console.error('[postAddPromo] Error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+    return res.status(500).json({ error: '套用優惠碼失敗' });
+  }
+}
+
+export async function deleteRemovePromo(req, res) {
+  const { booking_ref, code } = req.params;
+  const staffUser = req.user;
+  const deviceInfo = getAdminDeviceInfo(req);
+  const base_rev = req.body?.base_rev ?? req.query?.base_rev;
+
+  try {
+    const result = await removePromoFromBill(booking_ref, { code, base_rev }, staffUser, deviceInfo);
+    return res.json({
+      success: true,
+      server_now: new Date().toISOString(),
+      bill: result.bill,
+      draft: result.draft,
+      billInput: result.billInput,
+      rev: result.rev
+    });
+  } catch (error) {
+    console.error('[deleteRemovePromo] Error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+    return res.status(500).json({ error: '移除優惠碼失敗' });
   }
 }
 

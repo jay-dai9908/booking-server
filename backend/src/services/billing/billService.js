@@ -3,6 +3,7 @@ import prisma from '../../prismaClient.js';
 import { computeBill, billingStatus, calculatePersonRefundInfo } from '../../../../shared/billing.js';
 import { toTaipeiDateString, blocksBy1030, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
+import { evaluatePromoCode } from '../../controllers/checkoutController.js';
 import { log as auditLog } from '../audit/auditService.js';
 import { deductPass, restorePass, validatePassUsage } from './passTender.js';
 import { buildBillInput } from './billInput.js';
@@ -299,9 +300,29 @@ export async function saveDraft(booking_ref, base_rev, newDraft, staffName, staf
     });
   }
 
+  const existingPromos = Array.isArray(currentDetails?.order_promos) ? currentDetails.order_promos : [];
+  const incomingPromos = Array.isArray(newDraft?.order_promos) ? newDraft.order_promos : [];
+  const incomingPromoByCode = new Map(
+    incomingPromos
+      .filter((p) => p && p.code)
+      .map((p) => [String(p.code).trim().toUpperCase(), p])
+  );
+  const preservedOrderPromos = existingPromos.map((ep) => {
+    const match = incomingPromoByCode.get(String(ep?.code || '').trim().toUpperCase());
+    if (!match) return ep;
+    const nextSplitMode = match.split?.mode || match.split_mode;
+    if (!nextSplitMode) return ep;
+    return {
+      ...ep,
+      split_mode: nextSplitMode,
+      ...(ep.split ? { split: { ...ep.split, mode: nextSplitMode } } : {})
+    };
+  });
+
   const updatedRev = currentRev + 1;
   const draftToSave = {
     ...newDraft,
+    order_promos: preservedOrderPromos,
     version: 2,
     rev: updatedRev,
     updated_at: new Date().toISOString(),
@@ -321,6 +342,223 @@ export async function saveDraft(booking_ref, base_rev, newDraft, staffName, staf
     billInput: result.billInput,
     rev: updatedRev
   };
+}
+
+/**
+ * Add promo code onto a booking bill server-side (Round 34 Item 2)
+ */
+export async function addPromoToBill(booking_ref, { code, base_rev }, staffUser, deviceInfo) {
+  const staffName = staffUser?.name || '門市人員';
+  const staffId = staffUser?.id || null;
+  const cleanCode = (code || '').trim().toUpperCase();
+  if (!cleanCode) {
+    throw { status: 400, message: '請輸入折扣碼' };
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+    const reservations = await tx.reservation.findMany({
+      where: { booking_ref, status: { not: 'cancelled' } }
+    });
+    if (!reservations.length) {
+      throw { status: 404, message: '找不到此筆預約' };
+    }
+
+    const currentDetails = reservations[0].checkout_details;
+    const currentRev = currentRevOf(currentDetails);
+    if (base_rev !== undefined && base_rev !== null && Number(base_rev) !== currentRev) {
+      throw {
+        status: 409,
+        code: 'REV_CONFLICT',
+        message: '另一台裝置剛改過這筆帳，已重新載入'
+      };
+    }
+
+    const currentData = await getBookingBill(booking_ref, tx);
+    const existingPromos = Array.isArray(currentData.draft?.order_promos)
+      ? currentData.draft.order_promos
+      : [];
+    if (existingPromos.some((op) => String(op?.code || '').trim().toUpperCase() === cleanCode)) {
+      throw {
+        status: 409,
+        code: 'PROMO_ALREADY_APPLIED',
+        message: `優惠碼 ${cleanCode} 已經套用在此帳單上`
+      };
+    }
+
+    const unpaidPersons = (currentData.bill?.persons || []).filter(
+      (p) => !p.is_paid && p.status !== 'removed'
+    );
+    if (unpaidPersons.length === 0) {
+      throw { status: 400, message: '沒有未付款的人員，無法套用優惠碼' };
+    }
+
+    const allUnlimited = unpaidPersons.every((p) => p.entry?.mode === 'unlimited');
+    const allHourly = unpaidPersons.every((p) => p.entry?.mode !== 'unlimited');
+    const hasMixedModes = !allUnlimited && !allHourly;
+
+    const unpaidBase = unpaidPersons.reduce((s, p) => s + (p.base_amount || 0), 0);
+    const unpaidSeating = unpaidPersons.reduce((s, p) => s + (p.entry?.amount || 0), 0);
+    const unpaidBoard = unpaidPersons.reduce((s, p) => s + (p.board?.amount || 0), 0);
+    const bookedHours = Math.max(1, (currentData.booking?.booked_minutes || 60) / 60);
+
+    const evalRes = await evaluatePromoCode(tx, {
+      code: cleanCode,
+      session_date: currentData.booking?.session_date,
+      pax: unpaidPersons.length,
+      hours: bookedHours,
+      is_unlimited: allUnlimited,
+      has_mixed_modes: hasMixedModes,
+      base_amount: unpaidBase,
+      hourly_price: currentData.pricing?.hourly,
+      user_id: reservations[0].user_id,
+      is_pos: true,
+      skip_usage_check: false,
+      seating_amount: unpaidSeating,
+      equipment_amount: unpaidBoard,
+      persons: unpaidPersons.map((p) => ({
+        person_no: p.person_no,
+        entry_amount: p.entry?.amount || 0,
+        board_amount: p.board?.amount || 0,
+        base_amount: p.base_amount || 0
+      }))
+    });
+
+    if (!evalRes.valid) {
+      throw { status: 400, message: evalRes.error || '折扣碼無效或未達門檻' };
+    }
+
+    const defaultSplitMode = currentData.draft?.split_mode || currentData.rules?.default_split_mode || 'proportional';
+    const nextPromos = [
+      ...existingPromos,
+      {
+        ...evalRes.rule,
+        split_mode: defaultSplitMode
+      }
+    ];
+    const updatedRev = currentRev + 1;
+    const draftToSave = {
+      ...currentData.draft,
+      version: 2,
+      order_promos: nextPromos,
+      rev: updatedRev,
+      updated_at: new Date().toISOString(),
+      updated_by: staffName
+    };
+
+    await tx.reservation.updateMany({
+      where: { booking_ref },
+      data: { checkout_details: draftToSave }
+    });
+
+    await refreshBillingCache(tx, booking_ref);
+
+    await auditLog(tx, {
+      booking_ref,
+      event_type: 'promo_applied',
+      category: 'amount',
+      summary: `套用優惠碼 ${evalRes.rule.code}（折抵 NT$${evalRes.discount_amount}）`,
+      amount: -evalRes.discount_amount,
+      after_json: { code: evalRes.rule.code, discount_amount: evalRes.discount_amount },
+      staff_name: staffName,
+      staff_id: staffId,
+      device_id: deviceInfo?.device_id,
+      device_label: deviceInfo?.device_label
+    });
+
+    const finalData = await getBookingBill(booking_ref, tx);
+    return {
+      bill: finalData.bill,
+      draft: draftToSave,
+      billInput: finalData.billInput,
+      rev: updatedRev
+    };
+  });
+}
+
+/**
+ * Remove promo code from a booking bill server-side (Round 34 Item 2)
+ */
+export async function removePromoFromBill(booking_ref, { code, base_rev }, staffUser, deviceInfo) {
+  const staffName = staffUser?.name || '門市人員';
+  const staffId = staffUser?.id || null;
+  const cleanCode = decodeURIComponent(code || '').trim().toUpperCase();
+  if (!cleanCode) {
+    throw { status: 400, message: '請指定要移除的優惠碼' };
+  }
+
+  return await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+    const reservations = await tx.reservation.findMany({
+      where: { booking_ref, status: { not: 'cancelled' } }
+    });
+    if (!reservations.length) {
+      throw { status: 404, message: '找不到此筆預約' };
+    }
+
+    const currentDetails = reservations[0].checkout_details;
+    const currentRev = currentRevOf(currentDetails);
+    if (base_rev !== undefined && base_rev !== null && Number(base_rev) !== currentRev) {
+      throw {
+        status: 409,
+        code: 'REV_CONFLICT',
+        message: '另一台裝置剛改過這筆帳，已重新載入'
+      };
+    }
+
+    const currentData = await getBookingBill(booking_ref, tx);
+    const existingPromos = Array.isArray(currentData.draft?.order_promos)
+      ? currentData.draft.order_promos
+      : [];
+    const targetPromo = existingPromos.find(
+      (op) => String(op?.code || '').trim().toUpperCase() === cleanCode
+    );
+    if (!targetPromo) {
+      throw { status: 404, message: `帳單未套用優惠碼 ${cleanCode}` };
+    }
+
+    const nextPromos = existingPromos.filter(
+      (op) => String(op?.code || '').trim().toUpperCase() !== cleanCode
+    );
+    const updatedRev = currentRev + 1;
+    const draftToSave = {
+      ...currentData.draft,
+      version: 2,
+      order_promos: nextPromos,
+      rev: updatedRev,
+      updated_at: new Date().toISOString(),
+      updated_by: staffName
+    };
+
+    await tx.reservation.updateMany({
+      where: { booking_ref },
+      data: { checkout_details: draftToSave }
+    });
+
+    await refreshBillingCache(tx, booking_ref);
+
+    await auditLog(tx, {
+      booking_ref,
+      event_type: 'promo_removed',
+      category: 'amount',
+      summary: `移除優惠碼 ${cleanCode}`,
+      before_json: { code: cleanCode, rule: targetPromo },
+      staff_name: staffName,
+      staff_id: staffId,
+      device_id: deviceInfo?.device_id,
+      device_label: deviceInfo?.device_label
+    });
+
+    const finalData = await getBookingBill(booking_ref, tx);
+    return {
+      bill: finalData.bill,
+      draft: draftToSave,
+      billInput: finalData.billInput,
+      rev: updatedRev
+    };
+  });
 }
 
 /**

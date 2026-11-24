@@ -10,7 +10,9 @@ import {
   postWaive,
   postVoid,
   postMarkUnpaid,
-  getMemberPasses
+  getMemberPasses,
+  postAddPromo,
+  deleteRemovePromo
 } from '../controllers/billingController.js';
 
 const router = express.Router();
@@ -21,6 +23,8 @@ const checkoutStaffAuth = [
 
 router.get('/:booking_ref', ...checkoutStaffAuth, getBillingDetails);
 router.put('/:booking_ref/draft', ...checkoutStaffAuth, putDraft);
+router.post('/:booking_ref/promos', ...checkoutStaffAuth, postAddPromo);
+router.delete('/:booking_ref/promos/:code', ...checkoutStaffAuth, deleteRemovePromo);
 router.post('/:booking_ref/collect', ...checkoutStaffAuth, postCollect);
 router.post('/:booking_ref/supplement', ...checkoutStaffAuth, postSupplement);
 router.post('/:booking_ref/refund', verifyToken, requirePermissionGroup(MONEY_WRITE), postRefund);

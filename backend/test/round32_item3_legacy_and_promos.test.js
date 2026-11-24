@@ -198,16 +198,15 @@ test('Round 32 Item 3: legacy checkout endpoint returns 410 and default promos a
   assert.equal(custValData.valid, false);
   assert.equal(custValData.error, '此優惠券僅供現場櫃檯結帳使用');
 
-  // 4. Admin validate CHECKIN30 -> valid: true
+  // 4. Deprecated admin validate endpoint returns 410 GONE (Round 34 Item 2 moved POS promo application to /api/billing/:ref/promos)
   const adminVal = await fetch(`${baseUrl}/api/checkout/admin/promo-codes/validate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${staffToken}` },
     body: JSON.stringify({ code: 'CHECKIN30', base_amount: 400, pax: 2, hours: 1 })
   });
-  assert.equal(adminVal.status, 200);
+  assert.equal(adminVal.status, 410);
   const adminValData = await adminVal.json();
-  assert.equal(adminValData.valid, true);
-  assert.equal(adminValData.discount_amount, 30);
+  assert.equal(adminValData.code, 'GONE');
 
   // 5. Self-service prepay-quote with CHECKIN30 -> rejected
   const quoteRes = await fetch(`${baseUrl}/api/reservations/prepay-quote`, {

@@ -116,6 +116,7 @@ export const evaluatePromoCode = async (txOrPrisma, {
   pax = 1,
   hours = 1,
   is_unlimited = false,
+  has_mixed_modes = false,
   base_amount = 0,
   hourly_price = 150,
   user_id = null,
@@ -203,6 +204,9 @@ export const evaluatePromoCode = async (txOrPrisma, {
   // 5. Mode check (hourly vs unlimited)
   const modeLimit = promo.mode_limit || promo.applicable_mode || 'all';
   if (modeLimit !== 'all') {
+    if (has_mixed_modes) {
+      return { valid: false, error: '此優惠碼僅適用於全體相同計費方案（計時或不限時混用時不適用）' };
+    }
     if ((modeLimit === 'hourly' || modeLimit === 'regular') && is_unlimited) {
       return { valid: false, error: '此優惠碼僅適用於一般計時方案' };
     }
@@ -275,18 +279,20 @@ export const evaluatePromoCode = async (txOrPrisma, {
   };
 };
 
-async function validatePromoCodeCore(req, res, { actor }) {
+async function validatePromoCodeCore(req, res) {
   try {
-    const isAdmin = actor === 'admin';
-    const is_pos = isAdmin ? true : false;
-    const user_id = isAdmin ? (req.body.user_id || req.user?.id || null) : req.user.id;
-    const skip_usage_check = isAdmin ? (req.body.skip_usage_check === true) : false;
+    const {
+      is_pos: _ignoredIsPos,
+      skip_usage_check: _ignoredSkipUsageCheck,
+      user_id: _ignoredUserId,
+      ...safeBody
+    } = req.body || {};
 
     const result = await evaluatePromoCode(prisma, {
-      ...req.body,
-      user_id,
-      is_pos,
-      skip_usage_check
+      ...safeBody,
+      user_id: req.user.id,
+      is_pos: false,
+      skip_usage_check: false
     });
 
     if (!result.valid) {
@@ -302,6 +308,7 @@ async function validatePromoCodeCore(req, res, { actor }) {
         description: result.promo.description,
         discount_type: result.promo.discount_type,
         discount_value: result.promo.discount_value,
+        percent_off: result.promo.percent_off ?? null,
         min_spend: result.promo.min_amount ?? 0,
         min_amount: result.promo.min_amount ?? 0,
         min_pax: result.promo.min_pax ?? 1,
@@ -320,10 +327,12 @@ async function validatePromoCodeCore(req, res, { actor }) {
 }
 
 // POST /api/checkout/promo-codes/validate
-export const validatePromoCode = (req, res) => validatePromoCodeCore(req, res, { actor: 'customer' });
+export const validatePromoCode = (req, res) => validatePromoCodeCore(req, res);
 
-// POST /api/checkout/admin/promo-codes/validate
-export const adminValidatePromoCode = (req, res) => validatePromoCodeCore(req, res, { actor: 'admin' });
+// POST /api/checkout/admin/promo-codes/validate (deprecated: replaced by /api/billing/:booking_ref/promos)
+export const adminValidatePromoCode = (req, res) => {
+  return res.status(410).json({ code: 'GONE', error: '請改用帳單的優惠碼端點' });
+};
 
 // GET /api/checkout/promo-codes
 export const getPromoCodes = async (req, res) => {

@@ -185,7 +185,13 @@ test('Draft rev concurrency tests (Section 1.1)', async (t) => {
         pax: 2,
         assigned_seats: ['2-3', '2-4'],
         status: 'confirmed',
-        checkout_details: null
+        checkout_details: {
+          version: 2,
+          rev: 0,
+          order_promos: [
+            { key: 'p1', code: 'IG50', name: 'IG 打卡折', discount_type: 'fixed_order', discount_value: 50, split: { mode: 'proportional' } }
+          ]
+        }
       }
     });
 

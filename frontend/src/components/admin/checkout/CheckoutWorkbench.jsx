@@ -919,39 +919,68 @@ export default function CheckoutWorkbench({
     }
   };
 
-  // Promo handling
+  // Promo handling (server-authoritative via /api/billing/:ref/promos)
   const handleValidatePromo = async (codeToValidate) => {
     const code = (codeToValidate || promoInput).trim().toUpperCase();
     if (!code) return;
     try {
       setIsValidatingPromo(true);
       setPromoError('');
-      const res = await api.post('/checkout/admin/promo-codes/validate', {
+      await flushDraft();
+      const baseRev = currentRevRef.current ?? billData?.draft?.rev;
+      const res = await api.post(`/billing/${bookingRef}/promos`, {
         code,
-        booking_ref: bookingRef,
-        pax: booking.pax || persons.length
+        base_rev: baseRev
       });
-      if (res.data?.valid) {
-        const promo = res.data.promo;
-        updateDraft(prev => {
-          const list = [...(prev.order_promos || [])];
-          if (list.some(p => p.code === promo.code)) return prev;
-          list.push({
-            promo_id: promo.id,
-            code: promo.code,
-            name: promo.name,
-            discount_type: promo.discount_type,
-            discount_value: promo.discount_value,
-            split_mode: prev.split_mode || 'proportional'
-          });
-          return { ...prev, order_promos: list };
-        });
+      if (res.data?.draft) {
+        const nextRev = res.data.rev ?? res.data.draft.rev;
+        currentRevRef.current = nextRev;
+        setBillData((prev) => ({
+          ...prev,
+          bill: res.data.bill || prev?.bill,
+          billInput: res.data.billInput || prev?.billInput,
+          draft: res.data.draft
+        }));
+        setDraftState(res.data.draft);
         setPromoInput('');
-      } else {
-        setPromoError(res.data?.error || '折扣碼無效或未達門檻');
       }
     } catch (err) {
-      setPromoError(err.response?.data?.error || '折扣碼驗證失敗');
+      if (err.response?.status === 409 && err.response?.data?.code === 'REV_CONFLICT') {
+        await loadBill();
+      }
+      setPromoError(err.response?.data?.error || '折扣碼套用失敗');
+    } finally {
+      setIsValidatingPromo(false);
+    }
+  };
+
+  const handleRemovePromo = async (codeToRemove) => {
+    const code = (codeToRemove || '').trim().toUpperCase();
+    if (!code) return;
+    try {
+      setIsValidatingPromo(true);
+      setPromoError('');
+      await flushDraft();
+      const baseRev = currentRevRef.current ?? billData?.draft?.rev;
+      const res = await api.delete(`/billing/${bookingRef}/promos/${encodeURIComponent(code)}`, {
+        data: { base_rev: baseRev }
+      });
+      if (res.data?.draft) {
+        const nextRev = res.data.rev ?? res.data.draft.rev;
+        currentRevRef.current = nextRev;
+        setBillData((prev) => ({
+          ...prev,
+          bill: res.data.bill || prev?.bill,
+          billInput: res.data.billInput || prev?.billInput,
+          draft: res.data.draft
+        }));
+        setDraftState(res.data.draft);
+      }
+    } catch (err) {
+      if (err.response?.status === 409 && err.response?.data?.code === 'REV_CONFLICT') {
+        await loadBill();
+      }
+      setPromoError(err.response?.data?.error || '移除折扣碼失敗');
     } finally {
       setIsValidatingPromo(false);
     }
@@ -1415,13 +1444,9 @@ export default function CheckoutWorkbench({
               <span>{p.name} ({p.code})</span>
               <button
                 type="button"
-                onClick={() => {
-                  updateDraft(prev => ({
-                    ...prev,
-                    order_promos: (prev.order_promos || []).filter(pr => pr.code !== p.code)
-                  }));
-                }}
-                className="hover:underline text-[11px]"
+                disabled={isValidatingPromo}
+                onClick={() => handleRemovePromo(p.code)}
+                className="hover:underline text-[11px] disabled:opacity-50"
               >
                 移除
               </button>

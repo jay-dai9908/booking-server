@@ -381,16 +381,15 @@ test('Round 30 Item 4: customer-only endpoints reject admin/legacy/temp tokens a
   });
   assert.equal(tempResMy.status, 401);
 
-  // 7. POS-only promo code: admin route forces is_pos=true (succeeds), customer route forces is_pos=false (fails)
+  // 7. Deprecated /api/checkout/admin/promo-codes/validate returns 410 GONE (replaced by /api/billing/:ref/promos in Round 34 Item 2), customer route forces is_pos=false (fails)
   const adminPromoRes = await fetch(`${baseUrl}/api/checkout/admin/promo-codes/validate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenC}` },
     body: JSON.stringify({ code: promoCodeStr, base_amount: 300, pax: 1, hours: 1, is_pos: false })
   });
-  assert.equal(adminPromoRes.status, 200);
+  assert.equal(adminPromoRes.status, 410);
   const adminPromoData = await adminPromoRes.json();
-  assert.equal(adminPromoData.valid, true);
-  assert.equal(adminPromoData.discount_amount, 50);
+  assert.equal(adminPromoData.code, 'GONE');
 
   const custPromoRes = await fetch(`${baseUrl}/api/checkout/promo-codes/validate`, {
     method: 'POST',
