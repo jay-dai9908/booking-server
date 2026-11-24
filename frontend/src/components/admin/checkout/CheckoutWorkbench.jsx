@@ -783,9 +783,18 @@ export default function CheckoutWorkbench({
     setShowSplitCollect(true);
   };
 
+  const isPersonUnlimitedMode = (p) => {
+    if (!p) return false;
+    if (p.is_frozen) return (p.entry?.mode || p.mode) === 'unlimited';
+    const dp = (draftState?.persons || []).find(d => d.person_no === p.person_no);
+    if (dp?.mode) return dp.mode === 'unlimited';
+    if (p.mode) return p.mode === 'unlimited';
+    return p.entry?.mode === 'unlimited' && !p.entry?.isCapped;
+  };
+
   const renderHoursControl = (p) => {
     const isFrozen = p.is_frozen;
-    const isUnl = (p.entry?.mode || p.mode) === 'unlimited';
+    const isUnl = isPersonUnlimitedMode(p);
     if (isUnl) {
       return (
         <div className="font-bold text-sg-ink text-[12px] sm:text-[13px]">
@@ -1749,7 +1758,7 @@ export default function CheckoutWorkbench({
               <div className="md:hidden space-y-2.5">
                 {persons.map((p) => {
                   const isFrozen = p.is_frozen;
-                  const isUnl = (p.entry?.mode || p.mode) === 'unlimited';
+                  const isUnl = isPersonUnlimitedMode(p);
                   const { totalHours, intHours } = getPersonHoursData(p);
 
                   return (
@@ -1826,7 +1835,7 @@ export default function CheckoutWorkbench({
                     {persons.map((p) => {
                       const isFrozen = p.is_frozen;
                       const hasOverride = p.hours_override != null;
-                      const isUnl = (p.entry?.mode || p.mode) === 'unlimited';
+                      const isUnl = isPersonUnlimitedMode(p);
                       const rawP = (billData?.persons || []).find(rp => rp.person_no === p.person_no) || p;
                       const elapsedMins = personElapsedMinutes(rawP, new Date(billData?.server_now || Date.now()));
                       const elapsedText = formatElapsedText(elapsedMins);
@@ -1947,7 +1956,7 @@ export default function CheckoutWorkbench({
                                         const unlimitedPrice = Number.isFinite(Number(pricing?.unlimited))
                                           ? Number(pricing.unlimited)
                                           : 750;
-                                        const personIsUnlimited = (p.entry?.mode || p.mode) === 'unlimited';
+                                        const personIsUnlimited = isPersonUnlimitedMode(p);
                                         const isDisabled = !allowUnlimited && !personIsUnlimited;
                                         return (
                                           <button
@@ -2112,7 +2121,7 @@ export default function CheckoutWorkbench({
                   <div className="p-3 rounded-xl bg-white border border-sg-line text-[12px]">
                     <span className="text-sg-muted block text-[11px]">會員時數累計（結帳後自動寫入）</span>
                     <span className="font-bold text-sg-ink">
-                      計時 {persons.reduce((s, p) => s + (p.entry?.hours || 0), 0)} 人時 · 不限時 {persons.filter(p => (p.entry?.mode || p.mode) === 'unlimited').length} 人次
+                      計時 {persons.reduce((s, p) => s + (p.entry?.hours || 0), 0)} 人時 · 不限時 {persons.filter(p => isPersonUnlimitedMode(p)).length} 人次
                     </span>
                   </div>
                 </div>
@@ -2358,7 +2367,7 @@ export default function CheckoutWorkbench({
       {mobileAdjustPersonNo && (() => {
         const targetP = persons.find(p => p.person_no === mobileAdjustPersonNo);
         if (!targetP) return null;
-        const isUnl = (targetP.entry?.mode || targetP.mode) === 'unlimited';
+        const isUnl = isPersonUnlimitedMode(targetP);
         const { totalHours } = getPersonHoursData(targetP);
 
         const timingExplanation = targetP.entry?.explainDetail
