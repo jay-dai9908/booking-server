@@ -3,7 +3,7 @@
 
 import { allocate } from '../../../../shared/allocator/score.js';
 import { resolveLayoutGeometry } from '../../../../shared/allocator/geometry.js';
-import { loadAllocatorContext } from './layoutService.js';
+import { loadAllocatorContext, loadActiveSeatHolds, seatHoldsToPinnedReservations } from './layoutService.js';
 
 export const MOVABLE_RESERVATION_FILTER = {
   is_seat_locked: false,
@@ -363,6 +363,46 @@ export async function assertNoSeatCollisions(tx, sessionIds) {
       message: `座位衝突：時段內檢測到重複劃位（${list}）`
     };
   }
+
+  // Also check active SeatHold occupancy against Reservations in the same sessions
+  const activeHolds = await tx.seatHold.findMany({
+    where: { session_id: { in: numSessionIds }, status: 'active' }
+  });
+  if (activeHolds.length > 0) {
+    const sessResvs = await tx.reservation.findMany({
+      where: {
+        session_id: { in: numSessionIds },
+        status: { not: 'cancelled' },
+        OR: [{ attendance: null }, { attendance: { notIn: ['completed', 'no_show'] } }]
+      }
+    });
+    const holdCollisions = [];
+    for (const h of activeHolds) {
+      const holdSeats = new Set((h.seat_codes || []).filter(s => s && !String(s).startsWith('WAIT-')));
+      if (!holdSeats.size) continue;
+      for (const r of sessResvs) {
+        if (r.session_id !== h.session_id || r.booking_ref === h.booking_ref) continue;
+        const overlap = (r.assigned_seats || []).filter(s => holdSeats.has(s));
+        if (!overlap.length) continue;
+        // Pre-existing pinned reservation flagged as HOLD_SEAT_PINNED warning may coexist
+        const preExistingPinned = isReservationPinned(r) &&
+          r.created_at && h.created_at &&
+          new Date(r.created_at).getTime() <= new Date(h.created_at).getTime();
+        if (!preExistingPinned) {
+          for (const sc of overlap) {
+            holdCollisions.push(`${sc} (時段 ${h.session_id})`);
+          }
+        }
+      }
+    }
+    if (holdCollisions.length > 0) {
+      throw {
+        status: 409,
+        code: 'SEAT_COLLISION',
+        message: `座位衝突：延伸佔位與時段內預約重複（${holdCollisions.join('、')}）`
+      };
+    }
+  }
 }
 
 /**
@@ -373,9 +413,10 @@ export async function assertNoSeatCollisions(tx, sessionIds) {
  * @param {string[]} params.reservedSeats - seats being taken by the primary action
  * @param {number[]} params.sessionIds - session IDs where reservedSeats are held
  * @param {string} [params.primaryBookingRef] - booking ref of the primary action (excluded from occupied reservations)
+ * @param {boolean} [params.allowWaitFallback=false] - fall back to WAIT-n instead of throwing CANNOT_DISPLACE
  * @returns {Promise<Array<{ booking_ref: string, name: string, from: string[], to: string[] }>>}
  */
-export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [], sessionIds = [], primaryBookingRef = null }) {
+export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [], sessionIds = [], primaryBookingRef = null, allowWaitFallback = false }) {
   const displaced = [];
   if (!bookingRefs.length) return displaced;
 
@@ -407,9 +448,12 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
     }
 
     const allSessionIds = [...new Set([...bSessionIds, ...sessionIds])];
-    const allResvsInSessions = await tx.reservation.findMany({
-      where: { session_id: { in: allSessionIds }, status: { not: 'cancelled' } }
-    });
+    const [allResvsInSessions, activeHoldsInSessions] = await Promise.all([
+      tx.reservation.findMany({
+        where: { session_id: { in: allSessionIds }, status: { not: 'cancelled' } }
+      }),
+      loadActiveSeatHolds(tx, allSessionIds)
+    ]);
 
     // Inject dummy pinned reservation for reservedSeats in relevant sessions
     const dummyReserved = sessionIds.map(sid => ({
@@ -424,7 +468,8 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
 
     const excludeRefs = new Set([bRef, primaryBookingRef].filter(Boolean));
     const otherResvs = allResvsInSessions.filter(r => !excludeRefs.has(r.booking_ref));
-    const currentReservations = [...otherResvs, ...dummyReserved];
+    const holdPinned = seatHoldsToPinnedReservations(activeHoldsInSessions);
+    const currentReservations = [...otherResvs, ...holdPinned, ...dummyReserved];
 
     const newReservationBlock = {
       booking_ref: bRef,
@@ -436,21 +481,41 @@ export async function reseatBookings(tx, { bookingRefs = [], reservedSeats = [],
 
     const allocResult = allocateWithLayout(currentReservations, newReservationBlock, bForceSplit, ctx);
 
-    if (!allocResult.success || !allocResult.updates || !allocResult.updates.length) {
-      throw {
-        status: 409,
-        code: 'CANNOT_DISPLACE',
-        message: `原座位佔用者（${firstRes.user?.name || bRef}）自動改排失敗，座位不足`
-      };
+    let effectiveUpdates = allocResult?.updates || [];
+    const needsWaitFallback = !allocResult.success || !effectiveUpdates.length || effectiveUpdates.some(u => {
+      const ref = u.booking_ref;
+      if (!ref || ref.startsWith('__RESERVED_') || ref.startsWith('__HOLD_')) return false;
+      return !u.assigned_seats?.length || u.assigned_seats.some(s => s.startsWith('WAIT-'));
+    });
+
+    if (needsWaitFallback) {
+      if (!allowWaitFallback) {
+        throw {
+          status: 409,
+          code: 'CANNOT_DISPLACE',
+          message: `原座位佔用者（${firstRes.user?.name || bRef}）自動改排失敗，座位不足`
+        };
+      }
+      let maxWait = 0;
+      for (const r of allResvsInSessions) {
+        for (const s of (r.assigned_seats || [])) {
+          if (String(s).startsWith('WAIT-')) {
+            const n = parseInt(String(s).replace('WAIT-', ''), 10);
+            if (!isNaN(n) && n > maxWait) maxWait = n;
+          }
+        }
+      }
+      const waitSeats = Array.from({ length: bPax }, (_, i) => `WAIT-${maxWait + i + 1}`);
+      effectiveUpdates = [{ booking_ref: bRef, assigned_seats: waitSeats }];
     }
 
-    // Apply EVERY update in allocResult.updates (Spec 1.2)
-    for (const update of allocResult.updates) {
+    // Apply EVERY update in effectiveUpdates (Spec 1.2)
+    for (const update of effectiveUpdates) {
       const uRef = update.booking_ref;
-      if (!uRef || uRef.startsWith('__RESERVED_')) continue;
+      if (!uRef || uRef.startsWith('__RESERVED_') || uRef.startsWith('__HOLD_')) continue;
       const newSeats = update.assigned_seats;
 
-      if (!newSeats || !newSeats.length || newSeats.some(s => s.startsWith('WAIT-'))) {
+      if (!allowWaitFallback && (!newSeats || !newSeats.length || newSeats.some(s => s.startsWith('WAIT-')))) {
         throw {
           status: 409,
           code: 'CANNOT_DISPLACE',

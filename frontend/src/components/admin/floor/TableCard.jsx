@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import SeatTile from './SeatTile';
+import { formatTimeHHmm } from '../../../../shared/time.js';
 
 const GROUP_COLORS = [
   { stroke: '#8C6D58', fill: 'rgba(140, 109, 88, 0.05)' },  // brown
@@ -196,7 +197,9 @@ export default function TableCard({
           name: name || '客人',
           pax: info.booking?.pax || 1,
           seatCount: 1,
-          timerText: info.timerText && info.timerText !== '空位' && info.timerText !== '已停用' ? info.timerText : ''
+          timerText: info.timerText && info.timerText !== '空位' && info.timerText !== '已停用' ? info.timerText : '',
+          startAt: info.booking?.start_at || null,
+          seatHoldUntil: info.booking?.seat_hold_until || null
         });
       } else {
         map.get(key).seatCount += 1;
@@ -207,7 +210,15 @@ export default function TableCard({
     for (const item of map.values()) {
       const paxText = `${item.pax || item.seatCount} 位`;
       const timePart = item.timerText ? ` ${item.timerText}` : '';
-      summaries.push(`${item.name} ${paxText}${timePart}`);
+      let holdPart = '';
+      if (item.seatHoldUntil) {
+        const startHM = item.startAt ? formatTimeHHmm(item.startAt) : '';
+        const holdHM = formatTimeHHmm(item.seatHoldUntil);
+        if (holdHM) {
+          holdPart = ` ${startHM ? `${startHM}–` : ''}${holdHM}（延伸佔位到 ${holdHM}）`;
+        }
+      }
+      summaries.push(`${item.name} ${paxText}${timePart}${holdPart}`);
     }
     return summaries.join(' · ');
   }, [seats, seatStates]);

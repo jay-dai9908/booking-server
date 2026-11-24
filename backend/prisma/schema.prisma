@@ -987,6 +987,22 @@ model AdminLoginGuardEvent {
   @@index([created_at])
 }
 
+model SeatHold {
+  id          Int       @id @default(autoincrement())
+  booking_ref String
+  session_id  Int
+  seat_codes  String[]  @default([])
+  pax         Int
+  hold_until  DateTime
+  status      String    @default("active") // active | released
+  created_at  DateTime  @default(now())
+  released_at DateTime?
+
+  @@index([session_id, status])
+  @@index([booking_ref])
+}
+
+
 
 
 

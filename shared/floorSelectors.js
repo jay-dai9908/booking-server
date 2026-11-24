@@ -91,3 +91,18 @@ export function isPersonOnSeat(person, booking) {
     : (person.timer ? person.timer.left_at : null);
   return leftAt == null;
 }
+
+/**
+ * Compute walk-in billing end time from actual billing start time + booked minutes.
+ * @param {{ billingStartAt: Date|string|null|undefined, bookedMinutes: number }} params
+ * @returns {Date|null}
+ */
+export function walkInBillingEndAt({ billingStartAt, bookedMinutes } = {}) {
+  if (!billingStartAt) return null;
+  const startMs = billingStartAt instanceof Date
+    ? billingStartAt.getTime()
+    : new Date(billingStartAt).getTime();
+  const mins = Number(bookedMinutes);
+  if (!Number.isFinite(startMs) || !Number.isFinite(mins) || mins <= 0) return null;
+  return new Date(startMs + mins * 60000);
+}

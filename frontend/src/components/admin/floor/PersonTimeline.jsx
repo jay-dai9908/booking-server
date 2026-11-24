@@ -69,7 +69,7 @@ export default function PersonTimeline({ booking, person, personNo, now, childre
 
   // 時間軸範圍計算
   const bookingStartMs = toMs(booking.start_at) ?? nowMs;
-  const bookingEndMs = toMs(booking.end_at) ?? (bookingStartMs + Math.max(60, totalBookedMins) * 60000);
+  const bookingEndMs = toMs(booking.billing_end_at || booking.end_at) ?? (bookingStartMs + Math.max(60, totalBookedMins) * 60000);
   const timerStartMs = toMs(timer.billing_start_at) ?? toMs(timer.timer_started_at);
   const timerEndMs = toMs(timer.timer_ended_at);
   const effectiveNowMs = timerEndMs ?? nowMs;

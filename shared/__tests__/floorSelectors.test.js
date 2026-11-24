@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isBookingCompleted, isPersonOnSeat } from '../floorSelectors.js';
+import { isBookingCompleted, isPersonOnSeat, walkInBillingEndAt } from '../floorSelectors.js';
 
 test('isBookingCompleted shared selector tests', async (t) => {
   await t.test('1. Completed attendance returns true', () => {
@@ -139,6 +139,17 @@ test('isBookingCompleted shared selector tests', async (t) => {
       isPersonOnSeat({ status: 'active', seat_code: 'A1-1', left_at: null }, pendingBooking),
       false
     );
+  });
+
+  await t.test('12. walkInBillingEndAt adds bookedMinutes to billingStartAt (14:40 + 120m = 16:40)', () => {
+    const end = walkInBillingEndAt({
+      billingStartAt: '2099-11-24T14:40:00+08:00',
+      bookedMinutes: 120
+    });
+    assert.ok(end instanceof Date);
+    assert.equal(end.toISOString(), new Date('2099-11-24T16:40:00+08:00').toISOString());
+    assert.equal(walkInBillingEndAt({ billingStartAt: null, bookedMinutes: 120 }), null);
+    assert.equal(walkInBillingEndAt({ billingStartAt: '2099-11-24T14:40:00+08:00', bookedMinutes: 0 }), null);
   });
 });
 

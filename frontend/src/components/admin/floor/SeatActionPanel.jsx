@@ -132,7 +132,11 @@ export default function SeatActionPanel({
     }
 
     const endStr = booking.end_at ? formatTimeHHMM(booking.end_at) : (booking.end_time || '');
-    const endPart = endStr ? `預約到 ${endStr}` : '';
+    const startHM = booking.start_at ? formatTimeHHMM(booking.start_at) : (booking.start_time || '');
+    const holdHM = booking.seat_hold_until ? formatTimeHHMM(booking.seat_hold_until) : '';
+    const endPart = holdHM
+      ? `${startHM ? `${startHM}–` : ''}${holdHM}（延伸佔位到 ${holdHM}）`
+      : (endStr ? `預約到 ${endStr}` : '');
 
     const payment = (booking?.payments || []).slice().reverse().find(pay =>
       !pay.person_nos || pay.person_nos.length === 0 || pay.person_nos.includes(personNo)
@@ -178,7 +182,11 @@ export default function SeatActionPanel({
     }
 
     const endStr = booking.end_at ? formatTimeHHMM(booking.end_at) : (booking.end_time || '');
-    const endPart = endStr ? `預約到 ${endStr}` : '';
+    const startHM = booking.start_at ? formatTimeHHMM(booking.start_at) : (booking.start_time || '');
+    const holdHM = booking.seat_hold_until ? formatTimeHHMM(booking.seat_hold_until) : '';
+    const endPart = holdHM
+      ? `${startHM ? `${startHM}–` : ''}${holdHM}（延伸佔位到 ${holdHM}）`
+      : (endStr ? `預約到 ${endStr}` : '');
 
     subtitle = [personPart, statusPart, boardPart, endPart].filter(Boolean).join(' · ');
   }

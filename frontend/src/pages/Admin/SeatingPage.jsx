@@ -781,14 +781,19 @@ export default function SeatingPage() {
   // Timer controls
   const handleTimerAction = async (bookingRef, personNos, action, reason = null) => {
     try {
-      await api.post(`/floor/${bookingRef}/timer`, {
+      const res = await api.post(`/floor/${bookingRef}/timer`, {
         action,
         person_nos: personNos === 'all' ? 'all' : (Array.isArray(personNos) ? personNos : [Number(personNos)]),
         reason
       });
       await refresh();
       setPausePersonTarget(null);
-      showToast('計時更新成功');
+      const warns = res.data?.warnings || [];
+      if (warns.length > 0 && warns[0]?.message) {
+        showToast(warns[0].message);
+      } else {
+        showToast('計時更新成功');
+      }
     } catch (err) {
       showToast(err.response?.data?.error || '計時操作失敗');
     }
@@ -820,10 +825,15 @@ export default function SeatingPage() {
 
   const handleRemovePerson = async (bookingRef, personNo) => {
     try {
-      await api.delete(`/floor/${bookingRef}/persons/${personNo}`);
+      const res = await api.delete(`/floor/${bookingRef}/persons/${personNo}`);
       await refresh();
       setSeatActionTarget(null);
-      showToast(`已移除第 ${personNo} 位`);
+      const warns = res.data?.warnings || [];
+      if (warns.length > 0 && warns[0]?.message) {
+        showToast(warns[0].message);
+      } else {
+        showToast(`已移除第 ${personNo} 位`);
+      }
     } catch (err) {
       showToast(err.response?.data?.error || err.response?.data?.message || '移除失敗');
     }
@@ -832,7 +842,7 @@ export default function SeatingPage() {
   // Move seat action
   const handleMoveSeat = async (bookingRef, fromSeat, toSeat, mode = 'move') => {
     try {
-      await api.post(`/floor/${bookingRef}/move-seat`, {
+      const res = await api.post(`/floor/${bookingRef}/move-seat`, {
         from_seat: fromSeat,
         to_seat: toSeat,
         mode
@@ -841,7 +851,12 @@ export default function SeatingPage() {
       setSeatActionTarget(null);
       setMoveSeatModalTarget(null);
       setSwapConfirmTarget(null);
-      showToast(`已換至座位 ${toSeat}`);
+      const warns = res.data?.warnings || [];
+      if (warns.length > 0 && warns[0]?.message) {
+        showToast(warns[0].message);
+      } else {
+        showToast(`已換至座位 ${toSeat}`);
+      }
     } catch (err) {
       showToast(err.response?.data?.error || '換座位失敗');
     }
@@ -850,14 +865,19 @@ export default function SeatingPage() {
   // Seat an unseated person in an already checked-in group
   const handleSeatPerson = async (bookingRef, personNo, seatCode) => {
     try {
-      await api.post(`/floor/${bookingRef}/persons/${personNo}/seat`, {
+      const res = await api.post(`/floor/${bookingRef}/persons/${personNo}/seat`, {
         seat_code: seatCode,
         start_timer: true
       });
       refresh();
       setSeatActionTarget(null);
       setMoveSeatModalTarget(null);
-      showToast(`已為第 ${personNo} 位帶位至 ${seatCode}`);
+      const warns = res.data?.warnings || [];
+      if (warns.length > 0 && warns[0]?.message) {
+        showToast(warns[0].message);
+      } else {
+        showToast(`已為第 ${personNo} 位帶位至 ${seatCode}`);
+      }
     } catch (err) {
       showToast(err.response?.data?.error || '帶位失敗');
     }
@@ -1215,7 +1235,10 @@ export default function SeatingPage() {
                 {searchedPending.map((b, idx) => {
                   const arrival = getArrivalStatus(b.start_at);
                   const isFirst = idx === 0;
-                  const timeRangeStr = bookingTimeRange(b.start_at, b.end_at);
+                  const timeRangeStr = bookingTimeRange(b.start_at, b.seat_hold_until || b.end_at);
+                  const seatHoldSuffix = b.seat_hold_until
+                    ? `（延伸佔位到 ${formatTimeHHmm(b.seat_hold_until)}）`
+                    : '';
                   const seatsList = b.assigned_seats || [];
                   const isWaitOnly = seatsList.length > 0 && seatsList.every(s => s && s.startsWith('WAIT-'));
                   const seatText = seatsList.length > 0
@@ -1376,7 +1399,10 @@ export default function SeatingPage() {
                   const seatText = seatsList.length > 0
                     ? (isWaitOnly ? '等待區' : seatsList.join('、'))
                     : '未帶位';
-                  const timeRangeStr = bookingTimeRange(b.start_at, b.end_at);
+                  const timeRangeStr = bookingTimeRange(b.start_at, b.seat_hold_until || b.end_at);
+                  const seatHoldSuffix = b.seat_hold_until
+                    ? `（延伸佔位到 ${formatTimeHHmm(b.seat_hold_until)}）`
+                    : '';
 
                   return (
                     <div
@@ -1462,7 +1488,7 @@ export default function SeatingPage() {
                         )}
 
                         <div className="text-[12px] text-sg-muted mt-1 leading-relaxed">
-                          座位 {seatText} · {timeRangeStr}
+                          座位 {seatText} · {timeRangeStr}{seatHoldSuffix}
                         </div>
 
                         {/* Notes preview (Spec 3.4) */}
@@ -2118,7 +2144,8 @@ export default function SeatingPage() {
 
               // Timeline calculations
               const startMs = timerTarget?.start_at ? new Date(timerTarget.start_at).getTime() : Date.now();
-              const bookedEndMs = timerTarget?.end_at ? new Date(timerTarget.end_at).getTime() : (startMs + 7200000);
+              const effectiveEndIso = timerTarget?.billing_end_at || timerTarget?.end_at;
+              const bookedEndMs = effectiveEndIso ? new Date(effectiveEndIso).getTime() : (startMs + 7200000);
               const nowMs = getServerNow().getTime();
               const isOvertime = nowMs > bookedEndMs;
               const timelineStartMs = startMs;
@@ -3066,6 +3093,7 @@ export default function SeatingPage() {
           preselectedSeats={forceAddPreselectedSeats}
           initialPax={forceAddPreselectedSeats.length > 0 ? forceAddPreselectedSeats.length : null}
           sessions={sessions}
+          now={getServerNow()}
           onSuccess={(createdBooking, isWait) => {
             setShowForceAdd(false);
             setForceAddPreselectedSeats([]);

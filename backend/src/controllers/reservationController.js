@@ -2,7 +2,15 @@ import prisma from '../prismaClient.js';
 import { Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import { allocateSeats } from '../utils/SeatAllocator.js';
-import { loadAllocatorContext, getActiveLayoutForDate, loadSeatedOccupants, lockDaySeats } from '../services/seating/layoutService.js';
+import {
+  loadAllocatorContext,
+  getActiveLayoutForDate,
+  loadSeatedOccupants,
+  lockDaySeats,
+  loadActiveSeatHolds,
+  seatHoldsToPinnedReservations,
+  syncWalkInSeatHolds
+} from '../services/seating/layoutService.js';
 import { isReservationPinned, reseatBookings, MOVABLE_RESERVATION_FILTER, assertNoSeatCollisions } from '../services/seating/allocator.js';
 import { isPersonPaid } from '../services/floor/checkInService.js';
 import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js';
@@ -507,10 +515,13 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       await lockDaySeats(tx, dateStr);
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
 
-      // Fetch all confirmed reservations for the day
-      const currentReservations = await tx.reservation.findMany({
-        where: { session_id: { in: allSessionIdsOfDay }, status: 'confirmed' }
-      });
+      // Fetch all confirmed reservations and active walk-in holds for the day
+      const [currentReservations, activeHolds] = await Promise.all([
+        tx.reservation.findMany({
+          where: { session_id: { in: allSessionIdsOfDay }, status: 'confirmed' }
+        }),
+        loadActiveSeatHolds(tx, allSessionIdsOfDay)
+      ]);
 
       // Prepare the new reservation block
       const newReservationBlock = { 
@@ -524,15 +535,22 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         const bookedPax = currentReservations
           .filter(r => r.session_id === reqSession.id)
           .reduce((sum, r) => sum + r.pax, 0);
+        const heldPax = activeHolds
+          .filter(h => h.session_id === reqSession.id)
+          .reduce((sum, h) => sum + h.pax, 0);
         
-        if (reqSession.max_capacity - bookedPax < parseInt(pax, 10)) {
+        if (reqSession.max_capacity - bookedPax - heldPax < parseInt(pax, 10)) {
           throw new Error('INSUFFICIENT_CAPACITY');
         }
       }
 
       // Run Continuous Block Allocation algorithm
       const ctx = await loadAllocatorContext(tx, sessionDate);
-      const allocResult = allocateSeats(currentReservations, newReservationBlock, forceSplit === true, ctx);
+      const allocCurrentReservations = [
+        ...currentReservations,
+        ...seatHoldsToPinnedReservations(activeHolds)
+      ];
+      const allocResult = allocateSeats(allocCurrentReservations, newReservationBlock, forceSplit === true, ctx);
 
       if (!allocResult.success) {
         if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
@@ -1824,6 +1842,20 @@ export async function reshuffleAfterSeatChange(tx, sessionIds, updatedBookingRef
     }
   }
 
+  const activeHolds = await loadActiveSeatHolds(tx, sessionIds);
+  for (const h of activeHolds) {
+    if (updatedBookingRefs.includes(h.booking_ref)) continue;
+    const updatedSeatsForSession = updatedSeatsMap.get(h.session_id);
+    if (!updatedSeatsForSession) continue;
+    const hitSeat = (h.seat_codes || []).find(s => updatedSeatsForSession.has(s));
+    if (hitSeat) {
+      const pinnedErr = new Error(`${hitSeat} 已被臨時客延伸佔位固定，不能自動移開`);
+      pinnedErr.status = 409;
+      pinnedErr.code = 'SEAT_PINNED';
+      throw pinnedErr;
+    }
+  }
+
   const displacedCount = collidingRefs.size;
   if (displacedCount > 0) {
     try {
@@ -2336,8 +2368,14 @@ export const adminCreateReservation = async (req, res) => {
           mySeats.push(`WAIT-${waitCounter++}`);
         }
       } else {
-        const ctx = await loadAllocatorContext(tx, sessionDate);
-        const allocCurrentReservations = [...currentReservations];
+        const [ctx, activeHolds] = await Promise.all([
+          loadAllocatorContext(tx, sessionDate),
+          loadActiveSeatHolds(tx, allSessionIdsOfDay)
+        ]);
+        const allocCurrentReservations = [
+          ...currentReservations,
+          ...seatHoldsToPinnedReservations(activeHolds)
+        ];
         if (effectiveWalkIn) {
           const seatedOccupants = await loadSeatedOccupants(tx, dateStr);
           for (const sCode of Object.keys(seatedOccupants)) {
@@ -2688,14 +2726,17 @@ export const extendReservation = async (req, res) => {
 
       let mySeats = [];
 
-      // Fetch current active reservations in the target sessions for allocator
-      const allCurrentReservations = await tx.reservation.findMany({
-        where: {
-          session_id: { in: uniqueSessionIds },
-          status: 'confirmed',
-          OR: [{ attendance: null }, { attendance: { notIn: ['completed', 'no_show'] } }]
-        }
-      });
+      // Fetch current active reservations & other walk-in SeatHolds in the target sessions
+      const [allCurrentReservations, activeHolds] = await Promise.all([
+        tx.reservation.findMany({
+          where: {
+            session_id: { in: uniqueSessionIds },
+            status: 'confirmed',
+            OR: [{ attendance: null }, { attendance: { notIn: ['completed', 'no_show'] } }]
+          }
+        }),
+        loadActiveSeatHolds(tx, uniqueSessionIds, { excludeBookingRef: booking_ref })
+      ]);
 
       if (extendMode === 'force_wait') {
         let maxWait = 0;
@@ -2716,11 +2757,14 @@ export const extendReservation = async (req, res) => {
       } else {
         for (const session of sessions) {
           const bookedPax = session.reservations.reduce((sum, r) => sum + r.pax, 0);
+          const heldPax = activeHolds
+            .filter(h => h.session_id === session.id)
+            .reduce((sum, h) => sum + h.pax, 0);
           const activeLayout = await getActiveLayoutForDate(tx, session.session_date);
           const layoutCapacity = (activeLayout?.capacity && activeLayout.capacity > 0)
             ? activeLayout.capacity
             : ((activeLayout?.seats || []).filter(s => s.is_active).length || 16);
-          if (layoutCapacity - bookedPax < pax) {
+          if (layoutCapacity - bookedPax - heldPax < pax) {
             throw { status: 400, code: 'INSUFFICIENT_CAPACITY', message: '加時時段座位已滿，無法加時' };
           }
         }
@@ -2730,7 +2774,8 @@ export const extendReservation = async (req, res) => {
         } else if (extendMode === 'system_allocate') {
           const newBlock = { booking_ref: 'NEW_RES', pax, session_ids: uniqueSessionIds };
           const ctx = await loadAllocatorContext(tx, sessions[0]?.session_date);
-          const allocResult = allocateSeats(allCurrentReservations, newBlock, forceSplit === true || forceSplit === 'true', ctx);
+          const allocInput = [...allCurrentReservations, ...seatHoldsToPinnedReservations(activeHolds)];
+          const allocResult = allocateSeats(allocInput, newBlock, forceSplit === true || forceSplit === 'true', ctx);
 
           if (!allocResult.success) {
             if (allocResult.error === 'INSUFFICIENT_SEATS') {
@@ -2880,12 +2925,13 @@ export const extendReservation = async (req, res) => {
 
       await recalculateReservationTotal(tx, booking_ref);
       await refreshBillingCache(tx, booking_ref);
+      const holdSync = await syncWalkInSeatHolds(tx, booking_ref, new Date());
 
-      return { count: newReservations.count };
+      return { count: newReservations.count, warnings: holdSync.warnings || [] };
     });
 
     displayBus.floorChanged();
-    res.status(201).json({ message: '加時成功', result });
+    res.status(201).json({ message: '加時成功', result, warnings: result.warnings || [] });
 
   } catch (error) {
     console.error('Extend Reservation error:', error);
@@ -3003,6 +3049,7 @@ export const updateAttendance = async (req, res) => {
         });
 
         await refreshBillingCache(tx, booking_ref);
+        await syncWalkInSeatHolds(tx, booking_ref, now);
         return { count: updated.count };
       });
 

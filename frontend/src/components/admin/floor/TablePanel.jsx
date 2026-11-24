@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { X, MoreVertical, Plus, UserCheck, ArrowRightLeft, CreditCard, Clock, LogOut, FileText, Pause, Play, AlertCircle } from 'lucide-react';
 import api from '../../../api/axios';
+import { formatTimeHHmm } from '../../../../shared/time.js';
 import { formatElapsedText, getPersonTimerElapsedForRemove } from '../../../utils/admin/floorSelectors';
 import RemovePersonConfirmDialog from './RemovePersonConfirmDialog';
 import ConfirmPanel from '../ConfirmPanel';
@@ -182,6 +183,15 @@ export default function TablePanel({
                       <span className="text-[13px] font-medium text-sg-muted" data-testid={`group-pax-${idx + 1}`}>
                         {group.pax} 位
                       </span>
+                      {group.seat_hold_until && (() => {
+                        const startHM = group.start_at ? formatTimeHHmm(group.start_at) : '';
+                        const holdHM = formatTimeHHmm(group.seat_hold_until);
+                        return holdHM ? (
+                          <span className="text-[12px] font-medium text-sg-brown font-num">
+                            {startHM ? `${startHM}–` : ''}{holdHM}（延伸佔位到 {holdHM}）
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
 
                     <div className="flex items-center gap-1.5">

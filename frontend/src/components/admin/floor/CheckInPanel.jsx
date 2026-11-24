@@ -257,6 +257,12 @@ export default function CheckInPanel({
           displayToast(`${d.name} ${dTime} 的預約已改排到 ${toSeats}`);
         });
       }
+      const warningList = res.data?.warnings || [];
+      if (warningList.length > 0) {
+        warningList.forEach((w) => {
+          if (w?.message) displayToast(w.message);
+        });
+      }
 
       if (onSuccess) {
         onSuccess(res.data, deferSeating);

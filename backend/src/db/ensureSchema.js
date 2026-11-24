@@ -837,6 +837,21 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     )`,
     `CREATE INDEX IF NOT EXISTS "DisplaySlide_set_enabled_sort_order_idx" ON "DisplaySlide"("set", "enabled", "sort_order")`,
 
+    `CREATE TABLE IF NOT EXISTS "SeatHold" (
+      "id" SERIAL NOT NULL,
+      "booking_ref" TEXT NOT NULL,
+      "session_id" INTEGER NOT NULL,
+      "seat_codes" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+      "pax" INTEGER NOT NULL,
+      "hold_until" TIMESTAMP(3) NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'active',
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "released_at" TIMESTAMP(3),
+      CONSTRAINT "SeatHold_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE INDEX IF NOT EXISTS "SeatHold_session_id_status_idx" ON "SeatHold"("session_id", "status")`,
+    `CREATE INDEX IF NOT EXISTS "SeatHold_booking_ref_idx" ON "SeatHold"("booking_ref")`,
+
     `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "checkout_sync" BOOLEAN NOT NULL DEFAULT true`,
     `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "checkout_wake" BOOLEAN NOT NULL DEFAULT true`,
     `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "checkout_per_person" BOOLEAN NOT NULL DEFAULT true`,

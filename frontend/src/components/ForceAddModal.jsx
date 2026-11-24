@@ -4,6 +4,8 @@ import api from '../api/axios';
 import ResponsivePanel from './admin/ResponsivePanel';
 import Button from './customer/Button';
 import { isSessionPast } from '../utils/admin/floorSelectors';
+import { walkInBillingEndAt } from '../../../shared/floorSelectors.js';
+import { formatTimeHHmm } from '../../../shared/time.js';
 
 export default function ForceAddModal({
   isOpen,
@@ -12,6 +14,7 @@ export default function ForceAddModal({
   preselectedSeats = [],
   initialPax = null,
   sessions = [],
+  now = null,
   onSuccess
 }) {
   const [name, setName] = useState('');
@@ -177,6 +180,15 @@ export default function ForceAddModal({
   const timeSummary = selectedSessionsList.length > 0
     ? `${selectedSessionsList[0].start_time} 到 ${selectedSessionsList[selectedSessionsList.length - 1].end_time}（${selectedSessionsList.length} 小時）`
     : '尚未選取時段';
+  const estWalkInEnd = useMemo(() => {
+    if (!selectedSessionsList.length) return null;
+    const baseNow = now ? (now instanceof Date ? now : new Date(now)) : new Date();
+    return walkInBillingEndAt({
+      billingStartAt: Number.isFinite(baseNow.getTime()) ? baseNow : new Date(),
+      bookedMinutes: selectedSessionsList.length * 60
+    });
+  }, [selectedSessionsList, now]);
+  const estWalkInEndHM = estWalkInEnd ? formatTimeHHmm(estWalkInEnd) : '';
 
   return (
     <ResponsivePanel
@@ -284,6 +296,11 @@ export default function ForceAddModal({
             <span className="text-[12px] font-bold text-sg-ink">時段選擇</span>
             <span className="text-[11px] text-sg-muted font-num">{timeSummary}</span>
           </div>
+          {estWalkInEndHM && (
+            <div data-testid="walkin-hold-hint" className="text-[11px] text-sg-muted text-right font-num">
+              從入座起算 {selectedSessionsList.length} 小時，可使用到 {estWalkInEndHM}，座位保留到 {estWalkInEndHM}
+            </div>
+          )}
 
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-48 overflow-y-auto p-1 bg-sg-paper/40 rounded-2xl border border-sg-line">
             {sortedSessions.map((s) => {

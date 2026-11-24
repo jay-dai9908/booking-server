@@ -1,10 +1,11 @@
 import crypto from 'crypto';
 import prisma from '../../prismaClient.js';
-import { getActiveLayoutForDate } from '../seating/layoutService.js';
+import { getActiveLayoutForDate, loadActiveSeatHolds } from '../seating/layoutService.js';
+import { isReservationPinned } from '../seating/allocator.js';
 import { computeBill, billingStatus } from '../../../../shared/billing.js';
 import { toTaipeiDateString, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
-import { isBookingCompleted } from '../../../../shared/floorSelectors.js';
+import { isBookingCompleted, walkInBillingEndAt } from '../../../../shared/floorSelectors.js';
 import { formatBookingRef } from '../../../../shared/receipts.js';
 import { resolveCoveredSessions, formatCoveredSessions } from '../../utils/equipmentWindow.js';
 
@@ -202,7 +203,14 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
     ]
   });
 
-  // Compute booked pax per session
+  const activeHolds = await loadActiveSeatHolds(prisma, sessions.map(s => s.id));
+  const activeHoldsByRef = new Map();
+  for (const h of activeHolds) {
+    if (!activeHoldsByRef.has(h.booking_ref)) activeHoldsByRef.set(h.booking_ref, []);
+    activeHoldsByRef.get(h.booking_ref).push(h);
+  }
+
+  // Compute booked pax per session (including active walk-in SeatHolds)
   const sessionBookedMap = new Map();
   for (const s of sessions) {
     sessionBookedMap.set(s.id, 0);
@@ -210,6 +218,10 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
   for (const r of reservations) {
     const cur = sessionBookedMap.get(r.session_id) || 0;
     sessionBookedMap.set(r.session_id, cur + r.pax);
+  }
+  for (const h of activeHolds) {
+    const cur = sessionBookedMap.get(h.session_id) || 0;
+    sessionBookedMap.set(h.session_id, cur + h.pax);
   }
 
   const sessionList = sessions.map(s => ({
@@ -450,6 +462,30 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
       }
     }
 
+    const bActiveHolds = activeHoldsByRef.get(bRef) || [];
+    const seatHoldUntil = bActiveHolds.length > 0
+      ? new Date(Math.max(...bActiveHolds.map(h => new Date(h.hold_until).getTime()))).toISOString()
+      : null;
+    let billingEndAt = endAtStr;
+    if (firstRes.is_walk_in && resolvedAttendance === 'checked_in') {
+      const seatedStarted = bPersons.filter(p =>
+        (p.status == null || p.status === 'active') &&
+        !p.left_at &&
+        p.seat_code &&
+        !String(p.seat_code).startsWith('WAIT-') &&
+        p.timer_started_at &&
+        p.billing_start_at
+      );
+      if (seatedStarted.length > 0) {
+        const minBillingStartMs = Math.min(...seatedStarted.map(p => new Date(p.billing_start_at).getTime()));
+        const bookedMins = Math.max(0, Math.floor((endDt.getTime() - startDt.getTime()) / 60000));
+        const walkInEnd = walkInBillingEndAt({ billingStartAt: new Date(minBillingStartMs), bookedMinutes: bookedMins });
+        if (walkInEnd) {
+          billingEndAt = walkInEnd.toISOString();
+        }
+      }
+    }
+
     const bookingItem = {
       booking_ref: bRef,
       ref_display: refDisplay,
@@ -458,6 +494,8 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
       pax: firstRes.pax,
       start_at: startAtStr,
       end_at: endAtStr,
+      billing_end_at: billingEndAt,
+      seat_hold_until: seatHoldUntil,
       is_walk_in: Boolean(firstRes.is_walk_in),
       is_self_service: Boolean(firstRes.is_self_service),
       is_paid: Boolean(firstRes.is_paid),
@@ -635,6 +673,45 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
           subtitle: alertHint,
           text: alertText,
           hint: alertHint
+        });
+      }
+    }
+  }
+
+  // Alerts for active walk-in SeatHold overlapping pinned reservations
+  const seenHoldPinnedKeys = new Set();
+  for (const h of activeHolds) {
+    const sessObj = sessions.find(s => s.id === h.session_id);
+    if (!sessObj) continue;
+    const holdHM = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Taipei',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(new Date(h.hold_until));
+    const holdSeats = new Set((h.seat_codes || []).map(String));
+    for (const r of reservations) {
+      if (r.session_id !== h.session_id || r.booking_ref === h.booking_ref) continue;
+      if (r.attendance === 'completed' || r.attendance === 'no_show') continue;
+      const bPers = personsByRef.get(r.booking_ref) || [];
+      if (!isReservationPinned({ ...r, persons: bPers })) continue;
+      const overlap = (r.assigned_seats || []).filter(sc => holdSeats.has(sc));
+      for (const sc of overlap) {
+        const key = `${h.booking_ref}:${r.booking_ref}:${h.session_id}:${sc}`;
+        if (seenHoldPinnedKeys.has(key)) continue;
+        seenHoldPinnedKeys.add(key);
+        const guestName = r.user?.name || '客人';
+        const alertText = `${sc} 臨時客可玩到 ${holdHM}，${sessObj.start_time} 的 ${guestName} 也排在這個座位`;
+        alerts.push({
+          type: 'hold_seat_pinned',
+          booking_ref: h.booking_ref,
+          conflict_booking_ref: r.booking_ref,
+          seat: sc,
+          session_id: h.session_id,
+          title: alertText,
+          subtitle: `請協助調整 ${guestName} 或留意現場座位安排`,
+          text: alertText,
+          hint: `請協助調整 ${guestName} 或留意現場座位安排`
         });
       }
     }

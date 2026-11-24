@@ -3,7 +3,8 @@ import prisma from '../../prismaClient.js';
 import { resolveLayoutGeometry } from '../../../../shared/allocator/geometry.js';
 import { allocate } from '../../../../shared/allocator/score.js';
 import { dateOnly, toTaipeiDateString } from '../../../../shared/time.js';
-import { isBookingCompleted, isPersonOnSeat } from '../../../../shared/floorSelectors.js';
+import { isBookingCompleted, isPersonOnSeat, walkInBillingEndAt } from '../../../../shared/floorSelectors.js';
+import { isReservationPinned, reseatBookings } from './allocator.js';
 
 export function getLegacyFallbackLayout() {
   const zones = [
@@ -212,6 +213,342 @@ export async function lockDaySeats(tx, dateStr) {
     : toTaipeiDateString(dateStr);
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(3901, hashtext(${targetDateStr}))`;
   return targetDateStr;
+}
+
+/**
+ * Lock all Session rows of a Taipei business date (FOR UPDATE) and then acquire lockDaySeats.
+ * Enforces canonical lock order: Session -> lockDaySeats -> booking_ref.
+ */
+export async function lockDaySessionsAndSeats(tx, dateInput) {
+  const targetDateStr = typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)
+    ? dateInput.slice(0, 10)
+    : toTaipeiDateString(dateInput);
+  const sessions = await tx.$queryRaw`
+    SELECT id, max_capacity, session_date, start_time, end_time
+    FROM "Session"
+    WHERE session_date = ${targetDateStr}::date
+    ORDER BY id ASC
+    FOR UPDATE
+  `;
+  await lockDaySeats(tx, targetDateStr);
+  return { dateStr: targetDateStr, sessions };
+}
+
+function formatTaipeiHM(dt) {
+  if (!dt) return '';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(new Date(dt));
+}
+
+export async function loadActiveSeatHolds(client = prisma, sessionIds = [], { excludeBookingRef = null } = {}) {
+  const numIds = [...new Set((sessionIds || []).map(Number))].filter(Number.isInteger);
+  if (!numIds.length) return [];
+  const where = {
+    session_id: { in: numIds },
+    status: 'active'
+  };
+  if (excludeBookingRef) {
+    where.booking_ref = { not: excludeBookingRef };
+  }
+  return client.seatHold.findMany({ where });
+}
+
+export function seatHoldsToPinnedReservations(holds = []) {
+  return (holds || []).map(h => ({
+    booking_ref: `__HOLD_${h.booking_ref}__`,
+    original_booking_ref: h.booking_ref,
+    session_id: h.session_id,
+    pax: h.pax,
+    assigned_seats: Array.isArray(h.seat_codes) ? [...h.seat_codes] : [],
+    status: 'confirmed',
+    attendance: 'checked_in',
+    is_seat_locked: true,
+    seat_source: 'staff',
+    is_pinned: true,
+    is_seat_hold: true,
+    hold_until: h.hold_until
+  }));
+}
+
+async function releaseBookingSeatHolds(tx, bookingRef, now) {
+  await tx.seatHold.updateMany({
+    where: { booking_ref: bookingRef, status: 'active' },
+    data: { status: 'released', released_at: now }
+  });
+}
+
+function sameStringSet(a = [], b = []) {
+  const sa = [...new Set(a.map(String))].sort();
+  const sb = [...new Set(b.map(String))].sort();
+  return sa.length === sb.length && sa.every((v, idx) => v === sb[idx]);
+}
+
+/**
+ * Synchronize walk-in SeatHold extension records for a booking.
+ * Idempotent: calling twice produces the exact same active SeatHold rows.
+ */
+export async function syncWalkInSeatHolds(tx, booking_ref, now = new Date()) {
+  const effectiveNow = now instanceof Date ? now : new Date(now || Date.now());
+  const reservations = await tx.reservation.findMany({
+    where: { booking_ref, status: { not: 'cancelled' } },
+    include: { session: true },
+    orderBy: { session: { start_time: 'asc' } }
+  });
+
+  if (!reservations.length) {
+    await releaseBookingSeatHolds(tx, booking_ref, effectiveNow);
+    return { holds: [], warnings: [], seat_hold_until: null, billing_end_at: null, displaced: [] };
+  }
+
+  const firstRes = reservations[0];
+  if (!firstRes.is_walk_in || firstRes.attendance !== 'checked_in' || firstRes.status !== 'confirmed') {
+    await releaseBookingSeatHolds(tx, booking_ref, effectiveNow);
+    return { holds: [], warnings: [], seat_hold_until: null, billing_end_at: null, displaced: [] };
+  }
+
+  const persons = await tx.bookingPerson.findMany({
+    where: { booking_ref },
+    orderBy: { person_no: 'asc' }
+  });
+  const activeSeated = persons.filter(p =>
+    (p.status == null || p.status === 'active') &&
+    p.left_at == null &&
+    p.seat_code &&
+    !String(p.seat_code).startsWith('WAIT-') &&
+    p.timer_started_at != null &&
+    p.billing_start_at != null
+  );
+
+  if (!activeSeated.length) {
+    await releaseBookingSeatHolds(tx, booking_ref, effectiveNow);
+    return { holds: [], warnings: [], seat_hold_until: null, billing_end_at: null, displaced: [] };
+  }
+
+  const lastRes = reservations[reservations.length - 1];
+  const dStr = toTaipeiDateString(firstRes.session.session_date);
+  const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
+  const bookingEndDt = new Date(`${dStr}T${lastRes.session.end_time}:00+08:00`);
+  const bookedMinutes = Math.max(0, Math.floor((bookingEndDt.getTime() - bookingStartDt.getTime()) / 60000));
+  const minBillingStartMs = Math.min(...activeSeated.map(p => new Date(p.billing_start_at).getTime()));
+  const billingEnd = walkInBillingEndAt({
+    billingStartAt: new Date(minBillingStartMs),
+    bookedMinutes
+  });
+
+  if (!billingEnd || billingEnd.getTime() <= bookingEndDt.getTime()) {
+    await releaseBookingSeatHolds(tx, booking_ref, effectiveNow);
+    return {
+      holds: [],
+      warnings: [],
+      seat_hold_until: null,
+      billing_end_at: billingEnd ? billingEnd.toISOString() : bookingEndDt.toISOString(),
+      displaced: []
+    };
+  }
+
+  const { sessions: daySessions } = await lockDaySessionsAndSeats(tx, dStr);
+  const bookingEndMs = bookingEndDt.getTime();
+  const billingEndMs = billingEnd.getTime();
+
+  const neededSessions = daySessions.filter(s => {
+    const sStartMs = new Date(`${dStr}T${s.start_time}:00+08:00`).getTime();
+    return sStartMs >= bookingEndMs && sStartMs < billingEndMs;
+  });
+
+  if (!neededSessions.length) {
+    await releaseBookingSeatHolds(tx, booking_ref, effectiveNow);
+    return {
+      holds: [],
+      warnings: [],
+      seat_hold_until: null,
+      billing_end_at: billingEnd.toISOString(),
+      displaced: []
+    };
+  }
+
+  const seatCodes = [...new Set(activeSeated.map(p => String(p.seat_code)))].sort();
+  const holdPax = activeSeated.length;
+  const neededSessionIds = neededSessions.map(s => s.id);
+  const neededIdSet = new Set(neededSessionIds);
+
+  // Release holds on sessions no longer needed (e.g. extended into formal session or shrunk)
+  await tx.seatHold.updateMany({
+    where: {
+      booking_ref,
+      status: 'active',
+      session_id: { notIn: neededSessionIds }
+    },
+    data: { status: 'released', released_at: effectiveNow }
+  });
+
+  const existingActive = await tx.seatHold.findMany({
+    where: { booking_ref, status: 'active', session_id: { in: neededSessionIds } }
+  });
+  const existingBySess = new Map(existingActive.map(h => [h.session_id, h]));
+
+  const activeHolds = [];
+  for (const sess of neededSessions) {
+    if (!neededIdSet.has(sess.id)) continue;
+    const prev = existingBySess.get(sess.id);
+    if (
+      prev &&
+      prev.pax === holdPax &&
+      new Date(prev.hold_until).getTime() === billingEndMs &&
+      sameStringSet(prev.seat_codes, seatCodes)
+    ) {
+      activeHolds.push(prev);
+    } else if (prev) {
+      const updated = await tx.seatHold.update({
+        where: { id: prev.id },
+        data: {
+          seat_codes: seatCodes,
+          pax: holdPax,
+          hold_until: billingEnd
+        }
+      });
+      activeHolds.push(updated);
+    } else {
+      const created = await tx.seatHold.create({
+        data: {
+          booking_ref,
+          session_id: sess.id,
+          seat_codes: seatCodes,
+          pax: holdPax,
+          hold_until: billingEnd,
+          status: 'active'
+        }
+      });
+      activeHolds.push(created);
+    }
+  }
+
+  // Evaluate capacity warnings and seat conflicts for each needed session
+  const warnings = [];
+  const displaceableRefsSet = new Set();
+  const holdUntilHM = formatTaipeiHM(billingEnd);
+
+  const [daySessResvs, otherActiveHolds] = await Promise.all([
+    tx.reservation.findMany({
+      where: {
+        session_id: { in: neededSessionIds },
+        booking_ref: { not: booking_ref },
+        status: 'confirmed'
+      },
+      include: { user: { select: { name: true } } }
+    }),
+    tx.seatHold.findMany({
+      where: {
+        session_id: { in: neededSessionIds },
+        booking_ref: { not: booking_ref },
+        status: 'active'
+      }
+    })
+  ]);
+
+  const otherHoldRefs = [...new Set(otherActiveHolds.map(h => h.booking_ref))];
+  const otherHoldUsers = otherHoldRefs.length
+    ? await tx.reservation.findMany({
+        where: { booking_ref: { in: otherHoldRefs } },
+        include: { user: { select: { name: true } } },
+        distinct: ['booking_ref']
+      })
+    : [];
+  const otherHoldUserMap = new Map(otherHoldUsers.map(r => [r.booking_ref, r.user?.name || '客人']));
+
+  const sessResvsPersonsRefs = [...new Set(daySessResvs.map(r => r.booking_ref))];
+  const sessResvsPersons = sessResvsPersonsRefs.length
+    ? await tx.bookingPerson.findMany({
+        where: { booking_ref: { in: sessResvsPersonsRefs }, status: 'active' }
+      })
+    : [];
+  const personsByRef = new Map();
+  for (const p of sessResvsPersons) {
+    if (!personsByRef.has(p.booking_ref)) personsByRef.set(p.booking_ref, []);
+    personsByRef.get(p.booking_ref).push(p);
+  }
+
+  for (const sess of neededSessions) {
+    const sResvs = daySessResvs.filter(r => r.session_id === sess.id);
+    const sOtherHolds = otherActiveHolds.filter(h => h.session_id === sess.id);
+    const bookedPax = sResvs.reduce((sum, r) => sum + r.pax, 0);
+    const otherHoldPax = sOtherHolds.reduce((sum, h) => sum + h.pax, 0);
+    const available = (sess.max_capacity || 0) - bookedPax - otherHoldPax;
+    const sessionLabel = `${sess.start_time}–${sess.end_time}`;
+
+    if (available < holdPax) {
+      const exceed = holdPax - Math.max(0, available);
+      warnings.push({
+        code: 'HOLD_OVER_CAPACITY',
+        session: sessionLabel,
+        exceed,
+        message: `${sessionLabel} 線上名額已滿，延伸佔位超出 ${exceed} 位，請留意`
+      });
+    }
+
+    for (const r of sResvs) {
+      if (r.attendance === 'completed' || r.attendance === 'no_show') continue;
+      const overlapSeats = seatCodes.filter(sc => (r.assigned_seats || []).includes(sc));
+      if (!overlapSeats.length) continue;
+
+      const rWithPersons = { ...r, persons: personsByRef.get(r.booking_ref) || [] };
+      if (isReservationPinned(rWithPersons)) {
+        for (const sc of overlapSeats) {
+          const guestName = r.user?.name || '客人';
+          warnings.push({
+            code: 'HOLD_SEAT_PINNED',
+            seat: sc,
+            session: sessionLabel,
+            booking_ref: r.booking_ref,
+            guest_name: guestName,
+            hold_until_time: holdUntilHM,
+            message: `${sc} 臨時客可玩到 ${holdUntilHM}，${sess.start_time} 的 ${guestName} 也排在這個座位`
+          });
+        }
+      } else {
+        displaceableRefsSet.add(r.booking_ref);
+      }
+    }
+
+    for (const oh of sOtherHolds) {
+      const overlapSeats = seatCodes.filter(sc => (oh.seat_codes || []).includes(sc));
+      for (const sc of overlapSeats) {
+        const guestName = otherHoldUserMap.get(oh.booking_ref) || '客人';
+        warnings.push({
+          code: 'HOLD_SEAT_PINNED',
+          seat: sc,
+          session: sessionLabel,
+          booking_ref: oh.booking_ref,
+          guest_name: guestName,
+          hold_until_time: holdUntilHM,
+          message: `${sc} 臨時客可玩到 ${holdUntilHM}，${sess.start_time} 的 ${guestName} 也排在這個座位`
+        });
+      }
+    }
+  }
+
+  let displaced = [];
+  const displaceableRefs = [...displaceableRefsSet];
+  if (displaceableRefs.length > 0) {
+    displaced = await reseatBookings(tx, {
+      bookingRefs: displaceableRefs,
+      reservedSeats: seatCodes,
+      sessionIds: neededSessionIds,
+      primaryBookingRef: booking_ref,
+      allowWaitFallback: true
+    });
+  }
+
+  return {
+    holds: activeHolds,
+    warnings,
+    seat_hold_until: billingEnd.toISOString(),
+    billing_end_at: billingEnd.toISOString(),
+    displaced
+  };
 }
 
 /**

@@ -444,9 +444,11 @@ export function buildSeatStates(layout = {}, bookings = [], now = new Date(), op
     if (b.attendance === 'checked_in') {
       if (completed) continue;
       if (isSlotPreview) {
-        // Round 13b Item 3: 選了某個時段時，已入座的人，如果預約到那時還沒結束就照樣顯示
+        // Round 13b Item 3: 選了某個時段時，已入座的人，如果預約或延伸佔位到那時還沒結束就照樣顯示
         const { endMs } = getBookingTimeRangeMs(b);
-        if (endMs !== null && endMs <= currentMs) {
+        const holdEndMs = b.seat_hold_until ? new Date(b.seat_hold_until).getTime() : null;
+        const effectiveEndMs = (Number.isFinite(holdEndMs) && (!endMs || holdEndMs > endMs)) ? holdEndMs : endMs;
+        if (effectiveEndMs !== null && effectiveEndMs <= currentMs) {
           // Booking has ended before this preview slot; seat is available for that slot's bookings
           continue;
         }

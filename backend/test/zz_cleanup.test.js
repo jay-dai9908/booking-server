@@ -5,6 +5,7 @@ import prisma from '../src/prismaClient.js';
 test('zz_cleanup: Operational tables must have 0 rows remaining after test suite execution', async () => {
   const operationalModels = [
     { name: 'Reservation', model: prisma.reservation },
+    { name: 'SeatHold', model: prisma.seatHold },
     { name: 'BookingPerson', model: prisma.bookingPerson },
     { name: 'BookingEquipment', model: prisma.bookingEquipment },
     { name: 'TimerPause', model: prisma.timerPause },

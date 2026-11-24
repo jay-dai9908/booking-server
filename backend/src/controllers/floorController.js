@@ -3,7 +3,14 @@ import prisma from '../prismaClient.js';
 import { getLiveFloorData, splitBoardUnits } from '../services/floor/liveService.js';
 import { applyCheckInRecords, resolveBillingStartAt, isPersonPaid } from '../services/floor/checkInService.js';
 import { reseatBookings, assertNoSeatCollisions } from '../services/seating/allocator.js';
-import { getActiveLayoutForDate, loadSeatedOccupants, assertNoSeatedCollisions, lockDaySeats } from '../services/seating/layoutService.js';
+import {
+  getActiveLayoutForDate,
+  loadSeatedOccupants,
+  assertNoSeatedCollisions,
+  lockDaySeats,
+  lockDaySessionsAndSeats,
+  syncWalkInSeatHolds
+} from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { refreshBillingCache, getBookingBill, saveDraft } from '../services/billing/billService.js';
@@ -53,7 +60,7 @@ export async function checkIn(req, res) {
     const preDateStr = toTaipeiDateString(preRes.session.session_date);
 
     const result = await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, preDateStr);
+      await lockDaySessionsAndSeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -168,11 +175,16 @@ export async function checkIn(req, res) {
       });
 
       await assertNoSeatedCollisions(tx, dateStr);
+      const holdRes = await syncWalkInSeatHolds(tx, booking_ref, now);
+      const allDisplaced = [...displaced, ...(holdRes.displaced || [])];
 
       return {
         booking_ref,
-        displaced,
-        displaced_reservations: displaced.map(d => ({ ...d, new_seats: d.to }))
+        displaced: allDisplaced,
+        displaced_reservations: allDisplaced.map(d => ({ ...d, new_seats: d.to })),
+        warnings: holdRes.warnings || [],
+        seat_hold_until: holdRes.seat_hold_until,
+        billing_end_at: holdRes.billing_end_at
       };
     });
 
@@ -214,8 +226,8 @@ export async function moveSeat(req, res) {
     }
     const preDateStr = toTaipeiDateString(preRes.session.session_date);
 
-    await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, preDateStr);
+    const moveResult = await prisma.$transaction(async (tx) => {
+      await lockDaySessionsAndSeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -371,10 +383,25 @@ export async function moveSeat(req, res) {
       const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
       await assertNoSeatCollisions(tx, allSessionsToCheck);
       await assertNoSeatedCollisions(tx, dateStr);
+      const actionNow = (process.env.NODE_ENV === 'test' && (req.body?.now || req.body?.at))
+        ? new Date(req.body.now || req.body.at)
+        : new Date();
+      const holdRes = await syncWalkInSeatHolds(tx, booking_ref, actionNow);
+      return {
+        warnings: holdRes.warnings || [],
+        seat_hold_until: holdRes.seat_hold_until,
+        billing_end_at: holdRes.billing_end_at
+      };
     });
 
     displayBus.floorChanged();
-    return res.json({ success: true, server_now: new Date().toISOString() });
+    return res.json({
+      success: true,
+      server_now: new Date().toISOString(),
+      warnings: moveResult?.warnings || [],
+      seat_hold_until: moveResult?.seat_hold_until || null,
+      billing_end_at: moveResult?.billing_end_at || null
+    });
   } catch (error) {
     console.error('[moveSeat] Error:', error);
     if (error.status) {
@@ -413,8 +440,8 @@ export async function seatPerson(req, res) {
     }
     const dateStr = toTaipeiDateString(preRes.session.session_date);
 
-    const updated = await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, dateStr);
+    const result = await prisma.$transaction(async (tx) => {
+      await lockDaySessionsAndSeats(tx, dateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -559,12 +586,20 @@ export async function seatPerson(req, res) {
       const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
       await assertNoSeatCollisions(tx, allSessionsToCheck);
       await assertNoSeatedCollisions(tx, dateStr);
+      const holdRes = await syncWalkInSeatHolds(tx, booking_ref, now);
 
-      return updatedPerson;
+      return { updatedPerson, holdRes };
     });
 
     displayBus.floorChanged();
-    return res.json({ success: true, person: updated, server_now: new Date().toISOString() });
+    return res.json({
+      success: true,
+      person: result.updatedPerson,
+      warnings: result.holdRes?.warnings || [],
+      seat_hold_until: result.holdRes?.seat_hold_until || null,
+      billing_end_at: result.holdRes?.billing_end_at || null,
+      server_now: new Date().toISOString()
+    });
   } catch (error) {
     console.error('[seatPerson] Error:', error);
     if (error.status) {
@@ -602,8 +637,8 @@ export async function moveGroup(req, res) {
     const preDateStr = toTaipeiDateString(preRes.session.session_date);
 
     let result = null;
-    await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, preDateStr);
+    const moveResult = await prisma.$transaction(async (tx) => {
+      await lockDaySessionsAndSeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -743,11 +778,18 @@ export async function moveGroup(req, res) {
       // Assert no collisions
       await assertNoSeatCollisions(tx, sessionIds);
       await assertNoSeatedCollisions(tx, dateStr);
+      const actionNow = (process.env.NODE_ENV === 'test' && (req.body?.now || req.body?.at))
+        ? new Date(req.body.now || req.body.at)
+        : new Date();
+      const holdRes = await syncWalkInSeatHolds(tx, booking_ref, actionNow);
 
       result = {
         success: true,
         new_seats: newSeats,
         table_label: targetTable.label,
+        warnings: holdRes.warnings || [],
+        seat_hold_until: holdRes.seat_hold_until || null,
+        billing_end_at: holdRes.billing_end_at || null,
         server_now: new Date().toISOString()
       };
     });
@@ -797,7 +839,7 @@ export async function handleTimer(req, res) {
 
   try {
     let preDateStr = null;
-    if (action === 'undo_leave_all') {
+    if (['undo_leave_all', 'end', 'start', 'restart'].includes(action)) {
       const preRes = await prisma.reservation.findFirst({
         where: { booking_ref, status: { not: 'cancelled' } },
         include: { session: true },
@@ -809,9 +851,9 @@ export async function handleTimer(req, res) {
       preDateStr = toTaipeiDateString(preRes.session.session_date);
     }
 
-    await prisma.$transaction(async (tx) => {
-      if (action === 'undo_leave_all') {
-        await lockDaySeats(tx, preDateStr);
+    const timerResult = await prisma.$transaction(async (tx) => {
+      if (['undo_leave_all', 'end', 'start', 'restart'].includes(action)) {
+        await lockDaySessionsAndSeats(tx, preDateStr);
       }
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
@@ -930,7 +972,8 @@ export async function handleTimer(req, res) {
           device_label: deviceInfo?.device_label || null
         });
         await refreshBillingCache(tx, booking_ref);
-        return;
+        const holdRes = await syncWalkInSeatHolds(tx, booking_ref, now);
+        return { holdRes };
       }
 
       let persons;
@@ -1258,10 +1301,22 @@ export async function handleTimer(req, res) {
           });
         }
       }
+
+      if (['end', 'start', 'restart'].includes(action)) {
+        const holdRes = await syncWalkInSeatHolds(tx, booking_ref, now);
+        return { holdRes };
+      }
+      return { holdRes: null };
     });
 
     displayBus.floorChanged();
-    return res.json({ success: true, server_now: new Date().toISOString() });
+    return res.json({
+      success: true,
+      server_now: new Date().toISOString(),
+      warnings: timerResult?.holdRes?.warnings || [],
+      seat_hold_until: timerResult?.holdRes?.seat_hold_until || null,
+      billing_end_at: timerResult?.holdRes?.billing_end_at || null
+    });
   } catch (error) {
     console.error('[handleTimer] Error:', error);
     if (error.status) {
@@ -1294,7 +1349,7 @@ export async function addPerson(req, res) {
     const preDateStr = toTaipeiDateString(preRes.session.session_date);
 
     const result = await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, preDateStr);
+      await lockDaySessionsAndSeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
@@ -1463,8 +1518,8 @@ export async function removePerson(req, res) {
     }
     const preDateStr = toTaipeiDateString(preRes.session.session_date);
 
-    await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, preDateStr);
+    const removeResult = await prisma.$transaction(async (tx) => {
+      await lockDaySessionsAndSeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       // Check payment status of this person or whole booking
@@ -1591,10 +1646,17 @@ export async function removePerson(req, res) {
       });
 
       await refreshBillingCache(tx, booking_ref);
+      const holdRes = await syncWalkInSeatHolds(tx, booking_ref, now);
+      return { holdRes };
     });
 
     displayBus.floorChanged();
-    return res.json({ success: true, server_now: new Date().toISOString() });
+    return res.json({
+      success: true,
+      server_now: new Date().toISOString(),
+      warnings: removeResult?.holdRes?.warnings || [],
+      seat_hold_until: removeResult?.holdRes?.seat_hold_until || null
+    });
   } catch (error) {
     console.error('[removePerson] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
@@ -2109,8 +2171,8 @@ export async function previewBoardChange(req, res) {
     }
     const preDateStr = toTaipeiDateString(preRes.session.session_date);
 
-    await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, preDateStr);
+    const moveResult = await prisma.$transaction(async (tx) => {
+      await lockDaySessionsAndSeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const beforeData = await getBookingBill(booking_ref, tx, nowDate);
@@ -2341,7 +2403,7 @@ export async function addBoardRental(req, res) {
     const preDateStr = toTaipeiDateString(preRes.session.session_date);
 
     const result = await prisma.$transaction(async (tx) => {
-      await lockDaySeats(tx, preDateStr);
+      await lockDaySessionsAndSeats(tx, preDateStr);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       const reservations = await tx.reservation.findMany({
