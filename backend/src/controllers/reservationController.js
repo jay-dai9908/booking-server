@@ -11,7 +11,7 @@ import {
   sendBookingCancellationNotification,
   sendSelfServiceTransferPendingNotification
 } from '../utils/lineMessaging.js';
-import { markUnpaid, collectPayment, saveDraft, getBookingBill, refreshBillingCache } from '../services/billing/billService.js';
+import { markUnpaid, collectPayment, saveDraft, getBookingBill, refreshBillingCache, buildInitialDraft } from '../services/billing/billService.js';
 import { deductPass, restorePass } from '../services/billing/passTender.js';
 import { assignPoolAccount, releasePoolAccount } from '../services/selfService/poolAccountService.js';
 import { log as auditLog } from '../services/audit/auditService.js';
@@ -338,6 +338,9 @@ export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, i
   const calculatedHourlyTotal = pax * hourly_price * sessionCount;
   const calculatedUnlimitedTotal = pax * unlimited_price;
 
+  if (is_unlimited && allow_unlimited) {
+    return calculatedUnlimitedTotal;
+  }
   if (allow_unlimited) {
     return Math.min(calculatedHourlyTotal, calculatedUnlimitedTotal);
   }
@@ -932,6 +935,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
 
       // Promo code evaluation if provided by customer
       let appliedPromoCode = null;
+      let appliedPromoRule = null;
       let appliedDiscountAmount = 0;
       if (req.body.promo_code && String(req.body.promo_code).trim()) {
         const promoEval = await evaluatePromoCode(tx, {
@@ -950,6 +954,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
           throw new Error(`PROMO_ERROR:${promoEval.error}`);
         }
         appliedPromoCode = promoEval.promo.code;
+        appliedPromoRule = promoEval.rule;
         appliedDiscountAmount = promoEval.discount_amount;
         await tx.promoCode.update({
           where: { id: promoEval.promo.id },
@@ -958,6 +963,11 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       }
 
       const totalAmount = Math.max(0, subtotalAmount - appliedDiscountAmount);
+      const initialDraft = buildInitialDraft({
+        pax: parseInt(pax, 10),
+        isUnlimited: is_unlimited,
+        promoRule: appliedPromoRule
+      });
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -972,6 +982,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
           total_amount: totalAmount,
           promo_code: appliedPromoCode,
           discount_amount: appliedDiscountAmount,
+          checkout_details: initialDraft,
           customer_note: cleanCustomerNote
         });
       }
@@ -1001,6 +1012,14 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         await tx.bookingEquipment.createMany({
           data: newEquipmentRecords
         });
+      }
+
+      const { bill: verifiedBill } = await getBookingBill(booking_ref, tx);
+      if (
+        (verifiedBill?.summary?.amount_due ?? 0) !== totalAmount ||
+        (verifiedBill?.summary?.discounts_total ?? 0) !== appliedDiscountAmount
+      ) {
+        throw new Error(`BILL_MISMATCH: expected total=${totalAmount} discount=${appliedDiscountAmount}, got due=${verifiedBill?.summary?.amount_due} discount=${verifiedBill?.summary?.discounts_total}`);
       }
 
       return { 
@@ -2243,7 +2262,7 @@ export const adminCreateReservation = async (req, res) => {
       }
 
       const newReservationsData = [];
-      const is_unlimited = req.body.isUnlimited === true || req.body.isUnlimited === 'true';
+      const is_unlimited = req.body.isUnlimited === true || req.body.isUnlimited === 'true' || req.body.is_unlimited === true || req.body.is_unlimited === 'true';
       const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), session_ids.length, is_unlimited);
       const totalAmount = baseSeatingPrice + totalEquipmentFee;
 
@@ -2252,6 +2271,11 @@ export const adminCreateReservation = async (req, res) => {
       const checkInTime = shouldAutoCheckIn ? new Date() : null;
       const cleanCustomerNote = req.body.customer_note ? String(req.body.customer_note).trim() : null;
       const cleanAdminNote = req.body.admin_note ? String(req.body.admin_note).trim() : null;
+      const initialAdminDraft = buildInitialDraft({
+        pax: parseInt(pax, 10),
+        isUnlimited: is_unlimited,
+        updatedBy: req.user?.name || '門市人員'
+      });
 
       for (const sessionId of session_ids) {
         newReservationsData.push({
@@ -2267,6 +2291,7 @@ export const adminCreateReservation = async (req, res) => {
           is_walk_in: isWalkIn === true || isWalkIn === 'true',
           is_unlimited: is_unlimited,
           total_amount: totalAmount,
+          checkout_details: initialAdminDraft,
           customer_note: cleanCustomerNote,
           admin_note: cleanAdminNote
         });
@@ -2285,6 +2310,11 @@ export const adminCreateReservation = async (req, res) => {
         await tx.bookingEquipment.createMany({
           data: newEquipmentRecords
         });
+      }
+
+      const { bill: verifiedAdminBill } = await getBookingBill(booking_ref, tx);
+      if ((verifiedAdminBill?.summary?.amount_due ?? 0) !== totalAmount) {
+        throw new Error(`BILL_MISMATCH: expected total=${totalAmount}, got due=${verifiedAdminBill?.summary?.amount_due}`);
       }
 
       return {

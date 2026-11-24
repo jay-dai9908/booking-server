@@ -9,6 +9,46 @@ import { deductPass, restorePass, validatePassUsage } from './passTender.js';
 import { buildBillInput } from './billInput.js';
 import { queuePrintJob } from '../print/printService.js';
 
+export function buildInitialDraft({
+  pax = 1,
+  isUnlimited = false,
+  promoRule = null,
+  promoPersonNos = null,
+  updatedBy = '系統',
+  splitMode = 'proportional'
+} = {}) {
+  const count = Math.max(1, parseInt(pax, 10) || 1);
+  const personMode = isUnlimited ? 'unlimited' : 'hourly';
+  const persons = Array.from({ length: count }, (_, i) => ({
+    person_no: i + 1,
+    mode: personMode
+  }));
+
+  const order_promos = promoRule
+    ? [
+        {
+          ...promoRule,
+          ...(Array.isArray(promoPersonNos) ? { person_nos: promoPersonNos } : {})
+        }
+      ]
+    : [];
+
+  return {
+    version: 2,
+    persons,
+    order_addons: [],
+    order_promos,
+    manual_discount: null,
+    total_override: null,
+    pending_supplements: [],
+    note: '',
+    rev: 1,
+    updated_at: new Date().toISOString(),
+    updated_by: updatedBy,
+    split_mode: splitMode
+  };
+}
+
 export async function getNextDailySeq(tx, key, date = new Date()) {
   const client = tx || prisma;
   const d = dateOnly(date);
@@ -454,6 +494,12 @@ export async function addPromoToBill(booking_ref, { code, base_rev }, staffUser,
 
     await refreshBillingCache(tx, booking_ref);
 
+    const nextPromoCodeStr = [...new Set(nextPromos.map((op) => op?.code).filter(Boolean))].join(',') || null;
+    await tx.reservation.updateMany({
+      where: { booking_ref },
+      data: { promo_code: nextPromoCodeStr }
+    });
+
     await auditLog(tx, {
       booking_ref,
       event_type: 'promo_applied',
@@ -539,6 +585,12 @@ export async function removePromoFromBill(booking_ref, { code, base_rev }, staff
 
     await refreshBillingCache(tx, booking_ref);
 
+    const nextPromoCodeStr = [...new Set(nextPromos.map((op) => op?.code).filter(Boolean))].join(',') || null;
+    await tx.reservation.updateMany({
+      where: { booking_ref },
+      data: { promo_code: nextPromoCodeStr }
+    });
+
     await auditLog(tx, {
       booking_ref,
       event_type: 'promo_removed',
@@ -621,21 +673,6 @@ export async function refreshBillingCache(tx = prisma, booking_ref) {
     });
   }
 
-  // Extract promo code string from draft or bill
-  const draft = existingRes?.checkout_details || {};
-  const promoCodes = [];
-  if (Array.isArray(draft.order_promos)) {
-    for (const op of draft.order_promos) if (op.code) promoCodes.push(op.code);
-  }
-  if (Array.isArray(draft.persons)) {
-    for (const p of draft.persons) {
-      if (Array.isArray(p.promos)) {
-        for (const pr of p.promos) if (pr.code) promoCodes.push(pr.code);
-      }
-    }
-  }
-  const promoCodeStr = [...new Set(promoCodes)].join(',') || null;
-
   await tx.reservation.updateMany({
     where: { booking_ref },
     data: {
@@ -651,8 +688,7 @@ export async function refreshBillingCache(tx = prisma, booking_ref) {
       checkout_unlimited_pax: isPaid ? (bill.summary?.unlimited_pax_total ?? 0) : null,
       checkout_regular_hours: isPaid ? (bill.summary?.regular_hours_total ?? 0) : null,
       discount_amount: bill.summary?.discounts_total ?? 0,
-      addons_amount: bill.summary?.addons_total ?? 0,
-      promo_code: promoCodeStr
+      addons_amount: bill.summary?.addons_total ?? 0
     }
   });
 

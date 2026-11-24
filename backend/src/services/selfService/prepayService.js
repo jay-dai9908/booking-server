@@ -12,7 +12,8 @@ import { buildBillInput } from '../billing/billInput.js';
 import {
   getBookingBill,
   nextSerialNo,
-  refreshBillingCache
+  refreshBillingCache,
+  buildInitialDraft
 } from '../billing/billService.js';
 import { log as auditLog } from '../audit/auditService.js';
 import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.js';
@@ -203,35 +204,13 @@ function normalizePassUses(rawPassUses = []) {
 }
 
 export function buildSelfCheckoutDraft({ pax, isUnlimited, promoEval, unpaidCount }) {
-  const personMode = isUnlimited ? 'unlimited' : 'hourly';
-  const persons = Array.from({ length: pax }, (_, i) => ({
-    person_no: i + 1,
-    mode: personMode
-  }));
-
   const unpaidNos = Array.from({ length: Math.max(0, unpaidCount) }, (_, i) => i + 1);
-  const order_promos = promoEval?.rule
-    ? [
-        {
-          ...promoEval.rule,
-          person_nos: unpaidNos
-        }
-      ]
-    : [];
-
-  return {
-    version: 2,
-    persons,
-    order_addons: [],
-    order_promos,
-    manual_discount: null,
-    total_override: null,
-    pending_supplements: [],
-    note: '',
-    rev: 1,
-    updated_at: new Date().toISOString(),
-    updated_by: '系統'
-  };
+  return buildInitialDraft({
+    pax,
+    isUnlimited,
+    promoRule: promoEval?.rule || null,
+    promoPersonNos: promoEval?.rule ? unpaidNos : null
+  });
 }
 
 /**

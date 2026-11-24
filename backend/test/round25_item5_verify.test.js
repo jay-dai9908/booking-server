@@ -487,7 +487,7 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
         body: {
           session_ids: normalSess.map((s) => s.id),
           pax: 1,
-          isUnlimited: true
+          isUnlimited: false
         }
       }), rNormal);
       assert.equal(rNormal.statusCode, 201);
