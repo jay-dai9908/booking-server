@@ -258,6 +258,9 @@ export function computeEntry({
     amount,
     mode: isUnlimitedMode ? 'unlimited' : 'hourly',
     isCapped: capped,
+    actual_minutes: actualMinutes,
+    paused_minutes: pausedMinutes,
+    booked_minutes: Number(bookedMinutes) || 0,
     explain,
     explainDetail: explainDetail || undefined
   };

@@ -44,7 +44,8 @@ import QuickPromoModal from './QuickPromoModal';
 import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
-import { displayBoardName, computeBill, computeEntry } from '@shared/billing.js';
+import { displayBoardName, computeBill } from '@shared/billing.js';
+import { getPersonHoursData as extractPersonHoursData } from '../../../utils/admin/hoursAdjuster';
 import { personElapsedMinutes, formatElapsedText, extractTimeHHMM, bookingDurationText, formatBookingRef } from '../../../utils/admin/floorSelectors';
 import { useAdminPermissions, MONEY_WRITE, COUPON_WRITE } from '../../../hooks/admin/useAdminPermissions';
 
@@ -598,49 +599,10 @@ export default function CheckoutWorkbench({
   // Handlers for person adjustments (Section 4.3)
   const OVERTIME_OPTIONS = [0, 0.5, 1, 1.5, 2, 2.5];
 
-  const getPersonHoursData = (p) => {
-    let bookedMins = booking.booked_minutes;
-    if (!bookedMins && booking.start_time && booking.end_time) {
-      const [sh, sm] = booking.start_time.split(':').map(Number);
-      const [eh, em] = booking.end_time.split(':').map(Number);
-      bookedMins = (eh * 60 + em) - (sh * 60 + sm);
-    }
-    const bookedHours = Math.max(1, Math.round((bookedMins || 60) / 60));
-
-    const autoEntry = computeEntry({
-      bookedMinutes: bookedMins || 0,
-      actualMinutes: p.entry?.actualMinutes ?? null,
-      pausedMinutes: p.entry?.pausedMinutes ?? 0,
-      mode: 'hourly',
-      hoursOverride: null,
-      pricing: billData?.pricing,
-      rules: billData?.rules || { grace: 10, block: 30 }
-    });
-    const autoHours = autoEntry.hours || bookedHours;
-    const defaultIntHours = Math.max(1, Math.floor(autoHours));
-    const defaultOvertimeChip = Math.max(0, Math.round((autoHours - defaultIntHours) * 10) / 10);
-
-    const pDraft = (draftState?.persons || []).find(dp => dp.person_no === p.person_no);
-    const hasOverride = pDraft && pDraft.hours_override != null;
-
-    let intHours = defaultIntHours;
-    let overtimeChip = defaultOvertimeChip;
-    if (hasOverride) {
-      intHours = pDraft.int_hours != null ? pDraft.int_hours : Math.floor(pDraft.hours_override);
-      overtimeChip = pDraft.overtime_chip != null ? pDraft.overtime_chip : Math.round((pDraft.hours_override - intHours) * 10) / 10;
-    }
-
-    const totalHours = hasOverride ? pDraft.hours_override : (intHours + overtimeChip);
-    return {
-      bookedHours,
-      defaultIntHours,
-      defaultOvertimeChip,
-      intHours,
-      overtimeChip,
-      hasOverride,
-      totalHours
-    };
-  };
+  const getPersonHoursData = (p) => extractPersonHoursData(p, {
+    booking,
+    draftPersons: draftState?.persons || []
+  });
 
   const handleIntHoursChange = (personNo, delta) => {
     updateDraft(prev => {
@@ -765,10 +727,12 @@ export default function CheckoutWorkbench({
       intHours,
       overtimeChip,
       hasOverride,
-      totalHours
+      totalHours,
+      actualMinutes,
+      pausedMinutes
     } = getPersonHoursData(p);
 
-    const entryAmount = p.entry?.amount || 0;
+    const entryAmount = p.entry?.amount ?? 0;
 
     return (
       <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
@@ -840,13 +804,21 @@ export default function CheckoutWorkbench({
           })}
         </div>
 
-        {/* Total hours and subtotal */}
+        {/* Total hours, timer info and subtotal */}
         <div
           data-testid={`hours-summary-${p.person_no}`}
           className="text-[11px] text-sg-muted font-medium"
         >
           共 {totalHours} 小時 · NT${entryAmount}
         </div>
+        {actualMinutes != null && (
+          <div
+            data-testid={`hours-timer-${p.person_no}`}
+            className="text-[11px] text-sg-muted"
+          >
+            計時 {formatTimerHMM(actualMinutes)}{pausedMinutes > 0 ? `（已扣暫停 ${pausedMinutes} 分）` : ''}
+          </div>
+        )}
       </div>
     );
   };

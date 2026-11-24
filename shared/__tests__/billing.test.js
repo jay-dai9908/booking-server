@@ -972,6 +972,22 @@ test('Round 37 Item 3: bill_until_return uses 10/30 rounding on effective minute
   assert.equal(cappedReturn.capped, true);
 });
 
+test('Round 37 Item 4: computeEntry returns actual_minutes, paused_minutes, and booked_minutes', () => {
+  const entry = computeEntry({
+    bookedMinutes: 180,
+    actualMinutes: 205,
+    pausedMinutes: 0,
+    mode: 'hourly',
+    pricing: { hourly: 150, unlimited: 750, allow_unlimited: true },
+    rules: { grace: 10, block: 30, early_leave_mode: 'booked' }
+  });
+  assert.equal(entry.hours, 3.5);
+  assert.equal(entry.actual_minutes, 205);
+  assert.equal(entry.paused_minutes, 0);
+  assert.equal(entry.booked_minutes, 180);
+});
+
+
 
 
 
