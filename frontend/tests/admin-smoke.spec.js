@@ -160,12 +160,16 @@ export async function runAdminSmoke() {
             const hasDiff = await diffPrompt.isVisible().catch(() => false);
             assert.ok(!hasDiff, 'Diff prompt should not be visible when cash count is empty');
 
-            const cashInput = page.locator('input[placeholder*="請輸入清點金額"], input[placeholder*="0"]').last();
+            const cashInput = page.locator('[data-testid="closing-counted-wrap"] input, input[placeholder*="請輸入清點金額"]').first();
             await cashInput.fill('2000');
+            const handedInput = page.locator('[data-testid="closing-handed-wrap"] input');
+            if (await handedInput.isVisible().catch(() => false)) {
+              await handedInput.fill('0');
+            }
             await page.waitForTimeout(300);
 
             const isEnabledNow = !(await submitBtn.isDisabled());
-            assert.ok(isEnabledNow, '完成交班 button must be enabled after entering cash count');
+            assert.ok(isEnabledNow, '完成交班 button must be enabled after entering cash count and handed amount');
             console.log(`✔ [${vp.name}] Spec 2.3 passed: Closing cash count requires input before showing diff & enables button`);
           }
         }
