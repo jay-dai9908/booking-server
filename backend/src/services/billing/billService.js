@@ -1032,7 +1032,8 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           booking_ref,
           payment_no: passPayNo,
           person_no: pBill.person_no,
-          staff_name: staffName
+          staff_name: staffName,
+          date: firstRes?.session?.session_date || firstRes?.session_date || new Date()
         });
 
         const passPay = await tx.payment.create({

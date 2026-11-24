@@ -1,4 +1,7 @@
 import prisma from '../prismaClient.js';
+import { deductPass } from '../services/billing/passTender.js';
+import { log as auditLog } from '../services/audit/auditService.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
 // Native date utilities replacing external date-fns dependency
 const formatDateYMD = (d = new Date()) => {
@@ -189,7 +192,19 @@ export const grantUserPass = async (req, res) => {
  * Admin: Redeem / deduct pass quota (via barcode scan or manual click)
  */
 export const redeemUserPass = async (req, res) => {
-  const { pass_code, user_pass_id, deduct_amount = 1, staff_name = 'admin', note = '' } = req.body;
+  const { pass_code, user_pass_id, deduct_amount = 1, note = '' } = req.body;
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  const rawUnits = req.body.deduct_amount === undefined ? 1 : req.body.deduct_amount;
+  const parsedUnits = (typeof rawUnits === 'boolean' || rawUnits === null || String(rawUnits).trim() === '')
+    ? NaN
+    : Number(rawUnits);
+
+  if (req.body.deduct_amount !== undefined && (!Number.isInteger(parsedUnits) || parsedUnits <= 0)) {
+    return res.status(422).json({ error: '扣抵數量必須為正整數' });
+  }
 
   try {
     let userPass = null;
@@ -268,85 +283,61 @@ export const redeemUserPass = async (req, res) => {
       return res.status(404).json({ error: '找不到該張卡券或預約單號，請確認條碼是否正確' });
     }
 
-    if (userPass.status !== 'ACTIVE') {
-      const statusMap = {
-        EXHAUSTED: '此卡券次數已全數使用完畢',
-        EXPIRED: '此卡券已逾期失效',
-        REVOKED: '此卡券已遭停用'
-      };
-      return res.status(400).json({ error: statusMap[userPass.status] || '此卡券目前非有效狀態' });
+    if (!Number.isInteger(parsedUnits) || parsedUnits <= 0) {
+      return res.status(422).json({ error: '扣抵數量必須為正整數' });
     }
 
-    // 1. Check expiration
-    if (userPass.expires_at && new Date() > new Date(userPass.expires_at)) {
-      await prisma.userPass.update({
-        where: { id: userPass.id },
-        data: { status: 'EXPIRED' }
+    if (userPass.status === 'REVOKED') {
+      return res.status(400).json({ error: '此卡券已遭停用' });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const deducted = await deductPass(tx, {
+        user_pass_id: userPass.id,
+        units: parsedUnits,
+        staff_name: staffName,
+        source: 'manual_redeem',
+        date: new Date(),
+        note
       });
-      return res.status(400).json({ error: '此卡券已逾期失效' });
-    }
 
-    // 2. Check day restriction (weekday vs weekend)
-    if (!checkDayRestriction(userPass.day_restriction)) {
-      const msg = userPass.day_restriction === 'WEEKDAY_ONLY'
-        ? '此卡券僅限週一至週五平日使用，今日為假日不適用！'
-        : '此卡券僅限週六週日假日使用，今日為平日不適用！';
-      return res.status(400).json({ error: msg });
-    }
+      const codeTail = String(deducted.pass_code || '').slice(-4);
+      const unitLabel = deducted.pass_type === 'TIME_PASS' ? '小時' : '次';
+      await auditLog(tx, {
+        event_type: 'pass_redeemed_manual',
+        category: 'pass',
+        summary: `手動核銷卡券 · *${codeTail} · ${parsedUnits} ${unitLabel}`,
+        reason: note ? String(note).trim() : null,
+        before_json: {
+          user_pass_id: deducted.id,
+          remaining_quota: deducted.remaining_quota !== null ? deducted.remaining_quota + parsedUnits : null
+        },
+        after_json: {
+          user_pass_id: deducted.id,
+          units: parsedUnits,
+          remaining_quota: deducted.remaining_quota
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id,
+        device_label: deviceInfo?.device_label || '管理後台'
+      });
 
-    // 3. Check daily/weekly usage limits
-    const usageLogs = Array.isArray(userPass.usage_logs_json) ? userPass.usage_logs_json : [];
-    const limitCheck = checkUsageLimits(
-      usageLogs,
-      userPass.max_hours_per_day,
-      userPass.max_days_per_week,
-      userPass.max_hours_per_week,
-      deduct_amount
-    );
-    if (!limitCheck.ok) {
-      return res.status(400).json({ error: limitCheck.error });
-    }
-
-    // 4. Deduct quota
-    let newQuota = userPass.remaining_quota;
-    let newStatus = 'ACTIVE';
-
-    if (userPass.remaining_quota !== null) {
-      if (userPass.remaining_quota < deduct_amount) {
-        return res.status(400).json({
-          error: `剩餘次數不足（僅剩 ${userPass.remaining_quota} 次，欲扣抵 ${deduct_amount} 次）`
-        });
-      }
-      newQuota = userPass.remaining_quota - deduct_amount;
-      if (newQuota <= 0) {
-        newStatus = 'EXHAUSTED';
-      }
-    }
-
-    const newLog = {
-      date: formatDateTime(new Date()),
-      deducted: deduct_amount,
-      staff: staff_name || '門市人員',
-      note: note || ''
-    };
-    const updatedLogs = [...usageLogs, newLog];
-
-    const updated = await prisma.userPass.update({
-      where: { id: userPass.id },
-      data: {
-        remaining_quota: newQuota,
-        status: newStatus,
-        usage_logs_json: updatedLogs
-      },
-      include: { user: true, plan: true }
+      return deducted;
     });
 
     res.json({
-      message: `核銷成功！已成功扣抵 ${deduct_amount} ${userPass.pass_type === 'TIME_PASS' ? '小時' : '次'}。`,
+      message: `核銷成功！已成功扣抵 ${parsedUnits} ${updated.pass_type === 'TIME_PASS' ? '小時' : '次'}。`,
       pass: updated
     });
   } catch (error) {
     console.error('redeemUserPass error:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
     res.status(500).json({ error: '卡券核銷失敗' });
   }
 };

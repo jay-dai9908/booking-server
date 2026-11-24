@@ -650,7 +650,8 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
             payment_no: null,
             person_no: null,
             staff_name: '半自助預約',
-            source: 'self_service_prepay'
+            source: 'self_service_prepay',
+            date: sessionDate
           });
           passHolds.push({
             user_pass_id: hold.user_pass_id,
@@ -1148,6 +1149,12 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       return res.status(error.status || 409).json({
         error: error.message,
         code: error.code || 'POOL_HOLD_LIMIT'
+      });
+    }
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
       });
     }
     if (error.message && error.message.startsWith('EQUIPMENT_WINDOW_INVALID:')) {

@@ -103,7 +103,7 @@ export function validatePassUsage(userPass, { date = new Date(), units = 1 } = {
 }
 
 /**
- * Deduct pass quota in a transaction
+ * Deduct pass quota in a transaction (atomic row lock via SELECT ... FOR UPDATE)
  */
 export async function deductPass(tx, {
   user_pass_id,
@@ -112,51 +112,78 @@ export async function deductPass(tx, {
   payment_no,
   person_no,
   staff_name,
-  source = 'checkout'
+  source = 'checkout',
+  date = null,
+  note = ''
 }) {
-  const client = tx || prisma;
-  const pass = await client.userPass.findUnique({
-    where: { id: user_pass_id },
-    include: { plan: true }
-  });
-
-  if (!pass) throw new Error('找不到該卡券');
-
-  let newQuota = pass.remaining_quota;
-  let newStatus = pass.status;
-  if (pass.remaining_quota !== null) {
-    if (pass.remaining_quota < units) {
-      throw new Error(`卡券額度不足（剩餘 ${pass.remaining_quota}，需扣 ${units}）`);
-    }
-    newQuota = pass.remaining_quota - units;
-    if (newQuota <= 0) {
-      newStatus = 'EXHAUSTED';
-    }
+  if (!Number.isInteger(units) || units <= 0) {
+    throw { status: 422, message: '扣抵數量必須為正整數' };
   }
 
-  const usageLogs = Array.isArray(pass.usage_logs_json) ? [...pass.usage_logs_json] : [];
-  usageLogs.push({
-    at: new Date().toISOString(),
-    booking_ref,
-    payment_no,
-    person_no,
-    units,
-    by: staff_name || '櫃檯人員',
-    source
-  });
+  const run = async (client) => {
+    const passId = Number(user_pass_id);
+    await client.$queryRaw`SELECT id FROM "UserPass" WHERE id = ${passId} FOR UPDATE`;
 
-  return await client.userPass.update({
-    where: { id: user_pass_id },
-    data: {
-      remaining_quota: newQuota,
-      status: newStatus,
-      usage_logs_json: usageLogs
+    const pass = await client.userPass.findUnique({
+      where: { id: passId },
+      include: { plan: true }
+    });
+
+    if (!pass) {
+      throw { status: 404, message: '找不到該卡券' };
     }
-  });
+
+    if (pass.status === 'EXHAUSTED' || (pass.remaining_quota !== null && pass.remaining_quota < units)) {
+      throw {
+        status: 409,
+        code: 'PASS_QUOTA_CHANGED',
+        message: `卡券額度不足（剩餘 ${pass.remaining_quota ?? 0}，需扣 ${units}）`
+      };
+    }
+
+    const validation = validatePassUsage(pass, { date: date || new Date(), units });
+    if (!validation.usable) {
+      throw { status: 422, message: validation.reason };
+    }
+
+    let newQuota = pass.remaining_quota;
+    let newStatus = pass.status;
+    if (pass.remaining_quota !== null) {
+      newQuota = pass.remaining_quota - units;
+      if (newQuota <= 0) {
+        newStatus = 'EXHAUSTED';
+      }
+    }
+
+    const usageLogs = Array.isArray(pass.usage_logs_json) ? [...pass.usage_logs_json] : [];
+    usageLogs.push({
+      at: new Date().toISOString(),
+      booking_ref,
+      payment_no,
+      person_no,
+      units,
+      by: staff_name || '櫃檯人員',
+      source,
+      ...(note ? { note: String(note).trim() } : {})
+    });
+
+    return await client.userPass.update({
+      where: { id: passId },
+      data: {
+        remaining_quota: newQuota,
+        status: newStatus,
+        usage_logs_json: usageLogs
+      },
+      include: { user: true, plan: true }
+    });
+  };
+
+  if (tx) return await run(tx);
+  return await prisma.$transaction(run);
 }
 
 /**
- * Restore pass quota when payment is voided or refunded
+ * Restore pass quota when payment is voided or refunded (atomic row lock)
  */
 export async function restorePass(tx, {
   user_pass_id,
@@ -166,41 +193,52 @@ export async function restorePass(tx, {
   person_no,
   staff_name
 }) {
-  const client = tx || prisma;
-  const pass = await client.userPass.findUnique({
-    where: { id: user_pass_id }
-  });
-
-  if (!pass) return null;
-
-  let newQuota = pass.remaining_quota;
-  let newStatus = pass.status;
-  if (pass.remaining_quota !== null) {
-    newQuota = pass.remaining_quota + units;
-    if (pass.status === 'EXHAUSTED' && newQuota > 0) {
-      newStatus = 'ACTIVE';
-    }
+  if (!Number.isInteger(units) || units <= 0) {
+    throw { status: 422, message: '退回數量必須為正整數' };
   }
 
-  const usageLogs = Array.isArray(pass.usage_logs_json) ? [...pass.usage_logs_json] : [];
-  usageLogs.push({
-    type: 'restore',
-    at: new Date().toISOString(),
-    booking_ref,
-    payment_no,
-    person_no,
-    units,
-    by: staff_name || '系統'
-  });
+  const run = async (client) => {
+    const passId = Number(user_pass_id);
+    await client.$queryRaw`SELECT id FROM "UserPass" WHERE id = ${passId} FOR UPDATE`;
 
-  return await client.userPass.update({
-    where: { id: user_pass_id },
-    data: {
-      remaining_quota: newQuota,
-      status: newStatus,
-      usage_logs_json: usageLogs
+    const pass = await client.userPass.findUnique({
+      where: { id: passId }
+    });
+
+    if (!pass) return null;
+
+    let newQuota = pass.remaining_quota;
+    let newStatus = pass.status;
+    if (pass.remaining_quota !== null) {
+      newQuota = pass.remaining_quota + units;
+      if (pass.status === 'EXHAUSTED' && newQuota > 0) {
+        newStatus = 'ACTIVE';
+      }
     }
-  });
+
+    const usageLogs = Array.isArray(pass.usage_logs_json) ? [...pass.usage_logs_json] : [];
+    usageLogs.push({
+      type: 'restore',
+      at: new Date().toISOString(),
+      booking_ref,
+      payment_no,
+      person_no,
+      units,
+      by: staff_name || '系統'
+    });
+
+    return await client.userPass.update({
+      where: { id: passId },
+      data: {
+        remaining_quota: newQuota,
+        status: newStatus,
+        usage_logs_json: usageLogs
+      }
+    });
+  };
+
+  if (tx) return await run(tx);
+  return await prisma.$transaction(run);
 }
 
 export default {
