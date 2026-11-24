@@ -2,21 +2,48 @@ import prisma from '../prismaClient.js';
 import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { dateOnly } from '../../../shared/time.js';
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_SESSION_RANGE_DAYS = 120;
+
+function isValidYmd(str) {
+  if (typeof str !== 'string' || !ISO_DATE_RE.test(str)) return false;
+  const d = dateOnly(str);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === str;
+}
+
 export const getSessions = async (req, res) => {
-  const { date, start_date, end_date } = req.query; 
-  
-  if (!date && (!start_date || !end_date)) {
+  const { date, start_date, end_date } = req.query;
+
+  if (date === undefined && (!start_date || !end_date)) {
     return res.status(400).json({ error: 'Date or start_date/end_date query parameters are required' });
   }
 
   try {
     let whereClause = {};
-    if (date) {
-      whereClause.session_date = dateOnly(date);
+    if (date !== undefined) {
+      const cleanDate = String(date).trim();
+      if (!isValidYmd(cleanDate)) {
+        return res.status(400).json({ error: '日期格式必須為 YYYY-MM-DD' });
+      }
+      whereClause.session_date = dateOnly(cleanDate);
     } else {
+      const cleanStart = String(start_date).trim();
+      const cleanEnd = String(end_date).trim();
+      if (!isValidYmd(cleanStart) || !isValidYmd(cleanEnd)) {
+        return res.status(400).json({ error: 'start_date 與 end_date 格式必須為 YYYY-MM-DD' });
+      }
+      const startObj = dateOnly(cleanStart);
+      const endObj = dateOnly(cleanEnd);
+      if (endObj < startObj) {
+        return res.status(400).json({ error: 'end_date 不可早於 start_date' });
+      }
+      const diffDays = Math.round((endObj.getTime() - startObj.getTime()) / (24 * 60 * 60 * 1000));
+      if (diffDays > MAX_SESSION_RANGE_DAYS) {
+        return res.status(400).json({ error: `查詢區間不可超過 ${MAX_SESSION_RANGE_DAYS} 天` });
+      }
       whereClause.session_date = {
-        gte: dateOnly(start_date),
-        lte: dateOnly(end_date)
+        gte: startObj,
+        lte: endObj
       };
     }
     

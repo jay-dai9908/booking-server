@@ -58,7 +58,7 @@ async function run() {
       process.exit(1);
     }
     customerToken = jwt.sign(
-      { id: 1, role: 'customer' },
+      { id: 1, role: 'customer', typ: 'customer' },
       process.env.JWT_SECRET.trim(),
       { expiresIn: '7d' }
     );

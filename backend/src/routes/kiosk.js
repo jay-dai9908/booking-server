@@ -24,14 +24,15 @@ import {
   updateAlertRecipientsHandler,
   sendTestAlertHandler
 } from '../controllers/kioskController.js';
-import { verifyToken, requireAnyPermission } from '../middlewares/authMiddleware.js';
+import { verifyToken, requireAnyPermission, requirePermissionGroup } from '../middlewares/authMiddleware.js';
+import { KIOSK_SETTINGS_WRITE } from '../middlewares/permissionGroups.js';
 import { kioskEnvelope } from '../middlewares/kioskEnvelope.js';
 
 const router = express.Router();
 
 // 後台報到機與半自助共用設定
 router.get('/settings', verifyToken, requireAnyPermission(['settings', 'sessions']), getKioskSettings);
-router.put('/settings', verifyToken, requireAnyPermission(['settings', 'sessions']), updateKioskSettings);
+router.put('/settings', verifyToken, requirePermissionGroup(KIOSK_SETTINGS_WRITE), updateKioskSettings);
 
 // 後台報到機管理端點（權限：settings）
 router.get('/admin/overview', verifyToken, requireAnyPermission(['settings']), getKioskAdminOverviewHandler);

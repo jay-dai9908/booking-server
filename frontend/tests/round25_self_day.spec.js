@@ -203,7 +203,7 @@ async function run() {
         throw new Error('需要 JWT_SECRET 或 /api/auth/test-login 以產生測試顧客登入 Token');
       }
       customerToken = jwt.sign(
-        { id: customerUser.id, role: 'customer', name: customerUser.name, phone: customerUser.phone },
+        { id: customerUser.id, role: 'customer', typ: 'customer', name: customerUser.name, phone: customerUser.phone },
         process.env.JWT_SECRET.trim(),
         { expiresIn: '1d' }
       );

@@ -18,36 +18,12 @@ const isLoopbackIp = (ip) => {
 };
 
 /**
- * Extract clean client IP address from Express request (with client-reported public IP fallback when behind unconfigured local Nginx proxy)
+ * Extract client IP address strictly from Express req.ip (controlled by app.set('trust proxy', ...))
+ * or raw socket remoteAddress. The second parameter (_clientInfo) is kept for caller backwards compatibility only.
  */
-export const getClientIp = (req, clientInfo = {}) => {
-  const candidates = [
-    req.headers['cf-connecting-ip'],
-    req.headers['true-client-ip'],
-    req.headers['x-real-ip'],
-    req.headers['x-client-ip'],
-    req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0] : '',
-    clientInfo?.publicIp,
-    req.query?.ip,
-    req.ip,
-    req.socket?.remoteAddress
-  ];
-
-  // First prefer any non-loopback IP (real public/WAN IP)
-  for (const c of candidates) {
-    const cleaned = normalizeIp(c);
-    if (cleaned && !isLoopbackIp(cleaned)) {
-      return cleaned;
-    }
-  }
-
-  // Fallback to whatever loopback IP was present if running on localhost without internet
-  for (const c of candidates) {
-    const cleaned = normalizeIp(c);
-    if (cleaned) return cleaned;
-  }
-
-  return '未知 IP';
+export const getClientIp = (req, _clientInfo = {}) => {
+  const cleaned = normalizeIp(req?.ip || req?.socket?.remoteAddress);
+  return cleaned || '未知 IP';
 };
 
 /**

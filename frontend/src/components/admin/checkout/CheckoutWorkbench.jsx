@@ -46,6 +46,7 @@ import { buildOrderSummary, commandsToPreviewHtml } from '@shared/receipts.js';
 import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
 import { displayBoardName, computeBill, computeEntry } from '@shared/billing.js';
 import { personElapsedMinutes, formatElapsedText, extractTimeHHMM, bookingDurationText, formatBookingRef } from '../../../utils/admin/floorSelectors';
+import { useAdminPermissions, MONEY_WRITE, COUPON_WRITE } from '../../../hooks/admin/useAdminPermissions';
 
 export default function CheckoutWorkbench({
   isOpen = false,
@@ -54,6 +55,9 @@ export default function CheckoutWorkbench({
   onPaymentSuccess,
   onSyncError
 }) {
+  const { can } = useAdminPermissions();
+  const canMoneyWrite = can(MONEY_WRITE);
+  const canCouponWrite = can(COUPON_WRITE);
   const isMountedRef = useRef(true);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -922,7 +926,7 @@ export default function CheckoutWorkbench({
     try {
       setIsValidatingPromo(true);
       setPromoError('');
-      const res = await api.post('/checkout/promo-codes/validate', {
+      const res = await api.post('/checkout/admin/promo-codes/validate', {
         code,
         booking_ref: bookingRef,
         pax: booking.pax || persons.length
@@ -1350,15 +1354,17 @@ export default function CheckoutWorkbench({
     <div className="p-4 rounded-2xl border border-sg-line bg-white shadow-sm space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-[14px] font-bold text-sg-ink">優惠券與折扣碼</h3>
-        <button
-          type="button"
-          data-testid="add-quick-pos-promo-btn"
-          onClick={() => setShowQuickPromoModal(true)}
-          className="text-[12px] font-bold text-sg-brown hover:text-sg-brown-dark hover:underline flex items-center gap-1 cursor-pointer"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          新增櫃檯優惠
-        </button>
+        {canCouponWrite && (
+          <button
+            type="button"
+            data-testid="add-quick-pos-promo-btn"
+            onClick={() => setShowQuickPromoModal(true)}
+            className="text-[12px] font-bold text-sg-brown hover:text-sg-brown-dark hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            新增櫃檯優惠
+          </button>
+        )}
       </div>
 
       {/* Quick Promos */}
@@ -2065,14 +2071,16 @@ export default function CheckoutWorkbench({
                         印分單
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => { setShowMobileMoreMenu(false); setShowWaiveModal(true); }}
-                      disabled={unpaidPersons.length === 0}
-                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl disabled:opacity-40"
-                    >
-                      免收（招待）
-                    </button>
+                    {canMoneyWrite && (
+                      <button
+                        type="button"
+                        onClick={() => { setShowMobileMoreMenu(false); setShowWaiveModal(true); }}
+                        disabled={unpaidPersons.length === 0}
+                        className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl disabled:opacity-40"
+                      >
+                        免收（招待）
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => { setShowMobileMoreMenu(false); setShowOverrideModal(true); }}
@@ -2087,19 +2095,25 @@ export default function CheckoutWorkbench({
                     >
                       卡券中心
                     </button>
-                    <button
-                      type="button"
-                      data-testid="workbench-mark-unpaid-btn"
-                      onClick={() => {
-                        setShowMobileMoreMenu(false);
-                        setUnpaidReason('收錯訂單');
-                        setUnpaidError(null);
-                        setShowMarkUnpaidModal(true);
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl"
-                    >
-                      標記未結帳
-                    </button>
+                    {canMoneyWrite ? (
+                      <button
+                        type="button"
+                        data-testid="workbench-mark-unpaid-btn"
+                        onClick={() => {
+                          setShowMobileMoreMenu(false);
+                          setUnpaidReason('收錯訂單');
+                          setUnpaidError(null);
+                          setShowMarkUnpaidModal(true);
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl"
+                      >
+                        標記未結帳
+                      </button>
+                    ) : (
+                      <div className="px-3 py-1.5 text-[11px] text-sg-muted">
+                        退款與作廢需要帳務或預約權限
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2145,15 +2159,19 @@ export default function CheckoutWorkbench({
               >
                 分開收款
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowWaiveModal(true)}
-                disabled={unpaidPersons.length === 0}
-                className="whitespace-nowrap"
-              >
-                免收（招待）
-              </Button>
+              {canMoneyWrite ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowWaiveModal(true)}
+                  disabled={unpaidPersons.length === 0}
+                  className="whitespace-nowrap"
+                >
+                  免收（招待）
+                </Button>
+              ) : (
+                <span className="text-[11px] text-sg-muted">退款與作廢需要帳務或預約權限</span>
+              )}
               <div className="relative">
                 <button
                   type="button"
@@ -2184,19 +2202,25 @@ export default function CheckoutWorkbench({
                     >
                       卡券中心
                     </button>
-                    <button
-                      type="button"
-                      data-testid="workbench-mark-unpaid-btn-desktop"
-                      onClick={() => {
-                        setShowMobileMoreMenu(false);
-                        setUnpaidReason('收錯訂單');
-                        setUnpaidError(null);
-                        setShowMarkUnpaidModal(true);
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl"
-                    >
-                      標記未結帳
-                    </button>
+                    {canMoneyWrite ? (
+                      <button
+                        type="button"
+                        data-testid="workbench-mark-unpaid-btn-desktop"
+                        onClick={() => {
+                          setShowMobileMoreMenu(false);
+                          setUnpaidReason('收錯訂單');
+                          setUnpaidError(null);
+                          setShowMarkUnpaidModal(true);
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-danger hover:bg-sg-danger-soft rounded-xl"
+                      >
+                        標記未結帳
+                      </button>
+                    ) : (
+                      <div className="px-3 py-1.5 text-[11px] text-sg-muted">
+                        退款與作廢需要帳務或預約權限
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

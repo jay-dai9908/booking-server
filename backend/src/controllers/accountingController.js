@@ -84,7 +84,7 @@ export const getAccountingSummary = async (req, res) => {
     });
   } catch (error) {
     console.error('[getAccountingSummary] Error:', error);
-    return res.status(500).json({ error: '無法讀取帳務摘要', details: error.message });
+    return res.status(500).json({ error: '無法讀取帳務摘要' });
   }
 };
 
@@ -142,7 +142,7 @@ export const getLedger = async (req, res) => {
     return res.json({ ledger });
   } catch (error) {
     console.error('[getLedger] Error:', error);
-    return res.status(500).json({ error: '無法讀取交易流水帳', details: error.message });
+    return res.status(500).json({ error: '無法讀取交易流水帳' });
   }
 };
 
@@ -426,7 +426,7 @@ export const postClosing = async (req, res) => {
     return res.json({ success: true, closing, print_job: printJob });
   } catch (error) {
     console.error('[postClosing] Error:', error);
-    return res.status(500).json({ error: '日結存檔失敗', details: error.message });
+    return res.status(500).json({ error: '日結存檔失敗' });
   }
 };
 

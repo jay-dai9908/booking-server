@@ -4,6 +4,7 @@ import Button from './Button';
 import { useToast } from './Toast';
 import { formatDateTime, formatMoneyBig, weekdayChar } from '../../utils/customer/format';
 import api from '../../api/axios';
+import { safeHttpUrl } from '@shared/safeUrl.js';
 
 function formatDeadlineDisplay(deadlineAt) {
   if (!deadlineAt) return '';
@@ -27,6 +28,7 @@ export default function PrepayTransferCard({ reservation, onReported }) {
 
   const isMismatch = prepay.status === 'mismatch';
   const deadlineText = formatDeadlineDisplay(prepay.deadline_at);
+  const safeAssignedPoolUrl = safeHttpUrl(prepay.assigned_pool_url);
 
   const bankLabel = prepay.assigned_pool_account
     ? '822 中國信託（專屬帳號）'
@@ -123,9 +125,9 @@ export default function PrepayTransferCard({ reservation, onReported }) {
         </dd>
       </dl>
 
-      {prepay.assigned_pool_url && (
+      {safeAssignedPoolUrl && (
         <a
-          href={prepay.assigned_pool_url}
+          href={safeAssignedPoolUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="text-center text-[13px] font-bold text-sg-brown underline"

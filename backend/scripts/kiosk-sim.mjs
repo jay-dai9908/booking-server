@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 模擬報到機（用戶端）：對任何照協定實作的伺服器送 sync／access。
 // 用法：node backend/scripts/kiosk-sim.mjs "<配對字串>" sync
-//       node backend/scripts/kiosk-sim.mjs "<配對字串>" phone 0912345678
+//       node backend/scripts/kiosk-sim.mjs "<配對字串>" phone 0912345678 // check-secrets: fake-data
 //       node backend/scripts/kiosk-sim.mjs "<配對字串>" qr SG1-XXXXXXXXXX-XXXXXXXX
 //       node backend/scripts/kiosk-sim.mjs "<配對字串>" replay
 import * as S from '../src/services/kiosk/sgk1.js';

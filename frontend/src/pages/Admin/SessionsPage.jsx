@@ -35,8 +35,11 @@ import HourRangeScrollPicker from '../../components/HourRangeScrollPicker';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import SelfServiceInfoCard from '../../components/customer/SelfServiceInfoCard';
 import { ironText as buildIronText } from '../../../../shared/selfService.js';
+import { useAdminPermissions } from '../../hooks/admin/useAdminPermissions';
 
 export default function SessionsPage() {
+  const { can } = useAdminPermissions();
+  const canSettings = can('settings');
   const [toastMsg, setToastMsg] = useState(null);
   const showToast = (msg) => {
     setToastMsg(msg);
@@ -150,6 +153,8 @@ export default function SessionsPage() {
       setPriceNoticeText(res.data.price_notice_text ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品');
       setShowAnnouncement(res.data.show_announcement !== false);
       setAnnouncementText(res.data.announcement_text ?? '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠');
+      setShowLineButton(res.data.show_line_button !== false);
+      setLineButtonUrl(res.data.official_line_url || res.data.line_button_url || 'https://lin.ee/vsZhRW5');
       if (res.data?.business_hours_json) {
         setBusinessHours({
           weekday: {
@@ -183,21 +188,24 @@ export default function SessionsPage() {
     if (e) e.preventDefault();
     setIsSavingDisplay(true);
     try {
-      await api.put('/daily-settings/global', {
+      const payload = {
         show_price_cards: showPriceCards,
         price_notice_text: priceNoticeText,
         show_announcement: showAnnouncement,
-        announcement_text: announcementText,
-        show_line_button: showLineButton,
-        line_button_url: lineButtonUrl
-      });
+        announcement_text: announcementText
+      };
+      if (canSettings) {
+        payload.show_line_button = showLineButton;
+        payload.line_button_url = lineButtonUrl;
+      }
+      await api.put('/daily-settings/global', payload);
       try {
         localStorage.removeItem('shiguang_booking_global_settings_cache');
       } catch (e) {}
       showToast('顧客端首頁顯示設定已成功更新！');
     } catch (err) {
       console.error(err);
-      showToast('更新顯示設定失敗');
+      showToast(err.response?.data?.error || '更新顯示設定失敗');
     } finally {
       setIsSavingDisplay(false);
     }
@@ -1373,11 +1381,21 @@ export default function SessionsPage() {
         </form>
 
         {/* Shared Kiosk / Self-Service Settings */}
-        <form onSubmit={handleSaveKioskSettings} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4 flex flex-col justify-between">
+        <form onSubmit={handleSaveKioskSettings} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4 flex flex-col justify-between" data-testid="sessions-kiosk-settings-card">
           <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-bold text-gray-900">半自助日共用設定</h2>
-              <p className="text-xs text-gray-500 mt-0.5">全店共用，不分日期</p>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">半自助日共用設定</h2>
+                <p className="text-xs text-gray-500 mt-0.5">全店共用，不分日期</p>
+              </div>
+              {!canSettings && (
+                <span
+                  data-testid="kiosk-settings-readonly-notice"
+                  className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg shrink-0"
+                >
+                  需要系統全域設定權限
+                </span>
+              )}
             </div>
 
             <div className="space-y-3 text-sm">
@@ -1388,9 +1406,11 @@ export default function SessionsPage() {
                     type="number"
                     min="0"
                     max="23"
+                    disabled={!canSettings}
+                    readOnly={!canSettings}
                     value={kioskSettings.prepay_deadline_hour}
                     onChange={(e) => setKioskSettings(prev => ({ ...prev, prepay_deadline_hour: e.target.value }))}
-                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right"
+                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right disabled:bg-gray-100 disabled:text-gray-500"
                   />
                   <span className="text-gray-600 font-bold">:00</span>
                 </div>
@@ -1403,9 +1423,11 @@ export default function SessionsPage() {
                     type="number"
                     min="0"
                     max="120"
+                    disabled={!canSettings}
+                    readOnly={!canSettings}
                     value={kioskSettings.early_minutes}
                     onChange={(e) => setKioskSettings(prev => ({ ...prev, early_minutes: e.target.value }))}
-                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right"
+                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right disabled:bg-gray-100 disabled:text-gray-500"
                   />
                   <span className="text-gray-600">分鐘進場</span>
                 </div>
@@ -1418,9 +1440,11 @@ export default function SessionsPage() {
                     type="number"
                     min="0"
                     max="240"
+                    disabled={!canSettings}
+                    readOnly={!canSettings}
                     value={kioskSettings.after_close_minutes}
                     onChange={(e) => setKioskSettings(prev => ({ ...prev, after_close_minutes: e.target.value }))}
-                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right"
+                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right disabled:bg-gray-100 disabled:text-gray-500"
                   />
                   <span className="text-gray-600">分鐘內</span>
                 </div>
@@ -1433,9 +1457,11 @@ export default function SessionsPage() {
                     type="number"
                     min="1"
                     max="10"
+                    disabled={!canSettings}
+                    readOnly={!canSettings}
                     value={kioskSettings.max_unpaid_self_bookings}
                     onChange={(e) => setKioskSettings(prev => ({ ...prev, max_unpaid_self_bookings: e.target.value }))}
-                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right"
+                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right disabled:bg-gray-100 disabled:text-gray-500"
                   />
                   <span className="text-gray-600">筆</span>
                 </div>
@@ -1443,16 +1469,141 @@ export default function SessionsPage() {
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={savingKioskSettings}
-            data-testid="save-kiosk-settings-btn"
-            className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
-          >
-            {savingKioskSettings ? '儲存中...' : '儲存半自助日共用設定'}
-          </button>
+          {canSettings && (
+            <button
+              type="submit"
+              disabled={savingKioskSettings}
+              data-testid="save-kiosk-settings-btn"
+              className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
+            >
+              {savingKioskSettings ? '儲存中...' : '儲存半自助日共用設定'}
+            </button>
+          )}
         </form>
       </div>
+
+      {/* Customer Home Display Settings Card */}
+      <form
+        onSubmit={handleUpdateDisplaySettings}
+        data-testid="sessions-display-settings-card"
+        className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mt-8 space-y-5"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <Sliders className="w-5 h-5 text-sg-brown" />
+              顧客端首頁顯示設定
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              設定顧客預約首頁的頂部系統公告欄、入場價格表卡片與官方 LINE 連結按鈕
+            </p>
+          </div>
+          <button
+            type="submit"
+            disabled={isSavingDisplay}
+            data-testid="save-display-settings-btn"
+            className="px-5 py-2.5 bg-sg-brown hover:bg-sg-brown-hover text-white font-bold rounded-xl text-xs sm:text-sm shadow-sm transition-all disabled:opacity-50 shrink-0"
+          >
+            {isSavingDisplay ? '儲存中...' : '儲存顧客端首頁顯示設定'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {/* Announcement */}
+          <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+                <Bell className="w-4 h-4 text-amber-600" />
+                頂部系統公告欄
+              </span>
+              <input
+                type="checkbox"
+                data-testid="sessions-announcement-toggle"
+                checked={showAnnouncement}
+                onChange={(e) => setShowAnnouncement(e.target.checked)}
+                className="w-4 h-4 accent-[#8B5B43]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">公告文字內容</label>
+              <textarea
+                rows="3"
+                data-testid="sessions-announcement-input"
+                value={announcementText}
+                onChange={(e) => setAnnouncementText(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:border-sg-brown focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Price Cards */}
+          <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+                <CreditCard className="w-4 h-4 text-sg-brown" />
+                首頁入場價格表雙卡片
+              </span>
+              <input
+                type="checkbox"
+                data-testid="sessions-price-cards-toggle"
+                checked={showPriceCards}
+                onChange={(e) => setShowPriceCards(e.target.checked)}
+                className="w-4 h-4 accent-[#8B5B43]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">價格卡下方備註提醒文字</label>
+              <textarea
+                rows="3"
+                data-testid="sessions-price-notice-input"
+                value={priceNoticeText}
+                onChange={(e) => setPriceNoticeText(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:border-sg-brown focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Official LINE Button */}
+          <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+                <MessageSquare className="w-4 h-4 text-emerald-600" />
+                官方 LINE 連結與按鈕
+              </span>
+              <input
+                type="checkbox"
+                data-testid="sessions-line-toggle"
+                disabled={!canSettings}
+                checked={showLineButton}
+                onChange={(e) => setShowLineButton(e.target.checked)}
+                className="w-4 h-4 accent-[#8B5B43] disabled:opacity-50"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label className="block text-xs font-semibold text-gray-700">官方 LINE 連結網址</label>
+                {!canSettings && (
+                  <span
+                    data-testid="sessions-line-readonly-notice"
+                    className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md"
+                  >
+                    需要系統全域設定權限
+                  </span>
+                )}
+              </div>
+              <input
+                type="url"
+                data-testid="sessions-line-url-input"
+                disabled={!canSettings}
+                readOnly={!canSettings}
+                value={lineButtonUrl}
+                onChange={(e) => setLineButtonUrl(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:border-sg-brown focus:outline-none disabled:bg-gray-100 disabled:text-gray-500"
+              />
+            </div>
+          </div>
+        </div>
+      </form>
 
       {/* Shortcut Banner to Dedicated System Settings Page */}
       <div className="bg-[#FAF7F2] p-5 sm:p-6 rounded-2xl shadow-xs border border-[#E8DEC8] mt-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

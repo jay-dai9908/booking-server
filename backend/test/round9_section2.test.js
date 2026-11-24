@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import prisma from '../src/prismaClient.js';
 import { getGlobalSetting, updateGlobalSetting } from '../src/controllers/dailySettingController.js';
 
-function mockReq(body = {}, query = {}, user = { id: 1, name: '測試管理員', role: 'admin' }) {
+function mockReq(body = {}, query = {}, user = { id: 1, name: '測試管理員', role: 'admin', isSuperAdmin: true, permissions: ['all'] }) {
   return { body, query, user };
 }
 

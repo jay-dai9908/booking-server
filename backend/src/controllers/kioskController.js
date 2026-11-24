@@ -11,6 +11,7 @@ import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { buildFloorMap } from '../../../shared/floorMap.js';
 import { sendKioskAlertMessage } from '../services/kiosk/alertService.js';
 import displayBus from '../services/display/displayBus.js';
+import { activeUserWhere } from '../utils/userQuery.js';
 
 const ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -907,6 +908,7 @@ export const getAlertRecipientsHandler = async (req, res) => {
 
     // 尋找已綁定真實 LINE 的會員/員工帳號供勾選
     const users = await prisma.user.findMany({
+      where: activeUserWhere(),
       select: { id: true, name: true, phone: true, line_user_id: true }
     });
 

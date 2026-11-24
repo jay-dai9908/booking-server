@@ -27,7 +27,7 @@ export async function getLive(req, res) {
     return res.json(data);
   } catch (error) {
     console.error('[getLive] Error:', error);
-    return res.status(500).json({ error: '無法讀取現場狀態', details: error.message });
+    return res.status(500).json({ error: '無法讀取現場狀態' });
   }
 }
 
@@ -156,7 +156,7 @@ export async function checkIn(req, res) {
         code: error.code || 'CHECK_IN_FAILED'
       });
     }
-    return res.status(500).json({ error: '報到帶位失敗', details: error.message });
+    return res.status(500).json({ error: '報到帶位失敗' });
   }
 }
 
@@ -309,7 +309,7 @@ export async function moveSeat(req, res) {
   } catch (error) {
     console.error('[moveSeat] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '換位失敗', details: error.message });
+    return res.status(500).json({ error: '換位失敗' });
   }
 }
 
@@ -466,7 +466,7 @@ export async function moveGroup(req, res) {
   } catch (error) {
     console.error('[moveGroup] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message, message: error.message });
-    return res.status(500).json({ error: '整組換桌失敗', details: error.message });
+    return res.status(500).json({ error: '整組換桌失敗' });
   }
 }
 
@@ -692,7 +692,7 @@ export async function handleTimer(req, res) {
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[handleTimer] Error:', error);
-    return res.status(500).json({ error: '計時操作失敗', details: error.message });
+    return res.status(500).json({ error: '計時操作失敗' });
   }
 }
 
@@ -834,7 +834,7 @@ export async function addPerson(req, res) {
   } catch (error) {
     console.error('[addPerson] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
-    return res.status(500).json({ error: '加人失敗', details: error.message });
+    return res.status(500).json({ error: '加人失敗' });
   }
 }
 
@@ -982,7 +982,7 @@ export async function removePerson(req, res) {
   } catch (error) {
     console.error('[removePerson] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '移除顧客失敗', details: error.message });
+    return res.status(500).json({ error: '移除顧客失敗' });
   }
 }
 
@@ -1225,7 +1225,7 @@ export async function swapBoard(req, res) {
   } catch (error) {
     console.error('[swapBoard] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '換板失敗', details: error.message });
+    return res.status(500).json({ error: '換板失敗' });
   }
 }
 
@@ -1331,7 +1331,7 @@ export async function returnBoard(req, res) {
   } catch (error) {
     console.error('[returnBoard] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '歸還板子失敗', details: error.message });
+    return res.status(500).json({ error: '歸還板子失敗' });
   }
 }
 
@@ -1356,7 +1356,7 @@ export async function reassignBoard(req, res) {
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[reassignBoard] Error:', error);
-    return res.status(500).json({ error: '指派板子失敗', details: error.message });
+    return res.status(500).json({ error: '指派板子失敗' });
   }
 }
 
@@ -1599,7 +1599,7 @@ export async function addBoardRental(req, res) {
   } catch (error) {
     console.error('[addBoardRental] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
-    return res.status(500).json({ error: '加租智能板失敗', details: error.message });
+    return res.status(500).json({ error: '加租智能板失敗' });
   }
 }
 
@@ -1659,7 +1659,7 @@ export async function pauseBoard(req, res) {
   } catch (error) {
     console.error('[pauseBoard] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '暫停智能板失敗', details: error.message });
+    return res.status(500).json({ error: '暫停智能板失敗' });
   }
 }
 
@@ -1715,7 +1715,7 @@ export async function resumeBoard(req, res) {
   } catch (error) {
     console.error('[resumeBoard] Error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
-    return res.status(500).json({ error: '恢復智能板失敗', details: error.message });
+    return res.status(500).json({ error: '恢復智能板失敗' });
   }
 }
 

@@ -27,6 +27,8 @@ import { earliestEntry, ironText } from '../../../shared/selfService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { getReservationEntryPass } from '../services/kiosk/entryService.js';
+import { isPlainString } from '../utils/phone.js';
+import { activeUserWhere } from '../utils/userQuery.js';
 
 function mergeCustomerEquipments(rawList = []) {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
@@ -1181,8 +1183,8 @@ export const getAdminReservations = async (req, res) => {
       const cleanRefPrefix = search.replace(/^BK-/i, '');
       const orConditions = [
         { booking_ref: { contains: search, mode: 'insensitive' } },
-        { user: { name: { contains: search, mode: 'insensitive' } } },
-        { user: { phone: { contains: search } } },
+        { user: activeUserWhere({ name: { contains: search, mode: 'insensitive' } }) },
+        { user: activeUserWhere({ phone: { contains: search } }) },
         { customer_note: { contains: search, mode: 'insensitive' } },
         { admin_note: { contains: search, mode: 'insensitive' } }
       ];
@@ -1392,12 +1394,12 @@ export const getMyReservations = async (req, res) => {
   }
 };
 
-export const cancelReservation = async (req, res) => {
-  // We use :id parameter, but it actually receives booking_ref now.
-  const { id: booking_ref } = req.params;
+async function cancelReservationCore(req, res, { actor }) {
+  const isAdmin = actor === 'admin';
+  // Customer route uses :id, admin route uses :booking_ref
+  const booking_ref = isAdmin ? req.params.booking_ref : req.params.id;
   const userId = req.user?.id;
-  const isAdmin = req.user?.role === 'admin';
-  const confirmPaidCancel = Boolean(req.body?.confirmPaidCancel || req.query?.confirmPaidCancel === 'true');
+  const confirmPaidCancel = isAdmin ? Boolean(req.body?.confirmPaidCancel || req.query?.confirmPaidCancel === 'true') : false;
   const operatorName = isAdmin ? (req.user?.name || '管理員') : 'customer';
   const cancelledByTag = isAdmin ? `admin:${operatorName}` : 'customer';
 
@@ -1436,7 +1438,7 @@ export const cancelReservation = async (req, res) => {
       }
 
       const isCollected = !isSelfCustomerAllPassVerified &&
-        reservations.some(r => (r.amount_received && r.amount_received > 0) || r.is_paid);
+        reservations.some(r => r.amount_received && r.amount_received > 0);
       if (isCollected) {
         const amt = reservations[0].amount_received || 0;
         return { errorStatus: 409, errorBody: { error: `這筆已收款 NT$${amt}，請先退款或作廢收款` } };
@@ -1639,7 +1641,10 @@ export const cancelReservation = async (req, res) => {
     console.error('Error cancelling reservation:', error);
     res.status(500).json({ error: 'Failed to cancel reservation' });
   }
-};
+}
+
+export const cancelReservation = (req, res) => cancelReservationCore(req, res, { actor: 'customer' });
+export const adminCancelReservation = (req, res) => cancelReservationCore(req, res, { actor: 'admin' });
 
 export const deleteReservationRecord = async (req, res) => {
   const { id: booking_ref } = req.params;
@@ -2038,27 +2043,38 @@ export const getSessionSeats = async (req, res) => {
 };
 
 export const adminCreateReservation = async (req, res) => {
-  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, attendance, autoCheckIn } = req.body;
+  const { session_ids, pax, name, phone, forceSplit, isForceWait, isWalkIn, attendance, autoCheckIn } = req.body || {};
   
   const parsedPax = parseInt(pax, 10);
   if (!Array.isArray(session_ids) || session_ids.length === 0 || !Number.isInteger(parsedPax) || parsedPax < 1) {
     return res.status(400).json({ error: '人數必須為大於 0 的正整數，且必須選擇至少一個時段' });
   }
 
-  if (!name) {
+  if (!isPlainString(name) || !name.trim()) {
     return res.status(400).json({ error: 'Name is required for manual booking.' });
   }
+
+  if (phone !== undefined && phone !== null && !isPlainString(phone)) {
+    return res.status(400).json({ error: '電話號碼格式不正確' });
+  }
+  const cleanName = name.trim();
+  const cleanPhone = isPlainString(phone) ? phone.trim() : '';
 
   try {
     const booking_ref = crypto.randomUUID();
 
     const result = await prisma.$transaction(async (tx) => {
-      // 0. Handle user finding / creation
+      // 0. Handle user finding / creation (exclude merged users; prefer real LINE user over manual user)
       let targetUser = null;
-      if (phone) {
-        targetUser = await tx.user.findFirst({
-          where: { phone }
+      if (cleanPhone) {
+        const matchedUsers = await tx.user.findMany({
+          where: activeUserWhere({ phone: cleanPhone }),
+          orderBy: { id: 'asc' }
         });
+        targetUser =
+          matchedUsers.find((u) => u.line_user_id && !u.line_user_id.startsWith('manual_')) ||
+          matchedUsers[0] ||
+          null;
       }
 
       if (!targetUser) {
@@ -2066,8 +2082,8 @@ export const adminCreateReservation = async (req, res) => {
         targetUser = await tx.user.create({
           data: {
             line_user_id: `manual_${crypto.randomUUID()}`,
-            name,
-            phone: phone || null
+            name: cleanName,
+            phone: cleanPhone || null
           }
         });
       }
@@ -2637,11 +2653,11 @@ export const updateAmount = async (req, res) => {
   }
 };
 
-export const updateReservationNotes = async (req, res) => {
+async function updateReservationNotesCore(req, res, { actor }) {
   const { booking_ref } = req.params;
   const { customer_note, admin_note } = req.body;
   const userId = req.user?.id;
-  const isStaff = req.user?.role === 'admin' || req.user?.role === 'staff';
+  const isStaff = actor === 'admin';
 
   try {
     const reservations = await prisma.reservation.findMany({
@@ -2682,7 +2698,10 @@ export const updateReservationNotes = async (req, res) => {
     console.error('Error updating reservation notes:', error);
     res.status(500).json({ error: '更新備註失敗' });
   }
-};
+}
+
+export const updateReservationNotes = (req, res) => updateReservationNotesCore(req, res, { actor: 'customer' });
+export const adminUpdateReservationNotes = (req, res) => updateReservationNotesCore(req, res, { actor: 'admin' });
 
 /**
  * Admin Sidebar Navigation Live Badges
@@ -2788,8 +2807,8 @@ export const adminQuickLookup = async (req, res) => {
     const cleanRefPrefix = q.replace(/^BK-/i, '');
     const resOrConditions = [
       { booking_ref: { contains: q, mode: 'insensitive' } },
-      { user: { name: { contains: q, mode: 'insensitive' } } },
-      { user: { phone: { contains: q } } }
+      { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+      { user: activeUserWhere({ phone: { contains: q } }) }
     ];
     if (cleanRefPrefix && cleanRefPrefix !== q) {
       resOrConditions.push({ booking_ref: { contains: cleanRefPrefix, mode: 'insensitive' } });
@@ -2814,8 +2833,8 @@ export const adminQuickLookup = async (req, res) => {
         where: {
           OR: [
             { pass_code: { contains: q, mode: 'insensitive' } },
-            { user: { name: { contains: q, mode: 'insensitive' } } },
-            { user: { phone: { contains: q } } }
+            { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+            { user: activeUserWhere({ phone: { contains: q } }) }
           ]
         },
         include: {
@@ -2832,8 +2851,8 @@ export const adminQuickLookup = async (req, res) => {
             { order_ref: { contains: q, mode: 'insensitive' } },
             { remittance_last5: { contains: q } },
             { assigned_pool_account: { contains: q } },
-            { user: { name: { contains: q, mode: 'insensitive' } } },
-            { user: { phone: { contains: q } } }
+            { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+            { user: activeUserWhere({ phone: { contains: q } }) }
           ]
         },
         include: {

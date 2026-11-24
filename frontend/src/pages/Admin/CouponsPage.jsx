@@ -22,6 +22,7 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 import api from '../../api/axios';
+import { useAdminPermissions, COUPON_WRITE } from '../../hooks/admin/useAdminPermissions';
 
 const DISCOUNT_TYPE_CONFIG = {
   fixed_order: {
@@ -67,6 +68,8 @@ const ADDON_CATEGORIES = {
 };
 
 export default function CouponsPage() {
+  const { can } = useAdminPermissions();
+  const canCouponWrite = can(COUPON_WRITE);
   const [activeTab, setActiveTab] = useState('coupons'); // 'coupons' | 'addons' | 'plans'
   const [promoCodes, setPromoCodes] = useState([]);
   const [addonItems, setAddonItems] = useState([]);
@@ -518,6 +521,16 @@ export default function CouponsPage() {
         </div>
       )}
 
+      {!canCouponWrite && (
+        <div
+          data-testid="coupons-readonly-banner"
+          className="px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm font-bold flex items-center gap-2"
+        >
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>唯讀：需要卡券與優惠權限才能修改</span>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-end gap-4">
 
@@ -562,7 +575,7 @@ export default function CouponsPage() {
             </button>
           </div>
 
-          {activeTab === 'coupons' && (
+          {activeTab === 'coupons' && canCouponWrite && (
             <button
               type="button"
               onClick={handleOpenNewPromo}
@@ -841,54 +854,56 @@ export default function CouponsPage() {
                     </div>
 
                     {/* Bottom Actions Bar */}
-                    <div className="mt-4 pt-3 border-t border-[#E8DEC8] flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleTogglePromoField(promo, 'is_pos_quick_select')}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
-                            promo.is_pos_quick_select
-                              ? 'bg-amber-50 text-amber-900 border-amber-300'
-                              : 'bg-white text-[#8C8279] border-[#E8DEC8] hover:bg-[#FAF7F2]'
-                          }`}
-                          title="在 POS 櫃檯結帳畫面顯示為一鍵套用快捷鍵"
-                        >
-                          <Zap className="w-3 h-3" />
-                          <span>{promo.is_pos_quick_select ? '快捷: 開啟' : '快捷: 關閉'}</span>
-                        </button>
+                    {canCouponWrite && (
+                      <div className="mt-4 pt-3 border-t border-[#E8DEC8] flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePromoField(promo, 'is_pos_quick_select')}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
+                              promo.is_pos_quick_select
+                                ? 'bg-amber-50 text-amber-900 border-amber-300'
+                                : 'bg-white text-[#8C8279] border-[#E8DEC8] hover:bg-[#FAF7F2]'
+                            }`}
+                            title="在 POS 櫃檯結帳畫面顯示為一鍵套用快捷鍵"
+                          >
+                            <Zap className="w-3 h-3" />
+                            <span>{promo.is_pos_quick_select ? '快捷: 開啟' : '快捷: 關閉'}</span>
+                          </button>
 
-                        <button
-                          type="button"
-                          onClick={() => handleTogglePromoField(promo, 'is_active')}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
-                            promo.is_active
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                              : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
-                          }`}
-                        >
-                          {promo.is_active ? '啟用中' : '已停用'}
-                        </button>
-                      </div>
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePromoField(promo, 'is_active')}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                              promo.is_active
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
+                            }`}
+                          >
+                            {promo.is_active ? '啟用中' : '已停用'}
+                          </button>
+                        </div>
 
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditPromo(promo)}
-                          className="p-1.5 text-[#6D5D52] hover:text-[#8B5B43] hover:bg-[#FAF7F2] rounded-lg transition-colors"
-                          title="編輯優惠券"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingItem({ type: 'promo', item: promo })}
-                          className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="刪除優惠券"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditPromo(promo)}
+                            className="p-1.5 text-[#6D5D52] hover:text-[#8B5B43] hover:bg-[#FAF7F2] rounded-lg transition-colors"
+                            title="編輯優惠券"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingItem({ type: 'promo', item: promo })}
+                            className="p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
+                            title="刪除優惠券"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })}

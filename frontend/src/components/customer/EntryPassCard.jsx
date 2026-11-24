@@ -240,7 +240,7 @@ export default function EntryPassCard({
   if (!entryData) return null;
 
   const phoneDisplay = formatPhone(
-    customerPhone || reservation?.customer_phone || reservation?.user?.phone || '0912-345-678'
+    customerPhone || reservation?.customer_phone || reservation?.user?.phone || '0912-345-678' // check-secrets: fake-data
   );
 
   // 狀態渲染

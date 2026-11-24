@@ -4,6 +4,7 @@ import { calculateEquipmentChargeableHours } from '../utils/equipmentPricing.js'
 import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { dateOnly } from '../../../shared/time.js';
 import { selfEquipmentTerms } from '../../../shared/selfService.js';
+import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
 
 export const DEFAULT_EQUIPMENT_CONFIGS = [
   {
@@ -660,7 +661,7 @@ export const updateGlobalEquipmentSetting = async (req, res) => {
       }
     });
 
-    res.json(updated);
+    res.json(sanitizeGlobalSetting(updated));
   } catch (error) {
     console.error('Error updating global equipment setting:', error);
     res.status(500).json({ error: '更新全域設備設定失敗' });
@@ -779,12 +780,11 @@ export const getEquipmentOccupancy = async (req, res) => {
   }
 };
 
-// PATCH /api/reservations/:booking_ref/equipment (Retroactive Add-on / Modify)
-export const modifyBookingEquipment = async (req, res) => {
+async function modifyBookingEquipmentCore(req, res, { actor }) {
   const { booking_ref } = req.params;
   const { equipments } = req.body; // Array of { equipment_id, quantity, rental_hours }
   const userId = req.user?.id;
-  const isAdmin = req.user?.role === 'admin';
+  const isAdmin = actor === 'admin';
 
   if (!Array.isArray(equipments)) {
     return res.status(400).json({ error: 'equipments 必須是陣列' });
@@ -1119,4 +1119,7 @@ export const modifyBookingEquipment = async (req, res) => {
     }
     res.status(500).json({ error: '更新智能拼豆板失敗' });
   }
-};
+}
+
+export const modifyBookingEquipment = (req, res) => modifyBookingEquipmentCore(req, res, { actor: 'customer' });
+export const adminModifyBookingEquipment = (req, res) => modifyBookingEquipmentCore(req, res, { actor: 'admin' });

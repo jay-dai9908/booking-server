@@ -214,7 +214,7 @@ async function run() {
     // 2. MOBILE 320px: Customer Entry Pass checked-in floor map (Screenshot 2)
     // =========================================================================
     const customerToken = jwt.sign(
-      { id: customerUser.id, role: 'customer', name: customerUser.name, phone: customerUser.phone },
+      { id: customerUser.id, role: 'customer', typ: 'customer', name: customerUser.name, phone: customerUser.phone },
       JWT_SECRET,
       { expiresIn: '1d' }
     );

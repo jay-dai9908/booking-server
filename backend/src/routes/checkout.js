@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   validatePromoCode,
+  adminValidatePromoCode,
   getPromoCodes,
   createPromoCode,
   updatePromoCode,
@@ -11,7 +12,8 @@ import {
   deleteAddonItem,
   submitReservationCheckout
 } from '../controllers/checkoutController.js';
-import { verifyToken, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
+import { verifyToken, requireAnyPermission, requirePermissionGroup, requireRegisteredUser } from '../middlewares/authMiddleware.js';
+import { COUPON_WRITE } from '../middlewares/permissionGroups.js';
 import { promoValidateLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
@@ -23,12 +25,13 @@ const checkoutStaffAuth = [
 
 // Customer + Admin promo code validation
 router.post('/promo-codes/validate', verifyToken, requireRegisteredUser, promoValidateLimiter, validatePromoCode);
+router.post('/admin/promo-codes/validate', ...checkoutStaffAuth, adminValidatePromoCode);
 
 // Promo code management & POS quick select
 router.get('/promo-codes', ...checkoutStaffAuth, getPromoCodes);
-router.post('/promo-codes', ...checkoutStaffAuth, createPromoCode);
-router.put('/promo-codes/:id', ...checkoutStaffAuth, updatePromoCode);
-router.delete('/promo-codes/:id', ...checkoutStaffAuth, deletePromoCode);
+router.post('/promo-codes', verifyToken, requirePermissionGroup(COUPON_WRITE), createPromoCode);
+router.put('/promo-codes/:id', verifyToken, requirePermissionGroup(COUPON_WRITE), updatePromoCode);
+router.delete('/promo-codes/:id', verifyToken, requirePermissionGroup(COUPON_WRITE), deletePromoCode);
 
 // Addon items (charms, accessories, ironing service)
 router.get('/addons', ...checkoutStaffAuth, getAddonItems);

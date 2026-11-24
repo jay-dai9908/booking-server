@@ -26,6 +26,8 @@ import displayRoutes from './routes/display.js';
 import { ensureDefaultEquipmentConfigs } from './controllers/equipmentController.js';
 import { ensureDefaultCheckoutConfigs } from './controllers/checkoutController.js';
 import { ensureDefaultPaymentMethods, ensureDefaultProducts, ensureDefaultPassPlans } from './utils/shopDefaults.js';
+import { resolveTrustProxy } from './utils/trustProxy.js';
+import { applyBodyParsers } from './middlewares/bodyParsers.js';
 import { startCronJobs } from './cronJobs.js';
 
 const app = express();
@@ -41,6 +43,28 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "last_login_at" TIMESTAMP(3)`,
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "is_blacklisted" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "notes" TEXT`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "merged_into_user_id" INTEGER`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "merged_at" TIMESTAMP(3)`,
+    `CREATE TABLE IF NOT EXISTS "MemberBindRequest" (
+      "id" SERIAL NOT NULL,
+      "new_user_id" INTEGER NOT NULL,
+      "manual_user_id" INTEGER NOT NULL,
+      "phone" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'pending',
+      "pass_summary" JSONB NOT NULL DEFAULT '[]',
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "decided_at" TIMESTAMP(3),
+      "decided_by_name" TEXT,
+      "decided_by_id" INTEGER,
+      "decision_note" TEXT,
+      CONSTRAINT "MemberBindRequest_pkey" PRIMARY KEY ("id"),
+      CONSTRAINT "MemberBindRequest_new_user_id_fkey" FOREIGN KEY ("new_user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "MemberBindRequest_manual_user_id_fkey" FOREIGN KEY ("manual_user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "MemberBindRequest_new_user_id_manual_user_id_key" ON "MemberBindRequest"("new_user_id", "manual_user_id")`,
+    `CREATE INDEX IF NOT EXISTS "MemberBindRequest_status_idx" ON "MemberBindRequest"("status")`,
+    `CREATE INDEX IF NOT EXISTS "MemberBindRequest_new_user_id_idx" ON "MemberBindRequest"("new_user_id")`,
+    `CREATE INDEX IF NOT EXISTS "MemberBindRequest_manual_user_id_idx" ON "MemberBindRequest"("manual_user_id")`,
 
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "payment_method" TEXT`,
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "checkout_unlimited_pax" INTEGER`,
@@ -748,6 +772,7 @@ const ensureDatabaseSchema = async () => {
     )`,
     `ALTER TABLE "KioskFirmware" ADD COLUMN IF NOT EXISTS "uploaded_by_name" TEXT`,
 
+<<<<<<< HEAD
     `CREATE TABLE IF NOT EXISTS "DisplayDevice" (
       "id" SERIAL NOT NULL,
       "name" TEXT NOT NULL DEFAULT '店內顯示屏',
@@ -813,7 +838,41 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_use_raw_image" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_raw_image" TEXT`,
     `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_logo_enabled" BOOLEAN NOT NULL DEFAULT true`,
-    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_logo_image" TEXT`
+    `ALTER TABLE "DisplaySetting" ADD COLUMN IF NOT EXISTS "twqr_logo_image" TEXT`,
+    `CREATE TABLE IF NOT EXISTS "AdminLoginGuard" (
+      "id" INTEGER NOT NULL DEFAULT 1,
+      "locked_at" TIMESTAMP(3),
+      "password_failures_reset_at" TIMESTAMP(3),
+      "unlock_failures_reset_at" TIMESTAMP(3),
+      "unlock_blocked_until" TIMESTAMP(3),
+      "totp_secret_enc" TEXT,
+      "totp_pending_secret_enc" TEXT,
+      "totp_enabled" BOOLEAN NOT NULL DEFAULT false,
+      "totp_enabled_at" TIMESTAMP(3),
+      "totp_last_step" INTEGER,
+      "backup_codes_json" JSONB,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "AdminLoginGuard_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE TABLE IF NOT EXISTS "AdminLoginFailure" (
+      "id" SERIAL NOT NULL,
+      "kind" TEXT NOT NULL,
+      "ip" TEXT,
+      "user_agent" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "AdminLoginFailure_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE INDEX IF NOT EXISTS "AdminLoginFailure_kind_created_at_idx" ON "AdminLoginFailure"("kind", "created_at")`,
+    `CREATE TABLE IF NOT EXISTS "AdminLoginGuardEvent" (
+      "id" SERIAL NOT NULL,
+      "type" TEXT NOT NULL,
+      "ip" TEXT,
+      "user_agent" TEXT,
+      "note" TEXT,
+      "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "AdminLoginGuardEvent_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE INDEX IF NOT EXISTS "AdminLoginGuardEvent_created_at_idx" ON "AdminLoginGuardEvent"("created_at")`
   ];
 
   for (const sql of statements) {
@@ -827,19 +886,15 @@ const ensureDatabaseSchema = async () => {
 };
 
 // Middleware
-const trustProxyEnv = process.env.TRUST_PROXY;
-const trustProxyVal = trustProxyEnv !== undefined
-  ? (isNaN(trustProxyEnv) ? trustProxyEnv : Number(trustProxyEnv))
-  : 1;
+const trustProxyVal = resolveTrustProxy(process.env.TRUST_PROXY);
 app.set('trust proxy', trustProxyVal);
+console.log(`[trust proxy] ${trustProxyVal}`);
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true, // Allow cookies to be sent
 }));
 app.use(checkBannedIP);
-app.use('/api/kiosk/v1', express.json({ limit: '16kb' }));
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ limit: '15mb', extended: true }));
+applyBodyParsers(app);
 app.use(cookieParser());
 
 // Routes
@@ -868,7 +923,7 @@ app.use('/api/display', displayRoutes);
 // Basic error handler
 app.use((err, req, res, next) => {
   if (err?.type === 'entity.too.large' || err?.status === 413) {
-    return res.status(413).json({ error: 'Payload too large' });
+    return res.status(413).json({ error: '資料太大' });
   }
   if (err instanceof SyntaxError && err?.status === 400 && 'body' in err) {
     if (req.originalUrl?.startsWith('/api/kiosk/v1')) {

@@ -194,7 +194,7 @@ async function run() {
 
     // Generate Customer JWT token
     const customerToken = jwt.sign(
-      { id: customerUser.id, role: 'customer', name: customerUser.name, phone: customerUser.phone },
+      { id: customerUser.id, role: 'customer', typ: 'customer', name: customerUser.name, phone: customerUser.phone },
       JWT_SECRET,
       { expiresIn: '1d' }
     );

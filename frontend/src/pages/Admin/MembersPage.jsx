@@ -30,6 +30,9 @@ export default function MembersPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [pendingBindCount, setPendingBindCount] = useState(0);
+  const [pendingBindOnly, setPendingBindOnly] = useState(false);
+  const [includeMerged, setIncludeMerged] = useState(false);
 
   // Quick Barcode Scan & Redeem State
   const [showScanModal, setShowScanModal] = useState(false);
@@ -42,7 +45,11 @@ export default function MembersPage() {
       fetchUsers();
     }, 300);
     return () => clearTimeout(delayDebounceFn);
-  }, [page, memberSearchQuery]);
+  }, [page, memberSearchQuery, pendingBindOnly, includeMerged]);
+
+  useEffect(() => {
+    fetchPendingBindCount();
+  }, []);
 
   useEffect(() => {
     const userId = searchParams.get('userId');
@@ -63,13 +70,33 @@ export default function MembersPage() {
     }
   }, [users, searchParams]);
 
+  const fetchPendingBindCount = async () => {
+    try {
+      const res = await api.get('/users/bind-requests?status=pending');
+      setPendingBindCount(res.data?.total ?? (res.data?.requests?.length || 0));
+    } catch (err) {
+      console.error('Failed to fetch pending bind requests:', err);
+    }
+  };
+
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      const res = await api.get(`/users?page=${page}&limit=20&search=${encodeURIComponent(memberSearchQuery)}`);
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: '20',
+        search: memberSearchQuery
+      });
+      if (pendingBindOnly) params.set('pending_bind', '1');
+      if (includeMerged) params.set('include_merged', '1');
+
+      const res = await api.get(`/users?${params.toString()}`);
       setUsers(res.data?.data || (Array.isArray(res.data) ? res.data : []));
       setTotalPages(res.data?.totalPages || 1);
       setTotalRecords(res.data?.total || (Array.isArray(res.data) ? res.data.length : 0));
+      if (typeof res.data?.pending_bind_requests_count === 'number') {
+        setPendingBindCount(res.data.pending_bind_requests_count);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -118,7 +145,61 @@ export default function MembersPage() {
   return (
     <>
       <div className="space-y-6 animate-fade-in">
-        <div className="flex flex-col md:flex-row md:items-center justify-end gap-4">
+        {(pendingBindCount > 0 || pendingBindOnly) && (
+          <div
+            data-testid="pending-bind-banner"
+            className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setPendingBindOnly(true);
+                setPage(1);
+              }}
+              className="flex items-center gap-2 text-sm font-bold text-left hover:underline"
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>有 {pendingBindCount} 筆帳號綁定申請待確認</span>
+            </button>
+            {pendingBindOnly ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingBindOnly(false);
+                  setPage(1);
+                }}
+                className="px-3 py-1 rounded-lg bg-white border border-amber-300 text-xs font-bold text-amber-900 hover:bg-amber-100 self-start sm:self-auto"
+              >
+                顯示全部會員
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingBindOnly(true);
+                  setPage(1);
+                }}
+                className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-xs font-bold text-white self-start sm:self-auto"
+              >
+                只看待確認會員
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <label className="inline-flex items-center gap-2 text-xs font-bold text-[#6D5D52] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeMerged}
+              onChange={(e) => {
+                setIncludeMerged(e.target.checked);
+                setPage(1);
+              }}
+              className="rounded border-[#E8DEC8] text-[#8B5B43] focus:ring-[#8B5B43]"
+            />
+            <span>顯示已合併會員</span>
+          </label>
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -220,6 +301,16 @@ export default function MembersPage() {
                                     {isManualOnly && (
                                       <span className="text-[12px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
                                         現場建檔
+                                      </span>
+                                    )}
+                                    {u.merged_into_user_id && (
+                                      <span className="text-[12px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">
+                                        已併入 #{u.merged_into_user_id}
+                                      </span>
+                                    )}
+                                    {u.has_pending_bind && (
+                                      <span className="text-[12px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold">
+                                        待確認綁定
                                       </span>
                                     )}
                                   </div>
@@ -369,6 +460,16 @@ export default function MembersPage() {
                                 <span className={`font-bold text-sm ${u.is_blacklisted ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
                                   {u.name || '未設定'}
                                 </span>
+                                {u.merged_into_user_id && (
+                                  <span className="text-[12px] text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded font-bold">
+                                    已併入 #{u.merged_into_user_id}
+                                  </span>
+                                )}
+                                {u.has_pending_bind && (
+                                  <span className="text-[12px] text-amber-900 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded font-bold">
+                                    待確認綁定
+                                  </span>
+                                )}
                                 {u.is_blacklisted ? (
                                   <span className="text-[12px] text-red-700 bg-red-50 px-1.5 py-0.5 rounded font-bold">黑名單</span>
                                 ) : (
@@ -455,6 +556,11 @@ export default function MembersPage() {
       <MemberDetailsModal 
         member={selectedMember} 
         onClose={() => handleSelectMember(null)}
+        onSwitchMember={(targetId) => setSearchParams({ userId: String(targetId) })}
+        onBindRequestResolved={() => {
+          fetchPendingBindCount();
+          fetchUsers();
+        }}
         onMemberUpdated={(updatedUser) => {
           setUsers(prev => prev.map(u => u.id === updatedUser.id ? { ...u, ...updatedUser } : u));
           setSelectedMember(prev => prev && prev.id === updatedUser.id ? { ...prev, ...updatedUser } : prev);

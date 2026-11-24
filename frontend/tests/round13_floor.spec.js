@@ -35,6 +35,8 @@ async function run() {
 
   const todayStr = toTaipeiDateString(new Date());
   const todayDate = dateOnly(todayStr);
+  const fixedNowDate = new Date(`${todayStr}T15:00:00+08:00`);
+  const fixedNowMs = fixedNowDate.getTime();
   const ts = Date.now();
 
   // 1. Create sessions for today
@@ -140,7 +142,7 @@ async function run() {
         pax: 2,
         status: 'confirmed',
         attendance: 'checked_in',
-        checked_in_at: new Date(Date.now() - 60 * 60 * 1000),
+        checked_in_at: new Date(fixedNowMs - 60 * 60 * 1000),
         is_paid: false,
         assigned_seats: ['A1-3', 'A1-4'],
         total_amount: 1200
@@ -158,7 +160,7 @@ async function run() {
         pax: 2,
         status: 'confirmed',
         attendance: 'checked_in',
-        checked_in_at: new Date(Date.now() - 60 * 60 * 1000),
+        checked_in_at: new Date(fixedNowMs - 60 * 60 * 1000),
         is_paid: true,
         assigned_seats: ['B1-1', 'B1-2'],
         total_amount: 1200
@@ -191,32 +193,32 @@ async function run() {
         person_no: 1,
         seat_code: 'A1-3',
         status: 'active',
-        billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
-        timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
+        billing_start_at: new Date(fixedNowMs - 60 * 60 * 1000),
+        timer_started_at: new Date(fixedNowMs - 60 * 60 * 1000)
       },
       {
         booking_ref: refInUse,
         person_no: 2,
         seat_code: 'A1-4',
         status: 'active',
-        billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
-        timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
+        billing_start_at: new Date(fixedNowMs - 60 * 60 * 1000),
+        timer_started_at: new Date(fixedNowMs - 60 * 60 * 1000)
       },
       {
         booking_ref: refPaid,
         person_no: 1,
         seat_code: 'B1-1',
         status: 'active',
-        billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
-        timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
+        billing_start_at: new Date(fixedNowMs - 60 * 60 * 1000),
+        timer_started_at: new Date(fixedNowMs - 60 * 60 * 1000)
       },
       {
         booking_ref: refPaid,
         person_no: 2,
         seat_code: 'B1-2',
         status: 'active',
-        billing_start_at: new Date(Date.now() - 60 * 60 * 1000),
-        timer_started_at: new Date(Date.now() - 60 * 60 * 1000)
+        billing_start_at: new Date(fixedNowMs - 60 * 60 * 1000),
+        timer_started_at: new Date(fixedNowMs - 60 * 60 * 1000)
       }
     ]
   });
@@ -251,7 +253,21 @@ async function run() {
   const context = await browser.newContext({
     viewport: { width: 1024, height: 768 }
   });
+  const installFixedClock = async (targetPage) => {
+    await targetPage.clock.install({ time: fixedNowDate });
+    await targetPage.route('**/api/floor/live*', async (route) => {
+      const response = await route.fetch();
+      if (response.status() === 200) {
+        const data = await response.json();
+        data.server_now = fixedNowDate.toISOString();
+        await route.fulfill({ response, json: data });
+      } else {
+        await route.fulfill({ response });
+      }
+    });
+  };
   const page = await context.newPage();
+  await installFixedClock(page);
 
   try {
     // 1. Admin login
@@ -495,6 +511,7 @@ async function run() {
       viewport: { width: 390, height: 844 }
     });
     const mobilePage = await mobileContext.newPage();
+    await installFixedClock(mobilePage);
     try {
       await mobilePage.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle' });
       const mPass = mobilePage.locator('input[type="password"]');

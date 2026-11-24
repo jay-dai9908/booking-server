@@ -1,6 +1,7 @@
 import React from 'react';
 import Button from './Button';
 import { initiateLineOAuth, getGuestLineAction } from '../../utils/lineAuth';
+import { safeHttpUrl } from '@shared/safeUrl.js';
 
 export default function GuestLineLoginButton({
   globalSettings,
@@ -20,7 +21,7 @@ export default function GuestLineLoginButton({
   const action = propAction || getGuestLineAction(page);
   const isLoginAction = action === 'login';
 
-  const officialLineUrl = globalSettings?.official_line_url;
+  const officialLineUrl = safeHttpUrl(globalSettings?.official_line_url);
   const hintText =
     globalSettings?.guest_line_hint_text ||
     '會打開拾光製所的官方 LINE，從選單點『預約』就能登入';

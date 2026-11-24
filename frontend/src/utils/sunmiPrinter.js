@@ -7,7 +7,7 @@ const DIVIDER = '-------------------------------\n';
 const DOUBLE_DIVIDER = '===============================\n';
 
 /**
- * 隱私遮罩手機號碼：0912345678 -> 0912***678
+ * 隱私遮罩手機號碼：0912345678 -> 0912***678 // check-secrets: fake-data
  */
 export const maskPhoneNumber = (phone) => {
   if (!phone || typeof phone !== 'string') return '未提供';

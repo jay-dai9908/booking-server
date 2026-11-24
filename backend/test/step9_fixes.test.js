@@ -394,7 +394,7 @@ test('Step 9 Fixes Verification Suite', async (t) => {
   });
 
   await t.test('Bug 8: Paid reservation cannot be cancelled by admin (returns 409)', async () => {
-    const { cancelReservation } = await import('../src/controllers/reservationController.js');
+    const { adminCancelReservation } = await import('../src/controllers/reservationController.js');
     const bRef = 'BK-TEST-CANCEL-PAID';
     await prisma.reservation.deleteMany({ where: { booking_ref: bRef } });
 
@@ -415,11 +415,11 @@ test('Step 9 Fixes Verification Suite', async (t) => {
     });
 
     const { req, res } = createMockReqRes({
-      params: { id: bRef },
+      params: { booking_ref: bRef },
       user: { id: 1, role: 'admin', isSuperAdmin: true, permissions: ['all'] }
     });
 
-    await cancelReservation(req, res);
+    await adminCancelReservation(req, res);
     assert.equal(res.getStatusCode(), 409, 'Expected 409 when cancelling paid reservation');
   });
 

@@ -29,6 +29,7 @@ import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
 import api from '../../api/axios';
 import { initiateLineOAuth, getGuestLineAction } from '../../utils/lineAuth';
+import { safeHttpUrl } from '@shared/safeUrl.js';
 import {
   formatMoney,
   formatMoneyBig,
@@ -346,11 +347,12 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
   }, [view, isLoggedInCustomer, location.pathname, navigate]);
 
   // Handle Checkout Button
+  const safeOfficialLineUrl = safeHttpUrl(globalSettings?.official_line_url);
   const handleGoToCheckout = () => {
     if (!isLoggedInCustomer) {
       const checkoutReturnPath = `${location.pathname}?view=checkout`;
       if (shouldShowOfficialLine) {
-        if (!globalSettings?.official_line_url) {
+        if (!safeOfficialLineUrl) {
           console.warn('official_line_url is not configured, falling back to LINE Login');
           initiateLineOAuth({ prefix: 'preorder_', returnPath: checkoutReturnPath });
         }
@@ -562,12 +564,12 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
 
           {/* 3. Fixed Bottom Area */}
           <div className="sticky bottom-0 z-40 bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))] grid gap-2">
-            {globalSettings?.official_line_url && (
+            {safeOfficialLineUrl && (
               <Button
                 variant="secondary"
                 size="sm"
                 icon={<MessageCircle className="w-4 h-4" />}
-                onClick={() => window.open(globalSettings.official_line_url, '_blank')}
+                onClick={() => window.open(safeOfficialLineUrl, '_blank', 'noopener,noreferrer')}
                 className="w-full"
               >
                 傳 LINE 給我們對帳
@@ -877,9 +879,9 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                     : '登入進行購買'
                 }
                 actionVariant={isLoggedInCustomer ? 'primary' : 'line'}
-                actionHref={!isLoggedInCustomer && shouldShowOfficialLine ? (globalSettings?.official_line_url || undefined) : undefined}
-                target={!isLoggedInCustomer && shouldShowOfficialLine && globalSettings?.official_line_url ? '_blank' : undefined}
-                rel={!isLoggedInCustomer && shouldShowOfficialLine && globalSettings?.official_line_url ? 'noopener noreferrer' : undefined}
+                actionHref={!isLoggedInCustomer && shouldShowOfficialLine ? (safeOfficialLineUrl || undefined) : undefined}
+                target={!isLoggedInCustomer && shouldShowOfficialLine && safeOfficialLineUrl ? '_blank' : undefined}
+                rel={!isLoggedInCustomer && shouldShowOfficialLine && safeOfficialLineUrl ? 'noopener noreferrer' : undefined}
                 onAction={handleGoToCheckout}
                 hasTabBarBelow={isLoggedInCustomer}
               />

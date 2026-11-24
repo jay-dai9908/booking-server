@@ -159,7 +159,7 @@ async function run() {
         process.exit(1);
       }
       customerToken = jwt.sign(
-        { id: 1, role: 'customer', name: '測試客', phone: '0912345678' },
+        { id: 1, role: 'customer', typ: 'customer', name: '測試客', phone: '0912345678' },
         process.env.JWT_SECRET.trim(),
         { expiresIn: '1d' }
       );

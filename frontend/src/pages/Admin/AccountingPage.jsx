@@ -37,6 +37,7 @@ import { toTaipeiDateString } from '@shared/time.js';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
 import { formatMoney, formatMinus } from '../../utils/format';
 import { buildPaymentsCsv, buildEventsCsv, computeDailyRevenue } from '../../utils/admin/accountingExport';
+import { useAdminPermissions, MONEY_WRITE } from '../../hooks/admin/useAdminPermissions';
 
 function flattenObject(obj, prefix = '') {
   if (obj === null || obj === undefined) return {};
@@ -66,6 +67,8 @@ function flattenObject(obj, prefix = '') {
 }
 
 export default function AccountingPage() {
+  const { can } = useAdminPermissions();
+  const canMoneyWrite = can(MONEY_WRITE);
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 640) {
       return 'closing';
@@ -927,16 +930,20 @@ export default function AccountingPage() {
                             </button>
                           )}
                           {!isVoided && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setVoidPaymentTarget(p);
-                                setVoidReason('收錯付款方式');
-                              }}
-                              className="text-sg-danger font-bold text-[12px] hover:underline"
-                            >
-                              作廢
-                            </button>
+                            canMoneyWrite ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setVoidPaymentTarget(p);
+                                  setVoidReason('收錯付款方式');
+                                }}
+                                className="text-sg-danger font-bold text-[12px] hover:underline"
+                              >
+                                作廢
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-sg-muted">退款與作廢需要帳務或預約權限</span>
+                            )
                           )}
                         </td>
                       </tr>
@@ -1018,16 +1025,20 @@ export default function AccountingPage() {
                           </button>
                         )}
                         {!isVoided && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setVoidPaymentTarget(p);
-                              setVoidReason('收錯付款方式');
-                            }}
-                            className="text-sg-danger font-bold text-[12px] hover:underline"
-                          >
-                            作廢
-                          </button>
+                          canMoneyWrite ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setVoidPaymentTarget(p);
+                                setVoidReason('收錯付款方式');
+                              }}
+                              className="text-sg-danger font-bold text-[12px] hover:underline"
+                            >
+                              作廢
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-sg-muted">退款與作廢需要帳務或預約權限</span>
+                          )
                         )}
                       </div>
                     </div>

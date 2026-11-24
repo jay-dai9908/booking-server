@@ -127,9 +127,15 @@ export default function SeatingPage() {
     };
     const baseStart = addDays(todayStr, -14);
     const baseEnd = addDays(todayStr, BOOKING_LOOKAHEAD_DAYS - 1);
+    if (selectedDate && (selectedDate < baseStart || selectedDate > baseEnd)) {
+      return {
+        rangeStartStr: addDays(selectedDate, -14),
+        rangeEndStr: addDays(selectedDate, 14)
+      };
+    }
     return {
-      rangeStartStr: selectedDate && selectedDate < baseStart ? selectedDate : baseStart,
-      rangeEndStr: selectedDate && selectedDate > baseEnd ? selectedDate : baseEnd
+      rangeStartStr: baseStart,
+      rangeEndStr: baseEnd
     };
   }, [todayStr, selectedDate]);
 
@@ -255,7 +261,7 @@ export default function SeatingPage() {
   const handleCancelReservation = async () => {
     if (!cancelReservationTarget) return;
     try {
-      await api.delete(`/reservations/${cancelReservationTarget.booking_ref}`);
+      await api.post(`/reservations/admin/${cancelReservationTarget.booking_ref}/cancel`, {});
       showToast('已取消預約');
       setCancelReservationTarget(null);
       refresh();

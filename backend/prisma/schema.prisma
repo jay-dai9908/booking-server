@@ -8,22 +8,48 @@ datasource db {
 }
 
 model User {
-  id                Int            @id @default(autoincrement())
-  line_user_id      String         @unique
-  name              String?
-  phone             String?
-  line_display_name String?
-  line_picture_url  String?
-  line_status_msg   String?
-  last_login_at     DateTime?
-  created_at        DateTime       @default(now())
-  is_blacklisted    Boolean        @default(false)
-  notes             String?
+  id                  Int            @id @default(autoincrement())
+  line_user_id        String         @unique
+  name                String?
+  phone               String?
+  line_display_name   String?
+  line_picture_url    String?
+  line_status_msg     String?
+  last_login_at       DateTime?
+  created_at          DateTime       @default(now())
+  is_blacklisted      Boolean        @default(false)
+  notes               String?
+  merged_into_user_id Int?
+  merged_at           DateTime?
   
-  reservations      Reservation[]
-  login_logs        UserLoginLog[]
-  product_orders    ProductOrder[]
-  user_passes       UserPass[]
+  reservations             Reservation[]
+  login_logs               UserLoginLog[]
+  product_orders           ProductOrder[]
+  user_passes              UserPass[]
+  bind_requests_as_new     MemberBindRequest[] @relation("BindNewUser")
+  bind_requests_as_manual  MemberBindRequest[] @relation("BindManualUser")
+}
+
+model MemberBindRequest {
+  id              Int       @id @default(autoincrement())
+  new_user_id     Int
+  manual_user_id  Int
+  phone           String
+  status          String    @default("pending") // pending | approved | rejected
+  pass_summary    Json      @default("[]")
+  created_at      DateTime  @default(now())
+  decided_at      DateTime?
+  decided_by_name String?
+  decided_by_id   Int?
+  decision_note   String?
+
+  new_user        User      @relation("BindNewUser", fields: [new_user_id], references: [id], onDelete: Cascade)
+  manual_user     User      @relation("BindManualUser", fields: [manual_user_id], references: [id], onDelete: Cascade)
+
+  @@unique([new_user_id, manual_user_id])
+  @@index([status])
+  @@index([new_user_id])
+  @@index([manual_user_id])
 }
 
 model UserLoginLog {
@@ -893,6 +919,41 @@ model DisplaySlide {
   @@index([set, enabled, sort_order])
 }
 
+model AdminLoginGuard {
+  id                         Int       @id @default(1)
+  locked_at                  DateTime?
+  password_failures_reset_at DateTime?
+  unlock_failures_reset_at   DateTime?
+  unlock_blocked_until       DateTime?
+  totp_secret_enc            String?
+  totp_pending_secret_enc    String?
+  totp_enabled               Boolean   @default(false)
+  totp_enabled_at            DateTime?
+  totp_last_step             Int?
+  backup_codes_json          Json?
+  updated_at                 DateTime  @default(now()) @updatedAt
+}
+
+model AdminLoginFailure {
+  id         Int      @id @default(autoincrement())
+  kind       String   // password | unlock_code
+  ip         String?
+  user_agent String?
+  created_at DateTime @default(now())
+
+  @@index([kind, created_at])
+}
+
+model AdminLoginGuardEvent {
+  id         Int      @id @default(autoincrement())
+  type       String   // locked | unlocked_totp | unlocked_backup | unlocked_cli | unlock_blocked | totp_enabled | totp_disabled | totp_regenerated | backup_codes_regenerated | totp_reset_cli
+  ip         String?
+  user_agent String?
+  note       String?
+  created_at DateTime @default(now())
+
+  @@index([created_at])
+}
 
 
 

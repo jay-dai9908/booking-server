@@ -15,7 +15,7 @@ import GuestLineLoginButton from '../../components/customer/GuestLineLoginButton
 import PriceInfoSheet from '../../components/customer/sheets/PriceInfoSheet';
 import api from '../../api/axios';
 import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
-import { initiateLineOAuth, verifyAndConsumeLineOAuthState } from '../../utils/lineAuth';
+import { initiateLineOAuth } from '../../utils/lineAuth';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useDayPricing } from '../../hooks/customer/useDayPricing';
 import { useSessions } from '../../hooks/customer/useSessions';
@@ -36,6 +36,8 @@ export default function Home({ userRole }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [authErrorMsg, setAuthErrorMsg] = useState('');
+  const [lineStateInvalid, setLineStateInvalid] = useState(false);
+  const [failedStatePrefix, setFailedStatePrefix] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPriceInfoOpen, setIsPriceInfoOpen] = useState(false);
   const [equipmentConfigs, setEquipmentConfigs] = useState([]);
@@ -118,39 +120,21 @@ export default function Home({ userRole }) {
       setAuthErrorMsg('登入處理逾時，請重新登入。');
     }, 15000);
 
-    const cleanupAndStopProcessing = (errorMsg) => {
+    const cleanupAndStopProcessing = (errorMsg, isStateInvalid = false) => {
       clearTimeout(timeoutTimer);
       navigate(location.pathname, { replace: true });
       setIsProcessing(false);
+      setLineStateInvalid(isStateInvalid);
       if (errorMsg) {
         setAuthErrorMsg(errorMsg);
       }
     };
 
-    const verifyResult = verifyAndConsumeLineOAuthState(oauthState);
-    if (verifyResult.status === 'mismatch') {
-      cleanupAndStopProcessing('登入驗證失敗，請重新登入。');
-      return;
-    }
-
-    const isPreorderPath = (p) =>
-      typeof p === 'string' && (p.startsWith('/preorder') || p.startsWith('/shop'));
-    const isPreorderLogin = oauthState.startsWith('preorder_') || isPreorderPath(verifyResult.returnPath);
-    if (isPreorderLogin) {
-      const targetRedirect = isPreorderPath(verifyResult.returnPath) ? verifyResult.returnPath : '/preorder';
-      try {
-        const existingRedirect =
-          sessionStorage.getItem('shiguang_post_login_redirect') ||
-          localStorage.getItem('shiguang_post_login_redirect');
-        if (!isPreorderPath(existingRedirect)) {
-          sessionStorage.setItem('shiguang_post_login_redirect', targetRedirect);
-          localStorage.setItem('shiguang_post_login_redirect', targetRedirect);
-        }
-      } catch (e) {}
-    }
+    const isPreorderLogin = oauthState.startsWith('preorder_');
+    setFailedStatePrefix(isPreorderLogin ? 'preorder' : '');
 
     getBrowserClientInfoAsync()
-      .then((clientInfo) => api.post('/auth/line/callback', { code, clientInfo }))
+      .then((clientInfo) => api.post('/auth/line/callback', { code, state: oauthState, clientInfo }))
       .then((res) => {
         clearTimeout(timeoutTimer);
         try {
@@ -163,17 +147,20 @@ export default function Home({ userRole }) {
         if (res.data?.isNewUser) {
           window.location.href = '/register';
         } else {
-          let target = verifyResult.returnPath || (isPreorderLogin ? '/preorder' : '/booking');
+          let target = res.data?.return_path || '';
           try {
             const savedRedirect =
               sessionStorage.getItem('shiguang_post_login_redirect') ||
               localStorage.getItem('shiguang_post_login_redirect');
-            if (savedRedirect) {
-              sessionStorage.removeItem('shiguang_post_login_redirect');
-              localStorage.removeItem('shiguang_post_login_redirect');
+            sessionStorage.removeItem('shiguang_post_login_redirect');
+            localStorage.removeItem('shiguang_post_login_redirect');
+            if (!target && savedRedirect) {
               target = savedRedirect;
             }
           } catch (e) {}
+          if (!target) {
+            target = isPreorderLogin ? '/preorder' : '/booking';
+          }
           window.location.href = target;
         }
       })
@@ -186,7 +173,7 @@ export default function Home({ userRole }) {
           });
           if (meRes.data?.role === 'customer') {
             clearTimeout(timeoutTimer);
-            let target = verifyResult.returnPath || (isPreorderLogin ? '/preorder' : '/booking');
+            let target = isPreorderLogin ? '/preorder' : '/booking';
             try {
               const savedRedirect =
                 sessionStorage.getItem('shiguang_post_login_redirect') ||
@@ -206,6 +193,7 @@ export default function Home({ userRole }) {
           }
         } catch (meErr) {}
 
+        const isStateInvalid = err.response?.data?.code === 'LINE_STATE_INVALID';
         const details = err.response?.data?.details;
         let errorMsg = err.response?.data?.error || err.message || '登入失敗，請重試。';
         if (details && details.error_description) {
@@ -215,7 +203,7 @@ export default function Home({ userRole }) {
         } else if (typeof details === 'string') {
           errorMsg = details;
         }
-        cleanupAndStopProcessing(errorMsg);
+        cleanupAndStopProcessing(errorMsg, isStateInvalid);
       });
 
     return () => {
@@ -238,7 +226,11 @@ export default function Home({ userRole }) {
   const initiateLineLogin = () => {
     hasProcessedRef.current = false;
     setAuthErrorMsg('');
-    initiateLineOAuth({ returnPath: '/booking' });
+    setLineStateInvalid(false);
+    initiateLineOAuth({
+      prefix: failedStatePrefix,
+      returnPath: failedStatePrefix === 'preorder' ? '/preorder' : '/booking'
+    });
   };
 
   const hasCodeInUrl = new URLSearchParams(location.search).has('code');
@@ -325,7 +317,20 @@ export default function Home({ userRole }) {
         {/* 2. Content Area */}
         <div className="grid gap-[10px] px-4 pt-[14px] pb-5 flex-1">
           {authErrorMsg && (
-            <ErrorBanner message={authErrorMsg} />
+            <div className="grid gap-2">
+              <ErrorBanner message={authErrorMsg} />
+              {lineStateInvalid && (
+                <Button
+                  variant="line"
+                  size="sm"
+                  data-testid="retry-line-login-btn"
+                  onClick={initiateLineLogin}
+                  className="w-full"
+                >
+                  再按一次 LINE 登入
+                </Button>
+              )}
+            </div>
           )}
 
           {globalSettings?.show_announcement && globalSettings?.announcement_text && (

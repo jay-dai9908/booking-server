@@ -9,6 +9,10 @@ import {
   releasePoolAccount,
   markPoolAccountUsed
 } from '../services/selfService/poolAccountService.js';
+import { activeUserWhere } from '../utils/userQuery.js';
+import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
+import auditService from '../services/audit/auditService.js';
+import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
 
 /**
  * Public: Get active products for customer shop
@@ -299,13 +303,11 @@ export const createProductOrder = async (req, res) => {
   }
 };
 
-/**
- * Customer: Update remittance last 5 digits
- */
-export const updateRemittanceLast5 = async (req, res) => {
+async function updateRemittanceLast5Core(req, res, { actor }) {
   const { id } = req.params;
   const userId = req.user?.id;
   const { remittance_last5 } = req.body;
+  const isAdmin = actor === 'admin';
 
   if (!remittance_last5 || !String(remittance_last5).trim()) {
     return res.status(400).json({ error: '請輸入匯款末五碼' });
@@ -320,9 +322,12 @@ export const updateRemittanceLast5 = async (req, res) => {
       return res.status(404).json({ error: '找不到該筆預購訂單' });
     }
 
-    // Only allow customer who owns the order or admin
-    if (order.user_id !== userId && req.user?.role !== 'admin') {
+    if (!isAdmin && order.user_id !== userId) {
       return res.status(403).json({ error: '無權限修改此訂單' });
+    }
+
+    if (!isAdmin && !['pending_payment', 'reported_pending_verify'].includes(order.payment_status)) {
+      return res.status(409).json({ error: '已核對的訂單不能修改末五碼' });
     }
 
     const cleanLast5 = String(remittance_last5).trim();
@@ -335,8 +340,21 @@ export const updateRemittanceLast5 = async (req, res) => {
       }
     });
 
+    if (isAdmin) {
+      await auditService.log(prisma, {
+        booking_ref: order.order_ref,
+        event_type: 'shop_remittance_updated',
+        category: 'shop',
+        summary: `後台更新商城訂單 ${order.order_ref} 匯款末五碼`,
+        before_json: { remittance_last5: order.remittance_last5, payment_status: order.payment_status },
+        after_json: { remittance_last5: updated.remittance_last5, payment_status: updated.payment_status },
+        staff_name: req.user?.name || '店員',
+        staff_id: req.user?.id || null
+      });
+    }
+
     const sanitizedUpdated = { ...updated };
-    if (req.user?.role !== 'admin') {
+    if (!isAdmin) {
       delete sanitizedUpdated.admin_note;
     }
 
@@ -345,7 +363,10 @@ export const updateRemittanceLast5 = async (req, res) => {
     console.error('updateRemittanceLast5 error:', error);
     res.status(500).json({ error: '回報末五碼失敗' });
   }
-};
+}
+
+export const updateRemittanceLast5 = (req, res) => updateRemittanceLast5Core(req, res, { actor: 'customer' });
+export const adminUpdateRemittanceLast5 = (req, res) => updateRemittanceLast5Core(req, res, { actor: 'admin' });
 
 /**
  * Customer: Get my preorder orders
@@ -406,8 +427,8 @@ export const getAdminProductOrders = async (req, res) => {
         { order_ref: { contains: q, mode: 'insensitive' } },
         { assigned_pool_account: { contains: q, mode: 'insensitive' } },
         { remittance_last5: { contains: q, mode: 'insensitive' } },
-        { user: { name: { contains: q, mode: 'insensitive' } } },
-        { user: { phone: { contains: q, mode: 'insensitive' } } }
+        { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+        { user: activeUserWhere({ phone: { contains: q, mode: 'insensitive' } }) }
       ];
     }
 
@@ -693,22 +714,31 @@ export const batchImportAccountPool = async (req, res) => {
   }
 
   try {
-    const lines = String(text_lines)
-      .split('\n')
-      .map(l => l.trim())
-      .filter(Boolean);
+    const rawLines = String(text_lines).split('\n');
 
     let addedCount = 0;
     let skippedCount = 0;
+    const invalid_url_lines = [];
 
-    for (const line of lines) {
-      // Support comma or whitespace separated: account,payment_url,note
+    for (let i = 0; i < rawLines.length; i += 1) {
+      const lineNo = i + 1;
+      const line = rawLines[i].trim();
+      if (!line) continue;
+
+      // Support comma or tab separated: account,payment_url,note
       const parts = line.split(/[,\t]/).map(s => s.trim());
       const account = parts[0];
-      const url = parts[1] || null;
+      const rawUrl = parts[1] || '';
       const customNote = parts[2] || note || null;
 
       if (!account) continue;
+
+      if (rawUrl && !isSafeHttpUrl(rawUrl)) {
+        skippedCount++;
+        invalid_url_lines.push(lineNo);
+        continue;
+      }
+      const url = rawUrl ? safeHttpUrl(rawUrl, null) : null;
 
       const existing = await prisma.oneTimeAccountPool.findUnique({
         where: { account_number: account }
@@ -734,9 +764,10 @@ export const batchImportAccountPool = async (req, res) => {
     }
 
     res.json({
-      message: `匯入完成！成功新增 ${addedCount} 組帳號，略過重複 ${skippedCount} 組。`,
+      message: `匯入完成！成功新增 ${addedCount} 組帳號，略過 ${skippedCount} 組。`,
       addedCount,
-      skippedCount
+      skippedCount,
+      invalid_url_lines
     });
   } catch (error) {
     console.error('batchImportAccountPool error:', error);
@@ -748,13 +779,19 @@ export const updateAccountPoolItem = async (req, res) => {
   const { id } = req.params;
   const { status, note, payment_url } = req.body;
 
+  if (payment_url !== undefined && payment_url !== null) {
+    if (typeof payment_url !== 'string' || (payment_url.trim() && !isSafeHttpUrl(payment_url))) {
+      return res.status(422).json({ code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
+    }
+  }
+
   try {
     const updated = await prisma.oneTimeAccountPool.update({
       where: { id: parseInt(id, 10) },
       data: {
         ...(status ? { status } : {}),
         ...(note !== undefined ? { note } : {}),
-        ...(payment_url !== undefined ? { payment_url } : {})
+        ...(payment_url !== undefined ? { payment_url: safeHttpUrl(payment_url, null) } : {})
       }
     });
     res.json({ message: '帳號資訊已更新', item: updated });
@@ -845,7 +882,12 @@ export const updateShopGlobalSettings = async (req, res) => {
     if (shop_default_arrival_note !== undefined) dataToUpdate.shop_default_arrival_note = shop_default_arrival_note;
     if (shop_enable_shipping !== undefined) dataToUpdate.shop_enable_shipping = Boolean(shop_enable_shipping);
     if (shop_shipping_fee !== undefined) dataToUpdate.shop_shipping_fee = Math.max(0, parseInt(shop_shipping_fee, 10) || 0);
-    if (official_line_url !== undefined) dataToUpdate.official_line_url = official_line_url;
+    if (official_line_url !== undefined) {
+      if (official_line_url !== null && (typeof official_line_url !== 'string' || (official_line_url.trim() && !isSafeHttpUrl(official_line_url)))) {
+        return res.status(422).json({ code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
+      }
+      dataToUpdate.official_line_url = safeHttpUrl(official_line_url, null);
+    }
     if (bead_colors_json !== undefined) dataToUpdate.bead_colors_json = Array.isArray(bead_colors_json) ? bead_colors_json : [];
 
     const setting = await prisma.globalSetting.upsert({
@@ -854,7 +896,7 @@ export const updateShopGlobalSettings = async (req, res) => {
       create: { id: 1, ...dataToUpdate }
     });
 
-    res.json({ message: '預購商城全域設定已儲存', setting });
+    res.json({ message: '預購商城全域設定已儲存', setting: sanitizeGlobalSetting(setting) });
   } catch (error) {
     res.status(500).json({ error: '儲存設定失敗' });
   }

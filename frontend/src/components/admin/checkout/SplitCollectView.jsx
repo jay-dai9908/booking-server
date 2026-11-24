@@ -14,6 +14,7 @@ import Button from '../../customer/Button';
 import PassTenderSheet from './PassTenderSheet';
 import PaymentCompleteView from './PaymentCompleteView';
 import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
+import { useAdminPermissions, MONEY_WRITE } from '../../../hooks/admin/useAdminPermissions';
 
 export default function SplitCollectView({
   isOpen = false,
@@ -28,6 +29,8 @@ export default function SplitCollectView({
   onDisplayPaid = null,
   onDisplayNextPerson = null
 }) {
+  const { can } = useAdminPermissions();
+  const canMoneyWrite = can(MONEY_WRITE);
   const bill = billData?.bill || {};
   const persons = bill.persons || [];
   const pricing = billData?.pricing || {};
@@ -544,45 +547,49 @@ export default function SplitCollectView({
 
               {/* Bottom buttons:免收 moved to ⋯ menu, text never wraps */}
               <div className="flex items-center justify-between gap-2 pt-1 border-t border-sg-line/50">
-                <div className="relative">
-                  <button
-                    type="button"
-                    data-testid="split-more-btn"
-                    onClick={() => setShowMoreMenu(!showMoreMenu)}
-                    className="p-2 rounded-xl border border-sg-line bg-white hover:bg-sg-paper text-sg-muted hover:text-sg-ink transition"
-                    title="更多帳務操作"
-                  >
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
+                {canMoneyWrite ? (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      data-testid="split-more-btn"
+                      onClick={() => setShowMoreMenu(!showMoreMenu)}
+                      className="p-2 rounded-xl border border-sg-line bg-white hover:bg-sg-paper text-sg-muted hover:text-sg-ink transition"
+                      title="更多帳務操作"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
 
-                  {showMoreMenu && (
-                    <div className="absolute left-0 bottom-full mb-1 w-36 bg-white border border-sg-line rounded-2xl shadow-lg z-30 py-1 text-[13px] animate-fade-in">
-                      <button
-                        type="button"
-                        disabled={selectedPersonNos.length === 0}
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          setShowWaiveModal(true);
-                        }}
-                        className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium disabled:opacity-40"
-                      >
-                        免收此對象
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="split-mark-unpaid-btn"
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          setUnpaidReason('收錯訂單');
-                          setShowMarkUnpaidModal(true);
-                        }}
-                        className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-danger font-medium"
-                      >
-                        標記未結帳
-                      </button>
-                    </div>
-                  )}
-                </div>
+                    {showMoreMenu && (
+                      <div className="absolute left-0 bottom-full mb-1 w-36 bg-white border border-sg-line rounded-2xl shadow-lg z-30 py-1 text-[13px] animate-fade-in">
+                        <button
+                          type="button"
+                          disabled={selectedPersonNos.length === 0}
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            setShowWaiveModal(true);
+                          }}
+                          className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium disabled:opacity-40"
+                        >
+                          免收此對象
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="split-mark-unpaid-btn"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            setUnpaidReason('收錯訂單');
+                            setShowMarkUnpaidModal(true);
+                          }}
+                          className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-danger font-medium"
+                        >
+                          標記未結帳
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-sg-muted">退款與作廢需要帳務或預約權限</span>
+                )}
 
                 <Button
                   variant="primary"
@@ -704,14 +711,18 @@ export default function SplitCollectView({
                             >
                               補收
                             </button>
-                            <button
-                              type="button"
-                              data-testid="split-person-refund-btn"
-                              onClick={() => handleOpenRefund(p)}
-                              className="px-2.5 py-1 rounded-xl text-[12px] font-bold border border-sg-line bg-white hover:bg-sg-paper text-sg-danger"
-                            >
-                              退款
-                            </button>
+                            {canMoneyWrite ? (
+                              <button
+                                type="button"
+                                data-testid="split-person-refund-btn"
+                                onClick={() => handleOpenRefund(p)}
+                                className="px-2.5 py-1 rounded-xl text-[12px] font-bold border border-sg-line bg-white hover:bg-sg-paper text-sg-danger"
+                              >
+                                退款
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-sg-muted">退款與作廢需要帳務或預約權限</span>
+                            )}
                           </div>
                         </div>
                         <div className="text-[11px] text-sg-muted pl-6">
@@ -800,16 +811,20 @@ export default function SplitCollectView({
                         {pay.status === 'voided' && <span className="ml-2 text-sg-danger font-bold">(已作廢)</span>}
                       </div>
                       {pay.status === 'valid' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setVoidTargetPayment(pay);
-                            setActionReason('');
-                          }}
-                          className="text-sg-danger hover:underline font-bold"
-                        >
-                          作廢
-                        </button>
+                        canMoneyWrite ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVoidTargetPayment(pay);
+                              setActionReason('');
+                            }}
+                            className="text-sg-danger hover:underline font-bold"
+                          >
+                            作廢
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-sg-muted">退款與作廢需要帳務或預約權限</span>
+                        )
                       )}
                     </div>
                   ))}
