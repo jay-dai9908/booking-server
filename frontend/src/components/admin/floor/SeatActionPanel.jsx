@@ -549,16 +549,18 @@ export default function SeatActionPanel({
                 className={actionTileClass}
                 onClick={() => {
                   if (onMoveSeat && booking && seat) {
+                    const needsSeat = !currentPerson?.seat_code || String(currentPerson.seat_code).startsWith('WAIT-');
                     onMoveSeat({
                       booking,
-                      fromSeat: seat.code,
-                      personNo
+                      fromSeat: currentPerson?.seat_code || seat.code,
+                      personNo,
+                      isSeatAssign: needsSeat
                     });
                   }
                 }}
               >
                 <Move className="w-4 h-4 text-sg-brown" />
-                <span>換座位</span>
+                <span>{(!currentPerson?.seat_code || String(currentPerson.seat_code).startsWith('WAIT-')) ? '帶位' : '換座位'}</span>
               </button>
 
               <button

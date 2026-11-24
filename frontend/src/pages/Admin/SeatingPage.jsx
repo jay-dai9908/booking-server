@@ -816,6 +816,22 @@ export default function SeatingPage() {
     }
   };
 
+  // Seat an unseated person in an already checked-in group
+  const handleSeatPerson = async (bookingRef, personNo, seatCode) => {
+    try {
+      await api.post(`/floor/${bookingRef}/persons/${personNo}/seat`, {
+        seat_code: seatCode,
+        start_timer: true
+      });
+      refresh();
+      setSeatActionTarget(null);
+      setMoveSeatModalTarget(null);
+      showToast(`已為第 ${personNo} 位帶位至 ${seatCode}`);
+    } catch (err) {
+      showToast(err.response?.data?.error || '帶位失敗');
+    }
+  };
+
   // Mark no-show
   const handleMarkNoShow = async (bookingRef) => {
     try {
@@ -2261,17 +2277,19 @@ export default function SeatingPage() {
                                   type="button"
                                   data-testid={`person-move-seat-btn-${p.person_no}`}
                                   onClick={() => {
+                                    const needsSeat = !p.seat_code || String(p.seat_code).startsWith('WAIT-');
                                     setPersonMenuOpen(null);
                                     setMoveSeatModalTarget({
                                       booking: timerTarget,
-                                      fromSeat: p.seat_code,
-                                      personNo: p.person_no
+                                      fromSeat: p.seat_code || null,
+                                      personNo: p.person_no,
+                                      isSeatAssign: needsSeat
                                     });
                                   }}
                                   className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
                                 >
                                   <ArrowRightLeft className="w-3.5 h-3.5 text-sg-muted" />
-                                  換位
+                                  {(!p.seat_code || String(p.seat_code).startsWith('WAIT-')) ? '帶位' : '換位'}
                                 </button>
 
                                 {hasBoard ? (
@@ -2394,37 +2412,46 @@ export default function SeatingPage() {
         />
       </ConfirmPanel>
 
-      {/* Move Seat Modal (Spec 3.1 f, 3.3.4) */}
+      {/* Move Seat / Assign Seat Modal (Spec 3.1 f, 3.3.4, Round 39 Item 4) */}
       <ResponsivePanel
         isOpen={Boolean(moveSeatModalTarget)}
         onClose={() => setMoveSeatModalTarget(null)}
-        title="更換座位"
-        subtitle={`${moveSeatModalTarget?.booking?.name} · 第 ${moveSeatModalTarget?.personNo} 位 (原座位 ${moveSeatModalTarget?.fromSeat || '無'})`}
+        title={moveSeatModalTarget?.isSeatAssign ? '為客人帶位' : '更換座位'}
+        subtitle={`${moveSeatModalTarget?.booking?.name} · 第 ${moveSeatModalTarget?.personNo} 位 (${moveSeatModalTarget?.fromSeat ? `原座位 ${moveSeatModalTarget.fromSeat}` : '未帶位'})`}
       >
         <div className="space-y-4 py-2">
           {/* Waiting area shortcut */}
-          <div className="p-3 rounded-2xl bg-sg-paper/60 border border-sg-line flex items-center justify-between">
-            <div>
-              <span className="font-bold text-[13px] text-sg-ink block">移至等待區</span>
-              <span className="text-[11px] text-sg-muted">不佔座位，暫放候位（指派至 {nextEmptyWaitSeat}）</span>
+          {!String(moveSeatModalTarget?.fromSeat || '').startsWith('WAIT-') && (
+            <div className="p-3 rounded-2xl bg-sg-paper/60 border border-sg-line flex items-center justify-between">
+              <div>
+                <span className="font-bold text-[13px] text-sg-ink block">移至等待區</span>
+                <span className="text-[11px] text-sg-muted">不佔座位，暫放候位（指派至 {nextEmptyWaitSeat}）</span>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  if (!moveSeatModalTarget) return;
+                  if (moveSeatModalTarget.isSeatAssign) {
+                    handleSeatPerson(
+                      moveSeatModalTarget.booking.booking_ref,
+                      moveSeatModalTarget.personNo,
+                      nextEmptyWaitSeat
+                    );
+                  } else {
+                    handleMoveSeat(
+                      moveSeatModalTarget.booking.booking_ref,
+                      moveSeatModalTarget.fromSeat,
+                      nextEmptyWaitSeat,
+                      'move'
+                    );
+                  }
+                }}
+              >
+                移到等待區
+              </Button>
             </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                if (moveSeatModalTarget) {
-                  handleMoveSeat(
-                    moveSeatModalTarget.booking.booking_ref,
-                    moveSeatModalTarget.fromSeat,
-                    nextEmptyWaitSeat,
-                    'move'
-                  );
-                }
-              }}
-            >
-              移到等待區
-            </Button>
-          </div>
+          )}
 
           <div>
             <span className="text-[13px] font-bold text-sg-ink block mb-2">選擇目標實體座位</span>
@@ -2432,16 +2459,27 @@ export default function SeatingPage() {
               {activeSeats.map(s => {
                 const isCurrent = s.code === moveSeatModalTarget?.fromSeat;
                 const occupant = seatStatesMap[s.code]?.booking;
-                const isOccupied = isSeatOccupied(seatStatesMap[s.code]) && occupant?.booking_ref !== moveSeatModalTarget?.booking?.booking_ref;
+                const isAssignMode = Boolean(moveSeatModalTarget?.isSeatAssign);
+                const isOccupiedAny = isSeatOccupied(seatStatesMap[s.code]);
+                const isOwnGroupSeat = (moveSeatModalTarget?.booking?.assigned_seats || []).includes(s.code);
+                const isOccupiedOther = isOccupiedAny && occupant?.booking_ref !== moveSeatModalTarget?.booking?.booking_ref;
+                const isDisabled = isCurrent || (isAssignMode && (isOccupiedAny || isOwnGroupSeat));
 
                 return (
                   <button
                     key={s.code}
                     type="button"
-                    disabled={isCurrent}
+                    data-testid={`move-seat-option-${s.code}`}
+                    disabled={isDisabled}
                     onClick={() => {
                       if (!moveSeatModalTarget) return;
-                      if (isOccupied && occupant) {
+                      if (isAssignMode) {
+                        handleSeatPerson(
+                          moveSeatModalTarget.booking.booking_ref,
+                          moveSeatModalTarget.personNo,
+                          s.code
+                        );
+                      } else if (isOccupiedOther && occupant) {
                         setSwapConfirmTarget({
                           bookingRef: moveSeatModalTarget.booking.booking_ref,
                           fromSeat: moveSeatModalTarget.fromSeat,
@@ -2458,16 +2496,16 @@ export default function SeatingPage() {
                       }
                     }}
                     className={`p-2.5 rounded-xl border text-center transition ${
-                      isCurrent
-                        ? 'bg-gray-100 text-gray-400 border-sg-line cursor-not-allowed'
-                        : isOccupied
+                      isDisabled
+                        ? 'bg-gray-100 text-gray-400 border-sg-line cursor-not-allowed opacity-60'
+                        : isOccupiedOther
                         ? 'bg-amber-50/60 border-amber-300 text-amber-900 hover:bg-amber-100'
                         : 'bg-white text-sg-ink border-sg-line hover:border-sg-brown'
                     }`}
                   >
                     <span className="block text-[13px] font-bold font-num">{s.code}</span>
                     <span className="block text-[10px] opacity-80">
-                      {isCurrent ? '原位' : isOccupied ? '對調' : '空位'}
+                      {isCurrent ? '原位' : isAssignMode && (isOccupiedAny || isOwnGroupSeat) ? '有人' : isOccupiedOther ? '對調' : '空位'}
                     </span>
                   </button>
                 );

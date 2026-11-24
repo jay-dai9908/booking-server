@@ -4,6 +4,7 @@ import {
   getLive,
   checkIn,
   moveSeat,
+  seatPerson,
   moveGroup,
   handleTimer,
   addPerson,
@@ -23,6 +24,7 @@ const floorAuth = [verifyToken, requireAnyPermission(['reservations', 'seating',
 router.get('/live', ...floorAuth, getLive);
 router.post('/:booking_ref/check-in', ...floorAuth, checkIn);
 router.post('/:booking_ref/move-seat', ...floorAuth, moveSeat);
+router.post('/:booking_ref/persons/:person_no/seat', ...floorAuth, seatPerson);
 router.post('/:booking_ref/move-group', ...floorAuth, moveGroup);
 router.post('/:booking_ref/timer', ...floorAuth, handleTimer);
 router.post('/:booking_ref/persons', ...floorAuth, addPerson);

@@ -389,13 +389,19 @@ export default function TablePanel({
                                   <button
                                     type="button"
                                     onClick={() => {
+                                      const needsSeat = !person.seat_code || String(person.seat_code).startsWith('WAIT-');
                                       setMenuOpenKey(null);
                                       onClose();
-                                      onMoveSeat?.({ booking: group, fromSeat: person.seat_code, personNo: person.person_no });
+                                      onMoveSeat?.({
+                                        booking: group,
+                                        fromSeat: person.seat_code || null,
+                                        personNo: person.person_no,
+                                        isSeatAssign: needsSeat
+                                      });
                                     }}
                                     className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition"
                                   >
-                                    換座位
+                                    {(!person.seat_code || String(person.seat_code).startsWith('WAIT-')) ? '帶位' : '換座位'}
                                   </button>
                                   <button
                                     type="button"

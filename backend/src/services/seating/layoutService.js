@@ -199,6 +199,22 @@ export async function occupancyForSessions(client = prisma, sessionIds = [], exc
 }
 
 /**
+ * Advisory lock for all seating operations on a Taipei business date.
+ * STRICT LOCK ORDER across all transactions that mutate seats:
+ *   1. Session rows FOR UPDATE (if any)
+ *   2. lockDaySeats(tx, dateStr)
+ *   3. pg_advisory_xact_lock(hashtext(booking_ref))
+ * Never acquire booking_ref lock before lockDaySeats to prevent deadlocks.
+ */
+export async function lockDaySeats(tx, dateStr) {
+  const targetDateStr = typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)
+    ? dateStr.slice(0, 10)
+    : toTaipeiDateString(dateStr);
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(3901, hashtext(${targetDateStr}))`;
+  return targetDateStr;
+}
+
+/**
  * Load physical seats currently occupied by seated (checked-in, not departed) guests on a date,
  * regardless of which sessions the current reservation covers.
  * Returns { [seatCode]: { booking_ref, name, end_time } }

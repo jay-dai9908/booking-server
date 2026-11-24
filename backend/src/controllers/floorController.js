@@ -3,7 +3,7 @@ import prisma from '../prismaClient.js';
 import { getLiveFloorData, splitBoardUnits } from '../services/floor/liveService.js';
 import { applyCheckInRecords } from '../services/floor/checkInService.js';
 import { reseatBookings, assertNoSeatCollisions } from '../services/seating/allocator.js';
-import { getActiveLayoutForDate, loadSeatedOccupants, assertNoSeatedCollisions } from '../services/seating/layoutService.js';
+import { getActiveLayoutForDate, loadSeatedOccupants, assertNoSeatedCollisions, lockDaySeats } from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { refreshBillingCache, getBookingBill } from '../services/billing/billService.js';
@@ -186,6 +186,10 @@ export async function moveSeat(req, res) {
   const { from_seat, to_seat, mode = 'move' } = req.body;
   const staffName = req.user?.name || '門市人員';
 
+  if (!from_seat || typeof from_seat !== 'string' || !from_seat.trim()) {
+    return res.status(400).json({ code: 'FROM_SEAT_REQUIRED', error: '這位還沒有座位，請用「帶位」' });
+  }
+
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
@@ -195,6 +199,10 @@ export async function moveSeat(req, res) {
         include: { session: true }
       });
       if (!reservations.length) throw { status: 404, message: '找不到此筆預約' };
+
+      if (!(reservations[0].assigned_seats || []).includes(from_seat)) {
+        throw { status: 400, code: 'FROM_SEAT_REQUIRED', message: '這位還沒有座位，請用「帶位」' };
+      }
 
       const sessionIds = reservations.map(r => r.session_id);
       const dateStr = toTaipeiDateString(reservations[0].session.session_date);
@@ -353,6 +361,213 @@ export async function moveSeat(req, res) {
       });
     }
     return res.status(500).json({ error: '換位失敗' });
+  }
+}
+
+export async function seatPerson(req, res) {
+  const { booking_ref, person_no } = req.params;
+  const pNo = parseInt(person_no, 10);
+  const { seat_code, start_timer = true } = req.body || {};
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  if (!Number.isInteger(pNo) || pNo <= 0 || !seat_code || typeof seat_code !== 'string' || !seat_code.trim()) {
+    return res.status(400).json({ error: '請指定客人編號與目標座位' });
+  }
+  const cleanSeatCode = seat_code.trim();
+  const isWaitSeat = cleanSeatCode.startsWith('WAIT-');
+
+  try {
+    const preRes = await prisma.reservation.findFirst({
+      where: { booking_ref, status: { not: 'cancelled' } },
+      include: { session: true },
+      orderBy: { session: { start_time: 'asc' } }
+    });
+    if (!preRes) {
+      return res.status(404).json({ error: '找不到此筆預約' });
+    }
+    const dateStr = toTaipeiDateString(preRes.session.session_date);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await lockDaySeats(tx, dateStr);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+
+      const reservations = await tx.reservation.findMany({
+        where: { booking_ref, status: { not: 'cancelled' } },
+        include: { session: true },
+        orderBy: { session: { start_time: 'asc' } }
+      });
+      if (!reservations.length) throw { status: 404, message: '找不到此筆預約' };
+
+      const firstRes = reservations[0];
+      if (firstRes.attendance !== 'checked_in') {
+        throw { status: 409, message: '請先報到' };
+      }
+
+      const person = await tx.bookingPerson.findFirst({
+        where: { booking_ref, person_no: pNo }
+      });
+      if (!person || person.status !== 'active') {
+        throw { status: 409, code: 'PERSON_REMOVED', message: `第 ${pNo} 位不存在或已移除` };
+      }
+      if (person.seat_code && !String(person.seat_code).startsWith('WAIT-')) {
+        throw { status: 409, code: 'ALREADY_SEATED', message: `第 ${pNo} 位已經有座位 ${person.seat_code}` };
+      }
+
+      const sessionIds = reservations.map(r => r.session_id);
+      let displaced = null;
+
+      if (!isWaitSeat) {
+        const activeLayout = await getActiveLayoutForDate(tx, firstRes.session.session_date);
+        const targetSeatObj = (activeLayout?.seats || []).find(ls => ls.code === cleanSeatCode);
+        if (!targetSeatObj || !targetSeatObj.is_active) {
+          throw { status: 400, message: `座位 ${cleanSeatCode} 不存在或未啟用` };
+        }
+
+        const otherSeated = await tx.bookingPerson.findFirst({
+          where: {
+            booking_ref,
+            status: 'active',
+            person_no: { not: pNo },
+            seat_code: cleanSeatCode
+          }
+        });
+        if (otherSeated || (firstRes.assigned_seats || []).includes(cleanSeatCode)) {
+          throw { status: 400, message: `座位 ${cleanSeatCode} 已被本筆預約的其他人員佔用` };
+        }
+
+        const seatedOccupants = await loadSeatedOccupants(tx, dateStr, { excludeBookingRef: booking_ref });
+        if (seatedOccupants[cleanSeatCode]) {
+          const occ = seatedOccupants[cleanSeatCode];
+          throw {
+            status: 409,
+            code: 'SEAT_OCCUPIED',
+            conflict_seat: cleanSeatCode,
+            message: `${cleanSeatCode} 還有客人（${occ.name}，預約到 ${occ.end_time}），請選其他座位或先讓上一組離場`
+          };
+        }
+
+        const conflictReservations = await tx.reservation.findMany({
+          where: {
+            session_id: { in: sessionIds },
+            booking_ref: { not: booking_ref },
+            status: { not: 'cancelled' },
+            assigned_seats: { has: cleanSeatCode }
+          },
+          include: { user: true, session: true }
+        });
+
+        for (const cr of conflictReservations) {
+          if (cr.is_seat_locked || cr.attendance === 'checked_in' || cr.seat_source === 'staff') {
+            const crTime = cr.session?.start_time || '';
+            throw {
+              status: 409,
+              code: 'SEAT_CONFLICT',
+              conflict_seat: cleanSeatCode,
+              conflict_time: crTime,
+              message: `${cleanSeatCode} 在 ${crTime} 有已鎖定的預約，請選其他座位`
+            };
+          }
+        }
+
+        const conflictRefs = [...new Set(conflictReservations.map(cr => cr.booking_ref))];
+        displaced = await reseatBookings(tx, {
+          bookingRefs: conflictRefs,
+          reservedSeats: [cleanSeatCode],
+          sessionIds,
+          primaryBookingRef: booking_ref
+        });
+      }
+
+      const now = (process.env.NODE_ENV === 'test' && (req.body?.now || req.body?.at))
+        ? new Date(req.body.now || req.body.at)
+        : new Date();
+
+      const validPayments = await tx.payment.findMany({
+        where: {
+          booking_ref,
+          status: 'valid',
+          kind: { in: ['charge', 'waive'] }
+        }
+      });
+      const isBookingPaid =
+        firstRes.is_paid === true ||
+        firstRes.billing_status === 'paid' ||
+        firstRes.billing_status === 'waived' ||
+        validPayments.some((pay) => !pay.person_nos || pay.person_nos.length === 0);
+      const personPaid =
+        isBookingPaid ||
+        validPayments.some((pay) => Array.isArray(pay.person_nos) && pay.person_nos.includes(pNo));
+
+      const personUpdate = { seat_code: cleanSeatCode };
+      if (start_timer && !personPaid) {
+        if (!person.timer_started_at) {
+          personUpdate.timer_started_at = now;
+        }
+        if (!person.billing_start_at) {
+          const dStr = typeof firstRes.session.session_date === 'string'
+            ? firstRes.session.session_date.slice(0, 10)
+            : firstRes.session.session_date.toISOString().slice(0, 10);
+          const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
+          personUpdate.billing_start_at = firstRes.is_walk_in ? now : bookingStartDt;
+        }
+      }
+
+      const updatedPerson = await tx.bookingPerson.update({
+        where: { id: person.id },
+        data: personUpdate
+      });
+
+      const currentSeats = Array.isArray(firstRes.assigned_seats) ? [...firstRes.assigned_seats] : [];
+      if (person.seat_code && String(person.seat_code).startsWith('WAIT-')) {
+        const wIdx = currentSeats.indexOf(person.seat_code);
+        if (wIdx >= 0) currentSeats[wIdx] = cleanSeatCode;
+        else currentSeats.push(cleanSeatCode);
+      } else if (!currentSeats.includes(cleanSeatCode)) {
+        currentSeats.push(cleanSeatCode);
+      }
+
+      await tx.reservation.updateMany({
+        where: { booking_ref },
+        data: {
+          assigned_seats: currentSeats,
+          seat_source: 'staff',
+          is_seat_locked: true
+        }
+      });
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'seats_changed',
+        category: 'seating',
+        summary: `第 ${pNo} 位帶位至 ${cleanSeatCode}`,
+        reason: '分批帶位',
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id || null,
+        device_label: deviceInfo?.device_label || null
+      });
+
+      const allSessionsToCheck = [...new Set([...sessionIds, ...(displaced?.touchedSessionIds || [])])];
+      await assertNoSeatCollisions(tx, allSessionsToCheck);
+      await assertNoSeatedCollisions(tx, dateStr);
+
+      return updatedPerson;
+    });
+
+    displayBus.floorChanged();
+    return res.json({ success: true, person: updated, server_now: new Date().toISOString() });
+  } catch (error) {
+    console.error('[seatPerson] Error:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.conflict_seat ? { conflict_seat: error.conflict_seat } : {})
+      });
+    }
+    return res.status(500).json({ error: '帶位失敗' });
   }
 }
 
