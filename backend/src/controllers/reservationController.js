@@ -2636,7 +2636,7 @@ export const updatePaymentStatus = async (req, res) => {
     } else {
       const billData = await getBookingBill(booking_ref);
       const unpaidPersonNos = (billData.bill.persons || [])
-        .filter(p => !p.paid)
+        .filter(p => !p.is_paid && !p.paid && !p.is_frozen && p.status !== 'removed')
         .map(p => p.person_no);
 
       if (unpaidPersonNos.length === 0) {

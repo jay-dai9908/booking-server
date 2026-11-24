@@ -11,6 +11,7 @@ import {
   postVoid,
   postMarkUnpaid,
   getMemberPasses,
+  postPassQuote,
   postAddPromo,
   deleteRemovePromo
 } from '../controllers/billingController.js';
@@ -26,6 +27,7 @@ router.put('/:booking_ref/draft', ...checkoutStaffAuth, putDraft);
 router.post('/:booking_ref/promos', ...checkoutStaffAuth, postAddPromo);
 router.delete('/:booking_ref/promos/:code', ...checkoutStaffAuth, deleteRemovePromo);
 router.post('/:booking_ref/collect', ...checkoutStaffAuth, postCollect);
+router.post('/:booking_ref/pass-quote', ...checkoutStaffAuth, postPassQuote);
 router.post('/:booking_ref/supplement', ...checkoutStaffAuth, postSupplement);
 router.post('/:booking_ref/refund', verifyToken, requirePermissionGroup(MONEY_WRITE), postRefund);
 router.post('/:booking_ref/waive', verifyToken, requirePermissionGroup(MONEY_WRITE), postWaive);

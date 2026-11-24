@@ -9,8 +9,10 @@ import {
   markUnpaid,
   waivePayment,
   addPromoToBill,
-  removePromoFromBill
+  removePromoFromBill,
+  quotePassTenders
 } from '../services/billing/billService.js';
+import { computePassTenderValue, resolvePassCheckoutEffect } from '../../../shared/passValue.js';
 import displayBus from '../services/display/displayBus.js';
 import { validatePassUsage } from '../services/billing/passTender.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
@@ -137,7 +139,8 @@ export async function postCollect(req, res) {
       return res.status(error.status).json({
         error: error.message,
         code: error.code,
-        bill: error.bill
+        bill: error.bill,
+        quote: error.quote
       });
     }
     return res.status(500).json({ error: '收款失敗' });
@@ -246,6 +249,24 @@ export async function postMarkUnpaid(req, res) {
   }
 }
 
+export async function postPassQuote(req, res) {
+  const { booking_ref } = req.params;
+  try {
+    const result = await quotePassTenders(booking_ref, req.body || {});
+    return res.json({
+      success: true,
+      server_now: new Date().toISOString(),
+      ...result
+    });
+  } catch (error) {
+    console.error('[postPassQuote] Error:', error);
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    return res.status(500).json({ error: '無法試算卡券折抵' });
+  }
+}
+
 export async function getMemberPasses(req, res) {
   const { booking_ref } = req.params;
   try {
@@ -268,31 +289,26 @@ export async function getMemberPasses(req, res) {
 
     const passList = passes.map(pass => {
       const validation = validatePassUsage(pass, { date: sessionDate });
+      const effect = resolvePassCheckoutEffect(pass.plan?.checkout_effect, pass.pass_type);
       const suggests = [];
 
       if (bill.persons) {
         for (const p of bill.persons) {
-          if (p.paid) continue;
-          let units = 1;
-          let value = 0;
-          const effect = pass.plan?.checkout_effect || (pass.pass_type === 'TIME_PASS' ? 'entry_hours' : 'entry_full');
-
-          if (effect === 'entry_hours') {
-            const needHours = Math.floor(p.hours || 0);
-            units = Math.max(1, Math.min(pass.remaining_quota || 99, needHours));
-            value = Math.min(p.entry?.amount || 0, units * (pricing.hourly || 150));
-          } else if (effect === 'entry_full') {
-            units = 1;
-            value = p.entry?.amount || 0;
-          } else if (effect === 'percent_off') {
-            units = 1;
-            const scope = pass.plan?.checkout_scope === 'all' ? (p.total || 0) : (p.entry?.amount || 0);
-            value = Math.round(scope * (pass.plan?.discount_percent || 0) / 100);
-          } else if (effect === 'fixed_amount') {
-            units = 1;
-            const scope = pass.plan?.checkout_scope === 'all' ? (p.total || 0) : (p.entry?.amount || 0);
-            value = Math.min(pass.plan?.checkout_value || 0, scope);
-          }
+          if (p.is_paid || p.paid || p.is_frozen || p.status === 'removed') continue;
+          const units = effect === 'entry_hours'
+            ? Math.max(1, Math.min(pass.remaining_quota || 99, Math.floor(p.hours || p.entry?.hours || 0)))
+            : 1;
+          const value = computePassTenderValue({
+            checkout_effect: pass.plan?.checkout_effect,
+            pass_type: pass.pass_type,
+            checkout_scope: pass.plan?.checkout_scope,
+            discount_percent: pass.plan?.discount_percent,
+            checkout_value: pass.plan?.checkout_value,
+            units,
+            person: p,
+            hourly_price: pricing?.hourly || 150,
+            already_covered: 0
+          });
 
           suggests.push({
             person_no: p.person_no,
@@ -307,6 +323,7 @@ export async function getMemberPasses(req, res) {
         pass_code: pass.pass_code,
         plan_name: pass.plan_name_snapshot,
         pass_type: pass.pass_type,
+        checkout_effect: effect,
         remaining_quota: pass.remaining_quota,
         total_quota: pass.total_quota,
         expires_at: pass.expires_at,
@@ -330,6 +347,7 @@ export default {
   getBillingDetails,
   putDraft,
   postCollect,
+  postPassQuote,
   postSupplement,
   postRefund,
   postWaive,

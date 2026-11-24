@@ -10,17 +10,45 @@ export default function PassTenderSheet({
   bookingRef,
   personNo,
   onSelectPass, // (passTender: { user_pass_id, person_no, units }) => void
-  hourlyRate = 150
+  existingTenders = []
 }) {
   const [passes, setPasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedPassId, setSelectedPassId] = useState(null);
   const [units, setUnits] = useState(1);
+  const [quotedValue, setQuotedValue] = useState(null);
 
   useEffect(() => {
     if (!isOpen || !bookingRef) return;
     fetchPasses();
   }, [isOpen, bookingRef]);
+
+  useEffect(() => {
+    if (!isOpen || !bookingRef || !selectedPassId || !personNo) {
+      setQuotedValue(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const otherTenders = (existingTenders || []).filter((t) => t.user_pass_id !== selectedPassId);
+    const quotePersonNos = [...new Set([personNo, ...otherTenders.map((t) => t.person_no)])];
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.post(`/billing/${bookingRef}/pass-quote`, {
+          person_nos: quotePersonNos,
+          pass_tenders: [...otherTenders, { user_pass_id: selectedPassId, person_no: personNo, units }]
+        });
+        if (cancelled) return;
+        const matched = (res.data?.tenders || []).find((t) => t.user_pass_id === selectedPassId);
+        setQuotedValue(matched ? matched.value : 0);
+      } catch (err) {
+        if (!cancelled) console.error('[PassTenderSheet quote] Error:', err);
+      }
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isOpen, bookingRef, selectedPassId, personNo, units, existingTenders]);
 
   const fetchPasses = async () => {
     try {
@@ -28,12 +56,12 @@ export default function PassTenderSheet({
       const res = await api.get(`/billing/${bookingRef}/passes`);
       const list = res.data?.passes || [];
       setPasses(list);
-      // Auto select first usable pass
       const firstUsable = list.find(p => p.usable);
       if (firstUsable) {
         setSelectedPassId(firstUsable.id);
+        const existingMatch = (existingTenders || []).find(t => t.user_pass_id === firstUsable.id && t.person_no === personNo);
         const suggest = firstUsable.suggest?.find(s => s.person_no === personNo);
-        setUnits(suggest?.units || 1);
+        setUnits(existingMatch?.units || suggest?.units || 1);
       }
     } catch (err) {
       console.error(err);
@@ -44,10 +72,12 @@ export default function PassTenderSheet({
 
   const handleConfirm = () => {
     if (!selectedPassId) return;
-    onSelectPass({
+    const selected = passes.find(p => p.id === selectedPassId);
+    const isEntryHours = (selected?.checkout_effect || (selected?.pass_type === 'TIME_PASS' ? 'entry_hours' : 'entry_full')) === 'entry_hours';
+    onSelectPass?.({
       user_pass_id: selectedPassId,
       person_no: personNo,
-      units
+      units: isEntryHours ? units : 1
     });
     onClose();
   };
@@ -87,10 +117,14 @@ export default function PassTenderSheet({
           passes.map((pass) => {
             const isSelected = selectedPassId === pass.id;
             const isUsable = pass.usable;
+            const suggestItem = pass.suggest?.find(s => s.person_no === personNo);
+            const displayDiscount = isSelected && quotedValue !== null ? quotedValue : (suggestItem?.value ?? 0);
+            const isEntryHours = (pass.checkout_effect || (pass.pass_type === 'TIME_PASS' ? 'entry_hours' : 'entry_full')) === 'entry_hours';
 
             return (
               <div
                 key={pass.id}
+                data-testid={`pass-tender-card-${pass.id}`}
                 onClick={isUsable ? () => {
                   setSelectedPassId(pass.id);
                   const sug = pass.suggest?.find(s => s.person_no === personNo);
@@ -121,6 +155,12 @@ export default function PassTenderSheet({
                   )}
                 </div>
 
+                {isUsable && (
+                  <div className="mt-1.5 text-[12px] font-bold text-sg-brown" data-testid={`pass-tender-value-${pass.id}`}>
+                    這張會折 NT${displayDiscount}
+                  </div>
+                )}
+
                 {!isUsable && pass.reason && (
                   <div className="mt-2 text-[11px] font-bold text-sg-danger flex items-center gap-1">
                     <AlertCircle className="w-3.5 h-3.5" />
@@ -128,7 +168,7 @@ export default function PassTenderSheet({
                   </div>
                 )}
 
-                {isSelected && isUsable && pass.pass_type === 'TIME_PASS' && (
+                {isSelected && isUsable && isEntryHours && (
                   <div className="mt-3 pt-3 border-t border-sg-line flex items-center justify-between">
                     <span className="text-[12px] font-medium text-sg-ink">使用時數</span>
                     <div className="flex items-center gap-2">

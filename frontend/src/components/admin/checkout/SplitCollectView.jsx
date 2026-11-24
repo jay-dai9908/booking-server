@@ -47,6 +47,9 @@ export default function SplitCollectView({
   const splitDisplayTimerRef = useRef(null);
   const splitPaidRef = useRef(false);
   const [passTenders, setPassTenders] = useState([]);
+  const [passQuote, setPassQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const quoteTimerRef = useRef(null);
   const [note, setNote] = useState('');
   const [autoPrint, setAutoPrint] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -209,14 +212,51 @@ export default function SplitCollectView({
 
   const selectedPersons = persons.filter(p => selectedPersonNos.includes(p.person_no));
   const rawDueAmount = selectedPersons.reduce((sum, p) => sum + (p.total || 0), 0);
+  const activePassTenders = passTenders.filter(pt => selectedPersonNos.includes(pt.person_no));
+  const activePassKey = JSON.stringify(activePassTenders);
+  const selectedNosKey = selectedPersonNos.join(',');
 
-  // Subtract pass discount
-  const passDiscountTotal = passTenders.reduce((sum, pt) => {
-    const p = selectedPersons.find(sp => sp.person_no === pt.person_no);
-    return sum + Math.min(p?.entry?.amount || 0, pt.units * (pricing.hourly || 150));
-  }, 0);
+  useEffect(() => {
+    if (!isOpen || !bookingRef || successPaymentData || selectedPersonNos.length === 0) {
+      setPassQuote(null);
+      setQuoteLoading(false);
+      return undefined;
+    }
 
-  const netCashDue = Math.max(0, rawDueAmount - passDiscountTotal);
+    if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current);
+    setQuoteLoading(true);
+    let cancelled = false;
+
+    quoteTimerRef.current = setTimeout(async () => {
+      quoteTimerRef.current = null;
+      try {
+        const res = await api.post(`/billing/${bookingRef}/pass-quote`, {
+          person_nos: selectedPersonNos,
+          pass_tenders: activePassTenders
+        });
+        if (!cancelled) {
+          setPassQuote(res.data || null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[SplitCollectView pass-quote] Error:', err);
+          setErrorMessage(err.response?.data?.error || '卡券試算失敗');
+        }
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      if (quoteTimerRef.current) {
+        clearTimeout(quoteTimerRef.current);
+        quoteTimerRef.current = null;
+      }
+    };
+  }, [isOpen, bookingRef, selectedNosKey, activePassKey, successPaymentData, rawDueAmount]);
+
+  const netCashDue = passQuote ? (passQuote.net_due ?? rawDueAmount) : rawDueAmount;
 
   const togglePerson = (pNo) => {
     if (selectedPersonNos.includes(pNo)) {
@@ -286,9 +326,10 @@ export default function SplitCollectView({
         client_batch_id: clientBatchId,
         person_nos: selectedPersonNos,
         expected_amount: rawDueAmount,
+        expected_net_amount: netCashDue,
         method: method === 'pass' ? 'cash' : method,
-        cash_received: method === 'cash' ? (cashReceived || netCashDue) : null,
-        pass_tenders: passTenders,
+        cash_received: method === 'cash' ? (cashReceived > 0 ? cashReceived : netCashDue) : null,
+        pass_tenders: activePassTenders,
         note,
         print: autoPrint
       });
@@ -596,7 +637,7 @@ export default function SplitCollectView({
                   size="md"
                   onClick={handleCollect}
                   loading={loading}
-                  disabled={selectedPersonNos.length === 0}
+                  disabled={selectedPersonNos.length === 0 || (activePassTenders.length > 0 && quoteLoading)}
                   className="whitespace-nowrap"
                 >
                   確認收款 NT${netCashDue}
@@ -771,6 +812,38 @@ export default function SplitCollectView({
                 <span className="text-[13px] font-bold text-sg-ink block">選擇收款方式</span>
                 <PayMethodGrid value={method} onChange={handleMethodChange} />
 
+                {activePassTenders.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-sg-brown-soft/60 border border-sg-brown/30 space-y-1.5" data-testid="applied-pass-tenders">
+                    <div className="flex items-center justify-between text-[12px] font-bold text-sg-brown">
+                      <span>已套用卡券折抵</span>
+                      <span>
+                        {quoteLoading ? '試算中...' : `-NT$${passQuote?.total_discount ?? 0}`}
+                      </span>
+                    </div>
+                    {activePassTenders.map((pt) => {
+                      const quoted = (passQuote?.tenders || []).find((q) => q.user_pass_id === pt.user_pass_id);
+                      return (
+                        <div key={pt.user_pass_id} className="flex items-center justify-between text-[12px] text-sg-ink">
+                          <span>
+                            第 {pt.person_no} 位 · {quoted?.plan_name || `卡券 #${pt.user_pass_id}`}
+                            {quoted ? `（折抵 NT$${quoted.value}）` : ''}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPassTenders((prev) => prev.filter((item) => item.user_pass_id !== pt.user_pass_id));
+                              setCashReceived(0);
+                            }}
+                            className="text-sg-danger hover:underline font-bold"
+                          >
+                            移除
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {method === 'cash' && (
                   <CashPad
                     dueAmount={netCashDue}
@@ -842,8 +915,13 @@ export default function SplitCollectView({
           onClose={() => setPassSheetPersonNo(null)}
           bookingRef={bookingRef}
           personNo={passSheetPersonNo}
-          onApply={(tenders) => {
-            setPassTenders(tenders);
+          existingTenders={activePassTenders}
+          onSelectPass={(pt) => {
+            setPassTenders((prev) => {
+              const filtered = prev.filter((item) => item.user_pass_id !== pt.user_pass_id);
+              return [...filtered, pt];
+            });
+            setCashReceived(0);
             setPassSheetPersonNo(null);
           }}
         />

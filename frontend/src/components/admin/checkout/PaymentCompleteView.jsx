@@ -17,10 +17,16 @@ export default function PaymentCompleteView({
 
   const payments = data?.payments || [];
   const firstPay = payments[0] || {};
-  const totalCollected = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  const methodLabel = PAYMENT_METHOD_LABELS[firstPay.method] || firstPay.method || '現金';
-  const changeGiven = firstPay.change_given ?? 0;
-  const personNos = firstPay.person_nos || [];
+  const primaryPay = payments.find(p => p.method !== 'pass') || firstPay;
+  const cashOrOtherTotal = payments
+    .filter(p => p.method !== 'pass')
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
+  const passDiscountTotal = payments
+    .filter(p => p.method === 'pass')
+    .reduce((sum, p) => sum + (p.amount || 0), 0);
+  const methodLabel = PAYMENT_METHOD_LABELS[primaryPay.method] || primaryPay.method || '現金';
+  const changeGiven = primaryPay.change_given ?? 0;
+  const personNos = primaryPay.person_nos?.length ? primaryPay.person_nos : (firstPay.person_nos || []);
   const personDesc = personNos.length > 0 ? `第 ${personNos.join('、')} 位` : '顧客';
 
   // Find remaining unpaid persons
@@ -63,12 +69,12 @@ export default function PaymentCompleteView({
   };
 
   const handleReprint = async () => {
-    if (!firstPay.id) return;
+    if (!primaryPay.id) return;
     try {
       setReprinting(true);
       const res = await api.post('/print/jobs', {
         type: 'receipt',
-        payment_id: firstPay.id,
+        payment_id: primaryPay.id,
         booking_ref: bookingRef,
         is_reprint: true
       });
@@ -116,11 +122,16 @@ export default function PaymentCompleteView({
         </div>
         <div>
           <div className="text-[24px] font-bold text-sg-ink font-num" data-testid="collected-amount-text">
-            已收款 NT${totalCollected}
+            已收款 NT${cashOrOtherTotal}
           </div>
           <p className="text-[14px] text-sg-muted mt-0.5">
             {personDesc} · {methodLabel} · 找零 NT${changeGiven}
           </p>
+          {passDiscountTotal > 0 && (
+            <p className="text-[13px] font-bold text-sg-brown mt-0.5" data-testid="pass-discount-text">
+              卡券折抵 NT${passDiscountTotal}
+            </p>
+          )}
         </div>
       </div>
 

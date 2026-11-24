@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../../prismaClient.js';
 import { computeBill, billingStatus, calculatePersonRefundInfo } from '../../../../shared/billing.js';
+import { computePassTenderValue, resolvePassCheckoutEffect } from '../../../../shared/passValue.js';
 import { toTaipeiDateString, blocksBy1030, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
 import { evaluatePromoCode } from '../../controllers/checkoutController.js';
@@ -721,6 +722,142 @@ export async function refreshBillingCache(tx = prisma, booking_ref) {
 }
 
 /**
+ * Plan pass tenders on server without mutating quota or payment records.
+ */
+export async function planPassTenders(txOrPrisma = prisma, {
+  booking_ref,
+  bill,
+  pricing,
+  targetPersonNos = [],
+  pass_tenders = [],
+  reservation = null
+} = {}) {
+  const normalizedNos = Array.isArray(targetPersonNos) ? targetPersonNos.map(Number).filter(n => !Number.isNaN(n)) : [];
+  const targetPersons = (bill?.persons || []).filter(p => normalizedNos.includes(p.person_no));
+  const grossDue = targetPersons.reduce((sum, p) => sum + (p.total || 0), 0);
+
+  if (!Array.isArray(pass_tenders) || pass_tenders.length === 0 || targetPersons.length === 0) {
+    return {
+      tenders: [],
+      gross_due: grossDue,
+      total_discount: 0,
+      net_due: grossDue
+    };
+  }
+
+  const firstRes = reservation || await txOrPrisma.reservation.findFirst({
+    where: { booking_ref, status: { not: 'cancelled' } },
+    include: { session: true }
+  });
+  const sessionDate = firstRes?.session?.session_date || firstRes?.session_date || new Date();
+
+  const usedPassIds = new Set();
+  const personCovered = new Map();
+  const plannedTenders = [];
+  let totalDiscount = 0;
+
+  for (const pt of pass_tenders) {
+    const passId = Number(pt?.user_pass_id);
+    if (!passId || usedPassIds.has(passId)) {
+      throw { status: 422, message: '同一次收款不能重複使用同一張卡券' };
+    }
+    usedPassIds.add(passId);
+
+    const pass = await txOrPrisma.userPass.findUnique({
+      where: { id: passId },
+      include: { plan: true }
+    });
+    if (!pass) {
+      throw { status: 422, message: '找不到卡券' };
+    }
+    if (firstRes && pass.user_id !== firstRes.user_id) {
+      throw { status: 422, message: '此卡券不屬於此預約會員' };
+    }
+
+    const effect = resolvePassCheckoutEffect(pass.plan?.checkout_effect, pass.pass_type);
+    const effectiveUnits = effect === 'entry_full' ? 1 : (Number(pt.units) || 1);
+
+    const validation = validatePassUsage(pass, {
+      date: sessionDate,
+      units: effectiveUnits,
+      hours: effectiveUnits
+    });
+    if (!validation.usable) {
+      throw { status: 422, message: validation.reason };
+    }
+
+    const pBill = targetPersons.find(p => p.person_no === Number(pt.person_no)) || targetPersons[0];
+    const alreadyCovered = personCovered.get(pBill.person_no) || 0;
+    const rawValue = computePassTenderValue({
+      checkout_effect: pass.plan?.checkout_effect,
+      pass_type: pass.pass_type,
+      checkout_scope: pass.plan?.checkout_scope,
+      discount_percent: pass.plan?.discount_percent,
+      checkout_value: pass.plan?.checkout_value,
+      units: effectiveUnits,
+      person: pBill,
+      hourly_price: pricing?.hourly || 150,
+      already_covered: alreadyCovered
+    });
+
+    const remainingOrderDue = Math.max(0, grossDue - totalDiscount);
+    const value = Math.min(rawValue, remainingOrderDue);
+    personCovered.set(pBill.person_no, alreadyCovered + value);
+    totalDiscount += value;
+
+    plannedTenders.push({
+      user_pass_id: pass.id,
+      person_no: pBill.person_no,
+      units: effectiveUnits,
+      value,
+      pass,
+      plan_name: pass.plan_name_snapshot,
+      pass_type: pass.pass_type,
+      pass_code: pass.pass_code
+    });
+  }
+
+  return {
+    tenders: plannedTenders,
+    gross_due: grossDue,
+    total_discount: totalDiscount,
+    net_due: Math.max(0, grossDue - totalDiscount)
+  };
+}
+
+/**
+ * Quote endpoint helper for POST /api/billing/:booking_ref/pass-quote
+ */
+export async function quotePassTenders(booking_ref, payload = {}) {
+  const { person_nos = [], pass_tenders = [] } = payload || {};
+  const billData = await getBookingBill(booking_ref, prisma);
+  const { bill, pricing } = billData;
+  const normalizedNos = Array.isArray(person_nos) ? person_nos.map(Number).filter(n => !Number.isNaN(n)) : [];
+
+  const planned = await planPassTenders(prisma, {
+    booking_ref,
+    bill,
+    pricing,
+    targetPersonNos: normalizedNos,
+    pass_tenders: Array.isArray(pass_tenders) ? pass_tenders : []
+  });
+
+  return {
+    gross_due: planned.gross_due,
+    net_due: planned.net_due,
+    total_discount: planned.total_discount,
+    tenders: planned.tenders.map(({ user_pass_id, person_no, units, value, plan_name, pass_type }) => ({
+      user_pass_id,
+      person_no,
+      units,
+      value,
+      plan_name,
+      pass_type
+    }))
+  };
+}
+
+/**
  * Collect payment for one or more persons (spec 5.4 POST /collect)
  */
 export async function collectPayment(booking_ref, payload, staffUser, deviceInfo) {
@@ -730,6 +867,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
     client_batch_id,
     person_nos = [],
     expected_amount,
+    expected_net_amount,
     method = 'cash',
     cash_received = null,
     pass_tenders = [],
@@ -845,129 +983,105 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       };
     }
 
+    const firstRes = hasPassTenders
+      ? await tx.reservation.findFirst({ where: { booking_ref }, include: { session: true } })
+      : null;
+
+    const passQuote = await planPassTenders(tx, {
+      booking_ref,
+      bill,
+      pricing,
+      targetPersonNos,
+      pass_tenders,
+      reservation: firstRes
+    });
+
+    if (expected_net_amount !== undefined && expected_net_amount !== null && passQuote.net_due !== Number(expected_net_amount)) {
+      throw {
+        status: 409,
+        code: 'AMOUNT_CHANGED',
+        message: '金額剛剛有變動，請確認後再收款',
+        bill,
+        quote: {
+          tenders: passQuote.tenders.map(({ user_pass_id, person_no, units, value, plan_name, pass_type }) => ({
+            user_pass_id, person_no, units, value, plan_name, pass_type
+          })),
+          gross_due: passQuote.gross_due,
+          net_due: passQuote.net_due
+        }
+      };
+    }
+
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const createdPayments = [];
-    let remainingAmount = calculatedTotal;
+    let remainingAmount = passQuote.net_due;
 
-    // Handle pass tenders (Section 3.7 & 4.5.7)
+    // Apply server-computed pass tenders (Section 3.7 & 4.5.7)
     const passRecords = [];
     const personPassDiscounts = new Map();
-    if (Array.isArray(pass_tenders) && pass_tenders.length) {
-      const usedPassIds = new Set();
-      const firstRes = await tx.reservation.findFirst({
-        where: { booking_ref },
-        include: { session: true }
-      });
-      const sessionDate = firstRes?.session?.session_date || firstRes?.session_date || new Date();
+    for (const tender of passQuote.tenders) {
+      const { pass, value: discountValue, units: usedUnits, person_no: tenderPersonNo } = tender;
+      const pBill = targetPersons.find(p => p.person_no === tenderPersonNo) || targetPersons[0];
+      if (discountValue > 0) {
+        personPassDiscounts.set(pBill.person_no, (personPassDiscounts.get(pBill.person_no) || 0) + discountValue);
+        const passPayNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
 
-      for (const pt of pass_tenders) {
-        if (usedPassIds.has(pt.user_pass_id)) {
-          throw { status: 422, message: '同一次收款不能重複使用同一張卡券' };
-        }
-        usedPassIds.add(pt.user_pass_id);
-
-        const pass = await tx.userPass.findUnique({
-          where: { id: pt.user_pass_id },
-          include: { plan: true }
+        await deductPass(tx, {
+          user_pass_id: pass.id,
+          units: usedUnits,
+          booking_ref,
+          payment_no: passPayNo,
+          person_no: pBill.person_no,
+          staff_name: staffName
         });
-        if (!pass) {
-          throw { status: 422, message: '找不到卡券' };
-        }
 
-        // Check if pass belongs to this reservation's user
-        if (firstRes && pass.user_id !== firstRes.user_id) {
-          throw { status: 422, message: '此卡券不屬於此預約會員' };
-        }
-
-        // Validate pass usage
-        const validation = validatePassUsage(pass, {
-          date: sessionDate,
-          units: pt.units || 1,
-          hours: pt.units || 1
-        });
-        if (!validation.usable) {
-          throw { status: 422, message: validation.reason };
-        }
-
-        const pBill = targetPersons.find(p => p.person_no === pt.person_no) || targetPersons[0];
-        let discountValue = 0;
-        const effect = pass.plan?.checkout_effect || (pass.pass_type === 'TIME_PASS' ? 'entry_hours' : 'entry_full');
-
-        if (effect === 'entry_hours') {
-          discountValue = Math.min(pBill.entry?.amount || 0, pt.units * (pricing.hourly || 150));
-        } else if (effect === 'entry_full') {
-          discountValue = pBill.entry?.amount || 0;
-        } else if (effect === 'percent_off') {
-          const baseScope = pass.plan?.checkout_scope === 'all' ? (pBill.total || 0) : (pBill.entry?.amount || 0);
-          discountValue = Math.round(baseScope * (pass.plan?.discount_percent || 0) / 100);
-        } else if (effect === 'fixed_amount') {
-          const baseScope = pass.plan?.checkout_scope === 'all' ? (pBill.total || 0) : (pBill.entry?.amount || 0);
-          discountValue = Math.min(pass.plan?.checkout_value || 0, baseScope);
-        }
-
-        discountValue = Math.min(discountValue, remainingAmount);
-        if (discountValue > 0) {
-          personPassDiscounts.set(pt.person_no, (personPassDiscounts.get(pt.person_no) || 0) + discountValue);
-          const passPayNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
-
-          await deductPass(tx, {
-            user_pass_id: pass.id,
-            units: pt.units || 1,
-            booking_ref,
+        const passPay = await tx.payment.create({
+          data: {
             payment_no: passPayNo,
-            person_no: pt.person_no,
-            staff_name: staffName
-          });
-
-          const passPay = await tx.payment.create({
-            data: {
-              payment_no: passPayNo,
-              batch_no: batchNo,
-              client_batch_id,
-              booking_ref,
-              kind: 'charge',
-              status: 'valid',
-              method: 'pass',
-              amount: discountValue,
-              person_nos: [pt.person_no],
-              breakdown_json: {
-                persons: [{ ...pBill, amount: discountValue }],
-                pricing,
-                snapshot_at: new Date().toISOString()
-              },
-              pass_json: [{
-                user_pass_id: pass.id,
-                pass_code: pass.pass_code,
-                plan_name: pass.plan_name_snapshot,
-                units: pt.units || 1,
-                unit_label: pass.pass_type === 'TIME_PASS' ? '小時' : '次',
-                value: discountValue,
-                person_no: pt.person_no
-              }],
-              staff_name: staffName,
-              staff_id: staffId,
-              device_id: deviceInfo?.device_id,
-              device_label: deviceInfo?.device_label || '櫃檯'
-            }
-          });
-
-          createdPayments.push(passPay);
-          passRecords.push({ pass_code: pass.pass_code, value: discountValue });
-          remainingAmount -= discountValue;
-
-          await auditLog(tx, {
+            batch_no: batchNo,
+            client_batch_id,
             booking_ref,
-            event_type: 'pass_redeemed',
-            category: 'pass',
-            summary: `卡券折抵 第 ${pt.person_no} 位 · ${pass.plan_name_snapshot} · NT$${discountValue}`,
+            kind: 'charge',
+            status: 'valid',
+            method: 'pass',
             amount: discountValue,
-            payment_id: passPay.id,
+            person_nos: [pBill.person_no],
+            breakdown_json: {
+              persons: [{ ...pBill, amount: discountValue }],
+              pricing,
+              snapshot_at: new Date().toISOString()
+            },
+            pass_json: [{
+              user_pass_id: pass.id,
+              pass_code: pass.pass_code,
+              plan_name: pass.plan_name_snapshot,
+              units: usedUnits,
+              unit_label: pass.pass_type === 'TIME_PASS' ? '小時' : '次',
+              value: discountValue,
+              person_no: pBill.person_no
+            }],
             staff_name: staffName,
             staff_id: staffId,
             device_id: deviceInfo?.device_id,
-            device_label: deviceInfo?.device_label
-          });
-        }
+            device_label: deviceInfo?.device_label || '櫃檯'
+          }
+        });
+
+        createdPayments.push(passPay);
+        passRecords.push({ pass_code: pass.pass_code, value: discountValue });
+
+        await auditLog(tx, {
+          booking_ref,
+          event_type: 'pass_redeemed',
+          category: 'pass',
+          summary: `卡券折抵 第 ${pBill.person_no} 位 · ${pass.plan_name_snapshot} · NT$${discountValue}`,
+          amount: discountValue,
+          payment_id: passPay.id,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id,
+          device_label: deviceInfo?.device_label
+        });
       }
     }
 
@@ -982,12 +1096,14 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
 
       let change = 0;
+      const providedCash = (cash_received !== null && cash_received !== undefined && cash_received !== '')
+        ? Number(cash_received)
+        : remainingAmount;
       if (method === 'cash') {
-        const cashAmt = cash_received !== null && cash_received !== undefined ? Number(cash_received) : remainingAmount;
-        if (cashAmt < remainingAmount) {
-          throw { status: 400, message: `實收現金（NT$${cashAmt}）不足（應收 NT$${remainingAmount}）` };
+        if (!Number.isFinite(providedCash) || providedCash < remainingAmount) {
+          throw { status: 400, message: `實收現金（NT$${Number.isFinite(providedCash) ? providedCash : 0}）不足（應收 NT$${remainingAmount}）` };
         }
-        change = cashAmt - remainingAmount;
+        change = providedCash - remainingAmount;
       }
 
       const targetPersonsWithNet = targetPersons.map(tp => ({
@@ -1005,7 +1121,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           status: 'valid',
           method,
           amount: remainingAmount,
-          cash_received: method === 'cash' ? (cash_received ?? remainingAmount) : null,
+          cash_received: method === 'cash' ? providedCash : null,
           change_given: method === 'cash' ? change : null,
           person_nos: targetPersonNos,
           breakdown_json: {
