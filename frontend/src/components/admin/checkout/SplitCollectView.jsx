@@ -87,6 +87,7 @@ export default function SplitCollectView({
   }));
   const [refundMethod, setRefundMethod] = useState('cash');
   const [selectedPassPaymentId, setSelectedPassPaymentId] = useState(null);
+  const [selectedCashPaymentId, setSelectedCashPaymentId] = useState(null);
   const [actionReason, setActionReason] = useState('');
   const [actionAmount, setActionAmount] = useState(() => {
     if (initialSupplementPerson?.pending_supplement > 0) return initialSupplementPerson.pending_supplement;
@@ -185,9 +186,11 @@ export default function SplitCollectView({
     const pPayments = (billData?.payments || []).filter(
       pay => pay.status === 'valid' && (pay.person_nos || []).includes(p.person_no)
     );
-    const nonPassOrig = [...pPayments].reverse().find(
+    const cashCharges = pPayments.filter(
       pay => (pay.kind === 'charge' || pay.kind === 'supplement') && pay.method !== 'pass'
     );
+    const nonPassOrig = [...cashCharges].reverse()[0];
+    setSelectedCashPaymentId(nonPassOrig?.id || null);
     const origPayment = nonPassOrig || [...pPayments].reverse().find(pay => pay.kind === 'charge' || pay.kind === 'supplement') || pPayments[0];
     const origMethod = origPayment?.method || 'cash';
     const initialMethod = (origMethod === 'line_pay') ? 'linepay' : origMethod;
@@ -198,6 +201,15 @@ export default function SplitCollectView({
   };
 
   const refundTargetMaxRefundable = refundTarget?.max_refundable ?? 0;
+  const cashChargePaymentsForTarget = refundTarget
+    ? (billData?.payments || []).filter(
+        pay =>
+          pay.status === 'valid' &&
+          (pay.kind === 'charge' || pay.kind === 'supplement') &&
+          pay.method !== 'pass' &&
+          (pay.person_nos || []).includes(refundTarget.person_no)
+      )
+    : [];
   const passRefundableList = Array.isArray(refundTarget?.pass_refundable) ? refundTarget.pass_refundable : [];
   const hasPassPayment = passRefundableList.length > 0;
   const selectedPassRefundItem = passRefundableList.find(pr => pr.payment_id === selectedPassPaymentId) || passRefundableList.find(pr => pr.remaining_units > 0) || null;
@@ -458,7 +470,9 @@ export default function SplitCollectView({
         person_no: refundTarget.person_no,
         amount: refundMethod === 'pass' ? selectedPassRefundAmount : actionAmount,
         method: refundMethod,
-        ...(refundMethod === 'pass' ? { payment_id: selectedPassRefundItem.payment_id } : {}),
+        ...(refundMethod === 'pass'
+          ? { payment_id: selectedPassRefundItem.payment_id }
+          : (selectedCashPaymentId ? { payment_id: selectedCashPaymentId } : {})),
         reason: actionReason,
         print: autoPrint
       });
@@ -1305,6 +1319,23 @@ export default function SplitCollectView({
               </div>
             ) : (
               <div>
+                {cashChargePaymentsForTarget.length >= 2 && (
+                  <div className="mb-2.5">
+                    <label className="block text-[12px] font-bold text-sg-ink mb-1">退哪一筆收款</label>
+                    <select
+                      data-testid="refund-target-payment-select"
+                      value={selectedCashPaymentId || ''}
+                      onChange={(e) => setSelectedCashPaymentId(Number(e.target.value) || null)}
+                      className="w-full px-3 py-2 rounded-xl border border-sg-line bg-white text-[13px] font-medium"
+                    >
+                      {[...cashChargePaymentsForTarget].reverse().map((pay) => (
+                        <option key={pay.id} value={pay.id}>
+                          {pay.payment_no} · {pay.method} · NT${pay.amount}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <label className="block text-[12px] font-bold text-sg-ink mb-1">退款金額</label>
                 <div className="flex items-center gap-2">
                   <div className="flex-1">

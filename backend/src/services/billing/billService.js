@@ -1483,6 +1483,24 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
         user_pass_id: pj.user_pass_id
       };
     } else {
+      const cashEligible = (p) =>
+        p.status === 'valid' &&
+        p.method !== 'pass' &&
+        (p.kind === 'charge' || p.kind === 'supplement') &&
+        Array.isArray(p.person_nos) &&
+        p.person_nos.includes(pNo);
+
+      if (payment_id !== undefined && payment_id !== null && payment_id !== '') {
+        const targetCashPay = priorPayments.find((p) => p.id === Number(payment_id) && cashEligible(p));
+        if (!targetCashPay) {
+          throw { status: 422, message: '找不到該位顧客的有效收款紀錄' };
+        }
+        relatedPaymentId = targetCashPay.id;
+      } else {
+        const latestCashPay = [...priorPayments].reverse().find(cashEligible);
+        relatedPaymentId = latestCashPay?.id || null;
+      }
+
       const refundInfo = calculatePersonRefundInfo(priorPayments, pNo);
       const maxRefundable = refundInfo.max_refundable;
       if (effectiveRefundAmt > maxRefundable) {
@@ -1610,10 +1628,41 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
       throw { status: 409, message: '請先作廢這筆的補收或退款' };
     }
 
-    // Void entire batch
+    // Void entire batch (scoped strictly to this booking_ref)
     const batchPayments = await tx.payment.findMany({
-      where: { batch_no: payment.batch_no, status: 'valid' }
+      where: {
+        booking_ref: payment.booking_ref,
+        batch_no: payment.batch_no,
+        status: 'valid'
+      }
     });
+
+    // Block voiding charge/supplement if any covered person still has an active cash-like refund (including legacy unlinked refunds)
+    const nonRefundBatch = batchPayments.filter((bp) => bp.kind !== 'refund');
+    if (nonRefundBatch.length > 0) {
+      const activeCashRefunds = await tx.payment.findMany({
+        where: {
+          booking_ref: payment.booking_ref,
+          status: 'valid',
+          kind: 'refund',
+          method: { not: 'pass' }
+        }
+      });
+      const coveredPersons = new Set();
+      for (const bp of nonRefundBatch) {
+        if (Array.isArray(bp.person_nos)) {
+          for (const pno of bp.person_nos) coveredPersons.add(Number(pno));
+        }
+      }
+      for (const pno of coveredPersons) {
+        const hasCashRefund = activeCashRefunds.some(
+          (r) => Array.isArray(r.person_nos) && r.person_nos.includes(pno)
+        );
+        if (hasCashRefund) {
+          throw { status: 409, message: `第 ${pno} 位有退款紀錄，請先作廢退款` };
+        }
+      }
+    }
 
     const now = new Date();
     for (const bp of batchPayments) {
