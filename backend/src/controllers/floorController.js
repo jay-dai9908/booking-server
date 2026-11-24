@@ -2346,10 +2346,11 @@ export async function addBoardRental(req, res) {
       if (!targetPerson) {
         throw { status: 404, message: `找不到第 ${person_no} 位顧客` };
       }
+      const actionNow = (process.env.NODE_ENV === 'test' && bodyNow) ? new Date(bodyNow) : new Date();
       const paidAfterPayment = await isPersonPaid(tx, booking_ref, pNo, firstRes);
       const hasPersonLeft = targetPerson.status !== 'active'
         || firstRes.attendance === 'completed'
-        || (!paidAfterPayment && Boolean(targetPerson.timer_ended_at));
+        || (!paidAfterPayment && Boolean(targetPerson.timer_ended_at) && new Date(targetPerson.timer_ended_at).getTime() <= actionNow.getTime());
       if (hasPersonLeft) {
         throw { status: 409, code: 'PERSON_INACTIVE', message: '此顧客已離場或已移除，不能加租智能板' };
       }
