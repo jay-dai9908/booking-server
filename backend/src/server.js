@@ -772,7 +772,6 @@ const ensureDatabaseSchema = async () => {
     )`,
     `ALTER TABLE "KioskFirmware" ADD COLUMN IF NOT EXISTS "uploaded_by_name" TEXT`,
 
-<<<<<<< HEAD
     `CREATE TABLE IF NOT EXISTS "DisplayDevice" (
       "id" SERIAL NOT NULL,
       "name" TEXT NOT NULL DEFAULT '店內顯示屏',
