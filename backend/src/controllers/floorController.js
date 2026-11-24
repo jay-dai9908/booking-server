@@ -14,7 +14,9 @@ import displayBus from '../services/display/displayBus.js';
 export async function getLive(req, res) {
   try {
     const dateStr = req.query.date || null;
-    const data = await getLiveFloorData(dateStr);
+    const rawNow = process.env.NODE_ENV === 'test' && req.query.now ? new Date(String(req.query.now)) : null;
+    const serverNow = rawNow && !Number.isNaN(rawNow.getTime()) ? rawNow : new Date();
+    const data = await getLiveFloorData(dateStr, serverNow);
 
     const jsonStr = JSON.stringify(data);
     const etag = `"${crypto.createHash('md5').update(jsonStr).digest('hex')}"`;

@@ -256,7 +256,9 @@ async function run() {
   const installFixedClock = async (targetPage) => {
     await targetPage.clock.install({ time: fixedNowDate });
     await targetPage.route('**/api/floor/live*', async (route) => {
-      const response = await route.fetch();
+      const reqUrl = new URL(route.request().url());
+      reqUrl.searchParams.set('now', fixedNowDate.toISOString());
+      const response = await route.fetch({ url: reqUrl.toString() });
       if (response.status() === 200) {
         const data = await response.json();
         data.server_now = fixedNowDate.toISOString();
