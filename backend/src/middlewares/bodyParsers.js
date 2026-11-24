@@ -4,7 +4,9 @@ export const LARGE_UPLOAD_PATHS = [
   '/api/shop/admin/products',
   '/api/seat-layouts',
   '/api/kiosk/admin/slides',
-  '/api/kiosk/admin/firmware'
+  '/api/kiosk/admin/firmware',
+  '/api/display/admin/slides',
+  '/api/display/admin/settings'
 ];
 
 /**
@@ -14,6 +16,7 @@ export const LARGE_UPLOAD_PATHS = [
 export function applyBodyParsers(app) {
   const json15mb = express.json({ limit: '15mb' });
   const json5mb = express.json({ limit: '5mb' });
+  const json4mb = express.json({ limit: '4mb' });
   const json2mb = express.json({ limit: '2mb' });
 
   app.use('/api/kiosk/v1', express.json({ limit: '16kb' }));
@@ -28,6 +31,20 @@ export function applyBodyParsers(app) {
   app.use('/api/kiosk/admin/firmware', (req, res, next) => {
     if (req.method === 'POST') {
       return json5mb(req, res, next);
+    }
+    return next();
+  });
+
+  app.use('/api/display/admin/slides', (req, res, next) => {
+    if (req.method === 'POST') {
+      return json4mb(req, res, next);
+    }
+    return next();
+  });
+
+  app.use('/api/display/admin/settings', (req, res, next) => {
+    if (req.method === 'PUT') {
+      return json4mb(req, res, next);
     }
     return next();
   });

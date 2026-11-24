@@ -8,10 +8,11 @@ import billingRoutes from '../../src/routes/billing.js';
 import displayRoutes from '../../src/routes/display.js';
 import dailySettingsRoutes from '../../src/routes/dailySettings.js';
 import { getGlobalSetting } from '../../src/controllers/dailySettingController.js';
+import { applyBodyParsers } from '../../src/middlewares/bodyParsers.js';
 
 export function createDisplayTestApp() {
   const app = express();
-  app.use(express.json({ limit: '15mb' }));
+  applyBodyParsers(app);
   app.use(cookieParser());
   app.use('/api/auth', authRoutes);
   app.use('/api/reservations', reservationRoutes);
@@ -22,9 +23,9 @@ export function createDisplayTestApp() {
   app.get('/api/global-settings', getGlobalSetting);
   app.use((err, req, res, next) => {
     if (err?.type === 'entity.too.large' || err?.status === 413) {
-      return res.status(413).json({ error: 'Payload too large' });
+      return res.status(413).json({ error: '資料太大' });
     }
-    res.status(500).json({ error: err?.message || 'Internal error' });
+    res.status(500).json({ error: 'Internal error' });
   });
   return app;
 }

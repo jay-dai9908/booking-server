@@ -10,6 +10,7 @@ import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { ensureKioskSetting } from './dailySettingController.js';
 import displayBus from '../services/display/displayBus.js';
 import { normalizePayload } from '../../../shared/twqr.js';
+import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
 import { getEnabledPaymentMethods, resolveTwqrConfig } from '../services/display/displayConfigHelper.js';
 
 const VALID_ROTATIONS = new Set([0, 90, 180, 270]);
@@ -116,9 +117,9 @@ export async function resolveSharedLineInfo(txOrPrisma = prisma) {
   ]);
 
   const line_url =
-    (ks?.line_url && ks.line_url.trim()) ||
-    gs?.official_line_url ||
-    gs?.line_button_url ||
+    safeHttpUrl(ks?.line_url, '') ||
+    safeHttpUrl(gs?.official_line_url, '') ||
+    safeHttpUrl(gs?.line_button_url, '') ||
     '';
   const line_id = (ks?.line_id || '').trim();
   return { line_url, line_id };
@@ -551,8 +552,8 @@ export async function updateDisplaySettings(req, res) {
     const kioskUpdate = {};
     if (body.line_url !== undefined) {
       const cleanUrl = String(body.line_url ?? '').trim();
-      if (cleanUrl && !/^https?:\/\//i.test(cleanUrl)) {
-        return res.status(422).json({ error: 'LINE 連結必須以 http:// 或 https:// 開頭' });
+      if (cleanUrl && !isSafeHttpUrl(cleanUrl)) {
+        return res.status(422).json({ code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
       }
       kioskUpdate.line_url = cleanUrl || null;
     }

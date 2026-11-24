@@ -1,6 +1,7 @@
 // frontend/src/components/display/DisplayTicker.jsx
 import React from 'react';
 import DisplayQrCode from './DisplayQrCode';
+import { safeHttpUrl } from '@shared/safeUrl.js';
 
 /**
  * Bottom ticker bar:
@@ -104,15 +105,15 @@ export default function DisplayTicker({
       >
         {currentText}
       </span>
-      {showLineMini && (line?.url || line?.id) && (
+      {showLineMini && (safeHttpUrl(line?.url) || line?.id) && (
         <span
           className="flex items-center flex-none font-num font-bold text-sg-muted"
           style={{ gap: 14, fontSize: 26 }}
         >
           {line?.id ? `LINE ${line.id}` : 'LINE'}
-          {line?.url && (
+          {safeHttpUrl(line?.url) && (
             <DisplayQrCode
-              text={line.url}
+              text={safeHttpUrl(line?.url)}
               ecc="M"
               size={60}
               className="rounded-[10px]"

@@ -1,6 +1,7 @@
 // frontend/src/components/display/DisplaySelfSide.jsx
 import React from 'react';
 import DisplayQrCode from './DisplayQrCode';
+import { safeHttpUrl } from '@shared/safeUrl.js';
 
 /**
  * Right column for slides_self and timers_self:
@@ -14,6 +15,7 @@ export default function DisplaySelfSide({
 }) {
   const qrSize = compactQr ? 176 : 200;
   const list = Array.isArray(notices) ? notices.filter(Boolean).slice(0, 5) : [];
+  const safeLineUrl = safeHttpUrl(line?.url, '');
 
   return (
     <>
@@ -34,7 +36,7 @@ export default function DisplaySelfSide({
           className="bg-sg-paper border-[3px] border-sg-line flex items-center justify-center overflow-hidden"
           style={{ width: qrSize, height: qrSize, borderRadius: 20 }}
         >
-          <DisplayQrCode text={line?.url || ''} ecc="M" size={qrSize - 6} />
+          <DisplayQrCode text={safeLineUrl} ecc="M" size={qrSize - 6} />
         </div>
         {line?.id && (
           <div className="font-num font-extrabold text-sg-line-green" style={{ fontSize: 32, lineHeight: 1.1 }}>
