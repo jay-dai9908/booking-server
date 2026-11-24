@@ -64,7 +64,7 @@ export function computeDailyRevenue(payments = [], startDateStr, endDateStr) {
   }
 
   for (const p of payments) {
-    if (p.status === 'voided') continue;
+    if (p.status === 'voided' || p.source === 'shop') continue;
     const dateStr = p.created_at ? p.created_at.slice(0, 10) : '';
     if (!dateStr) continue;
 
@@ -73,7 +73,9 @@ export function computeDailyRevenue(payments = [], startDateStr, endDateStr) {
     }
 
     if (p.kind === 'refund') {
-      dailyMap[dateStr].revenue -= (p.amount || 0);
+      if (p.method !== 'pass') {
+        dailyMap[dateStr].revenue -= (p.amount || 0);
+      }
     } else if (p.kind === 'charge' || p.kind === 'supplement') {
       if (p.method !== 'pass') {
         dailyMap[dateStr].revenue += (p.amount || 0);

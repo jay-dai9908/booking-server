@@ -11,12 +11,24 @@ export async function computeClosingStats({ start, end, businessDate, txOrPrisma
     where: { created_at: { gte: start, lte: end } }
   });
 
-  const validPayments = payments.filter(p => p.status === 'valid');
+  const storePayments = payments.filter(p => p.source !== 'shop');
+  const shopPayments = payments.filter(p => p.source === 'shop');
+
+  const validPayments = storePayments.filter(p => p.status === 'valid');
   const charges = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
   const passes = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method === 'pass');
   const refundsList = validPayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
   const passRefundsList = validPayments.filter(p => p.kind === 'refund' && p.method === 'pass');
-  const voids = payments.filter(p => p.status === 'voided');
+  const voids = storePayments.filter(p => p.status === 'voided');
+
+  const validShop = shopPayments.filter(p => p.status === 'valid');
+  const shopCharges = validShop.filter(p => p.kind === 'charge' || p.kind === 'supplement');
+  const shopRefunds = validShop.filter(p => p.kind === 'refund');
+  const shopCashIncome = shopCharges.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
+  const shopCashRefund = shopRefunds.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
+  const shopNonCashAmount =
+    shopCharges.filter(p => p.method !== 'cash').reduce((sum, p) => sum + p.amount, 0) -
+    shopRefunds.filter(p => p.method !== 'cash').reduce((sum, p) => sum + p.amount, 0);
 
   const byMethod = {};
   for (const p of charges) {
@@ -38,10 +50,6 @@ export async function computeClosingStats({ start, end, businessDate, txOrPrisma
 
   const cashIncome = charges.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
   const cashRefund = refundsList.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
-
-  // Reserved for Round 38 (Payment.source === 'shop'): cash affects drawer but never store revenue
-  const shopCashIncome = 0;
-  const shopCashRefund = 0;
 
   const passAmount = passes.reduce((sum, p) => sum + p.amount, 0);
   const passRefundAmount = passRefundsList.reduce((sum, p) => sum + p.amount, 0);
@@ -99,6 +107,12 @@ export async function computeClosingStats({ start, end, businessDate, txOrPrisma
     cash_income: cashIncome,
     cash_refund: cashRefund,
     shop_cash_income: shopCashIncome,
-    shop_cash_refund: shopCashRefund
+    shop_cash_refund: shopCashRefund,
+    shop: {
+      cash_income: shopCashIncome,
+      cash_refund: shopCashRefund,
+      non_cash_amount: shopNonCashAmount,
+      count: shopCharges.length
+    }
   };
 }

@@ -13,6 +13,8 @@ import { activeUserWhere } from '../utils/userQuery.js';
 import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
 import auditService from '../services/audit/auditService.js';
 import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+import { applyShopOrderPayment } from '../services/shop/shopPayment.js';
 
 /**
  * Public: Get active products for customer shop
@@ -469,50 +471,39 @@ export const getAdminProductOrders = async (req, res) => {
  */
 export const verifyOrderPayment = async (req, res) => {
   const { id } = req.params;
-  const { paid_amount, is_full_payment = false, send_line_notification = true } = req.body;
+  const {
+    amount,
+    paid_amount,
+    method = 'transfer',
+    cash_received,
+    client_batch_id,
+    is_full_payment = false,
+    send_line_notification = true,
+    note
+  } = req.body || {};
 
   try {
-    const order = await prisma.productOrder.findUnique({
-      where: { id: parseInt(id, 10) },
-      include: {
-        items: true,
-        user: true
-      }
+    const rawAmount = amount !== undefined && amount !== null && amount !== ''
+      ? amount
+      : paid_amount;
+
+    const { order: updated, payment, idempotent } = await applyShopOrderPayment({
+      orderId: id,
+      amountInput: rawAmount,
+      isFullPayment: Boolean(is_full_payment),
+      method: method || 'transfer',
+      cashReceived: cash_received,
+      clientBatchId: client_batch_id,
+      staffUser: req.user,
+      deviceInfo: getAdminDeviceInfo(req),
+      markPoolUsed: true,
+      note,
+      reqBody: req.body || {},
+      defaultToDeposit: true
     });
 
-    if (!order) {
-      return res.status(404).json({ error: '找不到該筆訂單' });
-    }
-
-    const actualPaid = paid_amount !== undefined && paid_amount !== null
-      ? parseInt(paid_amount, 10)
-      : (is_full_payment ? order.total_amount : order.deposit_required);
-
-    const newBalance = Math.max(0, order.total_amount - actualPaid);
-    const newPaymentStatus = (is_full_payment || newBalance === 0) ? 'fully_paid' : 'deposit_verified';
-
-    const updated = await prisma.$transaction(async (tx) => {
-      // If order had assigned pool account, update OneTimeAccountPool status to USED
-      if (order.assigned_pool_account) {
-        await markPoolAccountUsed(tx, { accountNumber: order.assigned_pool_account });
-      }
-
-      return tx.productOrder.update({
-        where: { id: order.id },
-        data: {
-          paid_amount: actualPaid,
-          balance_amount: newBalance,
-          payment_status: newPaymentStatus
-        },
-        include: {
-          items: true,
-          user: true
-        }
-      });
-    });
-
-    // Optionally push LINE notification
-    if (send_line_notification && updated.user?.line_user_id) {
+    // Optionally push LINE notification (skip on idempotent replay)
+    if (!idempotent && send_line_notification && updated.user?.line_user_id) {
       try {
         await sendProductOrderDepositVerifiedNotification(updated, updated.user);
       } catch (lineErr) {
@@ -522,11 +513,50 @@ export const verifyOrderPayment = async (req, res) => {
 
     res.json({
       message: '款項對帳確認完成！',
-      order: updated
+      order: updated,
+      payment,
+      idempotent
     });
   } catch (error) {
     console.error('verifyOrderPayment error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: '對帳確認失敗' });
+  }
+};
+
+/**
+ * Admin: Collect balance payment (收尾款)
+ */
+export const collectOrderBalance = async (req, res) => {
+  const { id } = req.params;
+  const { amount, method = 'cash', cash_received, client_batch_id, note } = req.body || {};
+
+  try {
+    const { order: updated, payment, idempotent } = await applyShopOrderPayment({
+      orderId: id,
+      amountInput: amount,
+      isFullPayment: false,
+      method: method || 'cash',
+      cashReceived: cash_received,
+      clientBatchId: client_batch_id,
+      staffUser: req.user,
+      deviceInfo: getAdminDeviceInfo(req),
+      markPoolUsed: true,
+      note,
+      reqBody: req.body || {},
+      defaultToDeposit: false
+    });
+
+    return res.json({
+      message: '尾款收款完成！',
+      order: updated,
+      payment,
+      idempotent
+    });
+  } catch (error) {
+    console.error('collectOrderBalance error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    return res.status(500).json({ error: '收尾款失敗' });
   }
 };
 
@@ -542,8 +572,17 @@ export const updateAdminOrder = async (req, res) => {
     order_status,
     wish_reply,
     paid_amount,
-    payment_status
-  } = req.body;
+    payment_status,
+    reason
+  } = req.body || {};
+
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  if (paid_amount !== undefined) {
+    return res.status(422).json({ error: '已付金額請用收款或退款' });
+  }
 
   try {
     const order = await prisma.productOrder.findUnique({
@@ -555,82 +594,110 @@ export const updateAdminOrder = async (req, res) => {
       return res.status(404).json({ error: '找不到該筆訂單' });
     }
 
+    if (payment_status !== undefined && payment_status !== order.payment_status) {
+      if (payment_status !== 'refunded') {
+        return res.status(422).json({ error: '付款狀態只可透過對帳、收款或標記已退款更新' });
+      }
+      if (!reason || !String(reason).trim()) {
+        return res.status(422).json({ error: '標記為已退款請填寫原因' });
+      }
+    }
+
+    if (order_status === 'picked_up' && order.order_status !== 'picked_up') {
+      if ((order.balance_amount || 0) > 0) {
+        return res.status(409).json({ error: `還有尾款 NT$${order.balance_amount}，請先收尾款` });
+      }
+    }
+
     const dataToUpdate = {};
     if (estimated_arrival !== undefined) dataToUpdate.estimated_arrival = estimated_arrival;
     if (admin_note !== undefined) dataToUpdate.admin_note = admin_note;
     if (wish_reply !== undefined) dataToUpdate.wish_reply = wish_reply;
     if (order_status !== undefined) dataToUpdate.order_status = order_status;
     if (payment_status !== undefined) dataToUpdate.payment_status = payment_status;
-    if (paid_amount !== undefined) {
-      const p = parseInt(paid_amount, 10) || 0;
-      dataToUpdate.paid_amount = p;
-      dataToUpdate.balance_amount = Math.max(0, order.total_amount - p);
-    }
 
     // If order transitioned to picked_up
     if (order_status === 'picked_up' && order.order_status !== 'picked_up') {
       dataToUpdate.picked_up_at = new Date();
     }
 
-    // If order transitioned to cancelled, release any assigned pool account back to AVAILABLE
-    if (order_status === 'cancelled' && order.order_status !== 'cancelled') {
-      if (order.assigned_pool_account) {
-        await releasePoolAccount(prisma, { accountNumber: order.assigned_pool_account });
+    const updated = await prisma.$transaction(async (tx) => {
+      // If order transitioned to cancelled, release any assigned pool account back to AVAILABLE
+      if (order_status === 'cancelled' && order.order_status !== 'cancelled') {
+        if (order.assigned_pool_account) {
+          await releasePoolAccount(tx, { accountNumber: order.assigned_pool_account });
+        }
       }
-    }
 
-    const updated = await prisma.productOrder.update({
-      where: { id: order.id },
-      data: dataToUpdate,
-      include: { items: true, user: true }
-    });
+      const row = await tx.productOrder.update({
+        where: { id: order.id },
+        data: dataToUpdate,
+        include: { items: true, user: true }
+      });
 
-    // If picked up, check if any items grant bonus pass plans (e.g. 221-color bundle grants free_ironing_5)
-    if (order_status === 'picked_up' && order.order_status !== 'picked_up') {
-      for (const item of order.items) {
-        if (item.product_id) {
-          const prod = await prisma.product.findUnique({ where: { id: item.product_id } });
-          if (prod?.bonus_pass_plan_code) {
-            const plan = await prisma.passPlan.findUnique({ where: { code: prod.bonus_pass_plan_code } });
-            if (plan) {
-              // Check if already granted for this order to prevent duplicate grants
-              const existingPass = await prisma.userPass.findFirst({
-                where: {
-                  order_ref: order.order_ref,
-                  plan_id: plan.id
-                }
-              });
+      if (payment_status === 'refunded' && order.payment_status !== 'refunded') {
+        await auditService.log(tx, {
+          booking_ref: order.order_ref,
+          event_type: 'shop_refund_marked',
+          category: 'payment',
+          summary: `商城訂單 ${order.order_ref} 標記為已退款。原因「${String(reason).trim()}」`,
+          reason: String(reason).trim(),
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
 
-              if (!existingPass) {
-                const qty = item.quantity || 1;
-                const totalQuota = plan.total_quota != null ? plan.total_quota * qty : null;
-                const passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
-
-                await prisma.userPass.create({
-                  data: {
-                    pass_code: passCode,
-                    user_id: order.user_id,
-                    plan_id: plan.id,
-                    plan_name_snapshot: plan.name,
-                    pass_type: plan.pass_type,
-                    remaining_quota: totalQuota,
-                    total_quota: totalQuota,
-                    day_restriction: plan.day_restriction,
-                    payment_status: 'active',
+      // If picked up, check if any items grant bonus pass plans (e.g. 221-color bundle grants free_ironing_5)
+      if (order_status === 'picked_up' && order.order_status !== 'picked_up') {
+        for (const item of order.items) {
+          if (item.product_id) {
+            const prod = await tx.product.findUnique({ where: { id: item.product_id } });
+            if (prod?.bonus_pass_plan_code) {
+              const plan = await tx.passPlan.findUnique({ where: { code: prod.bonus_pass_plan_code } });
+              if (plan) {
+                const existingPass = await tx.userPass.findFirst({
+                  where: {
                     order_ref: order.order_ref,
-                    status: 'ACTIVE'
+                    plan_id: plan.id
                   }
                 });
+
+                if (!existingPass) {
+                  const qty = item.quantity || 1;
+                  const totalQuota = plan.total_quota != null ? plan.total_quota * qty : null;
+                  const passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
+
+                  await tx.userPass.create({
+                    data: {
+                      pass_code: passCode,
+                      user_id: order.user_id,
+                      plan_id: plan.id,
+                      plan_name_snapshot: plan.name,
+                      pass_type: plan.pass_type,
+                      remaining_quota: totalQuota,
+                      total_quota: totalQuota,
+                      day_restriction: plan.day_restriction,
+                      payment_status: 'active',
+                      order_ref: order.order_ref,
+                      status: 'ACTIVE'
+                    }
+                  });
+                }
               }
             }
           }
         }
       }
-    }
+
+      return row;
+    });
 
     res.json({ message: '訂單資訊已更新', order: updated });
   } catch (error) {
     console.error('updateAdminOrder error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: '更新訂單失敗' });
   }
 };

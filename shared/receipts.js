@@ -663,11 +663,32 @@ export function buildClosingSlip(closing = {}, opts = {}) {
     bold: true
   });
 
-  const shopCashIncome = Number(totals.shop_cash_income || 0);
+  const shopCashIncome = Number(totals.shop_cash_income ?? totals.shop?.cash_income ?? 0);
+  const shopCashRefund = Number(totals.shop_cash_refund ?? totals.shop?.cash_refund ?? 0);
+  const shopNonCash = Number(totals.shop?.non_cash_amount ?? totals.shop_non_cash_amount ?? 0);
   if (shopCashIncome > 0) {
     commands.push({
       type: 'text',
       text: fitLine('商城現金（不計入營收）', formatReceiptMoney(shopCashIncome)),
+      size: 20
+    });
+  }
+  if (shopCashRefund > 0) {
+    commands.push({
+      type: 'text',
+      text: fitLine('商城現金退（不計入營收）', formatReceiptMoney(-shopCashRefund)),
+      size: 20
+    });
+  }
+  if (shopNonCash !== 0) {
+    commands.push({
+      type: 'text',
+      text: fitLine('商城轉帳等（不計入）', formatReceiptMoney(shopNonCash)),
+      size: 20
+    });
+    commands.push({
+      type: 'text',
+      text: '  (不計入營收、不在抽屜)',
       size: 20
     });
   }

@@ -23,11 +23,14 @@ export const getAccountingSummary = async (req, res) => {
     });
 
     const validPayments = payments.filter(p => p.status === 'valid');
-    const charges = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
-    const passes = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method === 'pass');
-    const refunds = validPayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
-    const passRefunds = validPayments.filter(p => p.kind === 'refund' && p.method === 'pass');
-    const voids = payments.filter(p => p.status === 'voided');
+    const storePayments = validPayments.filter(p => p.source !== 'shop');
+    const shopPayments = validPayments.filter(p => p.source === 'shop');
+
+    const charges = storePayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
+    const passes = storePayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method === 'pass');
+    const refunds = storePayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
+    const passRefunds = storePayments.filter(p => p.kind === 'refund' && p.method === 'pass');
+    const voids = payments.filter(p => p.status === 'voided' && p.source !== 'shop');
 
     const totalIncome = charges.reduce((sum, p) => sum + p.amount, 0);
     const totalRefund = refunds.reduce((sum, p) => sum + p.amount, 0);
@@ -46,6 +49,23 @@ export const getAccountingSummary = async (req, res) => {
       refundsByMethod[p.method].count += 1;
       refundsByMethod[p.method].amount += p.amount;
     }
+
+    const shopCharges = shopPayments.filter(p => p.kind === 'charge' || p.kind === 'supplement');
+    const shopRefundsList = shopPayments.filter(p => p.kind === 'refund');
+    const shopByMethod = {};
+    for (const p of shopCharges) {
+      if (!shopByMethod[p.method]) shopByMethod[p.method] = { count: 0, amount: 0 };
+      shopByMethod[p.method].count += 1;
+      shopByMethod[p.method].amount += p.amount;
+    }
+    const shopRefundsByMethod = {};
+    for (const p of shopRefundsList) {
+      if (!shopRefundsByMethod[p.method]) shopRefundsByMethod[p.method] = { count: 0, amount: 0 };
+      shopRefundsByMethod[p.method].count += 1;
+      shopRefundsByMethod[p.method].amount += p.amount;
+    }
+    const shopChargeTotal = shopCharges.reduce((sum, p) => sum + p.amount, 0);
+    const shopRefundTotal = shopRefundsList.reduce((sum, p) => sum + p.amount, 0);
 
     const passValue = passes.reduce((sum, p) => sum + p.amount, 0);
 
@@ -87,6 +107,12 @@ export const getAccountingSummary = async (req, res) => {
       unpaid: {
         count: unpaidCount,
         amount: unpaidAmount
+      },
+      shop: {
+        count: shopCharges.length,
+        amount: shopChargeTotal - shopRefundTotal,
+        by_method: shopByMethod,
+        refunds: shopRefundsByMethod
       }
     });
   } catch (error) {

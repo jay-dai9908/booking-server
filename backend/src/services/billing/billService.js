@@ -11,6 +11,7 @@ import { deductPass, restorePass, validatePassUsage } from './passTender.js';
 import { getShiftLock, canVoidPayment } from './shiftLock.js';
 import { buildBillInput } from './billInput.js';
 import { queuePrintJob } from '../print/printService.js';
+import { recalcOrderPaid } from '../shop/shopPayment.js';
 
 export function buildInitialDraft({
   pax = 1,
@@ -1826,6 +1827,40 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
       }
 
       return { voided_count: batchPayments.length, voided_source: 'pass_sale' };
+    }
+
+    if (payment.source === 'shop') {
+      const orderRef = payment.source_ref || payment.booking_ref;
+      const nowVoidedAt = new Date();
+      for (const bp of batchPayments) {
+        await tx.payment.update({
+          where: { id: bp.id },
+          data: {
+            status: 'voided',
+            voided_at: nowVoidedAt,
+            voided_by_name: staffName,
+            void_reason: String(reason).trim()
+          }
+        });
+
+        await auditLog(tx, {
+          booking_ref: bp.booking_ref,
+          event_type: 'payment_voided',
+          category: 'void',
+          summary: `作廢商城收款 ${bp.payment_no}（${orderRef}）· ${bp.method === 'cash' ? '現金' : bp.method} NT$${bp.amount}。原因「${reason}」`,
+          amount: bp.amount,
+          payment_id: bp.id,
+          reason,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id,
+          device_label: deviceInfo?.device_label
+        });
+      }
+
+      const shopOrder = await tx.productOrder.findUnique({ where: { order_ref: orderRef } });
+      const updatedOrder = shopOrder ? await recalcOrderPaid(tx, shopOrder.id) : null;
+      return { voided_count: batchPayments.length, voided_source: 'shop', order: updatedOrder };
     }
 
     // Block voiding charge/supplement if any covered person still has an active cash-like refund (including legacy unlinked refunds)

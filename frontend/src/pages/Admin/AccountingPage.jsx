@@ -456,7 +456,7 @@ export default function AccountingPage() {
   const paidOrdersCount = useMemo(() => {
     return new Set(
       payments
-        .filter(p => p.status === 'valid' && (p.kind === 'charge' || p.kind === 'supplement') && p.booking_ref)
+        .filter(p => p.status === 'valid' && p.source !== 'shop' && (p.kind === 'charge' || p.kind === 'supplement') && p.booking_ref)
         .map(p => p.booking_ref)
     ).size;
   }, [payments]);
@@ -1373,8 +1373,20 @@ export default function AccountingPage() {
               <div className="divide-y divide-sg-line text-[13px] pt-2">
                 <div className="py-2 flex justify-between text-sg-muted">
                   <span>商城現金（不計入營收）</span>
-                  <span className="font-num">{formatMoney(closingPreview.shop_cash_income || 0)}</span>
+                  <span className="font-num">{formatMoney(closingPreview.shop_cash_income ?? closingPreview.shop?.cash_income ?? 0)}</span>
                 </div>
+                {(closingPreview.shop_cash_refund > 0 || closingPreview.shop?.cash_refund > 0) && (
+                  <div className="py-2 flex justify-between text-sg-danger">
+                    <span>商城現金退（不計入營收）</span>
+                    <span className="font-num">{formatMinus(closingPreview.shop_cash_refund ?? closingPreview.shop?.cash_refund ?? 0)}</span>
+                  </div>
+                )}
+                {(closingPreview.shop?.non_cash_amount || 0) !== 0 && (
+                  <div className="py-2 flex justify-between text-sg-muted">
+                    <span>商城轉帳等（不計入營收、不在抽屜）</span>
+                    <span className="font-num">{formatMoney(closingPreview.shop?.non_cash_amount || 0)}</span>
+                  </div>
+                )}
                 <div className="py-2 flex justify-between">
                   <span className="text-sg-ink">現金收款（{closingPreview.by_method?.cash?.count || 0} 筆）</span>
                   <span className="font-num font-bold">{formatMoney(closingPreview.by_method?.cash?.amount || 0)}</span>

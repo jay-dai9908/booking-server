@@ -397,6 +397,7 @@ model ProductOrder {
   shipping_fee           Int       @default(0)
   deposit_required       Int
   paid_amount            Int       @default(0)
+  paid_before_payments   Int?
   balance_amount         Int
   payment_method_code    String
   selected_bank_info     String?

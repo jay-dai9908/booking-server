@@ -60,8 +60,22 @@ export default function ShopAdminPage() {
   // Modals
   const [verifyModalOrder, setVerifyModalOrder] = useState(null);
   const [verifyPaidAmount, setVerifyPaidAmount] = useState('');
+  const [verifyMethod, setVerifyMethod] = useState('transfer');
+  const [verifyCashReceived, setVerifyCashReceived] = useState('');
   const [verifyIsFullPayment, setVerifyIsFullPayment] = useState(false);
   const [verifySendLine, setVerifySendLine] = useState(true);
+
+  const [collectModalOrder, setCollectModalOrder] = useState(null);
+  const [collectAmount, setCollectAmount] = useState('');
+  const [collectMethod, setCollectMethod] = useState('cash');
+  const [collectCashReceived, setCollectCashReceived] = useState('');
+  const [collectSubmitting, setCollectSubmitting] = useState(false);
+  const [storePaymentMethods, setStorePaymentMethods] = useState([
+    { key: 'cash', label: '現金' },
+    { key: 'linepay', label: 'LINE Pay' },
+    { key: 'transfer', label: '銀行轉帳' },
+    { key: 'card', label: '信用卡' }
+  ]);
 
   const [wishReplyOrder, setWishReplyOrder] = useState(null);
   const [wishReplyText, setWishReplyText] = useState('');
@@ -103,6 +117,7 @@ export default function ShopAdminPage() {
   useEffect(() => {
     if (activeTab === 'orders') {
       fetchAdminOrders();
+      fetchStorePaymentMethods();
     }
     if (activeTab === 'payments') {
       fetchAccountPool();
@@ -149,11 +164,36 @@ export default function ShopAdminPage() {
     }
   };
 
+  const fetchStorePaymentMethods = async () => {
+    try {
+      const res = await api.get('/global-settings');
+      const raw = res.data?.payment_methods_json;
+      if (Array.isArray(raw) && raw.length > 0) {
+        const list = raw
+          .filter(m => String(m.key || m.code || '').toLowerCase() !== 'pass')
+          .filter(m => {
+            const k = String(m.key || m.code || '').toLowerCase();
+            return k === 'cash' ? true : Boolean(m.enabled);
+          })
+          .map(m => ({ key: m.key || m.code, label: m.label || m.name || m.key || m.code }));
+        if (list.length > 0) setStorePaymentMethods(list);
+      }
+    } catch (err) {
+      console.error('Failed to fetch global payment methods:', err);
+    }
+  };
+
   const handleVerifyPaymentSubmit = async () => {
     if (!verifyModalOrder) return;
     try {
+      const amtNum = parseInt(verifyPaidAmount, 10);
+      const balance = Math.max(0, verifyModalOrder.balance_amount ?? (verifyModalOrder.total_amount - (verifyModalOrder.paid_amount || 0)));
+      const finalAmt = verifyIsFullPayment ? balance : (Number.isInteger(amtNum) && amtNum > 0 ? amtNum : Math.min(balance, verifyModalOrder.deposit_required));
       await api.patch(`/shop/admin/orders/${verifyModalOrder.id}/verify-payment`, {
-        paid_amount: parseInt(verifyPaidAmount, 10) || verifyModalOrder.deposit_required,
+        amount: finalAmt,
+        method: verifyMethod || 'transfer',
+        cash_received: verifyMethod === 'cash' && verifyCashReceived !== '' ? parseInt(verifyCashReceived, 10) : undefined,
+        client_batch_id: crypto.randomUUID ? crypto.randomUUID() : `sv-${Date.now()}-${Math.random()}`,
         is_full_payment: verifyIsFullPayment,
         send_line_notification: verifySendLine
       });
@@ -162,6 +202,28 @@ export default function ShopAdminPage() {
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       showToast('對帳確認失敗：' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
+  const handleCollectBalanceSubmit = async () => {
+    if (!collectModalOrder) return;
+    try {
+      setCollectSubmitting(true);
+      const amtNum = parseInt(collectAmount, 10);
+      await api.post(`/shop/admin/orders/${collectModalOrder.id}/collect`, {
+        amount: amtNum,
+        method: collectMethod || 'cash',
+        cash_received: collectMethod === 'cash' && collectCashReceived !== '' ? parseInt(collectCashReceived, 10) : undefined,
+        client_batch_id: crypto.randomUUID ? crypto.randomUUID() : `sc-${Date.now()}-${Math.random()}`
+      });
+      setCollectModalOrder(null);
+      fetchAdminOrders();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+      showToast('尾款收款完成！');
+    } catch (err) {
+      showToast('收尾款失敗：' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setCollectSubmitting(false);
     }
   };
 
@@ -1136,12 +1198,16 @@ export default function ShopAdminPage() {
                           </td>
 
                           <td className="p-3 text-right whitespace-nowrap space-x-1">
-                            {!isPaidDeposit && order.order_status !== 'cancelled' && (
+                            {!isPaidDeposit && order.order_status !== 'cancelled' && order.order_status !== 'picked_up' && order.payment_status !== 'fully_paid' && order.payment_status !== 'refunded' && (
                               <button
                                 type="button"
+                                data-testid={`shop-verify-btn-${order.id}`}
                                 onClick={() => {
+                                  const bal = Math.max(0, order.balance_amount ?? (order.total_amount - (order.paid_amount || 0)));
                                   setVerifyModalOrder(order);
-                                  setVerifyPaidAmount(String(order.deposit_required));
+                                  setVerifyPaidAmount(String(Math.min(bal, order.deposit_required || bal)));
+                                  setVerifyMethod('transfer');
+                                  setVerifyCashReceived('');
                                   setVerifyIsFullPayment(false);
                                   setVerifySendLine(true);
                                 }}
@@ -1149,6 +1215,22 @@ export default function ShopAdminPage() {
                               >
                                 <Check className="w-3.5 h-3.5" />
                                 <span>對帳確認</span>
+                              </button>
+                            )}
+
+                            {order.balance_amount > 0 && order.order_status !== 'picked_up' && order.order_status !== 'cancelled' && order.payment_status !== 'refunded' && (
+                              <button
+                                type="button"
+                                data-testid={`shop-collect-btn-${order.id}`}
+                                onClick={() => {
+                                  setCollectModalOrder(order);
+                                  setCollectAmount(String(order.balance_amount));
+                                  setCollectMethod('cash');
+                                  setCollectCashReceived('');
+                                }}
+                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
+                              >
+                                <span>收尾款</span>
                               </button>
                             )}
 
@@ -1197,11 +1279,18 @@ export default function ShopAdminPage() {
                             {order.order_status !== 'picked_up' && order.order_status !== 'cancelled' && (
                               <button
                                 type="button"
+                                data-testid={`shop-pickup-btn-${order.id}`}
+                                disabled={order.balance_amount > 0}
+                                title={order.balance_amount > 0 ? `還有尾款 NT$${order.balance_amount}，請先收尾款` : '確認現場取貨'}
                                 onClick={() => handleMarkPickedUp(order.id)}
-                                className="px-2.5 py-1 bg-[#8B5B43] hover:bg-[#724a35] text-white rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition inline-flex items-center gap-1 ${
+                                  order.balance_amount > 0
+                                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                    : 'bg-[#8B5B43] hover:bg-[#724a35] text-white'
+                                }`}
                               >
                                 <Package className="w-3.5 h-3.5" />
-                                <span>取貨完成</span>
+                                <span>{order.balance_amount > 0 ? `尚欠 $${order.balance_amount}` : '取貨完成'}</span>
                               </button>
                             )}
 
@@ -1905,7 +1994,7 @@ export default function ShopAdminPage() {
       {/* ========================================================= */}
       {/* 1. Verify Payment Modal */}
       {verifyModalOrder && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+        <div data-testid="shop-verify-modal" className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-md space-y-4 animate-zoom-in">
             <div className="flex justify-between items-center border-b border-[#E8DEC8] pb-3">
               <h3 className="font-black text-base text-[#3E332B]">✅ 款項對帳確認</h3>
@@ -1931,18 +2020,65 @@ export default function ShopAdminPage() {
                   總額 NT$ {verifyModalOrder.total_amount} / 訂金 NT$ {verifyModalOrder.deposit_required}
                 </span>
               </div>
+              <div className="flex justify-between" data-testid="shop-verify-balance-info">
+                <span className="text-[#8C8279]">目前帳況：</span>
+                <span className="font-bold text-[#3E332B]">
+                  已收 NT${verifyModalOrder.paid_amount || 0}／尚欠 NT${Math.max(0, verifyModalOrder.balance_amount ?? (verifyModalOrder.total_amount - (verifyModalOrder.paid_amount || 0)))}
+                </span>
+              </div>
             </div>
 
             <div className="space-y-3 pt-2">
-              <div>
-                <label className="block text-xs font-bold text-[#6D5D52] mb-1">本次實收金額 ($)：</label>
-                <input
-                  type="number"
-                  value={verifyPaidAmount}
-                  onChange={e => setVerifyPaidAmount(e.target.value)}
-                  className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold text-sm outline-none"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-[#6D5D52] mb-1">這次收到 ($)：</label>
+                  <input
+                    type="number"
+                    data-testid="shop-verify-amount"
+                    value={verifyPaidAmount}
+                    onChange={e => setVerifyPaidAmount(e.target.value)}
+                    className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold text-sm outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-[#6D5D52] mb-1">付款方式：</label>
+                  <select
+                    data-testid="shop-verify-method"
+                    value={verifyMethod}
+                    onChange={e => setVerifyMethod(e.target.value)}
+                    className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-bold text-sm outline-none bg-white"
+                  >
+                    {storePaymentMethods.map(m => (
+                      <option key={m.key} value={m.key}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
+
+              {verifyMethod === 'cash' && (
+                <div className="grid grid-cols-2 gap-3 items-end">
+                  <div>
+                    <label className="block text-xs font-bold text-[#6D5D52] mb-1">收到現金 ($)：</label>
+                    <input
+                      type="number"
+                      value={verifyCashReceived}
+                      onChange={e => setVerifyCashReceived(e.target.value)}
+                      placeholder={verifyPaidAmount || '留空當剛好'}
+                      className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold text-sm outline-none"
+                    />
+                  </div>
+                  <div className="px-3 py-2 rounded-xl bg-[#FAF7F2] border border-[#E8DEC8] text-xs font-bold flex justify-between">
+                    <span className="text-[#8C8279]">找零</span>
+                    <span>
+                      NT$ {(() => {
+                        const a = Number(verifyPaidAmount) || 0;
+                        const r = verifyCashReceived !== '' ? Number(verifyCashReceived) : a;
+                        return Math.max(0, r - a);
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center gap-2">
                 <input
@@ -1950,14 +2086,15 @@ export default function ShopAdminPage() {
                   id="fullPay"
                   checked={verifyIsFullPayment}
                   onChange={e => {
+                    const bal = Math.max(0, verifyModalOrder.balance_amount ?? (verifyModalOrder.total_amount - (verifyModalOrder.paid_amount || 0)));
                     setVerifyIsFullPayment(e.target.checked);
-                    if (e.target.checked) setVerifyPaidAmount(String(verifyModalOrder.total_amount));
-                    else setVerifyPaidAmount(String(verifyModalOrder.deposit_required));
+                    if (e.target.checked) setVerifyPaidAmount(String(bal));
+                    else setVerifyPaidAmount(String(Math.min(bal, verifyModalOrder.deposit_required || bal)));
                   }}
                   className="w-4 h-4 accent-[#8B5B43]"
                 />
                 <label htmlFor="fullPay" className="text-xs font-bold text-[#3E332B]">
-                  標記為「已全額結清」（無取貨尾款）
+                  標記為「本次全額結清剩餘尾款」（尚欠 NT${Math.max(0, verifyModalOrder.balance_amount ?? (verifyModalOrder.total_amount - (verifyModalOrder.paid_amount || 0)))}）
                 </label>
               </div>
 
@@ -1985,10 +2122,117 @@ export default function ShopAdminPage() {
               </button>
               <button
                 type="button"
+                data-testid="shop-verify-confirm-btn"
                 onClick={handleVerifyPaymentSubmit}
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs"
               >
                 確認對帳
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 1b. Collect Balance Modal */}
+      {collectModalOrder && (
+        <div data-testid="shop-collect-modal" className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl p-6 shadow-2xl border border-[#E8DEC8] w-full max-w-md space-y-4 animate-zoom-in">
+            <div className="flex justify-between items-center border-b border-[#E8DEC8] pb-3">
+              <h3 className="font-black text-base text-[#3E332B]">💵 商城訂單收尾款</h3>
+              <button onClick={() => setCollectModalOrder(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-[#8C8279]">單號：</span>
+                <span className="font-mono font-bold text-[#3E332B]">#{collectModalOrder.order_ref}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#8C8279]">顧客：</span>
+                <span className="font-bold text-[#3E332B]">
+                  {collectModalOrder.user?.name} ({collectModalOrder.user?.phone})
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#8C8279]">目前帳況：</span>
+                <span className="font-bold text-[#8B5B43]">
+                  已收 NT${collectModalOrder.paid_amount || 0}／尚欠 NT${collectModalOrder.balance_amount || 0}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-1">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-[#6D5D52] mb-1">這次收到 ($)：</label>
+                  <input
+                    type="number"
+                    data-testid="shop-collect-amount"
+                    value={collectAmount}
+                    onChange={e => setCollectAmount(e.target.value)}
+                    className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold text-sm outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-[#6D5D52] mb-1">付款方式：</label>
+                  <select
+                    data-testid="shop-collect-method"
+                    value={collectMethod}
+                    onChange={e => setCollectMethod(e.target.value)}
+                    className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-bold text-sm outline-none bg-white"
+                  >
+                    {storePaymentMethods.map(m => (
+                      <option key={m.key} value={m.key}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {collectMethod === 'cash' && (
+                <div className="grid grid-cols-2 gap-3 items-end">
+                  <div>
+                    <label className="block text-xs font-bold text-[#6D5D52] mb-1">收到現金 ($)：</label>
+                    <input
+                      type="number"
+                      data-testid="shop-collect-cash-received"
+                      value={collectCashReceived}
+                      onChange={e => setCollectCashReceived(e.target.value)}
+                      placeholder={collectAmount ? `預設剛好 ${collectAmount}` : '留空當剛好'}
+                      className="w-full px-3 py-2 border border-[#E8DEC8] rounded-xl font-mono font-bold text-sm outline-none"
+                    />
+                  </div>
+                  <div className="px-3 py-2 rounded-xl bg-[#FAF7F2] border border-[#E8DEC8] text-xs font-bold flex justify-between" data-testid="shop-collect-change">
+                    <span className="text-[#8C8279]">找零</span>
+                    <span>
+                      NT$ {(() => {
+                        const a = Number(collectAmount) || 0;
+                        const r = collectCashReceived !== '' ? Number(collectCashReceived) : a;
+                        return Math.max(0, r - a);
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setCollectModalOrder(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-[#3E332B] rounded-xl text-xs font-bold"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={collectSubmitting}
+                data-testid="shop-collect-confirm-btn"
+                onClick={handleCollectBalanceSubmit}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs disabled:opacity-50"
+              >
+                {collectSubmitting ? '處理中...' : '確認收款'}
               </button>
             </div>
           </div>

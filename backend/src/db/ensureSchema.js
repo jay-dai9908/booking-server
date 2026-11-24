@@ -318,6 +318,7 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
       CONSTRAINT "ProductOrder_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "ProductOrder_order_ref_key" ON "ProductOrder"("order_ref")`,
+    `ALTER TABLE "ProductOrder" ADD COLUMN IF NOT EXISTS "paid_before_payments" INTEGER`,
 
     `CREATE TABLE IF NOT EXISTS "ProductOrderItem" (
       "id" SERIAL NOT NULL,
