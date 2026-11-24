@@ -987,6 +987,59 @@ test('Round 37 Item 4: computeEntry returns actual_minutes, paused_minutes, and 
   assert.equal(entry.booked_minutes, 180);
 });
 
+test('Round 40 Item 1: computeBill counts 120 actual minutes for person 1 left at 15:00 while group ends at 15:30', () => {
+  const bill = computeBill({
+    booking: {
+      booking_ref: 'R40-SHARED-1',
+      pax: 3,
+      booked_hours: 3,
+      early_leave_mode: 'actual',
+      sessions: [{ start_at: '2099-11-10T13:00:00+08:00', end_at: '2099-11-10T16:00:00+08:00' }]
+    },
+    persons: [
+      {
+        person_no: 1,
+        status: 'active',
+        timer: {
+          billing_start_at: '2099-11-10T13:00:00+08:00',
+          timer_started_at: '2099-11-10T13:00:00+08:00',
+          timer_ended_at: '2099-11-10T15:00:00+08:00',
+          paused_at: null,
+          paused_seconds: 0
+        }
+      },
+      {
+        person_no: 2,
+        status: 'active',
+        timer: {
+          billing_start_at: '2099-11-10T13:00:00+08:00',
+          timer_started_at: '2099-11-10T13:00:00+08:00',
+          timer_ended_at: '2099-11-10T15:30:00+08:00',
+          paused_at: null,
+          paused_seconds: 1200
+        }
+      },
+      {
+        person_no: 3,
+        status: 'active',
+        timer: {
+          billing_start_at: '2099-11-10T13:00:00+08:00',
+          timer_started_at: '2099-11-10T13:00:00+08:00',
+          timer_ended_at: '2099-11-10T15:30:00+08:00',
+          paused_at: null,
+          paused_seconds: 1200
+        }
+      }
+    ],
+    pricing: { hourly_price: 150, unlimited_price: 750, allow_unlimited: true, discount: {} },
+    now: new Date('2099-11-10T15:30:00+08:00')
+  });
+  const p1 = bill.persons.find(p => p.person_no === 1);
+  const p2 = bill.persons.find(p => p.person_no === 2);
+  assert.equal(p1.entry.actual_minutes, 120);
+  assert.equal(p2.entry.actual_minutes, 130);
+});
+
 
 
 

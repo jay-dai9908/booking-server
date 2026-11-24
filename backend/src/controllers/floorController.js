@@ -820,9 +820,11 @@ export async function handleTimer(req, res) {
         });
       }
 
+      let affectedCount = 0;
       for (const p of persons) {
         if (action === 'pause') {
-          if (!p.paused_at) {
+          if (p.status === 'active' && p.timer_started_at && !p.timer_ended_at && !p.paused_at) {
+            affectedCount++;
             await tx.timerPause.create({
               data: {
                 person_id: p.id,
@@ -857,7 +859,8 @@ export async function handleTimer(req, res) {
             }
           }
         } else if (action === 'resume') {
-          if (p.paused_at) {
+          if (p.status === 'active' && p.paused_at && !p.timer_ended_at) {
+            affectedCount++;
             const openPause = p.pauses?.find(pa => !pa.ended_at);
             let pauseDurationSec = 0;
             if (openPause) {
@@ -887,42 +890,66 @@ export async function handleTimer(req, res) {
             }
           }
         } else if (action === 'end') {
-          // If paused, end pause first
-          if (p.paused_at) {
-            const openPause = p.pauses?.find(pa => !pa.ended_at);
-            let pauseDurationSec = 0;
-            if (openPause) {
-              pauseDurationSec = Math.floor((now.getTime() - new Date(openPause.started_at).getTime()) / 1000);
-              await tx.timerPause.update({
-                where: { id: openPause.id },
-                data: { ended_at: now }
+          if (p.timer_ended_at) {
+            // Already departed: never overwrite timer_ended_at; close any lingering open pauses up to timer_ended_at
+            const origEndDt = new Date(p.timer_ended_at);
+            const openPauses = (p.pauses || []).filter(pa => !pa.ended_at);
+            if (openPauses.length > 0 || p.paused_at) {
+              let extraSec = 0;
+              if (openPauses.length > 0) {
+                const earliestStartMs = Math.min(...openPauses.map(pa => new Date(pa.started_at).getTime()));
+                extraSec = Math.max(0, Math.floor((origEndDt.getTime() - earliestStartMs) / 1000));
+                await tx.timerPause.updateMany({
+                  where: { person_id: p.id, ended_at: null },
+                  data: { ended_at: origEndDt }
+                });
+              }
+              await tx.bookingPerson.update({
+                where: { id: p.id },
+                data: {
+                  paused_at: null,
+                  paused_seconds: (p.paused_seconds || 0) + extraSec
+                }
               });
             }
-            await tx.bookingPerson.update({
-              where: { id: p.id },
-              data: {
-                paused_at: null,
-                paused_seconds: (p.paused_seconds || 0) + Math.max(0, pauseDurationSec),
-                timer_ended_at: now
+          } else {
+            // Not yet departed: close pause (if any) and set timer_ended_at = now
+            if (p.paused_at) {
+              const openPause = p.pauses?.find(pa => !pa.ended_at);
+              let pauseDurationSec = 0;
+              if (openPause) {
+                pauseDurationSec = Math.floor((now.getTime() - new Date(openPause.started_at).getTime()) / 1000);
+                await tx.timerPause.update({
+                  where: { id: openPause.id },
+                  data: { ended_at: now }
+                });
               }
-            });
-          } else if (!p.timer_ended_at) {
-            await tx.bookingPerson.update({
-              where: { id: p.id },
-              data: { timer_ended_at: now }
-            });
-          }
-          {
-            const pBoards = await tx.bookingEquipment.findMany({
-              where: { booking_ref, person_id: p.id, unit_group: { not: null } },
-              select: { unit_group: true }
-            });
-            const uGroups = [...new Set(pBoards.map(b => b.unit_group).filter(Boolean))];
-            if (uGroups.length > 0) {
-              await tx.boardPause.updateMany({
-                where: { unit_group: { in: uGroups }, ended_at: null },
-                data: { ended_at: now }
+              await tx.bookingPerson.update({
+                where: { id: p.id },
+                data: {
+                  paused_at: null,
+                  paused_seconds: (p.paused_seconds || 0) + Math.max(0, pauseDurationSec),
+                  timer_ended_at: now
+                }
               });
+            } else {
+              await tx.bookingPerson.update({
+                where: { id: p.id },
+                data: { timer_ended_at: now }
+              });
+            }
+            {
+              const pBoards = await tx.bookingEquipment.findMany({
+                where: { booking_ref, person_id: p.id, unit_group: { not: null } },
+                select: { unit_group: true }
+              });
+              const uGroups = [...new Set(pBoards.map(b => b.unit_group).filter(Boolean))];
+              if (uGroups.length > 0) {
+                await tx.boardPause.updateMany({
+                  where: { unit_group: { in: uGroups }, ended_at: null },
+                  data: { ended_at: now }
+                });
+              }
             }
           }
         } else if (action === 'restart') {
@@ -962,6 +989,13 @@ export async function handleTimer(req, res) {
             }
           }
         }
+      }
+
+      if (action === 'pause' && affectedCount === 0) {
+        throw { status: 409, code: 'NOTHING_TO_PAUSE', message: '這幾位沒有正在計時的人' };
+      }
+      if (action === 'resume' && affectedCount === 0) {
+        throw { status: 409, code: 'NOTHING_TO_RESUME', message: '這幾位沒有正在計時的人' };
       }
 
       if (action === 'end') {

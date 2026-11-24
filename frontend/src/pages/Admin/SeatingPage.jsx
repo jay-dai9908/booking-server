@@ -1866,12 +1866,14 @@ export default function SeatingPage() {
         footer={
           (() => {
             const activePersons = (timerTarget?.persons || []).filter(p => {
+              if (p.status === 'removed') return false;
               const tm = p.timer || p;
-              return Boolean((tm.timer_started_at || tm.billing_start_at) && !tm.timer_ended_at);
+              return Boolean(tm.timer_started_at && !tm.timer_ended_at);
             });
             const isAnyRunning = activePersons.some(p => !(p.timer?.paused_at || p.paused_at));
             const isAllPaused = activePersons.length > 0 && activePersons.every(p => Boolean(p.timer?.paused_at || p.paused_at));
             const hasActive = activePersons.length > 0;
+            const activePersonNos = activePersons.map(p => p.person_no);
 
             return (
               <div className="flex items-center justify-between gap-2">
@@ -1883,7 +1885,7 @@ export default function SeatingPage() {
                     onClick={() => {
                       handleTimerAction(
                         timerTarget.booking_ref,
-                        'all',
+                        activePersonNos,
                         isAllPaused ? 'resume' : 'pause',
                         isAllPaused ? null : '全組暫停'
                       );
