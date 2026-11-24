@@ -255,6 +255,8 @@ model BookingEquipment {
   start_at         DateTime?  // 這一段開始（null = 依 covered_sessions 推算）
   end_at           DateTime?  // 這一段結束
   unit_rate        Int?       // 這一段的單價快照（元／小時）
+  daily_cap_snapshot Int?     // 建立當下這款板子的每日上限快照
+  is_price_fixed   Boolean    @default(true) // 是否直接採用 subtotal_price（現場加租改由計算得出）
   ended_reason     String?    // swapped | returned | null
   planned_end_at   DateTime?  // 原本預約的結束時間（拆列或第一次換板時填入），提早歸還時照這個計費（4.4.3）
 

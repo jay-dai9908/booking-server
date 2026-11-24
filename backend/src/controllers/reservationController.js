@@ -734,6 +734,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
               quantity: eq.quantity,
               rental_hours: eq.rental_hours,
               unit_rate: eq.unit_rate,
+              daily_cap_snapshot: eq.daily_cap_snapshot ?? null,
               subtotal_price: eq.subtotal_price,
               covered_sessions: eq.covered_sessions
             }))
@@ -955,6 +956,8 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
             equipment_name_snapshot: config.name,
             quantity: qty,
             rental_hours: rentalHours,
+            unit_rate: config.hourly_rate,
+            daily_cap_snapshot: config.daily_cap ?? null,
             subtotal_price: subtotal,
             covered_sessions: eqCoveredSessions
           });
@@ -2306,6 +2309,8 @@ export const adminCreateReservation = async (req, res) => {
             equipment_name_snapshot: config.name,
             quantity: qty,
             rental_hours: rentalHours,
+            unit_rate: config.hourly_rate,
+            daily_cap_snapshot: config.daily_cap ?? null,
             subtotal_price: subtotal,
             covered_sessions: coveredSessionsStrings
           });

@@ -817,5 +817,52 @@ test('Round 36 Item 3: pending_supplement deducts matching valid supplements, re
   assert.equal(boardAddonBill.persons[0].pending_items[0].source_key, 'board:ug-late-1');
 });
 
+test('Round 37 Item 1: calculateBoardTotal enforces dailyCap across swapped/paused segments', () => {
+  // Swapped two 2.5h segments at 100/hr without promo => gross 500, capped at 300
+  const swappedCap = calculateBoardTotal({
+    segments: [
+      { hours: 2.5, rate: 100, name: '小板' },
+      { hours: 2.5, rate: 100, name: '小板' }
+    ],
+    discountConfig: { enabled: false },
+    dailyCap: 300
+  });
+  assert.equal(swappedCap.total, 300);
+  assert.equal(swappedCap.capped, true);
+
+  // Single 5h segment with 30m pause (4.5h effective) at 100/hr => 450, capped at 300
+  const pausedCap = calculateBoardTotal({
+    segments: [
+      {
+        rate: 100,
+        name: '小板',
+        start_at: '2026-11-24T14:00:00+08:00',
+        end_at: '2026-11-24T19:00:00+08:00'
+      }
+    ],
+    pauses: [
+      {
+        started_at: '2026-11-24T15:00:00+08:00',
+        ended_at: '2026-11-24T15:30:00+08:00'
+      }
+    ],
+    discountConfig: { enabled: false },
+    dailyCap: 300
+  });
+  assert.equal(pausedCap.total, 300);
+  assert.equal(pausedCap.capped, true);
+
+  // Without dailyCap: exact same behavior as before
+  const uncapped = calculateBoardTotal({
+    segments: [
+      { hours: 2.5, rate: 100, name: '小板' },
+      { hours: 2.5, rate: 100, name: '小板' }
+    ],
+    discountConfig: { enabled: false }
+  });
+  assert.equal(uncapped.total, 500);
+  assert.equal(uncapped.capped, false);
+});
+
 
 

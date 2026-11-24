@@ -460,6 +460,7 @@ export async function computeSelfServiceQuote(
           quantity: qty,
           rental_hours: rentalHours,
           unit_rate: terms.hourly_rate,
+          daily_cap_snapshot: terms.daily_cap ?? null,
           subtotal_price: subtotal,
           covered_sessions: coveredSessions,
           equipment: config
@@ -561,6 +562,7 @@ export async function computeSelfServiceQuote(
     quantity: eq.quantity,
     rental_hours: eq.rental_hours,
     unit_rate: eq.unit_rate,
+    daily_cap_snapshot: eq.daily_cap_snapshot ?? null,
     subtotal_price: eq.subtotal_price,
     covered_sessions: eq.covered_sessions,
     person_id: null,

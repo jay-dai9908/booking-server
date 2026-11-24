@@ -42,7 +42,7 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
   }
 
   for (const eq of equipments) {
-    const unitRate = eq.unit_rate || eq.equipment?.hourly_rate || (eq.rental_hours > 0 ? Math.round(eq.subtotal_price / (eq.quantity * eq.rental_hours)) : 60);
+    const unitRate = eq.unit_rate ?? eq.equipment?.hourly_rate ?? (eq.rental_hours > 0 ? Math.round(eq.subtotal_price / (eq.quantity * eq.rental_hours)) : 60);
 
     let eqStartAt = eq.start_at || null;
     let eqPlannedEndAt = null;
@@ -134,6 +134,8 @@ export async function splitBoardUnits(tx = prisma, booking_ref) {
           unit_group: crypto.randomUUID(),
           segment_no: 1,
           unit_rate: unitRate,
+          daily_cap_snapshot: eq.daily_cap_snapshot ?? null,
+          is_price_fixed: eq.is_price_fixed !== false,
           start_at: eqStartAt,
           planned_end_at: eqPlannedEndAt
         }
@@ -157,13 +159,26 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
   // 1. Layout
   const layout = await getActiveLayoutForDate(prisma, targetDate);
 
-  // 2. Pricing
-  const { hourly_price, unlimited_price, allow_unlimited } = await getEffectiveDailyRates(prisma, targetDate);
+  // 2. Pricing & global equipment discount rules
+  const [{ hourly_price, unlimited_price, allow_unlimited }, globalSetting] = await Promise.all([
+    getEffectiveDailyRates(prisma, targetDate),
+    prisma.globalSetting.findFirst()
+  ]);
   const pricing = {
     hourly: hourly_price,
     unlimited: unlimited_price,
     allow_unlimited: allow_unlimited
   };
+  const equipmentDiscount = {
+    enabled: globalSetting?.equipment_discount_enabled ?? true,
+    buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
+    free_hours: globalSetting?.equipment_discount_free_hours ?? 1,
+    tier2_enabled: globalSetting?.equipment_discount2_enabled ?? false,
+    tier2_buy_hours: globalSetting?.equipment_discount2_buy_hours ?? 8,
+    tier2_free_hours: globalSetting?.equipment_discount2_free_hours ?? 4,
+    stackable: globalSetting?.equipment_discount_stackable ?? true
+  };
+  const boardSwapGraceMinutes = globalSetting?.board_swap_grace_minutes ?? 10;
 
   // 3. Sessions on date
   const sessions = await prisma.session.findMany({
@@ -660,6 +675,8 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
     date: targetDateStr,
     layout,
     pricing,
+    equipment_discount: equipmentDiscount,
+    board_swap_grace_minutes: boardSwapGraceMinutes,
     sessions: sessionList,
     bookings,
     board_usage: boardUsage,

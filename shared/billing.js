@@ -308,7 +308,8 @@ export function computeBill({
       segments: normalizedSegs,
       pauses: b.pauses || [],
       discountConfig,
-      now
+      now,
+      dailyCap: b.daily_cap ?? b.dailyCap ?? null
     });
     const total = b.fixed_total != null ? b.fixed_total : calc.total;
     const activeSegs = normalizedSegs.filter(s => s?.ended_reason !== 'person_removed');

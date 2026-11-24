@@ -1164,16 +1164,22 @@ export async function swapBoard(req, res) {
       }
 
       if (isStartBoundary) {
+        const nextRate = (to_equipment_id === activeSeg.equipment_id && activeSeg.unit_rate != null)
+          ? activeSeg.unit_rate
+          : targetConfig.hourly_rate;
         await tx.bookingEquipment.update({
           where: { id: activeSeg.id },
           data: {
             equipment_id: to_equipment_id,
             equipment_name_snapshot: targetConfig.name,
-            unit_rate: targetConfig.hourly_rate,
+            unit_rate: nextRate,
             covered_sessions: newCoveredSessions
           }
         });
       } else {
+        const nextRate = (to_equipment_id === activeSeg.equipment_id && activeSeg.unit_rate != null)
+          ? activeSeg.unit_rate
+          : targetConfig.hourly_rate;
         await tx.bookingEquipment.update({
           where: { id: activeSeg.id },
           data: {
@@ -1197,7 +1203,9 @@ export async function swapBoard(req, res) {
             segment_no: activeSeg.segment_no + 1,
             start_at: boundaryDt,
             end_at: null,
-            unit_rate: targetConfig.hourly_rate,
+            unit_rate: nextRate,
+            daily_cap_snapshot: activeSeg.daily_cap_snapshot ?? null,
+            is_price_fixed: activeSeg.is_price_fixed !== false,
             planned_end_at: activeSeg.planned_end_at
           }
         });
@@ -1362,7 +1370,7 @@ export async function reassignBoard(req, res) {
 
 export async function addBoardRental(req, res) {
   const booking_ref = req.params.booking_ref || req.params.ref;
-  const { person_no, equipment_id, from_at, to_at } = req.body;
+  const { person_no, equipment_id, from_at, to_at, now: bodyNow } = req.body;
   const staffName = req.user?.name || '門市人員';
   const staffId = req.user?.id || null;
   const deviceInfo = getAdminDeviceInfo(req);
@@ -1426,8 +1434,8 @@ export async function addBoardRental(req, res) {
           fromDt = new Date(from_at);
         }
       } else {
-        const now = new Date();
-        fromDt = now < bookingStartDt ? bookingStartDt : now;
+        const nowDt = (process.env.NODE_ENV === 'test' && bodyNow) ? new Date(bodyNow) : new Date();
+        fromDt = nowDt < bookingStartDt ? bookingStartDt : nowDt;
       }
 
       let toDt;
@@ -1550,8 +1558,8 @@ export async function addBoardRental(req, res) {
 
       const diffMs = toDt.getTime() - fromDt.getTime();
       const rentalHours = Math.max(1, Math.ceil(diffMs / 3600000));
-      const unitRate = targetConfig.hourly_rate || 60;
-      const subtotalPrice = rentalHours * unitRate;
+      const unitRate = targetConfig.hourly_rate ?? 60;
+      const dailyCapSnapshot = targetConfig.daily_cap ?? null;
       const newUnitGroup = crypto.randomUUID();
 
       const newEquipment = await tx.bookingEquipment.create({
@@ -1567,8 +1575,10 @@ export async function addBoardRental(req, res) {
           end_at: null,
           planned_end_at: toDt,
           unit_rate: unitRate,
+          daily_cap_snapshot: dailyCapSnapshot,
+          is_price_fixed: false,
           rental_hours: rentalHours,
-          subtotal_price: subtotalPrice,
+          subtotal_price: 0,
           covered_sessions: coveredSessionStrings
         }
       });

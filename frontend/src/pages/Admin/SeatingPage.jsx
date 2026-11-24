@@ -448,19 +448,19 @@ export default function SeatingPage() {
   const openAddBoardModal = (booking, personNo = 1, person = null) => {
     if (!booking) return;
     const bookingSlots = getBookingHourSlots(booking);
-    const nowHHmm = formatTimeHHmm(getServerNow());
-    const nowH = parseInt(nowHHmm.split(':')[0], 10);
-    const nowSlot = `${nowH.toString().padStart(2, '0')}:00`;
+    const serverNowMs = getServerNow();
+    const nowHHmm = formatTimeHHmm(serverNowMs);
     const startMs = booking.start_at ? new Date(booking.start_at).getTime() : Date.now();
     const bookedEndMs = booking.end_at ? new Date(booking.end_at).getTime() : (startMs + 2 * 3600000);
 
     const startSlot = bookingSlots[0] || formatTimeHHmm(startMs);
     const endSlot = bookingSlots[bookingSlots.length - 1] || formatTimeHHmm(bookedEndMs);
 
-    let defaultFrom = startSlot;
-    if (bookingSlots.slice(0, -1).includes(nowSlot)) {
-      defaultFrom = nowSlot;
-    } else if (nowSlot < startSlot) {
+    // 預設目前的 HH:MM（伺服器時間）；早於預約開始時用預約開始
+    let defaultFrom = serverNowMs < startMs
+      ? formatTimeHHmm(startMs)
+      : nowHHmm;
+    if (serverNowMs >= bookedEndMs && startSlot) {
       defaultFrom = startSlot;
     }
 
@@ -3145,9 +3145,12 @@ export default function SeatingPage() {
                     {addBoardHours > 0 ? `${addBoardHours} 小時 · NT$${addBoardTotalPrice}` : '0 小時 · NT$0'}
                   </span>
                 </div>
-                <div className="text-[11px] text-sg-muted">
-                  結帳時會自動套用買三送一
-                </div>
+                {floorData?.equipment_discount?.enabled && (
+                  <div className="text-[11px] text-sg-muted" data-testid="add-board-discount-hint">
+                    結帳時會自動套用買 {floorData.equipment_discount.buy_hours} 送 {floorData.equipment_discount.free_hours} 優惠
+                    {floorData.equipment_discount.tier2_enabled ? `（或買 ${floorData.equipment_discount.tier2_buy_hours} 送 ${floorData.equipment_discount.tier2_free_hours}）` : ''}
+                  </div>
+                )}
               </div>
             </div>
           </ResponsivePanel>

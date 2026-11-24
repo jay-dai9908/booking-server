@@ -149,10 +149,10 @@ function calcPausedMinutesInRange(rangeStartMs, rangeEndMs, pauses = [], nowMs =
 /**
  * 計算同一台板子（含分段換板）的金額（方案 B）
  * 每一段若有起訖時間，會先扣除與暫停重疊的分鐘數，再套用半小時取整規則。
- * @param {{ segments: Array<{ hours?: number, rate: number, name?: string, start_at?: any, end_at?: any, planned_end_at?: any, ended_reason?: string, pauses?: any[] }>, pauses?: Array<{ started_at: any, ended_at?: any }>, discountConfig: any, now?: any }} params
- * @returns {{ H: number, gross: number, chargeable: number, free: number, cheapest: number, discount: number, total: number, pausedMinutes: number, effectiveMinutes: number }}
+ * @param {{ segments: Array<{ hours?: number, rate: number, name?: string, start_at?: any, end_at?: any, planned_end_at?: any, ended_reason?: string, pauses?: any[] }>, pauses?: Array<{ started_at: any, ended_at?: any }>, discountConfig: any, now?: any, dailyCap?: number|null }} params
+ * @returns {{ H: number, gross: number, chargeable: number, free: number, cheapest: number, discount: number, total: number, capped: boolean, pausedMinutes: number, effectiveMinutes: number }}
  */
-export function calculateBoardTotal({ segments = [], pauses = [], discountConfig, now = Date.now() }) {
+export function calculateBoardTotal({ segments = [], pauses = [], discountConfig, now = Date.now(), dailyCap = null }) {
   const nowMs = toMs(now) ?? Date.now();
   let totalPausedMinutes = 0;
   let totalEffectiveMinutes = 0;
@@ -194,7 +194,11 @@ export function calculateBoardTotal({ segments = [], pauses = [], discountConfig
     ? Math.min(...activeSegs.map(s => Number(s.rate) || 0))
     : 0;
   const discount = Math.round(free * cheapest);
-  const total = Math.max(0, gross - discount);
+  const rawTotal = Math.max(0, gross - discount);
+  const capNum = (dailyCap !== null && dailyCap !== undefined && dailyCap !== '') ? Number(dailyCap) : NaN;
+  const hasValidCap = Number.isFinite(capNum) && capNum > 0;
+  const capped = hasValidCap && rawTotal > capNum;
+  const total = capped ? capNum : rawTotal;
 
   return {
     H,
@@ -204,6 +208,7 @@ export function calculateBoardTotal({ segments = [], pauses = [], discountConfig
     cheapest,
     discount,
     total,
+    capped,
     pausedMinutes: totalPausedMinutes,
     effectiveMinutes: totalEffectiveMinutes
   };

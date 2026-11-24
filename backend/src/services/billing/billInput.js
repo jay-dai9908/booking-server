@@ -125,7 +125,7 @@ export function buildBillInput({
       return {
         equipment_id: be.equipment_id,
         name: be.equipment?.name || be.equipment_name_snapshot,
-        rate: be.unit_rate || be.equipment?.hourly_rate || 60,
+        rate: be.unit_rate ?? be.equipment?.hourly_rate ?? 60,
         hours: be.ended_reason === 'person_removed' ? 0 : hours,
         start_at: be.start_at,
         end_at: be.end_at,
@@ -136,10 +136,22 @@ export function buildBillInput({
       };
     });
 
+    const capValues = items
+      .map(be => be.daily_cap_snapshot)
+      .filter(v => v !== null && v !== undefined && Number.isFinite(Number(v)))
+      .map(v => Number(v));
+    const dailyCap = capValues.length > 0 ? Math.max(...capValues) : null;
+    const isPriceFixed = items[0]?.is_price_fixed !== false;
+
     boards.push({
       unit_group: bg.unit_group,
       person_no: bg.person_no,
-      fixed_total: allRemoved ? 0 : (isSingleUnmodified && bg.subtotal_price != null && Number(bg.subtotal_price) >= 0 ? Number(bg.subtotal_price) : undefined),
+      daily_cap: dailyCap,
+      fixed_total: allRemoved
+        ? 0
+        : (isSingleUnmodified && isPriceFixed && bg.subtotal_price != null && Number(bg.subtotal_price) >= 0
+            ? Number(bg.subtotal_price)
+            : undefined),
       pauses: unitPauses,
       segments
     });
