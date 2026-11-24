@@ -1325,7 +1325,7 @@ export default function SeatingPage() {
         ref={mobileStickyHeaderRef}
         className="lg:hidden sticky top-0 z-20 bg-sg-bg/95 backdrop-blur-md pt-2 pb-2 space-y-2 border-b border-sg-line/50 shadow-xs"
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <SegmentedTabs
             tabs={[
               { id: 'list', label: '名單' },
@@ -1335,7 +1335,7 @@ export default function SeatingPage() {
             activeTab={activeTab}
             onChange={handleTabChange}
           />
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {floorData?.is_self_service_day && (
               <Button
                 variant="secondary"
