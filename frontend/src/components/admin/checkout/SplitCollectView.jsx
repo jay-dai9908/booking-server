@@ -35,7 +35,8 @@ export default function SplitCollectView({
   initialRefundPayment = null,
   displaySyncEnabled = true,
   onDisplayPaid = null,
-  onDisplayNextPerson = null
+  onDisplayNextPerson = null,
+  onRefreshBill = null
 }) {
   const { can } = useAdminPermissions();
   const canMoneyWrite = can(MONEY_WRITE);
@@ -67,6 +68,8 @@ export default function SplitCollectView({
   const [unpaidReason, setUnpaidReason] = useState('收錯訂單');
   const [unpaidLoading, setUnpaidLoading] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
+  const [settleBoardTarget, setSettleBoardTarget] = useState(null);
+  const [settleBoardLoading, setSettleBoardLoading] = useState(false);
   const [successPaymentData, setSuccessPaymentData] = useState(null);
 
   // Sub-modal states
@@ -788,7 +791,7 @@ export default function SplitCollectView({
                               <div className="text-[13px] font-bold text-sg-ink">
                                 第 {p.person_no} 位 ({p.seat_code || '未帶位'})
                               </div>
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-[11px] text-sg-sage-ink font-bold">已結清 NT${p.total}</span>
                                 {p.pending_supplement > 0 && (
                                   <span
@@ -798,6 +801,22 @@ export default function SplitCollectView({
                                     待補收 NT${p.pending_supplement}
                                   </span>
                                 )}
+                                {(p.active_after_payment_boards || []).map(ab => (
+                                  <span
+                                    key={ab.unit_group}
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200"
+                                  >
+                                    智能板加租（使用中）
+                                    <button
+                                      type="button"
+                                      data-testid={`split-settle-board-now-btn-${ab.unit_group}`}
+                                      onClick={() => setSettleBoardTarget(ab)}
+                                      className="px-1.5 py-0.2 bg-sg-brown text-white rounded hover:bg-sg-brown-dark transition cursor-pointer"
+                                    >
+                                      現在結算
+                                    </button>
+                                  </span>
+                                ))}
                               </div>
                             </div>
                           </div>
@@ -1503,6 +1522,31 @@ export default function SplitCollectView({
           required={true}
         />
       </ConfirmPanel>
+
+      {/* Settle After-Payment Board Now Modal */}
+      <ConfirmPanel
+        isOpen={Boolean(settleBoardTarget)}
+        onClose={() => setSettleBoardTarget(null)}
+        onConfirm={async () => {
+          if (!settleBoardTarget || !bookingRef) return;
+          try {
+            setSettleBoardLoading(true);
+            await api.post(`/floor/${bookingRef}/boards/${settleBoardTarget.unit_group}/return`, {});
+            setSettleBoardTarget(null);
+            if (onRefreshBill) await onRefreshBill();
+            setToastMsg('已結算智能板費用，已列為待補收');
+            setTimeout(() => setToastMsg(null), 2500);
+          } catch (err) {
+            setToastMsg(err.response?.data?.error || err.message || '結算智能板失敗');
+            setTimeout(() => setToastMsg(null), 2500);
+          } finally {
+            setSettleBoardLoading(false);
+          }
+        }}
+        title="現在結算智能板"
+        message="會以現在時間結算並歸還這台智能板"
+        loading={settleBoardLoading}
+      />
 
       {/* Toast Notification */}
       {toastMsg && (

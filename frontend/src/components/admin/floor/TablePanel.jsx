@@ -319,17 +319,22 @@ export default function TablePanel({
                       const seatObj = seats.find(s => s.code === person.seat_code);
                       const seatInfo = seatStates[person.seat_code] || {};
                       const tm = getPersonTimer(person);
-                      const isEnded = Boolean(tm.timer_ended_at);
-                      const isPaused = Boolean(tm.paused_at && !isEnded);
+                      const isPersonPaid = Boolean(person.paid || group.is_paid || group.billing?.status === 'paid' || group.billing_status === 'paid');
+                      const isEnded = Boolean((tm.timer_ended_at && !isPersonPaid) || group.attendance === 'completed');
+                      const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at && !isEnded);
                       const hasStarted = Boolean(tm.timer_started_at);
-                      const elapsedText = isEnded ? '已離場' : (!hasStarted ? '待計時' : formatElapsedText(person, serverNow || new Date()));
+                      const elapsedText = isEnded
+                        ? '已離場'
+                        : isPersonPaid
+                        ? '已付款'
+                        : (!hasStarted ? '待計時' : formatElapsedText(person, serverNow || new Date()));
                       const currentKey = `${group.booking_ref}-${person.person_no}`;
                       const isMenuOpen = menuOpenKey === currentKey;
-                      const isPersonPaid = Boolean(person.paid || group.is_paid || group.billing?.status === 'paid' || group.billing_status === 'paid');
                       const removeInfo = getPersonTimerElapsedForRemove(person, serverNow || new Date());
                       const canRemovePerson = isCheckedIn && !isPersonPaid && person.status === 'active' && removeInfo.canShow;
                       const personHasBoard = (group.boards || []).some(
-                        bd => Number(bd.person_no) === Number(person.person_no) && (bd.segments || []).some(s => !s.end_at)
+                        bd => (Number(bd.person_no) === Number(person.person_no) || (bd.person_no == null && persons.length <= 1))
+                          && (bd.segments || []).some(s => !s.end_at && s.ended_reason !== 'person_removed')
                       );
 
                       return (
@@ -413,28 +418,34 @@ export default function TablePanel({
                                   >
                                     {(!person.seat_code || String(person.seat_code).startsWith('WAIT-')) ? '帶位' : '換座位'}
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setMenuOpenKey(null);
-                                      onClose();
-                                      onSwapBoard?.({ booking: group, personNo: person.person_no });
-                                    }}
-                                    className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition"
-                                  >
-                                    換板
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setMenuOpenKey(null);
-                                      onClose();
-                                      onAddBoard?.({ booking: group, personNo: person.person_no });
-                                    }}
-                                    className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition"
-                                  >
-                                    加租板
-                                  </button>
+                                  {personHasBoard && (
+                                    <button
+                                      type="button"
+                                      data-testid={`table-panel-swap-board-btn-${person.person_no}`}
+                                      onClick={() => {
+                                        setMenuOpenKey(null);
+                                        onClose();
+                                        onSwapBoard?.({ booking: group, personNo: person.person_no, seatCode: person.seat_code || '未排座' });
+                                      }}
+                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition"
+                                    >
+                                      換板
+                                    </button>
+                                  )}
+                                  {!isEnded && person.status === 'active' && (
+                                    <button
+                                      type="button"
+                                      data-testid={`table-panel-add-board-btn-${person.person_no}`}
+                                      onClick={() => {
+                                        setMenuOpenKey(null);
+                                        onClose();
+                                        onAddBoard?.({ booking: group, personNo: person.person_no });
+                                      }}
+                                      className="w-full text-left px-3 py-1.5 hover:bg-sg-paper text-sg-ink font-medium transition"
+                                    >
+                                      加租板
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => {

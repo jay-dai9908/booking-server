@@ -6,8 +6,9 @@ import { reseatBookings, assertNoSeatCollisions } from '../services/seating/allo
 import { getActiveLayoutForDate, loadSeatedOccupants, assertNoSeatedCollisions, lockDaySeats } from '../services/seating/layoutService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
-import { refreshBillingCache, getBookingBill } from '../services/billing/billService.js';
+import { refreshBillingCache, getBookingBill, saveDraft } from '../services/billing/billService.js';
 import { swapBoundaryOptions, toTaipeiDateString } from '../../../shared/time.js';
+import { calculateBoardTotal } from '../../../shared/boardPricing.js';
 import { resolveCoveredSessions, formatCoveredSessions } from '../utils/equipmentWindow.js';
 import displayBus from '../services/display/displayBus.js';
 
@@ -928,18 +929,37 @@ export async function handleTimer(req, res) {
                 data: { timer_ended_at: now }
               });
             }
-            {
-              const pBoards = await tx.bookingEquipment.findMany({
-                where: { booking_ref, person_id: p.id, unit_group: { not: null } },
-                select: { unit_group: true }
+          }
+          {
+            const pBoards = await tx.bookingEquipment.findMany({
+              where: { booking_ref, person_id: p.id, unit_group: { not: null } },
+              select: { unit_group: true, end_at: true, ended_reason: true, added_after_payment: true }
+            });
+            const uGroups = [...new Set(pBoards.map(b => b.unit_group).filter(Boolean))];
+            if (uGroups.length > 0) {
+              await tx.boardPause.updateMany({
+                where: { unit_group: { in: uGroups }, ended_at: null },
+                data: { ended_at: now }
               });
-              const uGroups = [...new Set(pBoards.map(b => b.unit_group).filter(Boolean))];
-              if (uGroups.length > 0) {
-                await tx.boardPause.updateMany({
-                  where: { unit_group: { in: uGroups }, ended_at: null },
-                  data: { ended_at: now }
-                });
-              }
+            }
+            const unreturnedAfterPayUgs = [...new Set(
+              pBoards
+                .filter(b => b.added_after_payment === true && !b.end_at && !b.ended_reason)
+                .map(b => b.unit_group)
+                .filter(Boolean)
+            )];
+            for (const ug of unreturnedAfterPayUgs) {
+              const ret = await applyReturnBoardTx(tx, {
+                booking_ref,
+                unit_group: ug,
+                at: null,
+                now
+              });
+              await computeAfterPaymentBoardFee(tx, booking_ref, ug, ret.actionDt, {
+                staffName,
+                staffId,
+                deviceInfo
+              });
             }
           }
         } else if (action === 'start') {
@@ -1618,12 +1638,182 @@ async function applySwapBoardTx(tx, { booking_ref, unit_group, to_equipment_id, 
         unit_rate: nextRate,
         daily_cap_snapshot: activeSeg.daily_cap_snapshot ?? null,
         is_price_fixed: activeSeg.is_price_fixed !== false,
-        planned_end_at: activeSeg.planned_end_at
+        planned_end_at: activeSeg.planned_end_at,
+        added_after_payment: Boolean(activeSeg.added_after_payment)
       }
     });
   }
 
   return { activeSeg, targetConfig, actionDt: boundaryDt };
+}
+
+export async function computeAfterPaymentBoardFee(
+  tx,
+  booking_ref,
+  unit_group,
+  endAt,
+  { staffName = '系統', staffId = null, deviceInfo = null } = {}
+) {
+  const segments = await tx.bookingEquipment.findMany({
+    where: { booking_ref, unit_group },
+    orderBy: { segment_no: 'asc' }
+  });
+  if (!segments.length || !segments.some((s) => s.added_after_payment === true)) {
+    return null;
+  }
+
+  const activeSegments = segments.filter((s) => s.ended_reason !== 'person_removed');
+  if (!activeSegments.length) return null;
+
+  const reservations = await tx.reservation.findMany({
+    where: { booking_ref, status: { not: 'cancelled' } },
+    include: { session: true },
+    orderBy: { session: { start_time: 'asc' } }
+  });
+  const firstRes = reservations[0];
+  const lastRes = reservations[reservations.length - 1];
+  if (!firstRes) return null;
+
+  const sessionDate = firstRes.session.session_date;
+  const dStr = typeof sessionDate === 'string'
+    ? sessionDate.slice(0, 10)
+    : toTaipeiDateString(sessionDate);
+  const bookingStartDt = new Date(`${dStr}T${firstRes.session.start_time}:00+08:00`);
+  let bookingEndDt = new Date(`${dStr}T${lastRes.session.end_time}:00+08:00`);
+  if (bookingEndDt <= bookingStartDt) {
+    bookingEndDt = new Date(bookingEndDt.getTime() + 24 * 60 * 60 * 1000);
+  }
+
+  let personNo = 1;
+  if (activeSegments[0].person_id) {
+    const bp = await tx.bookingPerson.findUnique({
+      where: { id: activeSegments[0].person_id },
+      select: { person_no: true }
+    });
+    if (bp?.person_no) personNo = bp.person_no;
+  }
+
+  const endDt = endAt instanceof Date ? endAt : new Date(endAt);
+  const pauses = await tx.boardPause.findMany({
+    where: { unit_group },
+    orderBy: { started_at: 'asc' }
+  });
+  const globalSetting = await tx.globalSetting.findFirst();
+  const discountConfig = {
+    enabled: globalSetting?.equipment_discount_enabled ?? true,
+    buy_hours: globalSetting?.equipment_discount_buy_hours ?? 3,
+    free_hours: globalSetting?.equipment_discount_free_hours ?? 1,
+    tier2_enabled: globalSetting?.equipment_discount2_enabled ?? false,
+    tier2_buy_hours: globalSetting?.equipment_discount2_buy_hours ?? 8,
+    tier2_free_hours: globalSetting?.equipment_discount2_free_hours ?? 4,
+    stackable: globalSetting?.equipment_discount_stackable ?? true
+  };
+  const graceMinutes = globalSetting?.board_swap_grace_minutes ?? 10;
+
+  const capVals = activeSegments
+    .map((s) => s.daily_cap_snapshot)
+    .filter((v) => v !== null && v !== undefined && Number.isFinite(Number(v)))
+    .map(Number);
+  const dailyCap = capVals.length > 0 ? Math.max(...capVals) : null;
+
+  const mappedSegs = activeSegments.map((s) => {
+    const startDt = s.start_at ? new Date(s.start_at) : bookingStartDt;
+    const segEnd = s.end_at ? new Date(s.end_at) : endDt;
+    return {
+      equipment_id: s.equipment_id,
+      name: s.equipment_name_snapshot,
+      rate: s.unit_rate ?? 60,
+      hours: 0,
+      start_at: startDt.toISOString(),
+      end_at: segEnd.toISOString(),
+      effective_end_at: segEnd.toISOString(),
+      ended_reason: s.ended_reason || 'returned',
+      bill_until_return: true
+    };
+  });
+
+  const calc = calculateBoardTotal({
+    segments: mappedSegs,
+    pauses,
+    discountConfig,
+    now: endDt,
+    dailyCap,
+    graceMinutes
+  });
+  const amount = Math.max(0, Math.round(calc.total || 0));
+  const sourceKey = `board:${unit_group}`;
+
+  const validSupplements = await tx.payment.findMany({
+    where: { booking_ref, status: 'valid', kind: 'supplement' }
+  });
+  const alreadyCollected = validSupplements.some((pay) => {
+    const items = Array.isArray(pay.breakdown_json?.pending_items) ? pay.breakdown_json.pending_items : [];
+    return items.some((pi) => pi?.source_key === sourceKey);
+  });
+  if (alreadyCollected) {
+    return { unit_group, person_no: personNo, source_key: sourceKey, amount, skippedBecauseCollected: true };
+  }
+
+  const currentDraft = (firstRes.checkout_details && typeof firstRes.checkout_details === 'object')
+    ? firstRes.checkout_details
+    : {};
+  const currentRev = Number.isInteger(currentDraft.rev) ? currentDraft.rev : 0;
+  const prevPending = Array.isArray(currentDraft.pending_supplements) ? currentDraft.pending_supplements : [];
+
+  if (amount <= 0) {
+    if (prevPending.some((ps) => ps?.source_key === sourceKey)) {
+      const nextDraft = {
+        ...currentDraft,
+        pending_supplements: prevPending.filter((ps) => ps?.source_key !== sourceKey)
+      };
+      await saveDraft(booking_ref, currentRev, nextDraft, staffName, staffId, deviceInfo, tx);
+      await refreshBillingCache(tx, booking_ref);
+    }
+    return { unit_group, person_no: personNo, source_key: sourceKey, amount: 0 };
+  }
+
+  const firstStartDt = mappedSegs[0]?.start_at ? new Date(mappedSegs[0].start_at) : endDt;
+  const fmtHHmm = (d) => new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(d);
+  const boardNames = [...new Set(activeSegments.map((s) => s.equipment_name_snapshot).filter(Boolean))].join('/');
+  const label = `智能板加租 ${boardNames || '智能板'} ${fmtHHmm(firstStartDt)}–${fmtHHmm(endDt)}`;
+
+  const existingSame = prevPending.find((ps) => ps?.source_key === sourceKey);
+  if (
+    existingSame &&
+    Number(existingSame.person_no) === personNo &&
+    Number(existingSame.amount) === amount &&
+    existingSame.source_type === 'board_addon'
+  ) {
+    return { unit_group, person_no: personNo, source_key: sourceKey, amount };
+  }
+
+  const nextPending = [
+    ...prevPending.filter((ps) => ps?.source_key !== sourceKey),
+    {
+      person_no: personNo,
+      source_key: sourceKey,
+      source_type: 'board_addon',
+      label,
+      amount,
+      computed_until: endDt.toISOString()
+    }
+  ];
+  await saveDraft(
+    booking_ref,
+    currentRev,
+    { ...currentDraft, pending_supplements: nextPending },
+    staffName,
+    staffId,
+    deviceInfo,
+    tx
+  );
+  await refreshBillingCache(tx, booking_ref);
+  return { unit_group, person_no: personNo, source_key: sourceKey, amount, label };
 }
 
 async function applyReturnBoardTx(tx, { booking_ref, unit_group, at, now }) {
@@ -1634,6 +1824,9 @@ async function applyReturnBoardTx(tx, { booking_ref, unit_group, at, now }) {
   if (!segments.length) throw { status: 404, message: '找不到此板子' };
 
   const activeSeg = segments[segments.length - 1];
+  if (activeSeg.ended_reason === 'returned' && activeSeg.end_at) {
+    return { activeSeg, actionDt: new Date(activeSeg.end_at), alreadyReturned: true };
+  }
   const bookingReservations = await tx.reservation.findMany({
     where: { booking_ref, status: { not: 'cancelled' } },
     include: { session: true },
@@ -1856,12 +2049,20 @@ export async function returnBoard(req, res) {
     const updatedBill = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
-      const { activeSeg } = await applyReturnBoardTx(tx, {
+      const { activeSeg, actionDt } = await applyReturnBoardTx(tx, {
         booking_ref,
         unit_group,
         at,
         now
       });
+
+      if (activeSeg?.added_after_payment) {
+        await computeAfterPaymentBoardFee(tx, booking_ref, unit_group, actionDt, {
+          staffName,
+          staffId,
+          deviceInfo
+        });
+      }
 
       await auditLog(tx, {
         booking_ref,
@@ -1983,12 +2184,20 @@ export async function addBoardRental(req, res) {
         throw { status: 404, message: '找不到此筆預約' };
       }
 
+      const firstRes = reservations[0];
       const pNo = Number(person_no);
       const targetPerson = await tx.bookingPerson.findFirst({
         where: { booking_ref, person_no: pNo }
       });
       if (!targetPerson) {
         throw { status: 404, message: `找不到第 ${person_no} 位顧客` };
+      }
+      const paidAfterPayment = await isPersonPaid(tx, booking_ref, pNo, firstRes);
+      const hasPersonLeft = targetPerson.status !== 'active'
+        || firstRes.attendance === 'completed'
+        || (!paidAfterPayment && Boolean(targetPerson.timer_ended_at));
+      if (hasPersonLeft) {
+        throw { status: 409, code: 'PERSON_INACTIVE', message: '此顧客已離場或已移除，不能加租智能板' };
       }
 
       const targetConfigs = await tx.$queryRaw`
@@ -1999,7 +2208,6 @@ export async function addBoardRental(req, res) {
         throw { status: 404, message: '找不到此設備尺寸' };
       }
 
-      const firstRes = reservations[0];
       const lastRes = reservations[reservations.length - 1];
       const sessionDate = firstRes.session.session_date;
       const dStr = typeof sessionDate === 'string'
@@ -2172,6 +2380,7 @@ export async function addBoardRental(req, res) {
           unit_rate: unitRate,
           daily_cap_snapshot: dailyCapSnapshot,
           is_price_fixed: false,
+          added_after_payment: paidAfterPayment,
           rental_hours: rentalHours,
           subtotal_price: 0,
           covered_sessions: coveredSessionStrings
@@ -2182,8 +2391,10 @@ export async function addBoardRental(req, res) {
         booking_ref,
         event_type: 'amount_adjusted',
         category: 'amount',
-        summary: `加租智能板：第 ${pNo} 位租借 ${targetConfig.name}`,
-        reason: '加租智能板',
+        summary: paidAfterPayment
+          ? `第 ${pNo} 位付款後加租智能板（歸還時列待補收）`
+          : `加租智能板：第 ${pNo} 位租借 ${targetConfig.name}`,
+        reason: paidAfterPayment ? '付款後加租智能板' : '加租智能板',
         staff_name: staffName,
         staff_id: staffId,
         device_id: deviceInfo?.device_id,

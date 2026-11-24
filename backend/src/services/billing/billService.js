@@ -12,6 +12,87 @@ import { getShiftLock, canVoidPayment } from './shiftLock.js';
 import { buildBillInput } from './billInput.js';
 import { queuePrintJob } from '../print/printService.js';
 import { recalcOrderPaid } from '../shop/shopPayment.js';
+import { isPersonPaid } from '../floor/checkInService.js';
+
+async function reconcileAfterPaymentBoardsOnVoidTx(tx, booking_ref, staffName, staffId, deviceInfo) {
+  const afterPayRows = await tx.bookingEquipment.findMany({
+    where: { booking_ref, added_after_payment: true }
+  });
+  if (!afterPayRows.length) return;
+
+  const firstRes = await tx.reservation.findFirst({
+    where: { booking_ref, status: { not: 'cancelled' } },
+    include: { session: true },
+    orderBy: { session: { start_time: 'asc' } }
+  });
+  if (!firstRes) return;
+
+  const persons = await tx.bookingPerson.findMany({
+    where: { booking_ref },
+    select: { id: true, person_no: true }
+  });
+  const personNoById = new Map(persons.map((p) => [p.id, p.person_no]));
+
+  const validSupplements = await tx.payment.findMany({
+    where: { booking_ref, status: 'valid', kind: 'supplement' }
+  });
+  const collectedSourceKeys = new Set();
+  for (const sup of validSupplements) {
+    const pis = Array.isArray(sup.breakdown_json?.pending_items) ? sup.breakdown_json.pending_items : [];
+    for (const pi of pis) {
+      if (pi?.source_key) collectedSourceKeys.add(pi.source_key);
+    }
+  }
+
+  const byUnitGroup = new Map();
+  for (const row of afterPayRows) {
+    const ug = row.unit_group || `single-${row.id}`;
+    if (!byUnitGroup.has(ug)) byUnitGroup.set(ug, row);
+  }
+
+  const sourceKeysToRemove = new Set();
+  for (const [ug, repRow] of byUnitGroup.entries()) {
+    const pNo = repRow.person_id ? (personNoById.get(repRow.person_id) || 1) : 1;
+    const stillPaid = await isPersonPaid(tx, booking_ref, pNo, firstRes);
+    if (!stillPaid) {
+      if (repRow.unit_group) {
+        await tx.bookingEquipment.updateMany({
+          where: { booking_ref, unit_group: repRow.unit_group },
+          data: { added_after_payment: false }
+        });
+      } else {
+        await tx.bookingEquipment.update({
+          where: { id: repRow.id },
+          data: { added_after_payment: false }
+        });
+      }
+      const sKey = `board:${ug}`;
+      if (!collectedSourceKeys.has(sKey)) {
+        sourceKeysToRemove.add(sKey);
+      }
+    }
+  }
+
+  if (sourceKeysToRemove.size > 0) {
+    const draft = (firstRes.checkout_details && typeof firstRes.checkout_details === 'object')
+      ? firstRes.checkout_details
+      : {};
+    const prevPending = Array.isArray(draft.pending_supplements) ? draft.pending_supplements : [];
+    const nextPending = prevPending.filter((ps) => !sourceKeysToRemove.has(ps?.source_key));
+    if (nextPending.length !== prevPending.length) {
+      const currentRev = currentRevOf(draft);
+      await saveDraft(
+        booking_ref,
+        currentRev,
+        { ...draft, pending_supplements: nextPending },
+        staffName || '系統',
+        staffId || null,
+        deviceInfo || null,
+        tx
+      );
+    }
+  }
+}
 
 export function buildInitialDraft({
   pax = 1,
@@ -2010,6 +2091,7 @@ export async function voidPayment(paymentId, reason, staffUser, deviceInfo) {
       });
     }
 
+    await reconcileAfterPaymentBoardsOnVoidTx(tx, payment.booking_ref, staffName, staffId, deviceInfo);
     const { bill, status } = await refreshBillingCache(tx, payment.booking_ref);
     await reopenVerifiedPrepayIfUnsettled(tx, {
       booking_ref: payment.booking_ref,
@@ -2123,6 +2205,7 @@ export async function markUnpaid(booking_ref, reason, staffUser, deviceInfo) {
       device_label: deviceInfo?.device_label
     });
 
+    await reconcileAfterPaymentBoardsOnVoidTx(tx, booking_ref, staffName, staffId, deviceInfo);
     const { bill, status } = await refreshBillingCache(tx, booking_ref);
     await reopenVerifiedPrepayIfUnsettled(tx, {
       booking_ref,

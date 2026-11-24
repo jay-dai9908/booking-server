@@ -364,9 +364,12 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
         boardGroupMap.set(uGroup, {
           unit_group: eq.unit_group,
           person_no: personNo,
+          added_after_payment: Boolean(eq.added_after_payment),
           pauses: eq.unit_group ? (pausesByUnitGroup.get(eq.unit_group) || []) : [],
           segments: []
         });
+      } else if (eq.added_after_payment) {
+        boardGroupMap.get(uGroup).added_after_payment = true;
       }
 
       let segStart = eq.start_at ? eq.start_at.toISOString() : null;
@@ -393,6 +396,7 @@ export async function getLiveFloorData(dateStr = null, serverNow = new Date()) {
         end_at: segEnd,
         planned_end_at: segPlannedEnd,
         ended_reason: eq.ended_reason,
+        added_after_payment: Boolean(eq.added_after_payment),
         unit_group: eq.unit_group
       });
     }

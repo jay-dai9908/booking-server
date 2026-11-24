@@ -90,6 +90,7 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "bill_until_return" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "ended_reason" TEXT`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "planned_end_at" TIMESTAMP(3)`,
+    `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "added_after_payment" BOOLEAN NOT NULL DEFAULT false`,
 
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "billing_grace_minutes" INTEGER NOT NULL DEFAULT 10`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "billing_block_minutes" INTEGER NOT NULL DEFAULT 30`,

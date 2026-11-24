@@ -98,6 +98,8 @@ export default function CheckoutWorkbench({
   const [unpaidLoading, setUnpaidLoading] = useState(false);
   const [unpaidError, setUnpaidError] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
+  const [settleBoardTarget, setSettleBoardTarget] = useState(null);
+  const [settleBoardLoading, setSettleBoardLoading] = useState(false);
   const [successPaymentData, setSuccessPaymentData] = useState(null);
 
   // Addon inputs
@@ -147,6 +149,21 @@ export default function CheckoutWorkbench({
   const inFlightPromiseRef = useRef(null);
 
   // Load bill data
+  const handleSettleBoardNow = async () => {
+    if (!settleBoardTarget || !bookingRef) return;
+    try {
+      setSettleBoardLoading(true);
+      await api.post(`/floor/${bookingRef}/boards/${settleBoardTarget.unit_group}/return`, {});
+      setSettleBoardTarget(null);
+      await loadBill();
+      showToast('已結算智能板費用，已列為待補收');
+    } catch (err) {
+      showToast(err.response?.data?.error || err.message || '結算智能板失敗');
+    } finally {
+      setSettleBoardLoading(false);
+    }
+  };
+
   const loadBill = async () => {
     if (!bookingRef) return;
     try {
@@ -1770,6 +1787,25 @@ export default function CheckoutWorkbench({
                             待補收 NT${p.pending_supplement}
                           </span>
                         )}
+                        {(p.active_after_payment_boards || []).map(ab => (
+                          <span
+                            key={ab.unit_group}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200"
+                          >
+                            智能板加租（使用中）
+                            <button
+                              type="button"
+                              data-testid={`mobile-settle-board-now-btn-${ab.unit_group}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSettleBoardTarget(ab);
+                              }}
+                              className="px-1.5 py-0.2 bg-sg-brown text-white rounded hover:bg-sg-brown-dark transition cursor-pointer"
+                            >
+                              現在結算
+                            </button>
+                          </span>
+                        ))}
                         <ChevronRight className="w-4 h-4 text-sg-muted" />
                       </div>
 
@@ -1867,6 +1903,24 @@ export default function CheckoutWorkbench({
                                   </button>
                                 </div>
                               )}
+                              {(p.active_after_payment_boards || []).map(ab => (
+                                <div key={ab.unit_group} className="mt-1 flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                    智能板加租（使用中）
+                                  </span>
+                                  <button
+                                    type="button"
+                                    data-testid={`settle-board-now-btn-${ab.unit_group}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSettleBoardTarget(ab);
+                                    }}
+                                    className="px-2 py-0.5 text-[10px] font-bold bg-sg-brown text-white rounded hover:bg-sg-brown-dark transition cursor-pointer"
+                                  >
+                                    現在結算
+                                  </button>
+                                </div>
+                              ))}
                             </td>
                             <td className="py-3 px-2">
                               <span className={`inline-block px-2 py-0.5 rounded-lg text-[11px] font-bold ${
@@ -2636,6 +2690,16 @@ export default function CheckoutWorkbench({
         />
       </ConfirmPanel>
 
+      {/* Settle After-Payment Board Now Modal */}
+      <ConfirmPanel
+        isOpen={Boolean(settleBoardTarget)}
+        onClose={() => setSettleBoardTarget(null)}
+        onConfirm={handleSettleBoardNow}
+        title="現在結算智能板"
+        message="會以現在時間結算並歸還這台智能板"
+        loading={settleBoardLoading}
+      />
+
       {/* Toast Notification */}
       {toastMsg && (
         <div
@@ -2667,6 +2731,7 @@ export default function CheckoutWorkbench({
             displayPaidBookingRef.current = null;
           }}
           onOpenSharedSplit={() => setShowSharedSplitPanel(true)}
+          onRefreshBill={loadBill}
           onPaymentSuccess={(data) => {
             const statusCode = data?.status?.code || data?.status?.status || (typeof data?.status === 'string' ? data.status : 'paid');
             const statusLabel = data?.status?.label || (statusCode === 'paid' ? '已結清' : (statusCode === 'unpaid' ? '未結帳' : '部分已付'));

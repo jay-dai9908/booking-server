@@ -259,8 +259,9 @@ model BookingEquipment {
   daily_cap_snapshot Int?     // 建立當下這款板子的每日上限快照
   is_price_fixed   Boolean    @default(true) // 是否直接採用 subtotal_price（現場加租改由計算得出）
   bill_until_return Boolean   @default(false) // 第 37 輪起歸還端點結束的段一律照 end_at 與 10/30 取整計費
-  ended_reason     String?    // swapped | returned | null
-  planned_end_at   DateTime?  // 原本預約的結束時間（拆列或第一次換板時填入），提早歸還時照這個計費（4.4.3）
+  ended_reason        String?    // swapped | returned | null
+  planned_end_at      DateTime?  // 原本預約的結束時間（拆列或第一次換板時填入），提早歸還時照這個計費（4.4.3）
+  added_after_payment Boolean    @default(false) // 已付款後現場加租（歸還／離場／結算時算費進待補收）
 
   equipment               EquipmentConfig @relation(fields: [equipment_id], references: [id])
 

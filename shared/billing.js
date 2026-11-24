@@ -378,22 +378,38 @@ export function computeBill({
       // - Step 4b below subtracts any valid supplement payments whose `breakdown_json.pending_items` match `(person_no, source_key)`.
       const frozenBoardGroups = new Set((frozenSnap.board?.units || []).map(u => u?.unit_group).filter(Boolean));
       const isFrozenMissingUnits = (frozenSnap.board?.amount || 0) > 0 && !(frozenSnap.board?.units?.length > 0);
+      const existingPendingKeys = new Set(normalizedPendingSupplements.map(ps => ps.source_key).filter(Boolean));
+      const activeAfterPaymentBoards = [];
       for (const b of (boards || [])) {
         const bPersonNo = b.person_no ?? (activePersons[0]?.person_no || 1);
         if (bPersonNo !== pNo) continue;
         const isPostPaymentBoard = b.added_after_payment === true || (!frozenBoardGroups.has(b.unit_group) && !isFrozenMissingUnits);
         if (!isPostPaymentBoard) continue;
+        const sourceKey = `board:${b.unit_group}`;
+        if (b.unreturned_after_payment === true && !existingPendingKeys.has(sourceKey)) {
+          const activeSeg = (b.segments || []).find(s => !s?.end_at && s?.ended_reason !== 'returned' && s?.ended_reason !== 'person_removed') || (b.segments || [])[0];
+          activeAfterPaymentBoards.push({
+            unit_group: b.unit_group,
+            board_label: displayBoardName(activeSeg?.name || '智能板'),
+            start_at: activeSeg?.start_at || null
+          });
+          continue;
+        }
+        if (existingPendingKeys.has(sourceKey)) continue;
         const bCalc = boardUnitMap.get(b.unit_group);
         if (bCalc && bCalc.total > 0) {
           normalizedPendingSupplements.push({
             person_no: pNo,
-            source_key: `board:${b.unit_group}`,
+            source_key: sourceKey,
             source_type: 'board_addon',
             label: bCalc.board_label,
             amount: bCalc.total,
             computed_until: bCalc.computed_until
           });
         }
+      }
+      if (activeAfterPaymentBoards.length > 0) {
+        computedPersons[computedPersons.length - 1].active_after_payment_boards = activeAfterPaymentBoards;
       }
       continue;
     }

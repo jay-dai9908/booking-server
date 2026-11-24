@@ -118,13 +118,17 @@ export default function SeatActionPanel({
     subtitle = `${startStr} 到 · 預定 ${pax} 位`;
   } else if (mode === 'paid') {
     const personPart = `第 ${personNo} 位`;
-    const personBoard = (booking.boards || []).find(bd => bd.person_no === personNo) || (booking.boards || [])[0];
+    const activeCount = (booking.persons || []).filter(p => p.status !== 'removed').length;
+    const personBoard =
+      (booking.boards || []).find(bd => Number(bd.person_no) === Number(personNo)) ||
+      (activeCount <= 1 ? (booking.boards || [])[0] : null);
     let boardPart = '';
     if (personBoard?.segments?.length) {
       const curSeg = personBoard.segments.find(s => !s.end_at) || personBoard.segments[personBoard.segments.length - 1];
       const bName = displayBoardName(curSeg?.name || '小板');
       const bStart = curSeg?.start_at ? formatTimeHHMM(curSeg.start_at) : (booking.start_at ? formatTimeHHMM(booking.start_at) : '');
-      boardPart = bStart ? `${bName} ${bStart} 起` : bName;
+      const afterPayHint = personBoard.added_after_payment && !curSeg?.end_at ? '（付款後加租 · 歸還時計算）' : '';
+      boardPart = (bStart ? `${bName} ${bStart} 起` : bName) + afterPayHint;
     }
 
     const endStr = booking.end_at ? formatTimeHHMM(booking.end_at) : (booking.end_time || '');
@@ -160,13 +164,17 @@ export default function SeatActionPanel({
       statusPart = rawTimer ? `計時中 ${rawTimer}` : '計時中';
     }
 
-    const personBoard = (booking.boards || []).find(bd => bd.person_no === personNo) || (booking.boards || [])[0];
+    const activeCount = (booking.persons || []).filter(p => p.status !== 'removed').length;
+    const personBoard =
+      (booking.boards || []).find(bd => Number(bd.person_no) === Number(personNo)) ||
+      (activeCount <= 1 ? (booking.boards || [])[0] : null);
     let boardPart = '';
     if (personBoard?.segments?.length) {
       const curSeg = personBoard.segments.find(s => !s.end_at) || personBoard.segments[personBoard.segments.length - 1];
       const bName = displayBoardName(curSeg?.name || '小板');
       const bStart = curSeg?.start_at ? formatTimeHHMM(curSeg.start_at) : (booking.start_at ? formatTimeHHMM(booking.start_at) : '');
-      boardPart = bStart ? `${bName} ${bStart} 起` : bName;
+      const afterPayHint = personBoard.added_after_payment && !curSeg?.end_at ? '（付款後加租 · 歸還時計算）' : '';
+      boardPart = (bStart ? `${bName} ${bStart} 起` : bName) + afterPayHint;
     }
 
     const endStr = booking.end_at ? formatTimeHHMM(booking.end_at) : (booking.end_time || '');
@@ -181,11 +189,12 @@ export default function SeatActionPanel({
   const otherPersons = allPersons.filter(p => p.person_no !== personNo);
 
   // Board for this person
-  const currentBoard = (booking?.boards || []).find(bd => bd.person_no === personNo) || (booking?.boards || [])[0];
+  const activePersonsCount = (booking?.persons || []).filter(p => p.status !== 'removed').length;
   const personBoard =
     (booking?.boards || []).find(bd => Number(bd.person_no) === Number(personNo)) ||
-    (allPersons.length <= 1 ? (booking?.boards || [])[0] : null);
-  const activeBoardSegment = personBoard?.segments?.find(s => !s.end_at) || null;
+    (activePersonsCount <= 1 ? (booking?.boards || []).find(bd => bd.person_no == null) || (booking?.boards || [])[0] : null);
+  const currentBoard = personBoard;
+  const activeBoardSegment = personBoard?.segments?.find(s => !s.end_at && s.ended_reason !== 'person_removed') || null;
   const activeBoardPause = (personBoard?.pauses || []).find(bp => !bp.ended_at) || null;
 
   const boardQuickControls = activeBoardSegment && personBoard?.unit_group ? (
@@ -510,7 +519,7 @@ export default function SeatActionPanel({
                 <span>{mode === 'paused' ? '繼續計時' : '暫停計時'}</span>
               </button>
 
-              {currentBoard ? (
+              {activeBoardSegment ? (
                 <button
                   type="button"
                   data-testid="seat-panel-swap-board-btn"

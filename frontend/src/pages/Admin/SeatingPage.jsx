@@ -317,8 +317,9 @@ export default function SeatingPage() {
     }
     const b = boardSwapTarget.booking;
     const currentBoard = boardSwapTarget.board
-      || (b.boards || []).find(bd => bd.person_no === boardSwapTarget.personNo)
-      || (b.boards || [])[0];
+      || (b.boards || []).find(bd => bd.person_no != null
+        ? Number(bd.person_no) === Number(boardSwapTarget.personNo)
+        : ((b.persons || []).filter(p => p.status !== 'removed').length <= 1));
     const unitGroup = currentBoard?.unit_group;
     if (!b?.booking_ref || !unitGroup) {
       setBoardPreview({ loading: false, data: null, error: null });
@@ -495,6 +496,34 @@ export default function SeatingPage() {
   const backendAlerts = floorData?.alerts || [];
   const boardUsage = floorData?.board_usage || [];
   const sessions = floorData?.sessions || [];
+
+  const openSwapBoardModal = ({ booking, board = null, personNo = 1, seatCode = null }) => {
+    if (!booking) return;
+    const activePersons = (booking.persons || []).filter(p => p.status !== 'removed');
+    const isUnreturned = (bd) => (bd?.segments || []).some(s => !s.end_at && s.ended_reason !== 'person_removed');
+    const resolvedBoard = (board && isUnreturned(board))
+      ? board
+      : (booking.boards || []).find(bd => {
+          const ownerMatch = bd.person_no != null
+            ? Number(bd.person_no) === Number(personNo)
+            : (activePersons.length <= 1);
+          return ownerMatch && isUnreturned(bd);
+        });
+    if (!resolvedBoard) {
+      showToast(`第 ${personNo} 位沒有租智能板`);
+      return;
+    }
+    const personObj = (booking.persons || []).find(p => Number(p.person_no) === Number(personNo));
+    setBoardSwapTarget({
+      booking,
+      board: resolvedBoard,
+      personNo,
+      seatCode: seatCode || personObj?.seat_code || '未排座'
+    });
+    setSelectedSwapSize(null);
+    setSelectedBoundary(null);
+    setSwapError(null);
+  };
 
   const openAddBoardModal = (booking, personNo = 1, person = null) => {
     if (!booking) return;
@@ -2036,18 +2065,17 @@ export default function SeatingPage() {
 
             {(timerTarget?.persons || []).filter(p => p.status !== 'removed').map((p) => {
               const tm = p.timer || p;
+              const isPaidOrWaived = timerTarget?.billing?.status === 'paid' ||
+                                     timerTarget?.billing?.status === 'waived' ||
+                                     timerTarget?.is_paid ||
+                                     Boolean(p.paid);
               const isPaused = Boolean(tm.paused_at && !tm.timer_ended_at);
-              const isEnded = Boolean(tm.timer_ended_at);
+              const isEnded = Boolean((tm.timer_ended_at && !isPaidOrWaived) || timerTarget?.attendance === 'completed');
               const hasStarted = Boolean(tm.timer_started_at);
               const elapsedMins = hasStarted ? personElapsedMinutes(p, getServerNow()) : 0;
               const seatLabel = p.seat_code
                 ? (p.seat_code.startsWith('WAIT-') ? '等待區' : p.seat_code)
                 : '未帶位';
-
-              const isPaidOrWaived = timerTarget?.billing?.status === 'paid' ||
-                                     timerTarget?.billing?.status === 'waived' ||
-                                     timerTarget?.is_paid ||
-                                     Boolean(p.paid);
               const isToday = (() => {
                 if (!timerTarget?.start_at) return true;
                 const tDate = new Date(timerTarget.start_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
@@ -2115,12 +2143,15 @@ export default function SeatingPage() {
 
               // Smart boards for this person
               const personBoards = (timerTarget?.boards || []).filter(b => {
-                if (b.person_no != null) return b.person_no === p.person_no;
-                if ((timerTarget?.persons || []).length === 1 && p.person_no === 1) return true;
+                if (b.person_no != null) return Number(b.person_no) === Number(p.person_no);
+                if ((timerTarget?.persons || []).length === 1 && Number(p.person_no) === 1) return true;
                 return false;
               });
-              const hasBoard = personBoards.length > 0;
-              const primaryBoard = personBoards[0] || null;
+              const activePersonBoards = personBoards.filter(b =>
+                (b.segments || []).some(s => !s.end_at && s.ended_reason !== 'person_removed')
+              );
+              const hasBoard = activePersonBoards.length > 0;
+              const primaryBoard = activePersonBoards[0] || null;
 
               const boardSubBars = [];
               for (const b of personBoards) {
@@ -2131,11 +2162,13 @@ export default function SeatingPage() {
                   const width = Math.max(2, Math.min(100 - left, ((segEnd - segStart) / totalDurationMs) * 100));
                   const sName = (seg.name || '').includes('大板') ? '大板' : ((seg.name || '').includes('中板') ? '中板' : '小板');
                   const timeRangeStr = `${formatTimeHHmm(segStart)}–${formatTimeHHmm(segEnd)}`;
+                  const afterPaySuffix = (b.added_after_payment && !seg.end_at) ? '（付款後加租）' : '';
+                  const afterPayFullSuffix = (b.added_after_payment && !seg.end_at) ? '（付款後加租 · 歸還時計算）' : '';
                   boardSubBars.push({
                     left,
                     width,
-                    label: `${sName} ${timeRangeStr}`,
-                    fullText: `${seg.name} ${timeRangeStr}`
+                    label: `${sName} ${timeRangeStr}${afterPaySuffix}`,
+                    fullText: `${seg.name} ${timeRangeStr}${afterPayFullSuffix}`
                   });
                 }
               }
@@ -2255,7 +2288,7 @@ export default function SeatingPage() {
                   {/* Third row: Info & Action Buttons */}
                   <div className="flex items-center justify-between pt-1 border-t border-sg-line/40">
                     <div className="text-[12px] text-sg-muted">
-                      {!hasStarted && !isEnded ? (
+                      {!hasStarted && !isEnded && !isPaidOrWaived ? (
                         <span className="font-bold text-sg-muted">待計時</span>
                       ) : (
                         <>
@@ -2282,7 +2315,7 @@ export default function SeatingPage() {
                               <Play className="w-3.5 h-3.5 mr-1" />
                               開始計時
                             </Button>
-                          ) : hasStarted && isPaused ? (
+                          ) : hasStarted && !isPaidOrWaived && isPaused ? (
                             <Button
                               variant="secondary"
                               size="sm"
@@ -2291,7 +2324,7 @@ export default function SeatingPage() {
                               <Play className="w-3.5 h-3.5 mr-1" />
                               繼續
                             </Button>
-                          ) : hasStarted ? (
+                          ) : hasStarted && !isPaidOrWaived ? (
                             <Button
                               variant="secondary"
                               size="sm"
@@ -2346,15 +2379,12 @@ export default function SeatingPage() {
                                     data-testid={`person-swap-board-btn-${p.person_no}`}
                                     onClick={() => {
                                       setPersonMenuOpen(null);
-                                      setBoardSwapTarget({
+                                      openSwapBoardModal({
                                         booking: timerTarget,
                                         board: primaryBoard,
                                         personNo: p.person_no,
                                         seatCode: p.seat_code
                                       });
-                                      setSelectedSwapSize(null);
-                                      setSelectedBoundary(null);
-                                      setSwapError(null);
                                     }}
                                     className="w-full text-left px-3 py-1.5 text-[12px] font-bold text-sg-ink hover:bg-sg-paper flex items-center gap-2 cursor-pointer"
                                   >
@@ -2614,15 +2644,12 @@ export default function SeatingPage() {
         onBoardReturn={handleBoardReturn}
         onBoardSwap={({ booking, board, personNo, seatCode }) => {
           setSeatActionTarget(null);
-          setBoardSwapTarget({
+          openSwapBoardModal({
             booking,
             board,
             personNo,
             seatCode
           });
-          setSelectedSwapSize(null);
-          setSelectedBoundary(null);
-          setSwapError(null);
         }}
         onAddBoard={(booking, personNo, person) => {
           setSeatActionTarget(null);
@@ -2694,12 +2721,9 @@ export default function SeatingPage() {
           setSelectedTableForPanel(null);
           setMoveSeatModalTarget({ booking, fromSeat, personNo });
         }}
-        onSwapBoard={({ booking, personNo }) => {
+        onSwapBoard={({ booking, personNo, seatCode }) => {
           setSelectedTableForPanel(null);
-          setBoardSwapTarget({ booking, personNo });
-          setSelectedSwapSize(null);
-          setSelectedBoundary(null);
-          setSwapError(null);
+          openSwapBoardModal({ booking, personNo, seatCode });
         }}
         onAddBoard={({ booking, personNo }) => {
           setSelectedTableForPanel(null);
@@ -2733,7 +2757,12 @@ export default function SeatingPage() {
       {/* Board Swap Sheet */}
       {boardSwapTarget && (() => {
         const b = boardSwapTarget.booking;
-        const currentBoard = (b.boards || []).find(bd => bd.person_no === boardSwapTarget.personNo) || (b.boards || [])[0];
+        const activePersons = (b.persons || []).filter(p => p.status !== 'removed');
+        const currentBoard = boardSwapTarget.board
+          || (b.boards || []).find(bd => bd.person_no != null
+            ? Number(bd.person_no) === Number(boardSwapTarget.personNo)
+            : (activePersons.length <= 1));
+        if (!currentBoard) return null;
         const lastSeg = currentBoard?.segments ? currentBoard.segments[currentBoard.segments.length - 1] : null;
         const currentEqId = lastSeg?.equipment_id;
         const currentEqName = lastSeg?.name || '智能板';
@@ -2784,7 +2813,7 @@ export default function SeatingPage() {
             isOpen={Boolean(boardSwapTarget)}
             onClose={() => setBoardSwapTarget(null)}
             title="換板"
-            subtitle={`${boardSwapTarget.seatCode} 第 ${boardSwapTarget.personNo} 位 · 目前 ${currentEqName}，${formatTimeHHmm(segStartMs)} 起已用 ${usedText}`}
+            subtitle={`${boardSwapTarget.seatCode || '未排座'} 第 ${boardSwapTarget.personNo} 位 · 目前 ${currentEqName}，${formatTimeHHmm(segStartMs)} 起已用 ${usedText}`}
             footer={
               <div className="flex items-center justify-between">
                 <Button
@@ -3147,6 +3176,20 @@ export default function SeatingPage() {
             }
           >
             <div className="space-y-4 py-2">
+              {Boolean(
+                addBoardModalTarget?.booking?.is_paid
+                || addBoardModalTarget?.booking?.billing?.status === 'paid'
+                || addBoardModalTarget?.booking?.billing_status === 'paid'
+                || addBoardModalTarget?.person?.paid
+              ) && (
+                <div
+                  data-testid="add-board-after-payment-notice"
+                  className="p-3 bg-amber-50 text-amber-900 text-xs font-bold rounded-xl border border-amber-200"
+                >
+                  第 {addBoardModalTarget?.personNo} 位已結帳，這台智能板的費用會在歸還時算出，列為待補收
+                </div>
+              )}
+
               {addBoardError && (
                 <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl flex items-center gap-2 border border-red-200">
                   <AlertTriangle className="w-4 h-4 shrink-0" />

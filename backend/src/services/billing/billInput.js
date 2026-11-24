@@ -145,11 +145,15 @@ export function buildBillInput({
       .map(v => Number(v));
     const dailyCap = capValues.length > 0 ? Math.max(...capValues) : null;
     const isPriceFixed = items[0]?.is_price_fixed !== false;
+    const isAddedAfterPayment = items.some(be => be.added_after_payment === true);
+    const hasUnreturnedSeg = items.some(be => be.ended_reason !== 'person_removed' && !be.end_at && be.ended_reason !== 'returned');
 
     boards.push({
       unit_group: bg.unit_group,
       person_no: bg.person_no,
       daily_cap: dailyCap,
+      added_after_payment: isAddedAfterPayment,
+      unreturned_after_payment: isAddedAfterPayment && hasUnreturnedSeg,
       fixed_total: allRemoved
         ? 0
         : (isSingleUnmodified && isPriceFixed && bg.subtotal_price != null && Number(bg.subtotal_price) >= 0
