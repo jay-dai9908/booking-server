@@ -122,7 +122,8 @@ model Reservation {
   amount_due       Int?      // 目前應收總額（帳單重算結果）
   amount_received  Int       @default(0)       // 有效收款 + 補收 − 退款（不含卡券折抵）
   is_self_service  Boolean   @default(false)
-  
+  pricing_snapshot Json?     // { hourly, unlimited, allow_unlimited, is_weekend, captured_at }
+
   session        Session  @relation(fields: [session_id], references: [id])
   user           User     @relation(fields: [user_id], references: [id])
 }

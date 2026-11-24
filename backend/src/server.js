@@ -29,6 +29,8 @@ import { ensureDefaultPaymentMethods, ensureDefaultProducts, ensureDefaultPassPl
 import { resolveTrustProxy } from './utils/trustProxy.js';
 import { applyBodyParsers } from './middlewares/bodyParsers.js';
 import { startCronJobs } from './cronJobs.js';
+import { solidifyDailyPrices } from './services/pricing/solidify.js';
+import { toTaipeiDateString } from '../../shared/time.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -105,6 +107,7 @@ const ensureDatabaseSchema = async () => {
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "paid_persons" INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "amount_due" INTEGER`,
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "amount_received" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "pricing_snapshot" JSONB`,
 
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "person_id" INTEGER`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "unit_group" TEXT`,
@@ -968,6 +971,14 @@ app.use((err, req, res, next) => {
     await ensureDatabaseSchema();
   } catch (err) {
     console.error('[Startup] ensureDatabaseSchema notice:', err?.message || err);
+  }
+
+  try {
+    const todayStr = toTaipeiDateString(new Date());
+    const yesterdayMid = new Date(new Date(`${todayStr}T00:00:00.000Z`).getTime() - 86400000);
+    await solidifyDailyPrices({ through: yesterdayMid });
+  } catch (err) {
+    console.error('[Startup] solidifyDailyPrices notice:', err?.message || err);
   }
 
   app.listen(PORT, () => {

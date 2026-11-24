@@ -964,7 +964,15 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         }
       }
 
-      const { hourly_price } = await getEffectiveDailyRates(tx, sessionDate);
+      const dailyRates = await getEffectiveDailyRates(tx, sessionDate);
+      const { hourly_price } = dailyRates;
+      const pricingSnapshot = {
+        hourly: dailyRates.hourly_price,
+        unlimited: dailyRates.unlimited_price,
+        allow_unlimited: dailyRates.allow_unlimited,
+        is_weekend: dailyRates.is_weekend,
+        captured_at: new Date().toISOString()
+      };
       const bookedHours = computeBookedHours(sortedRequestedSessions, session_ids.length);
       const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), bookedHours, is_unlimited);
       let subtotalAmount = baseSeatingPrice + totalEquipmentFee;
@@ -1025,7 +1033,8 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
           promo_code: appliedPromoCode,
           discount_amount: appliedDiscountAmount,
           checkout_details: initialDraft,
-          customer_note: cleanCustomerNote
+          customer_note: cleanCustomerNote,
+          pricing_snapshot: pricingSnapshot
         });
       }
 
@@ -2319,6 +2328,14 @@ export const adminCreateReservation = async (req, res) => {
 
       const newReservationsData = [];
       const is_unlimited = req.body.isUnlimited === true || req.body.isUnlimited === 'true' || req.body.is_unlimited === true || req.body.is_unlimited === 'true';
+      const adminDailyRates = await getEffectiveDailyRates(tx, sessionDate);
+      const adminPricingSnapshot = {
+        hourly: adminDailyRates.hourly_price,
+        unlimited: adminDailyRates.unlimited_price,
+        allow_unlimited: adminDailyRates.allow_unlimited,
+        is_weekend: adminDailyRates.is_weekend,
+        captured_at: new Date().toISOString()
+      };
       const baseSeatingPrice = await calculateTotalAmount(tx, sessionDate, parseInt(pax, 10), bookedHours, is_unlimited);
       const totalAmount = baseSeatingPrice + totalEquipmentFee;
 
@@ -2349,7 +2366,8 @@ export const adminCreateReservation = async (req, res) => {
           total_amount: totalAmount,
           checkout_details: initialAdminDraft,
           customer_note: cleanCustomerNote,
-          admin_note: cleanAdminNote
+          admin_note: cleanAdminNote,
+          pricing_snapshot: adminPricingSnapshot
         });
       }
 
@@ -2546,7 +2564,8 @@ export const extendReservation = async (req, res) => {
           discount_amount: baseReservation.discount_amount,
           addons_amount: baseReservation.addons_amount,
           customer_note: baseReservation.customer_note,
-          admin_note: baseReservation.admin_note
+          admin_note: baseReservation.admin_note,
+          pricing_snapshot: baseReservation.pricing_snapshot ?? undefined
         });
       }
 

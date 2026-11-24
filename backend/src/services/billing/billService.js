@@ -143,6 +143,16 @@ export async function getBookingBill(booking_ref, tx = prisma, now = new Date())
         is_weekend: Boolean(snap.is_weekend)
       };
     }
+  } else {
+    const resSnap = firstRes.pricing_snapshot || reservations.find(r => r.pricing_snapshot)?.pricing_snapshot;
+    if (resSnap && typeof resSnap === 'object' && resSnap.hourly !== undefined && resSnap.unlimited !== undefined) {
+      effectiveRates = {
+        hourly_price: Number(resSnap.hourly),
+        unlimited_price: Number(resSnap.unlimited),
+        allow_unlimited: Boolean(resSnap.allow_unlimited),
+        is_weekend: Boolean(resSnap.is_weekend)
+      };
+    }
   }
   if (!effectiveRates) {
     effectiveRates = await getEffectiveDailyRates(tx, sessionDate);
@@ -1316,8 +1326,10 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
     const billData = await getBookingBill(booking_ref, tx, now);
     const serverPricing = billData.pricing || {};
     const targetPersonBill = (billData.bill?.persons || []).find(p => Number(p.person_no) === pNo);
-    const hourly_price = serverPricing.hourly || priorPayment.breakdown_json?.pricing?.hourly || 150;
-    const unlimited_price = serverPricing.unlimited || priorPayment.breakdown_json?.pricing?.unlimited || 750;
+    const rawHourly = serverPricing.hourly ?? priorPayment.breakdown_json?.pricing?.hourly ?? 150;
+    const hourly_price = Number.isFinite(Number(rawHourly)) ? Number(rawHourly) : 150;
+    const rawUnlimited = serverPricing.unlimited ?? priorPayment.breakdown_json?.pricing?.unlimited ?? 750;
+    const unlimited_price = Number.isFinite(Number(rawUnlimited)) ? Number(rawUnlimited) : 750;
 
     let supplementAmount = 0;
     const itemSummaries = [];

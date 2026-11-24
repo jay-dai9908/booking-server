@@ -864,5 +864,34 @@ test('Round 37 Item 1: calculateBoardTotal enforces dailyCap across swapped/paus
   assert.equal(uncapped.capped, false);
 });
 
+test('Round 37 Item 2: zero prices are honored and not replaced by 150/750/60 defaults', () => {
+  const zeroHourlyEntry = computeEntry({
+    bookedMinutes: 180,
+    actualMinutes: 180,
+    pausedMinutes: 0,
+    mode: 'hourly',
+    pricing: { hourly: 0, unlimited: 750, allow_unlimited: true },
+    rules: { grace: 10, block: 30, early_leave_mode: 'booked' }
+  });
+  assert.equal(zeroHourlyEntry.amount, 0);
+
+  const zeroUnlimitedEntry = computeEntry({
+    bookedMinutes: 180,
+    actualMinutes: null,
+    pausedMinutes: 0,
+    mode: 'unlimited',
+    pricing: { hourly: 150, unlimited: 0, allow_unlimited: true },
+    rules: { grace: 10, block: 30, early_leave_mode: 'booked' }
+  });
+  assert.equal(zeroUnlimitedEntry.amount, 0);
+
+  const zeroBoard = calculateBoardTotal({
+    segments: [{ hours: 2, rate: 0, name: '贈送板' }],
+    discountConfig: { enabled: false }
+  });
+  assert.equal(zeroBoard.total, 0);
+});
+
+
 
 

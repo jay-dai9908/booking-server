@@ -215,8 +215,12 @@ export function computeEntry({
     }
   }
 
-  const hourlyPrice = Number(pricing.hourly) || 150;
-  const unlimitedPrice = Number(pricing.unlimited) || 750;
+  const rawHourly = pricing.hourly ?? 150;
+  const parsedHourly = Number(rawHourly);
+  const hourlyPrice = Number.isFinite(parsedHourly) ? parsedHourly : 150;
+  const rawUnlimited = pricing.unlimited ?? 750;
+  const parsedUnlimited = Number(rawUnlimited);
+  const unlimitedPrice = Number.isFinite(parsedUnlimited) ? parsedUnlimited : 750;
   const allowUnlimited = pricing.allow_unlimited !== false;
 
   const hourlyCost = Math.round(hours * hourlyPrice);

@@ -750,7 +750,7 @@ export default function CheckoutWorkbench({
     if (isUnl) {
       return (
         <div className="font-bold text-sg-ink text-[12px] sm:text-[13px]">
-          不限時 NT${pricing?.unlimited || 750}
+          不限時 NT${pricing?.unlimited ?? 750}
         </div>
       );
     }
@@ -1891,17 +1891,34 @@ export default function CheckoutWorkbench({
                                   <div className="p-2.5 rounded-xl bg-white border border-sg-line">
                                     <span className="text-sg-muted block text-[11px] mb-1">計費方案切換</span>
                                     <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleToggleMode(p.person_no)}
-                                        className={`px-3 py-1 rounded-lg font-bold text-[12px] border ${
-                                          p.mode === 'unlimited'
-                                            ? 'bg-sg-peach-soft text-sg-peach border-sg-peach'
-                                            : 'bg-white text-sg-ink border-sg-line'
-                                        }`}
-                                      >
-                                        {p.mode === 'unlimited' ? '目前：不限時 NT$750' : '改為不限時 (NT$750)'}
-                                      </button>
+                                      {(() => {
+                                        const allowUnlimited = pricing?.allow_unlimited !== false;
+                                        const unlimitedPrice = Number.isFinite(Number(pricing?.unlimited))
+                                          ? Number(pricing.unlimited)
+                                          : 750;
+                                        const isDisabled = !allowUnlimited && p.mode !== 'unlimited';
+                                        return (
+                                          <button
+                                            type="button"
+                                            disabled={isDisabled}
+                                            data-testid={`toggle-unlimited-btn-${p.person_no}`}
+                                            onClick={() => handleToggleMode(p.person_no)}
+                                            className={`px-3 py-1 rounded-lg font-bold text-[12px] border ${
+                                              isDisabled
+                                                ? 'bg-sg-paper text-sg-muted border-sg-line cursor-not-allowed opacity-70'
+                                                : p.mode === 'unlimited'
+                                                  ? 'bg-sg-peach-soft text-sg-peach border-sg-peach'
+                                                  : 'bg-white text-sg-ink border-sg-line'
+                                            }`}
+                                          >
+                                            {isDisabled
+                                              ? '今天不開放不限時'
+                                              : p.mode === 'unlimited'
+                                                ? `目前：不限時 NT$${unlimitedPrice}`
+                                                : `改為不限時 (NT$${unlimitedPrice})`}
+                                          </button>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
 
