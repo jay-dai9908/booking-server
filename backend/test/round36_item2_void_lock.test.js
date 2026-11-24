@@ -59,7 +59,7 @@ test('Round 36 Item 2: cross-day/closed-shift void & mark-unpaid lock, pass void
     if (srv) await srv.close().catch(() => {});
     await prisma.printJob.deleteMany({ where: { booking_ref: { in: createdRefs } } }).catch(() => {});
     if (createdClosingId) {
-      await prisma.printJob.deleteMany({ where: { ref_id: String(createdClosingId), type: 'closing' } }).catch(() => {});
+      await prisma.printJob.deleteMany({ where: { closing_id: createdClosingId } }).catch(() => {});
       await prisma.cashClosing.delete({ where: { id: createdClosingId } }).catch(() => {});
     }
     await prisma.payment.deleteMany({ where: { booking_ref: { in: createdRefs } } }).catch(() => {});
@@ -236,7 +236,7 @@ test('Round 36 Item 2: cross-day/closed-shift void & mark-unpaid lock, pass void
   const supAfterRes = await fetch(`${srv.baseUrl}/api/billing/${refTodayShift}/supplement`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ person_no: 1, reason_type: 'other', amount: 100, method: 'cash', note: '交班後補收', print: false })
+    body: JSON.stringify({ person_no: 1, items: [{ type: 'other', label: '交班後補收', amount: 100 }], method: 'cash', print: false })
   });
   assert.equal(supAfterRes.status, 200);
   const supAfterBody = await supAfterRes.json();

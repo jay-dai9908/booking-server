@@ -593,24 +593,33 @@ export function buildOrderSummary(booking = {}, payments = [], opts = {}) {
 }
 
 /**
- * Section 8.7 日結單
+ * Section 8.7 交班單
  */
 export function buildClosingSlip(closing = {}, opts = {}) {
   const commands = [];
   const dateStr = formatReceiptDate(closing.business_date || closing.created_at || Date.now());
   const staffName = closing.staff_name || opts.staffName || '櫃檯';
-  const printTime = new Date(closing.created_at || Date.now()).toLocaleTimeString('en-GB', {
+  const totals = closing.totals_json || {};
+  const printTime = new Date(closing.period_end_at || closing.created_at || Date.now()).toLocaleTimeString('en-GB', {
     timeZone: 'Asia/Taipei',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false
   });
+  const startRaw = closing.period_start_at || totals.period?.start_at;
+  const endRaw = closing.period_end_at || totals.period?.end_at || closing.created_at;
+  const startHHMM = startRaw
+    ? new Date(startRaw).toLocaleTimeString('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })
+    : '00:00';
+  const endHHMM = endRaw
+    ? new Date(endRaw).toLocaleTimeString('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })
+    : printTime;
 
   commands.push({ type: 'title', text: '拾光製所', size: 32, align: 1 });
-  commands.push({ type: 'text', text: `${dateStr} 日結單`, size: 28, align: 1, bold: true });
+  commands.push({ type: 'text', text: `${dateStr} 交班單`, size: 28, align: 1, bold: true });
+  commands.push({ type: 'text', text: `區間 ${startHHMM}～${endHHMM}`, size: 22, align: 1 });
   commands.push({ type: 'text', text: fitLine(`列印 ${printTime}`, `店員 ${staffName}`), size: 22 });
 
-  const totals = closing.totals_json || {};
   const rawByMethod = totals.by_method;
   const byMethod = Array.isArray(rawByMethod)
     ? rawByMethod
@@ -698,8 +707,16 @@ export function buildClosingSlip(closing = {}, opts = {}) {
   commands.push({ type: 'text', text: fitLine('現金應有', formatReceiptMoney(closing.expected_cash || 0)), size: 22 });
 
   if (closing.counted_cash != null) {
+    const handedOver = closing.handed_over_amount ?? totals.handed_over_amount;
+    const leftInDrawer = closing.left_in_drawer ?? totals.left_in_drawer;
     commands.push({ type: 'text', text: fitLine('實點現金', formatReceiptMoney(closing.counted_cash)), size: 22 });
     commands.push({ type: 'text', text: fitLine('差額', formatReceiptMoney(closing.difference || 0)), size: 24, bold: true });
+    if (handedOver != null) {
+      commands.push({ type: 'text', text: fitLine('交出金額', formatReceiptMoney(handedOver)), size: 22 });
+    }
+    if (leftInDrawer != null) {
+      commands.push({ type: 'text', text: fitLine('留在抽屜', formatReceiptMoney(leftInDrawer)), size: 22 });
+    }
   } else {
     commands.push({ type: 'text', text: '實點現金 ____________', size: 22 });
     commands.push({ type: 'text', text: '差額 ____________', size: 22 });

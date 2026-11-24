@@ -623,9 +623,13 @@ const ensureDatabaseSchema = async () => {
     `CREATE TABLE IF NOT EXISTS "CashClosing" (
       "id" SERIAL NOT NULL,
       "business_date" DATE NOT NULL,
+      "period_start_at" TIMESTAMP(3),
+      "period_end_at" TIMESTAMP(3),
       "float_amount" INTEGER NOT NULL,
       "expected_cash" INTEGER NOT NULL,
       "counted_cash" INTEGER NOT NULL,
+      "handed_over_amount" INTEGER,
+      "left_in_drawer" INTEGER,
       "difference" INTEGER NOT NULL,
       "totals_json" JSONB NOT NULL,
       "note" TEXT,
@@ -634,6 +638,10 @@ const ensureDatabaseSchema = async () => {
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "CashClosing_pkey" PRIMARY KEY ("id")
     )`,
+    `ALTER TABLE "CashClosing" ADD COLUMN IF NOT EXISTS "period_start_at" TIMESTAMP(3)`,
+    `ALTER TABLE "CashClosing" ADD COLUMN IF NOT EXISTS "period_end_at" TIMESTAMP(3)`,
+    `ALTER TABLE "CashClosing" ADD COLUMN IF NOT EXISTS "handed_over_amount" INTEGER`,
+    `ALTER TABLE "CashClosing" ADD COLUMN IF NOT EXISTS "left_in_drawer" INTEGER`,
 
     `CREATE TABLE IF NOT EXISTS "DailyCounter" (
       "id" SERIAL NOT NULL,

@@ -47,7 +47,7 @@ test('Round 36 Item 4: closing snapshot stores complete totals_json, drives Prin
   t.after(async () => {
     if (srv) await srv.close().catch(() => {});
     for (const cid of createdClosingIds) {
-      await prisma.printJob.deleteMany({ where: { ref_id: String(cid), type: 'closing' } }).catch(() => {});
+      await prisma.printJob.deleteMany({ where: { closing_id: cid } }).catch(() => {});
       await prisma.cashClosing.delete({ where: { id: cid } }).catch(() => {});
     }
     await prisma.payment.deleteMany({ where: { booking_ref: refA } }).catch(() => {});
@@ -174,6 +174,7 @@ test('Round 36 Item 4: closing snapshot stores complete totals_json, drives Prin
     body: JSON.stringify({
       date: todayStr,
       counted_cash: 2350,
+      handed_over_amount: 350,
       note: '少找',
       print: true
     })

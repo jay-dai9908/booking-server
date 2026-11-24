@@ -307,7 +307,8 @@ test('Section 8.7 buildClosingSlip generates daily cash closing slip', () => {
   };
 
   const commands = buildClosingSlip(closing);
-  assert.ok(commands.some(c => c.text && c.text.includes('日結單')));
+  assert.ok(commands.some(c => c.text && c.text.includes('交班單')));
+  assert.ok(commands.some(c => c.text && c.text.includes('區間 ')));
   assert.ok(commands.some(c => c.text && c.text.includes('NT$20,430')));
   assert.ok(commands.some(c => c.text && c.text.includes('NT$14,480')));
 

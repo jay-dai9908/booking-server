@@ -112,9 +112,11 @@ export default function AccountingPage() {
   const [closingPreview, setClosingPreview] = useState(null);
   const [closingsList, setClosingsList] = useState([]);
   const [countedCash, setCountedCash] = useState('');
+  const [handedOverAmount, setHandedOverAmount] = useState('');
   const [closingFloat, setClosingFloat] = useState(2000);
   const [closingNote, setClosingNote] = useState('');
   const [closingSubmitting, setClosingSubmitting] = useState(false);
+  const [showQuickClosingConfirm, setShowQuickClosingConfirm] = useState(false);
   const [showClosingPreviewModal, setShowClosingPreviewModal] = useState(false);
   const [closingSlipHtml, setClosingSlipHtml] = useState('');
 
@@ -299,10 +301,25 @@ export default function AccountingPage() {
     }
   };
 
-  // Submit daily closing
-  const handleSubmitClosing = async () => {
+  const formatTaipeiHHMM = (isoOrDate) => {
+    if (!isoOrDate) return '00:00';
+    return new Date(isoOrDate).toLocaleTimeString('en-GB', {
+      timeZone: 'Asia/Taipei',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+  };
+
+  // Submit shift closing
+  const executeSubmitClosing = async () => {
     const hasCounted = countedCash !== '' && countedCash !== null && !isNaN(Number(countedCash));
-    if (!hasCounted) return;
+    const hasHanded = handedOverAmount !== '' && handedOverAmount !== null && !isNaN(Number(handedOverAmount));
+    if (!hasCounted || !hasHanded) return;
+    if (Number(handedOverAmount) > Number(countedCash)) {
+      showToast('交出去的金額不能超過實點現金', true);
+      return;
+    }
     const diff = closingPreview ? Number(countedCash) - closingPreview.expected_cash : 0;
     if (diff !== 0 && (!closingNote || !closingNote.trim())) {
       showToast('有差額，請先填寫備註', true);
@@ -310,20 +327,39 @@ export default function AccountingPage() {
     }
     try {
       setClosingSubmitting(true);
-      const res = await api.post('/accounting/closing', {
+      await api.post('/accounting/closing', {
         date: closingDate,
         float_amount: closingFloat,
-        counted_cash: countedCash,
+        counted_cash: Number(countedCash),
+        handed_over_amount: Number(handedOverAmount),
         note: closingNote,
         print: true
       });
+      setShowQuickClosingConfirm(false);
+      setCountedCash('');
+      setHandedOverAmount('');
+      setClosingNote('');
       fetchClosing();
-      showToast('完成交班日結！');
+      showToast('完成交班！');
     } catch (err) {
-      showToast(err.response?.data?.error || '日結交班失敗');
+      showToast(err.response?.data?.error || '交班失敗', true);
     } finally {
       setClosingSubmitting(false);
     }
+  };
+
+  const handleSubmitClosing = async () => {
+    const hasCounted = countedCash !== '' && countedCash !== null && !isNaN(Number(countedCash));
+    const hasHanded = handedOverAmount !== '' && handedOverAmount !== null && !isNaN(Number(handedOverAmount));
+    if (!hasCounted || !hasHanded) return;
+    if (closingPreview?.last_closed_at) {
+      const elapsedMs = Date.now() - new Date(closingPreview.last_closed_at).getTime();
+      if (elapsedMs >= 0 && elapsedMs < 10 * 60 * 1000) {
+        setShowQuickClosingConfirm(true);
+        return;
+      }
+    }
+    await executeSubmitClosing();
   };
 
   // Preview closing slip
@@ -331,12 +367,18 @@ export default function AccountingPage() {
     if (!closingPreview) return;
     try {
       const diff = (countedCash || 0) - (closingPreview.expected_cash || 0);
+      const handedNum = handedOverAmount !== '' && handedOverAmount !== null ? Number(handedOverAmount) : null;
+      const leftNum = handedNum != null && countedCash !== '' ? Number(countedCash) - handedNum : null;
       const cmds = buildClosingSlip(
         {
           business_date: closingDate,
+          period_start_at: closingPreview.period_start_at,
+          period_end_at: closingPreview.period_end_at,
           float_amount: closingFloat,
           expected_cash: closingPreview.expected_cash,
           counted_cash: countedCash,
+          handed_over_amount: handedNum,
+          left_in_drawer: leftNum,
           difference: diff,
           totals_json: closingPreview
         }
@@ -1288,7 +1330,7 @@ export default function AccountingPage() {
         ) : (
         <div className="space-y-6">
           <div className="bg-white px-5 py-3.5 rounded-3xl border border-sg-line shadow-xs flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <label htmlFor="closing-date-input" className="text-[13px] font-bold text-sg-ink">
                 交班營業日
               </label>
@@ -1304,6 +1346,12 @@ export default function AccountingPage() {
                 }}
                 className="px-3 py-1.5 rounded-xl border border-sg-line text-[13px] font-num font-bold text-sg-ink"
               />
+              <span
+                data-testid="closing-period-label"
+                className="px-2.5 py-1 rounded-xl bg-sg-paper border border-sg-line text-[12px] font-bold text-sg-brown font-num"
+              >
+                本班區間 {formatTaipeiHHMM(closingPreview.period_start_at)}～{closingPreview.is_today ? '現在' : formatTaipeiHHMM(closingPreview.period_end_at)}
+              </span>
             </div>
             <span className="text-[12px] text-sg-muted">與上方報表篩選分開，預設今天（不可交未來日期）</span>
           </div>
@@ -1354,7 +1402,7 @@ export default function AccountingPage() {
                   <span className="font-num">{formatMoney(closingPreview.voids?.amount || 0)}</span>
                 </div>
                 <div className="py-2 flex justify-between text-sg-honey font-bold">
-                  <span>未結（{closingPreview.unpaid?.count || 0} 筆）</span>
+                  <span>未結（{closingPreview.unpaid?.count || 0} 筆，截至交班當下）</span>
                   <span className="font-num">{formatMoney(closingPreview.unpaid?.amount || 0)}</span>
                 </div>
               </div>
@@ -1366,14 +1414,24 @@ export default function AccountingPage() {
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-[13px]">
-                  <span className="text-sg-muted">起始零用金</span>
+                  <span className="text-sg-muted">
+                    本班起始零用金{' '}
+                    <span className="text-[11px] font-bold text-sg-brown">
+                      （{closingPreview.float_source === 'previous_shift' ? '上一班留下' : '系統設定'}）
+                    </span>
+                  </span>
                   <div className="flex items-center gap-1 font-num font-bold">
                     <span>NT$</span>
                     <input
                       type="number"
+                      data-testid="closing-float-input"
                       value={closingFloat}
+                      readOnly={closingPreview.float_source === 'previous_shift'}
+                      disabled={closingPreview.float_source === 'previous_shift'}
                       onChange={(e) => setClosingFloat(parseInt(e.target.value, 10) || 0)}
-                      className="w-24 px-2 py-1 rounded-xl border border-sg-line text-right"
+                      className={`w-24 px-2 py-1 rounded-xl border border-sg-line text-right ${
+                        closingPreview.float_source === 'previous_shift' ? 'bg-sg-paper text-sg-muted cursor-not-allowed' : ''
+                      }`}
                     />
                   </div>
                 </div>
@@ -1385,14 +1443,39 @@ export default function AccountingPage() {
                   </span>
                 </div>
 
-                <div className="pt-2 border-t border-sg-line">
-                  <MoneyInput
-                    label="實點現金總額"
-                    value={countedCash}
-                    onChange={setCountedCash}
-                    allowEmpty={true}
-                    placeholder="請輸入清點金額"
-                  />
+                <div className="pt-2 border-t border-sg-line space-y-3">
+                  <div data-testid="closing-counted-wrap">
+                    <MoneyInput
+                      label="實點現金總額"
+                      value={countedCash}
+                      onChange={setCountedCash}
+                      allowEmpty={true}
+                      placeholder="請輸入清點金額"
+                    />
+                  </div>
+                  <div data-testid="closing-handed-wrap">
+                    <MoneyInput
+                      label="交出去的金額（收進保險箱／交給店主）"
+                      value={handedOverAmount}
+                      onChange={setHandedOverAmount}
+                      allowEmpty={true}
+                      placeholder="必填，例如本次交出 300"
+                    />
+                    {countedCash !== '' && handedOverAmount !== '' && !isNaN(Number(countedCash)) && !isNaN(Number(handedOverAmount)) && (
+                      Number(handedOverAmount) > Number(countedCash) ? (
+                        <div className="text-[12px] text-sg-danger font-bold mt-1">
+                          交出去的金額不能超過實點現金
+                        </div>
+                      ) : (
+                        <div className="text-[12px] text-sg-ink font-bold mt-1 flex justify-between px-1">
+                          <span className="text-sg-muted font-medium">留在抽屜（下一班零用金）</span>
+                          <span className="font-num text-sg-sage-ink">
+                            {formatMoney(Number(countedCash) - Number(handedOverAmount))}
+                          </span>
+                        </div>
+                      )
+                    )}
+                  </div>
                 </div>
 
                 {/* Diff Result */}
@@ -1451,11 +1534,14 @@ export default function AccountingPage() {
                 <Button
                   variant="primary"
                   size="md"
+                  data-testid="submit-closing-btn"
                   onClick={handleSubmitClosing}
                   loading={closingSubmitting}
                   disabled={(() => {
                     const hasCounted = countedCash !== '' && countedCash !== null && !isNaN(Number(countedCash));
-                    if (!hasCounted) return true;
+                    const hasHanded = handedOverAmount !== '' && handedOverAmount !== null && !isNaN(Number(handedOverAmount));
+                    if (!hasCounted || !hasHanded) return true;
+                    if (Number(handedOverAmount) < 0 || Number(handedOverAmount) > Number(countedCash)) return true;
                     const diff = closingPreview ? Number(countedCash) - closingPreview.expected_cash : 0;
                     const isNoteEmpty = !closingNote || !closingNote.trim();
                     return diff !== 0 && isNoteEmpty;
@@ -1470,26 +1556,52 @@ export default function AccountingPage() {
 
           {/* Previous Closings History */}
           {closingsList.length > 0 && (
-            <div className="bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-2">
-              <span className="text-[13px] font-bold text-sg-ink block">歷史交班紀錄</span>
+            <div data-testid="closing-history-list" className="bg-white p-4 rounded-3xl border border-sg-line shadow-xs space-y-2">
+              <span className="text-[13px] font-bold text-sg-ink block">交班紀錄</span>
               <div className="space-y-1.5">
-                {closingsList.map((c) => (
-                  <div key={c.id} className="p-2.5 rounded-2xl bg-sg-paper/40 border border-sg-line flex items-center justify-between text-[12px]">
-                    <div>
-                      <span className="font-bold text-sg-ink mr-2">{new Date(c.period_end_at || c.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Taipei' })}</span>
-                      <span className="text-sg-muted">{c.staff_name}</span>
+                {closingsList.map((c) => {
+                  const pStart = c.period_start_at || c.totals_json?.period?.start_at;
+                  const pEnd = c.period_end_at || c.totals_json?.period?.end_at || c.created_at;
+                  const intervalLabel = pStart
+                    ? `${formatTaipeiHHMM(pStart)}～${formatTaipeiHHMM(pEnd)}`
+                    : formatTaipeiHHMM(pEnd);
+                  return (
+                    <div
+                      key={c.id}
+                      data-testid={`closing-history-item-${c.id}`}
+                      className="p-2.5 rounded-2xl bg-sg-paper/40 border border-sg-line flex flex-wrap items-center justify-between gap-2 text-[12px]"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sg-ink font-num">{intervalLabel}</span>
+                        <span className="text-sg-muted">{c.staff_name}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 font-num">
+                        <span className="text-sg-muted">應有 {formatMoney(c.expected_cash)}</span>
+                        <span className="text-sg-ink font-bold">實點 {formatMoney(c.counted_cash)}</span>
+                        {c.handed_over_amount != null && (
+                          <span className="text-sg-muted">交出 {formatMoney(c.handed_over_amount)}／留 {formatMoney(c.left_in_drawer ?? (c.counted_cash - c.handed_over_amount))}</span>
+                        )}
+                        <span className={`font-bold ${c.difference === 0 ? 'text-sg-sage-ink' : 'text-sg-danger'}`}>
+                          差額 {c.difference < 0 ? formatMinus(Math.abs(c.difference)) : formatMoney(c.difference)}
+                        </span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-sg-muted mr-3">實點 {formatMoney(c.counted_cash)}</span>
-                      <span className={`font-bold ${c.difference === 0 ? 'text-sg-sage-ink' : 'text-sg-danger'}`}>
-                        差額 {c.difference < 0 ? formatMinus(Math.abs(c.difference)) : formatMoney(c.difference)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
+
+          <ConfirmPanel
+            isOpen={showQuickClosingConfirm}
+            onClose={() => setShowQuickClosingConfirm(false)}
+            onConfirm={executeSubmitClosing}
+            title="確認再次交班"
+            message="10 分鐘內已交過班，確定再交一次？"
+            confirmText="確定交班"
+            cancelText="取消"
+            loading={closingSubmitting}
+          />
         </div>
         )
       )}

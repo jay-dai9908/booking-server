@@ -729,17 +729,21 @@ model PrintJob {
 // -------------------------------------------------------------
 
 model CashClosing {
-  id               Int       @id @default(autoincrement())
-  business_date    DateTime  @db.Date
-  float_amount     Int
-  expected_cash    Int
-  counted_cash     Int
-  difference       Int
-  totals_json      Json
-  note             String?
-  staff_name       String
-  device_label     String
-  created_at       DateTime  @default(now())
+  id                 Int       @id @default(autoincrement())
+  business_date      DateTime  @db.Date
+  period_start_at    DateTime?
+  period_end_at      DateTime?
+  float_amount       Int
+  expected_cash      Int
+  counted_cash       Int
+  handed_over_amount Int?
+  left_in_drawer     Int?
+  difference         Int
+  totals_json        Json
+  note               String?
+  staff_name         String
+  device_label       String
+  created_at         DateTime  @default(now())
 }
 
 model DailyCounter {

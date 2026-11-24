@@ -271,8 +271,79 @@ export const getPrintJobsList = async (req, res) => {
   }
 };
 
+function resolveClosingNow(rawNow) {
+  if (process.env.NODE_ENV === 'test' && rawNow) {
+    const parsed = new Date(rawNow);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return new Date();
+}
+
+async function computeShiftWindowAndFloat({ targetDateStr, requestFloatAmount, now, txOrPrisma }) {
+  const [dayClosings, globalSettingRow] = await Promise.all([
+    txOrPrisma.cashClosing.findMany({
+      where: { business_date: dateOnly(targetDateStr) }
+    }),
+    txOrPrisma.globalSetting.findFirst()
+  ]);
+
+  const globalSetting = globalSettingRow || {};
+
+  // Avoid Postgres NULLS FIRST when mixing legacy null period_end_at and new rows
+  let lastClosing = null;
+  let lastEndMs = -1;
+  for (const c of dayClosings) {
+    const candidate = c.period_end_at ?? c.created_at;
+    if (!candidate) continue;
+    const ms = new Date(candidate).getTime();
+    if (ms > lastEndMs) {
+      lastEndMs = ms;
+      lastClosing = c;
+    }
+  }
+
+  const periodStartAt = lastClosing
+    ? new Date(lastClosing.period_end_at ?? lastClosing.created_at)
+    : new Date(`${targetDateStr}T00:00:00+08:00`);
+
+  const todayStr = toTaipeiDateString(now);
+  const rawEnd = targetDateStr === todayStr
+    ? now
+    : new Date(`${targetDateStr}T23:59:59.999+08:00`);
+  const periodEndAt = rawEnd.getTime() < periodStartAt.getTime() ? periodStartAt : rawEnd;
+
+  const hasPreviousLeft = lastClosing != null && lastClosing.left_in_drawer != null;
+  let floatAmount;
+  let floatSource;
+  if (hasPreviousLeft) {
+    floatAmount = lastClosing.left_in_drawer;
+    floatSource = 'previous_shift';
+  } else {
+    floatAmount = (
+      requestFloatAmount !== undefined &&
+      requestFloatAmount !== null &&
+      requestFloatAmount !== '' &&
+      Number.isFinite(Number(requestFloatAmount))
+    )
+      ? Math.round(Number(requestFloatAmount))
+      : (globalSetting.cash_float_amount ?? 2000);
+    floatSource = 'setting';
+  }
+
+  return {
+    periodStartAt,
+    periodEndAt,
+    isToday: targetDateStr === todayStr,
+    floatAmount,
+    floatSource,
+    shiftCountToday: dayClosings.length,
+    lastClosedAt: lastClosing ? (lastClosing.period_end_at ?? lastClosing.created_at) : null
+  };
+}
+
 export const getClosingPreview = async (req, res) => {
-  const todayStr = toTaipeiDateString(new Date());
+  const now = resolveClosingNow(req.query.now);
+  const todayStr = toTaipeiDateString(now);
   const targetDateStr = req.query.date || todayStr;
 
   if (targetDateStr > todayStr) {
@@ -280,35 +351,48 @@ export const getClosingPreview = async (req, res) => {
   }
 
   try {
-    const start = new Date(`${targetDateStr}T00:00:00+08:00`);
-    const end = new Date(`${targetDateStr}T23:59:59.999+08:00`);
+    const shift = await computeShiftWindowAndFloat({
+      targetDateStr,
+      requestFloatAmount: undefined,
+      now,
+      txOrPrisma: prisma
+    });
 
-    const globalSetting = await prisma.globalSetting.findFirst() || {};
-    const floatAmount = globalSetting.cash_float_amount ?? 2000;
-
-    const stats = await computeClosingStats({ start, end, businessDate: targetDateStr, txOrPrisma: prisma });
-    const expectedCash = floatAmount + stats.cash_income - stats.cash_refund + stats.shop_cash_income - stats.shop_cash_refund;
+    const stats = await computeClosingStats({
+      start: shift.periodStartAt,
+      end: shift.periodEndAt,
+      businessDate: targetDateStr,
+      txOrPrisma: prisma
+    });
+    const expectedCash = shift.floatAmount + stats.cash_income - stats.cash_refund + stats.shop_cash_income - stats.shop_cash_refund;
 
     return res.json({
       date: targetDateStr,
-      float_amount: floatAmount,
+      period_start_at: shift.periodStartAt.toISOString(),
+      period_end_at: shift.periodEndAt.toISOString(),
+      is_today: shift.isToday,
+      float_amount: shift.floatAmount,
+      float_source: shift.floatSource,
+      shift_count_today: shift.shiftCountToday,
+      last_closed_at: shift.lastClosedAt ? new Date(shift.lastClosedAt).toISOString() : null,
       expected_cash: expectedCash,
       ...stats
     });
   } catch (error) {
     console.error('[getClosingPreview] Error:', error);
-    return res.status(500).json({ error: '無法計算日結預覽' });
+    return res.status(500).json({ error: '無法計算交班預覽' });
   }
 };
 
 export const postClosing = async (req, res) => {
-  const { date, float_amount, counted_cash, note = '', print = true } = req.body;
+  const { date, float_amount, counted_cash, handed_over_amount, note = '', print = true } = req.body;
+  const now = resolveClosingNow(req.body?.now);
   const staffName = req.user?.name || '門市人員';
   const staffId = req.user?.id || null;
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
-    const todayStr = toTaipeiDateString(new Date());
+    const todayStr = toTaipeiDateString(now);
     const targetDateStr = date || todayStr;
     if (targetDateStr > todayStr) {
       return res.status(422).json({ error: '不能交未來日期' });
@@ -322,20 +406,38 @@ export const postClosing = async (req, res) => {
       return res.status(422).json({ error: '實點現金必須為非負整數' });
     }
 
-    const start = new Date(`${targetDateStr}T00:00:00+08:00`);
-    const end = new Date(`${targetDateStr}T23:59:59.999+08:00`);
+    if (handed_over_amount === undefined || handed_over_amount === null || handed_over_amount === '') {
+      return res.status(422).json({ error: '請填寫交出去的金額' });
+    }
+    const handedNum = Number(handed_over_amount);
+    if (!Number.isInteger(handedNum) || handedNum < 0) {
+      return res.status(422).json({ error: '交出去的金額必須為非負整數' });
+    }
+
+    const leftInDrawer = countedNum - handedNum;
+    if (leftInDrawer < 0) {
+      return res.status(422).json({ error: '交出去的金額不能超過實點現金' });
+    }
 
     const txResult = await prisma.$transaction(async (tx) => {
-      const globalSetting = await tx.globalSetting.findFirst() || {};
-      const parsedFloat = (float_amount !== undefined && float_amount !== null && float_amount !== '' && Number.isFinite(Number(float_amount)))
-        ? Math.round(Number(float_amount))
-        : (globalSetting.cash_float_amount ?? 2000);
-      if (parsedFloat < 0) {
+      const shift = await computeShiftWindowAndFloat({
+        targetDateStr,
+        requestFloatAmount: float_amount,
+        now,
+        txOrPrisma: tx
+      });
+
+      if (shift.floatAmount < 0) {
         return { errorStatus: 422, errorBody: { error: '起始零用金不能為負數' } };
       }
 
-      const stats = await computeClosingStats({ start, end, businessDate: targetDateStr, txOrPrisma: tx });
-      const expCash = parsedFloat + stats.cash_income - stats.cash_refund + stats.shop_cash_income - stats.shop_cash_refund;
+      const stats = await computeClosingStats({
+        start: shift.periodStartAt,
+        end: shift.periodEndAt,
+        businessDate: targetDateStr,
+        txOrPrisma: tx
+      });
+      const expCash = shift.floatAmount + stats.cash_income - stats.cash_refund + stats.shop_cash_income - stats.shop_cash_refund;
       const difference = countedNum - expCash;
       const trimmedNote = note ? String(note).trim() : '';
 
@@ -343,28 +445,41 @@ export const postClosing = async (req, res) => {
         return { errorStatus: 422, errorBody: { error: '有差額，請先填寫備註' } };
       }
 
+      const periodObj = {
+        start_at: shift.periodStartAt.toISOString(),
+        end_at: shift.periodEndAt.toISOString()
+      };
       const snapshotTotals = {
         ...stats,
         date: targetDateStr,
-        float_amount: parsedFloat,
+        period: periodObj,
+        float_amount: shift.floatAmount,
+        float_source: shift.floatSource,
         expected_cash: expCash,
         counted_cash: countedNum,
+        handed_over_amount: handedNum,
+        left_in_drawer: leftInDrawer,
         difference,
         note: trimmedNote || null,
-        snapshot_at: new Date().toISOString()
+        snapshot_at: now.toISOString()
       };
 
       const created = await tx.cashClosing.create({
         data: {
           business_date: dateOnly(targetDateStr),
-          float_amount: parsedFloat,
+          period_start_at: shift.periodStartAt,
+          period_end_at: shift.periodEndAt,
+          float_amount: shift.floatAmount,
           expected_cash: expCash,
           counted_cash: countedNum,
+          handed_over_amount: handedNum,
+          left_in_drawer: leftInDrawer,
           difference,
           totals_json: snapshotTotals,
           note: trimmedNote || null,
           staff_name: staffName,
-          device_label: deviceInfo.device_label
+          device_label: deviceInfo.device_label,
+          ...(process.env.NODE_ENV === 'test' && req.body?.now ? { created_at: shift.periodEndAt } : {})
         }
       });
 
@@ -372,7 +487,7 @@ export const postClosing = async (req, res) => {
       await auditLog(tx, {
         event_type: 'day_closed',
         category: 'closing',
-        summary: `日結交班完成 · 應有 NT$${expCash} / 實點 NT$${countedNum}（${diffLabel}）`,
+        summary: `交班完成 · 實點 NT$${countedNum}／交出 NT$${handedNum}／留在抽屜 NT$${leftInDrawer}（應有 NT$${expCash}，${diffLabel}）`,
         amount: countedNum,
         reason: difference !== 0 ? trimmedNote : null,
         staff_name: staffName,
@@ -396,7 +511,8 @@ export const postClosing = async (req, res) => {
           type: 'closing',
           closing_id: closing.id,
           user: req.user,
-          device: deviceInfo
+          device: deviceInfo,
+          now
         });
       } catch (err) {
         console.error('[postClosing] Print error:', err);
@@ -406,7 +522,7 @@ export const postClosing = async (req, res) => {
     return res.json({ success: true, closing, print_job: printJob });
   } catch (error) {
     console.error('[postClosing] Error:', error);
-    return res.status(500).json({ error: '日結存檔失敗' });
+    return res.status(500).json({ error: '交班存檔失敗' });
   }
 };
 
@@ -415,7 +531,7 @@ export const getClosingsList = async (req, res) => {
     const { date } = req.query;
     const closings = await prisma.cashClosing.findMany({
       where: date ? { business_date: dateOnly(date) } : undefined,
-      orderBy: [{ business_date: 'desc' }, { created_at: 'desc' }, { id: 'desc' }],
+      orderBy: [{ business_date: 'desc' }, { id: 'desc' }],
       take: 60
     });
     return res.json({ closings });

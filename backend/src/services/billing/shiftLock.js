@@ -2,15 +2,25 @@ import prisma from '../../prismaClient.js';
 import { dateOnly, toTaipeiDateString } from '../../../../shared/time.js';
 
 /**
- * Returns the latest shift closing timestamp for the Taipei business date of `now`, or null if no shift has closed today.
+ * Returns the latest shift closing end timestamp (`period_end_at ?? created_at`)
+ * for the Taipei business date of `now`, or null if no shift has closed today.
  */
 export async function getShiftLock(txOrPrisma = prisma, now = new Date()) {
   const todayStr = toTaipeiDateString(now);
-  const latest = await txOrPrisma.cashClosing.findFirst({
-    where: { business_date: dateOnly(todayStr) },
-    orderBy: [{ created_at: 'desc' }, { id: 'desc' }]
+  const closings = await txOrPrisma.cashClosing.findMany({
+    where: { business_date: dateOnly(todayStr) }
   });
-  return latest ? latest.created_at : null;
+  if (!closings.length) return null;
+  let latestEnd = null;
+  for (const c of closings) {
+    const candidate = c.period_end_at ?? c.created_at;
+    if (!candidate) continue;
+    const ms = new Date(candidate).getTime();
+    if (!latestEnd || ms > new Date(latestEnd).getTime()) {
+      latestEnd = candidate;
+    }
+  }
+  return latestEnd;
 }
 
 /**

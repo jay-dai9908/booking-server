@@ -160,7 +160,7 @@ export async function queuePrintJob({
   } else if (type === 'closing' && closing_id) {
     const closing = await client.cashClosing.findUnique({ where: { id: Number(closing_id) } });
     commands = buildClosingSlip(closing, opts);
-    title = `日結單 ${closing?.business_date ? closing.business_date.toISOString().slice(0, 10) : ''}`;
+    title = `交班單 ${closing?.business_date ? closing.business_date.toISOString().slice(0, 10) : ''}`;
   } else if (type === 'test') {
     const stationId = opts.station_id || opts.stationId;
     const station = stationId
