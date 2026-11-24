@@ -3,6 +3,7 @@ import { X, MoreVertical, Plus, UserCheck, ArrowRightLeft, CreditCard, Clock, Lo
 import api from '../../../api/axios';
 import { formatElapsedText, getPersonTimerElapsedForRemove } from '../../../utils/admin/floorSelectors';
 import RemovePersonConfirmDialog from './RemovePersonConfirmDialog';
+import ConfirmPanel from '../ConfirmPanel';
 
 export default function TablePanel({
   isOpen,
@@ -30,6 +31,7 @@ export default function TablePanel({
   const [addingPersonForRef, setAddingPersonForRef] = useState(null);
   const [menuOpenKey, setMenuOpenKey] = useState(null);
   const [removeConfirmTarget, setRemoveConfirmTarget] = useState(null);
+  const [leaveConfirmGroupRef, setLeaveConfirmGroupRef] = useState(null);
   const menuRef = useRef(null);
 
   // Close popup menu when clicking outside
@@ -263,8 +265,7 @@ export default function TablePanel({
                         <button
                           type="button"
                           onClick={() => {
-                            const personNos = activePersons.map(p => p.person_no);
-                            onTimerAction?.(group.booking_ref, personNos, 'leave');
+                            setLeaveConfirmGroupRef(group.booking_ref);
                           }}
                           className="px-2.5 py-1.5 rounded-xl font-bold text-[12px] bg-sg-danger-soft border border-sg-danger/30 text-sg-danger hover:bg-sg-danger/10 transition flex items-center gap-1 cursor-pointer"
                         >
@@ -509,6 +510,23 @@ export default function TablePanel({
             onTimerAction(removeConfirmTarget.bookingRef, [removeConfirmTarget.personNo], 'end');
           }
         }}
+      />
+
+      <ConfirmPanel
+        isOpen={Boolean(leaveConfirmGroupRef)}
+        onClose={() => setLeaveConfirmGroupRef(null)}
+        onConfirm={async () => {
+          const ref = leaveConfirmGroupRef;
+          setLeaveConfirmGroupRef(null);
+          if (ref && onTimerAction) {
+            await onTimerAction(ref, 'all', 'end');
+            onClose?.();
+          }
+        }}
+        title="全組離場？"
+        message="計時會停止，座位釋出。"
+        confirmText="全組離場"
+        cancelText="先不要"
       />
     </div>
   );

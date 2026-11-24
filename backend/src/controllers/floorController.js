@@ -472,10 +472,16 @@ export async function moveGroup(req, res) {
   }
 }
 
+export const TIMER_ACTION_WHITELIST = ['pause', 'resume', 'end', 'restart'];
+
 export async function handleTimer(req, res) {
   const { booking_ref } = req.params;
   const { action, person_nos = 'all', reason } = req.body;
   const staffName = req.user?.name || '門市人員';
+
+  if (!TIMER_ACTION_WHITELIST.includes(action)) {
+    return res.status(400).json({ error: '不認得的計時動作', code: 'UNKNOWN_TIMER_ACTION' });
+  }
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -694,6 +700,13 @@ export async function handleTimer(req, res) {
     return res.json({ success: true, server_now: new Date().toISOString() });
   } catch (error) {
     console.error('[handleTimer] Error:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        message: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
     return res.status(500).json({ error: '計時操作失敗' });
   }
 }
