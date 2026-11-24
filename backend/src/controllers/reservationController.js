@@ -346,7 +346,8 @@ function computeBookedHours(sortedSessions = [], fallbackCount = 1) {
 export const calculateTotalAmount = async (tx, sessionDate, pax, sessionCount, is_unlimited) => {
   const { hourly_price, unlimited_price, allow_unlimited } = await getEffectiveDailyRates(tx, sessionDate);
 
-  const calculatedHourlyTotal = pax * hourly_price * sessionCount;
+  const perPaxHourlyCost = Math.round(hourly_price * sessionCount);
+  const calculatedHourlyTotal = pax * perPaxHourlyCost;
   const calculatedUnlimitedTotal = pax * unlimited_price;
 
   if (is_unlimited && allow_unlimited) {
