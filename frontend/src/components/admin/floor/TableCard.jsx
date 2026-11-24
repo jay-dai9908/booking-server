@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import SeatTile from './SeatTile';
-import { formatTimeHHmm } from '../../../../shared/time.js';
+import { formatTimeHHmm } from '../../../../../shared/time.js';
 
 const GROUP_COLORS = [
   { stroke: '#8C6D58', fill: 'rgba(140, 109, 88, 0.05)' },  // brown

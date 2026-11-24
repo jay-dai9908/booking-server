@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { X, MoreVertical, Plus, UserCheck, ArrowRightLeft, CreditCard, Clock, LogOut, FileText, Pause, Play, AlertCircle } from 'lucide-react';
 import api from '../../../api/axios';
-import { formatTimeHHmm } from '../../../../shared/time.js';
+import { formatTimeHHmm } from '../../../../../shared/time.js';
 import { formatElapsedText, getPersonTimerElapsedForRemove } from '../../../utils/admin/floorSelectors';
 import RemovePersonConfirmDialog from './RemovePersonConfirmDialog';
 import ConfirmPanel from '../ConfirmPanel';

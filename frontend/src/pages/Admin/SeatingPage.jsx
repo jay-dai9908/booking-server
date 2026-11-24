@@ -2232,8 +2232,9 @@ export default function SeatingPage() {
                 }
               }
 
-              // Billed hours
-              const bookedMins = Math.round((bookedEndMs - startMs) / 60000);
+              // Billed hours (based on booked session hours, not walk-in SeatHold extension)
+              const slotEndMs = timerTarget?.end_at ? new Date(timerTarget.end_at).getTime() : bookedEndMs;
+              const bookedMins = Math.round((slotEndMs - startMs) / 60000);
               let billedHours = Math.max(1, Math.round(bookedMins / 60));
               if (elapsedMins > bookedMins + 10) {
                 const overBlocks = Math.ceil((elapsedMins - bookedMins - 10) / 30);
