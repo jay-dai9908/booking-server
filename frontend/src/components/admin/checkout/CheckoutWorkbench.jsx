@@ -2738,11 +2738,13 @@ export default function CheckoutWorkbench({
             if (data?.message) {
               showToast(data.message);
             }
-            setBillData(prev => ({
-              ...prev,
-              status: { ...(prev?.status || {}), ...(data?.status || {}), code: statusCode, label: statusLabel },
-              bill: data.bill || prev?.bill
-            }));
+            if (data) {
+              setBillData(prev => ({
+                ...prev,
+                status: { ...(prev?.status || {}), ...(data?.status || {}), code: statusCode, label: statusLabel },
+                bill: data?.bill || prev?.bill
+              }));
+            }
             loadBill();
             if (onPaymentSuccess) {
               onPaymentSuccess({

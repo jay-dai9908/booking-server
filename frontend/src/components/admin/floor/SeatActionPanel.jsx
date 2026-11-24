@@ -665,6 +665,20 @@ export default function SeatActionPanel({
                 退款
               </Button>
 
+              {booking?.attendance !== 'completed' && (!currentPerson || currentPerson.status === 'active') && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  data-testid="seat-panel-add-board-btn"
+                  onClick={() => {
+                    if (onAddBoard && booking) onAddBoard(booking, personNo, currentPerson);
+                  }}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  加租智能板
+                </Button>
+              )}
+
               <Button
                 variant="secondary"
                 size="sm"

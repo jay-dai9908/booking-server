@@ -371,7 +371,7 @@ export default function TablePanel({
                                 開始
                               </button>
                             )}
-                            {!isEnded && hasStarted && (
+                            {!isEnded && hasStarted && !isPersonPaid && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -391,6 +391,7 @@ export default function TablePanel({
                             <div className="relative" ref={isMenuOpen ? menuRef : null}>
                               <button
                                 type="button"
+                                data-testid={`table-panel-more-btn-${person.person_no}`}
                                 onClick={() => setMenuOpenKey(isMenuOpen ? null : currentKey)}
                                 className="w-6 h-6 rounded-lg flex items-center justify-center text-sg-muted hover:text-sg-ink hover:bg-white transition cursor-pointer"
                                 aria-label="更多選項"

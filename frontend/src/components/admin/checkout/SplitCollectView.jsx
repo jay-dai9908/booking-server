@@ -476,7 +476,7 @@ export default function SplitCollectView({
         }];
       }
 
-      await api.post(`/billing/${bookingRef}/supplement`, {
+      const res = await api.post(`/billing/${bookingRef}/supplement`, {
         client_batch_id: supplementBatchIdRef.current,
         person_no: supplementTarget.person_no,
         items,
@@ -487,7 +487,7 @@ export default function SplitCollectView({
       supplementBatchIdRef.current = genBatchUuid();
       setSupplementCashReceived(0);
       setSupplementTarget(null);
-      if (onPaymentSuccess) onPaymentSuccess();
+      if (onPaymentSuccess) onPaymentSuccess(res.data);
       onClose();
     } catch (err) {
       setErrorMessage(err.response?.data?.error || '補收失敗');
