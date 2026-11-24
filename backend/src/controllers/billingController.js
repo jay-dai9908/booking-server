@@ -59,17 +59,30 @@ export async function putDraft(req, res) {
   const deviceInfo = getAdminDeviceInfo(req);
 
   try {
-    const saveResult = await saveDraft(booking_ref, base_rev, draft, staffName, staffId, deviceInfo);
+    const saveResult = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
+      return await saveDraft(booking_ref, base_rev, draft, staffName, staffId, deviceInfo, tx);
+    });
     return res.json({
       success: true,
       server_now: new Date().toISOString(),
       bill: saveResult.bill || saveResult,
+      billInput: saveResult.billInput,
       draft: saveResult.draft,
       rev: saveResult.rev
     });
   } catch (error) {
     console.error('[putDraft] Error:', error);
-    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        code: error.code,
+        ...(error.current_draft !== undefined ? { current_draft: error.current_draft } : {}),
+        ...(error.rev !== undefined ? { rev: error.rev } : {}),
+        ...(error.updated_by !== undefined ? { updated_by: error.updated_by } : {}),
+        ...(error.updated_at !== undefined ? { updated_at: error.updated_at } : {})
+      });
+    }
     return res.status(500).json({ error: '儲存草稿失敗' });
   }
 }

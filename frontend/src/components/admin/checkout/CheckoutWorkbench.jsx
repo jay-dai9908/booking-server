@@ -43,9 +43,10 @@ import AddonItemsManageModal from './AddonItemsManageModal';
 import QuickPromoModal from './QuickPromoModal';
 import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 import { buildOrderSummary, commandsToPreviewHtml } from '@shared/receipts.js';
-import { formatTimerHMM, formatBillingHours } from '@shared/time.js';
+import { formatTimerHMM, formatBillingHours, formatTimeHHmm } from '@shared/time.js';
 import { displayBoardName, computeBill } from '@shared/billing.js';
 import { getPersonHoursData as extractPersonHoursData } from '../../../utils/admin/hoursAdjuster';
+import { analyzeDraftConflict, mergeDraftConflict } from '../../../utils/admin/draftConflict';
 import { personElapsedMinutes, formatElapsedText, extractTimeHHMM, bookingDurationText, formatBookingRef } from '../../../utils/admin/floorSelectors';
 import { useAdminPermissions, MONEY_WRITE, COUPON_WRITE } from '../../../hooks/admin/useAdminPermissions';
 
@@ -69,6 +70,8 @@ export default function CheckoutWorkbench({
   const [draftState, setDraftState] = useState(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [draftConflictMsg, setDraftConflictMsg] = useState(null);
+  const [draftConflictModal, setDraftConflictModal] = useState(null);
+  const [conflictResolving, setConflictResolving] = useState(false);
   const [syncStatus, setSyncStatus] = useState('synced'); // 'synced' | 'unsynced' | 'syncing' | 'error'
 
   // Sub-modal states
@@ -136,6 +139,8 @@ export default function CheckoutWorkbench({
   const isInitialLoadRef = useRef(true);
   const hasAutoOpenedSplitRef = useRef(false);
   const currentRevRef = useRef(0);
+  const lastSyncedDraftRef = useRef(null);
+  const draftConflictRef = useRef(false);
   const pendingDraftRef = useRef(null);
   const isSavingRef = useRef(false);
   const hasModifiedWhileSavingRef = useRef(false);
@@ -149,9 +154,7 @@ export default function CheckoutWorkbench({
       setLoadError(null);
       const res = await api.get(`/billing/${bookingRef}`);
       const rev = res.data?.draft?.rev ?? 0;
-      currentRevRef.current = rev;
-      setBillData(res.data);
-      setDraftState(res.data.draft || {
+      const loadedDraft = res.data.draft || {
         version: 2,
         rev,
         split_mode: 'proportional',
@@ -161,7 +164,14 @@ export default function CheckoutWorkbench({
         manual_discount: null,
         total_override: null,
         note: ''
-      });
+      };
+      currentRevRef.current = rev;
+      lastSyncedDraftRef.current = JSON.parse(JSON.stringify(loadedDraft));
+      draftConflictRef.current = false;
+      setBillData(res.data);
+      setDraftState(loadedDraft);
+      setDraftConflictModal(null);
+      setDraftConflictMsg(null);
       if (res.data.draft?.total_override) {
         setOverrideAmount(res.data.draft.total_override.amount);
         setOverrideReason(res.data.draft.total_override.reason || '熟客優惠');
@@ -228,13 +238,15 @@ export default function CheckoutWorkbench({
         });
         if (res.data) {
           const nextRev = res.data.rev ?? res.data.draft?.rev ?? (currentRev + 1);
+          const syncedDraft = res.data.draft ? { ...res.data.draft, rev: nextRev } : { ...draftToSend, rev: nextRev };
           currentRevRef.current = nextRev;
+          lastSyncedDraftRef.current = JSON.parse(JSON.stringify(syncedDraft));
           if (isMountedRef.current) {
             setBillData(prev => ({
               ...prev,
               bill: res.data.bill || prev?.bill,
               billInput: res.data.billInput || prev?.billInput,
-              draft: { ...draftToSend, rev: nextRev }
+              draft: syncedDraft
             }));
             setDraftState(prev => ({ ...prev, rev: nextRev }));
           }
@@ -254,65 +266,43 @@ export default function CheckoutWorkbench({
       } catch (err) {
         console.error('[CheckoutWorkbench] Draft save error:', err);
         if (err.response?.status === 409) {
-          if (isMountedRef.current) {
-            setDraftConflictMsg('另一台裝置剛改過這筆帳，已重新載入');
+          const errData = err.response.data || {};
+          let serverDraft = errData.current_draft;
+          if (!serverDraft) {
+            try {
+              const freshRes = await api.get(`/billing/${bookingRef}`);
+              serverDraft = freshRes.data?.draft || {};
+            } catch {}
           }
-          try {
-            const freshRes = await api.get(`/billing/${bookingRef}`);
-            const freshBillData = freshRes.data;
-            const freshDraft = freshBillData?.draft || {};
-            const freshRev = freshDraft.rev ?? 0;
-            currentRevRef.current = freshRev;
-            const mergedDraft = {
-              ...freshDraft,
-              order_addons: draftToSend.order_addons !== undefined ? draftToSend.order_addons : freshDraft.order_addons,
-              order_promos: draftToSend.order_promos !== undefined ? draftToSend.order_promos : freshDraft.order_promos,
-              manual_discount: draftToSend.manual_discount !== undefined ? draftToSend.manual_discount : freshDraft.manual_discount,
-              total_override: draftToSend.total_override !== undefined ? draftToSend.total_override : freshDraft.total_override,
-              persons: draftToSend.persons !== undefined ? draftToSend.persons : freshDraft.persons,
-              note: draftToSend.note !== undefined ? draftToSend.note : freshDraft.note,
-              rev: freshRev
-            };
-            if (isMountedRef.current) {
-              setBillData(freshBillData);
-              setDraftState(mergedDraft);
-            }
-            const retryRes = await api.put(`/billing/${bookingRef}/draft`, {
-              base_rev: freshRev,
-              draft: mergedDraft
+          const baseDraft = lastSyncedDraftRef.current || {};
+          const analysis = analyzeDraftConflict({
+            baseDraft,
+            localDraft: draftToSend,
+            serverDraft: serverDraft || {}
+          });
+
+          pendingDraftRef.current = null;
+          hasModifiedWhileSavingRef.current = false;
+          if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+            saveTimeoutRef.current = null;
+          }
+          isSavingRef.current = false;
+          draftConflictRef.current = true;
+
+          if (isMountedRef.current) {
+            setIsSavingDraft(false);
+            setSyncStatus('error');
+            setDraftConflictMsg(null);
+            setDraftConflictModal({
+              updated_by: errData.updated_by || serverDraft?.updated_by || '另一位店員',
+              updated_at: errData.updated_at || serverDraft?.updated_at || null,
+              serverDraft: serverDraft || {},
+              localDraft: draftToSend,
+              baseDraft,
+              bothChangedLabels: analysis.bothChangedLabels,
+              localChangedLabels: analysis.localChangedLabels
             });
-            if (retryRes.data) {
-              const retryRev = retryRes.data.rev ?? retryRes.data.draft?.rev ?? (freshRev + 1);
-              currentRevRef.current = retryRev;
-              if (isMountedRef.current) {
-                setBillData(prev => ({
-                  ...prev,
-                  bill: retryRes.data.bill || prev?.bill,
-                  billInput: retryRes.data.billInput || prev?.billInput,
-                  draft: { ...mergedDraft, rev: retryRev }
-                }));
-                setDraftState(prev => ({ ...prev, rev: retryRev }));
-              }
-            }
-            if (hasModifiedWhileSavingRef.current || pendingDraftRef.current) {
-              hasModifiedWhileSavingRef.current = false;
-              isSavingRef.current = false;
-              return await flushDraft();
-            } else {
-              isSavingRef.current = false;
-              if (isMountedRef.current) {
-                setIsSavingDraft(false);
-                setSyncStatus('synced');
-              }
-            }
-          } catch (retryErr) {
-            console.error('[CheckoutWorkbench] 409 re-apply failed:', retryErr);
-            isSavingRef.current = false;
-            if (isMountedRef.current) {
-              setIsSavingDraft(false);
-              setSyncStatus('error');
-            }
-            notifySyncError();
           }
         } else {
           isSavingRef.current = false;
@@ -327,6 +317,88 @@ export default function CheckoutWorkbench({
 
     inFlightPromiseRef.current = promise;
     return promise;
+  };
+
+  const handleConflictUseTheirs = async () => {
+    if (!draftConflictModal || conflictResolving) return;
+    setConflictResolving(true);
+    try {
+      pendingDraftRef.current = null;
+      hasModifiedWhileSavingRef.current = false;
+      draftConflictRef.current = false;
+      await loadBill();
+      if (isMountedRef.current) {
+        setSyncStatus('synced');
+        setDraftConflictModal(null);
+      }
+    } catch (err) {
+      console.error('[CheckoutWorkbench] handleConflictUseTheirs error:', err);
+      notifySyncError('載入最新版本失敗，請重試');
+    } finally {
+      if (isMountedRef.current) setConflictResolving(false);
+    }
+  };
+
+  const handleConflictMergeMine = async () => {
+    if (!draftConflictModal || conflictResolving) return;
+    setConflictResolving(true);
+    try {
+      const { baseDraft, localDraft, serverDraft } = draftConflictModal;
+      const mergedDraft = mergeDraftConflict({ baseDraft, localDraft, serverDraft });
+      const baseRev = serverDraft?.rev ?? 0;
+
+      const res = await api.put(`/billing/${bookingRef}/draft`, {
+        base_rev: baseRev,
+        draft: mergedDraft
+      });
+      const nextRev = res.data?.rev ?? res.data?.draft?.rev ?? (baseRev + 1);
+      const syncedDraft = res.data?.draft ? { ...res.data.draft, rev: nextRev } : { ...mergedDraft, rev: nextRev };
+      currentRevRef.current = nextRev;
+      lastSyncedDraftRef.current = JSON.parse(JSON.stringify(syncedDraft));
+      draftConflictRef.current = false;
+
+      if (isMountedRef.current) {
+        setBillData(prev => ({
+          ...prev,
+          bill: res.data?.bill || prev?.bill,
+          billInput: res.data?.billInput || prev?.billInput,
+          draft: syncedDraft
+        }));
+        setDraftState(syncedDraft);
+        if (syncedDraft.total_override) {
+          setOverrideAmount(syncedDraft.total_override.amount);
+          setOverrideReason(syncedDraft.total_override.reason || '熟客優惠');
+        }
+        setDraftConflictModal(null);
+        setDraftConflictMsg(null);
+        setSyncStatus('synced');
+      }
+    } catch (err) {
+      console.error('[CheckoutWorkbench] handleConflictMergeMine error:', err);
+      if (err.response?.status === 409) {
+        const errData = err.response.data || {};
+        const nextServerDraft = errData.current_draft || draftConflictModal.serverDraft;
+        const analysis = analyzeDraftConflict({
+          baseDraft: draftConflictModal.baseDraft,
+          localDraft: draftConflictModal.localDraft,
+          serverDraft: nextServerDraft || {}
+        });
+        if (isMountedRef.current) {
+          setDraftConflictModal({
+            ...draftConflictModal,
+            updated_by: errData.updated_by || nextServerDraft?.updated_by || '另一位店員',
+            updated_at: errData.updated_at || nextServerDraft?.updated_at || null,
+            serverDraft: nextServerDraft || {},
+            bothChangedLabels: analysis.bothChangedLabels,
+            localChangedLabels: analysis.localChangedLabels
+          });
+        }
+      } else {
+        notifySyncError('合併儲存失敗，請選擇用對方的版本或再試一次');
+      }
+    } finally {
+      if (isMountedRef.current) setConflictResolving(false);
+    }
   };
 
   const handleClose = () => {
@@ -458,6 +530,7 @@ export default function CheckoutWorkbench({
   };
 
   const updateDraft = (updater) => {
+    if (draftConflictModal || draftConflictRef.current) return;
     setDraftState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
       scheduleDraftSave(next);
@@ -691,24 +764,28 @@ export default function CheckoutWorkbench({
 
   // Pre-flush before opening collect modals
   const handleOpenCollect = async () => {
+    if (draftConflictModal || draftConflictRef.current) return;
     if (pendingDraftRef.current || isSavingRef.current || syncStatus === 'unsynced') {
       await flushDraft();
     }
+    if (draftConflictRef.current || draftConflictModal || !isMountedRef.current) return;
     setTogetherMethodSelected(false);
     setCollectCashReceived(0);
     setShowCollectModal(true);
   };
 
   const handleOpenSplitCollect = async () => {
+    if (draftConflictModal || draftConflictRef.current) return;
     if (pendingDraftRef.current || isSavingRef.current || syncStatus === 'unsynced') {
       await flushDraft();
     }
+    if (draftConflictRef.current || draftConflictModal || !isMountedRef.current) return;
     setShowSplitCollect(true);
   };
 
   const renderHoursControl = (p) => {
     const isFrozen = p.is_frozen;
-    const isUnl = p.mode === 'unlimited';
+    const isUnl = (p.entry?.mode || p.mode) === 'unlimited';
     if (isUnl) {
       return (
         <div className="font-bold text-sg-ink text-[12px] sm:text-[13px]">
@@ -918,6 +995,7 @@ export default function CheckoutWorkbench({
       if (res.data?.draft) {
         const nextRev = res.data.rev ?? res.data.draft.rev;
         currentRevRef.current = nextRev;
+        lastSyncedDraftRef.current = JSON.parse(JSON.stringify(res.data.draft));
         setBillData((prev) => ({
           ...prev,
           bill: res.data.bill || prev?.bill,
@@ -951,6 +1029,7 @@ export default function CheckoutWorkbench({
       if (res.data?.draft) {
         const nextRev = res.data.rev ?? res.data.draft.rev;
         currentRevRef.current = nextRev;
+        lastSyncedDraftRef.current = JSON.parse(JSON.stringify(res.data.draft));
         setBillData((prev) => ({
           ...prev,
           bill: res.data.bill || prev?.bill,
@@ -1670,7 +1749,7 @@ export default function CheckoutWorkbench({
               <div className="md:hidden space-y-2.5">
                 {persons.map((p) => {
                   const isFrozen = p.is_frozen;
-                  const isUnl = p.mode === 'unlimited';
+                  const isUnl = (p.entry?.mode || p.mode) === 'unlimited';
                   const { totalHours, intHours } = getPersonHoursData(p);
 
                   return (
@@ -1747,7 +1826,7 @@ export default function CheckoutWorkbench({
                     {persons.map((p) => {
                       const isFrozen = p.is_frozen;
                       const hasOverride = p.hours_override != null;
-                      const isUnl = p.mode === 'unlimited';
+                      const isUnl = (p.entry?.mode || p.mode) === 'unlimited';
                       const rawP = (billData?.persons || []).find(rp => rp.person_no === p.person_no) || p;
                       const elapsedMins = personElapsedMinutes(rawP, new Date(billData?.server_now || Date.now()));
                       const elapsedText = formatElapsedText(elapsedMins);
@@ -1868,7 +1947,8 @@ export default function CheckoutWorkbench({
                                         const unlimitedPrice = Number.isFinite(Number(pricing?.unlimited))
                                           ? Number(pricing.unlimited)
                                           : 750;
-                                        const isDisabled = !allowUnlimited && p.mode !== 'unlimited';
+                                        const personIsUnlimited = (p.entry?.mode || p.mode) === 'unlimited';
+                                        const isDisabled = !allowUnlimited && !personIsUnlimited;
                                         return (
                                           <button
                                             type="button"
@@ -1878,14 +1958,14 @@ export default function CheckoutWorkbench({
                                             className={`px-3 py-1 rounded-lg font-bold text-[12px] border ${
                                               isDisabled
                                                 ? 'bg-sg-paper text-sg-muted border-sg-line cursor-not-allowed opacity-70'
-                                                : p.mode === 'unlimited'
+                                                : personIsUnlimited
                                                   ? 'bg-sg-peach-soft text-sg-peach border-sg-peach'
                                                   : 'bg-white text-sg-ink border-sg-line'
                                             }`}
                                           >
                                             {isDisabled
                                               ? '今天不開放不限時'
-                                              : p.mode === 'unlimited'
+                                              : personIsUnlimited
                                                 ? `目前：不限時 NT$${unlimitedPrice}`
                                                 : `改為不限時 (NT$${unlimitedPrice})`}
                                           </button>
@@ -2032,7 +2112,7 @@ export default function CheckoutWorkbench({
                   <div className="p-3 rounded-xl bg-white border border-sg-line text-[12px]">
                     <span className="text-sg-muted block text-[11px]">會員時數累計（結帳後自動寫入）</span>
                     <span className="font-bold text-sg-ink">
-                      計時 {persons.reduce((s, p) => s + (p.entry?.hours || 0), 0)} 人時 · 不限時 {persons.filter(p => p.mode === 'unlimited').length} 人次
+                      計時 {persons.reduce((s, p) => s + (p.entry?.hours || 0), 0)} 人時 · 不限時 {persons.filter(p => (p.entry?.mode || p.mode) === 'unlimited').length} 人次
                     </span>
                   </div>
                 </div>
@@ -2056,7 +2136,8 @@ export default function CheckoutWorkbench({
               <button
                 type="button"
                 onClick={handleOpenSplitCollect}
-                className="text-[12px] font-bold text-sg-brown hover:underline whitespace-nowrap px-1"
+                disabled={Boolean(draftConflictModal)}
+                className="text-[12px] font-bold text-sg-brown hover:underline disabled:opacity-40 whitespace-nowrap px-1"
               >
                 分開收款
               </button>
@@ -2149,7 +2230,7 @@ export default function CheckoutWorkbench({
                 size="md"
                 className="whitespace-nowrap font-bold"
                 onClick={handleOpenCollect}
-                disabled={unpaidPersons.length === 0}
+                disabled={unpaidPersons.length === 0 || Boolean(draftConflictModal)}
               >
                 收款
               </Button>
@@ -2180,6 +2261,7 @@ export default function CheckoutWorkbench({
                 variant="secondary"
                 size="sm"
                 onClick={handleOpenSplitCollect}
+                disabled={Boolean(draftConflictModal)}
                 className="whitespace-nowrap"
               >
                 分開收款
@@ -2189,7 +2271,7 @@ export default function CheckoutWorkbench({
                   variant="secondary"
                   size="sm"
                   onClick={() => setShowWaiveModal(true)}
-                  disabled={unpaidPersons.length === 0}
+                  disabled={unpaidPersons.length === 0 || Boolean(draftConflictModal)}
                   className="whitespace-nowrap"
                 >
                   免收（招待）
@@ -2262,7 +2344,7 @@ export default function CheckoutWorkbench({
                 size="md"
                 className="whitespace-nowrap font-bold"
                 onClick={handleOpenCollect}
-                disabled={unpaidPersons.length === 0}
+                disabled={unpaidPersons.length === 0 || Boolean(draftConflictModal)}
               >
                 收款
               </Button>
@@ -2276,7 +2358,7 @@ export default function CheckoutWorkbench({
       {mobileAdjustPersonNo && (() => {
         const targetP = persons.find(p => p.person_no === mobileAdjustPersonNo);
         if (!targetP) return null;
-        const isUnl = targetP.mode === 'unlimited';
+        const isUnl = (targetP.entry?.mode || targetP.mode) === 'unlimited';
         const { totalHours } = getPersonHoursData(targetP);
 
         const timingExplanation = targetP.entry?.explainDetail
@@ -2659,6 +2741,76 @@ export default function CheckoutWorkbench({
             setShowPassCenter(false);
           }}
         />
+      )}
+
+      {/* Blocking Draft Conflict Dialog (Round 37 Item 5) */}
+      {draftConflictModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          data-testid="draft-conflict-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-sg-ink/50 backdrop-blur-xs p-4"
+        >
+          <div className="bg-white rounded-3xl border border-sg-line shadow-2xl max-w-md w-full p-5 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-sg-honey-soft text-sg-honey flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-[16px] font-bold text-sg-ink">帳單剛被另一台裝置修改</h3>
+                <p className="text-[13px] text-sg-ink font-medium" data-testid="draft-conflict-who-when">
+                  {draftConflictModal.updated_by || '另一位店員'} 在 {draftConflictModal.updated_at ? formatTimeHHmm(draftConflictModal.updated_at) : '剛剛'} 改過這筆帳
+                </p>
+              </div>
+            </div>
+
+            {draftConflictModal.bothChangedLabels?.length > 0 && (
+              <div className="p-3 rounded-2xl bg-sg-honey-soft/50 border border-sg-honey/30 text-[12px] space-y-1">
+                <div className="font-bold text-sg-ink">雙方都改過的部分</div>
+                <div className="text-sg-ink" data-testid="draft-conflict-both-parts">
+                  {draftConflictModal.bothChangedLabels.join('、')}
+                </div>
+              </div>
+            )}
+
+            {draftConflictModal.localChangedLabels?.length > 0 && (
+              <div className="p-3 rounded-2xl bg-sg-paper border border-sg-line text-[12px] space-y-1">
+                <div className="font-bold text-sg-muted">這台裝置尚未存檔的修改</div>
+                <div className="text-sg-ink">
+                  {draftConflictModal.localChangedLabels.join('、')}
+                </div>
+              </div>
+            )}
+
+            <p className="text-[12px] text-sg-muted">
+              在選擇解決方式之前，暫時不能繼續編輯或收款。
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <Button
+                variant="secondary"
+                size="md"
+                data-testid="conflict-use-theirs-btn"
+                disabled={conflictResolving}
+                onClick={handleConflictUseTheirs}
+                className="flex-1"
+              >
+                用對方的版本
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                data-testid="conflict-merge-mine-btn"
+                loading={conflictResolving}
+                disabled={conflictResolving}
+                onClick={handleConflictMergeMine}
+                className="flex-1"
+              >
+                把我的修改加上去
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

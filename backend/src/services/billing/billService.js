@@ -308,10 +308,15 @@ export async function saveDraft(booking_ref, base_rev, newDraft, staffName, staf
   const currentRev = currentRevOf(currentDetails);
 
   if (base_rev !== undefined && base_rev !== null && base_rev !== currentRev) {
+    const latestBill = await getBookingBill(booking_ref, tx);
     throw {
       status: 409,
       code: 'REV_CONFLICT',
-      message: '另一台裝置剛改過這筆帳，已重新載入'
+      message: '這筆帳剛被其他人修改，請選擇要保留哪一份修改',
+      current_draft: latestBill.draft,
+      rev: latestBill.draft?.rev ?? currentRev,
+      updated_by: latestBill.draft?.updated_by || currentDetails?.updated_by || '其他店員',
+      updated_at: latestBill.draft?.updated_at || currentDetails?.updated_at || null
     };
   }
 
