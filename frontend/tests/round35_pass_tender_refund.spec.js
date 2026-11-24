@@ -152,12 +152,17 @@ async function run() {
     await page.locator('aside a[href="/admin/seating"]').waitFor({ state: 'visible', timeout: 10000 });
 
     await page.goto(`${BASE_URL}/admin/reservations`, { waitUntil: 'networkidle' });
-    const row = page.locator('tr, [data-testid*="reservation"]').filter({ hasText: user.name }).first();
-    await row.waitFor({ state: 'visible', timeout: 10000 });
-    await row.getByRole('button', { name: '結帳' }).click();
+    const card = page.locator(`[data-testid="reservation-card-${bookingRef}"]:visible`).first();
+    await card.waitFor({ state: 'visible', timeout: 10000 });
+    await card.click();
 
-    await page.locator('[data-testid="workbench-collect-btn"]').waitFor({ state: 'visible', timeout: 10000 });
-    await page.locator('[data-testid="workbench-collect-btn"]').click();
+    const checkoutModalBtn = page.locator('button:has-text("結帳明細"), button:has-text("前往結帳")').first();
+    await checkoutModalBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await checkoutModalBtn.click();
+
+    const splitBtn = page.locator('button:has-text("分開收款"):visible').first();
+    await splitBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await splitBtn.click();
 
     await page.locator('[data-testid="pay-method-pass"]').click();
     const passValueEl = page.locator(`[data-testid="pass-tender-value-${userPass.id}"]`);
@@ -181,15 +186,25 @@ async function run() {
     assert.ok(completeText.includes('卡券折抵 NT$800'), `Expected 卡券折抵 NT$800 in complete view: ${completeText}`);
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'round35_shot2_pass_payment_complete.png') });
 
-    // Close complete view, reopen collect view -> test pass refund modal
+    // Close complete view, reopen CheckoutWorkbench -> SplitCollectView
     await completeView.getByRole('button', { name: /完成/ }).first().click();
     await page.waitForTimeout(300);
 
-    // Reopen CheckoutWorkbench -> SplitCollectView
-    const row2 = page.locator('tr, [data-testid*="reservation"]').filter({ hasText: user.name }).first();
-    await row2.getByRole('button', { name: '結帳' }).click();
-    await page.locator('[data-testid="workbench-collect-btn"]').waitFor({ state: 'visible', timeout: 10000 });
-    await page.locator('[data-testid="workbench-collect-btn"]').click();
+    const reopenSplitBtn = page.locator('button:has-text("分開收款"):visible').first();
+    if (await reopenSplitBtn.isVisible().catch(() => false)) {
+      await reopenSplitBtn.click();
+    } else {
+      await page.goto(`${BASE_URL}/admin/reservations`, { waitUntil: 'networkidle' });
+      const card2 = page.locator(`[data-testid="reservation-card-${bookingRef}"]:visible`).first();
+      await card2.waitFor({ state: 'visible', timeout: 10000 });
+      await card2.click();
+      const checkoutModalBtn2 = page.locator('button:has-text("結帳明細"), button:has-text("前往結帳")').first();
+      await checkoutModalBtn2.waitFor({ state: 'visible', timeout: 10000 });
+      await checkoutModalBtn2.click();
+      const splitBtn2 = page.locator('button:has-text("分開收款"):visible').first();
+      await splitBtn2.waitFor({ state: 'visible', timeout: 10000 });
+      await splitBtn2.click();
+    }
 
     await page.locator('[data-testid="split-person-refund-btn"]').first().click();
     await page.locator('[data-testid="refund-method-pass"]').click();
