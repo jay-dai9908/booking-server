@@ -223,8 +223,51 @@ async function run() {
     assert.ok(recheckedText1.includes('5'), `Person 1 hours must still be 5, got ${recheckedText1}`);
 
     console.log('PASS: Hours modification was persisted when closed within 200ms!');
+
+    // Round 32 Item 3: Verify counter CheckoutWorkbench can still apply POS-only default promo CHECKIN30
+    console.log('Testing POS-only default promo CHECKIN30 in CheckoutWorkbench...');
+    await prisma.promoCode.upsert({
+      where: { code: 'CHECKIN30' },
+      update: {
+        channel: 'pos',
+        is_active: true,
+        discount_type: 'fixed_order',
+        discount_value: 30,
+        min_pax: 1,
+        min_hours: 1,
+        min_amount: 0
+      },
+      create: {
+        code: 'CHECKIN30',
+        name: '📸 現場打卡／限動折 $30',
+        description: 'IG / FB / Threads 現場打卡或發限動即享整單折 $30',
+        discount_type: 'fixed_order',
+        discount_value: 30,
+        target_scope: 'all',
+        day_type_limit: 'all',
+        mode_limit: 'all',
+        channel: 'pos',
+        min_pax: 1,
+        min_hours: 1,
+        min_amount: 0,
+        is_pos_quick_select: true,
+        is_active: true
+      }
+    });
+    const mobileAddonsRow = page.locator('[data-testid="mobile-addons-discounts-row"]').first();
+    if (await mobileAddonsRow.isVisible()) {
+      await mobileAddonsRow.click();
+    }
+    const promoInput = page.locator('input[placeholder*="輸入折扣碼"]:visible').first();
+    await promoInput.waitFor({ state: 'visible', timeout: 5000 });
+    await promoInput.fill('CHECKIN30');
+    await page.locator('button:has-text("驗證套用"):visible').first().click();
+    await page.locator('span:has-text("(CHECKIN30)"):visible').first().waitFor({ state: 'visible', timeout: 5000 });
+    console.log('PASS: CHECKIN30 applied cleanly in counter CheckoutWorkbench!');
+
     console.log('--- Round 10 Checkout Draft Playwright Test Finished Successfully ---');
   } finally {
+    await prisma.promoCode.deleteMany({ where: { code: 'CHECKIN30' } }).catch(() => {});
     await prisma.timerPause.deleteMany({ where: { person: { booking_ref: testRef } } }).catch(() => {});
     await prisma.bookingPerson.deleteMany({ where: { booking_ref: testRef } }).catch(() => {});
     await prisma.reservation.deleteMany({ where: { booking_ref: testRef } }).catch(() => {});

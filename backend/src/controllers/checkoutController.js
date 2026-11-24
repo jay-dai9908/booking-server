@@ -1,5 +1,76 @@
 import prisma from '../prismaClient.js';
 
+export const DEFAULT_PROMO_CODES = [
+  {
+    code: 'CHECKIN30',
+    name: '📸 現場打卡／限動折 $30',
+    description: 'IG / FB / Threads 現場打卡或發限動即享整單折 $30',
+    discount_type: 'fixed_order',
+    discount_value: 30,
+    max_discount_amount: null,
+    target_scope: 'all',
+    day_type_limit: 'all',
+    mode_limit: 'all',
+    channel: 'pos',
+    min_pax: 1,
+    min_hours: 1,
+    min_amount: 0,
+    is_pos_quick_select: true,
+    is_active: true
+  },
+  {
+    code: 'REVIEW50',
+    name: '⭐ Google 五星好評折 $50',
+    description: '出示 Google 地圖五星評論畫面折抵 $50',
+    discount_type: 'fixed_order',
+    discount_value: 50,
+    max_discount_amount: null,
+    target_scope: 'all',
+    day_type_limit: 'all',
+    mode_limit: 'all',
+    channel: 'pos',
+    min_pax: 1,
+    min_hours: 1,
+    min_amount: 0,
+    is_pos_quick_select: true,
+    is_active: true
+  },
+  {
+    code: 'CHECKIN20P',
+    name: '👥 同行打卡每人折 $20',
+    description: '每位打卡貴賓各折 $20（依人數計算）',
+    discount_type: 'fixed_per_pax',
+    discount_value: 20,
+    max_discount_amount: null,
+    target_scope: 'all',
+    day_type_limit: 'all',
+    mode_limit: 'all',
+    channel: 'pos',
+    min_pax: 1,
+    min_hours: 1,
+    min_amount: 0,
+    is_pos_quick_select: true,
+    is_active: true
+  },
+  {
+    code: 'VIP90',
+    name: '💎 貴賓 9 折優惠 (-10%)',
+    description: '整單座位與設備費用享 9 折優惠',
+    discount_type: 'percentage',
+    discount_value: 10,
+    max_discount_amount: null,
+    target_scope: 'all',
+    day_type_limit: 'all',
+    mode_limit: 'all',
+    channel: 'pos',
+    min_pax: 1,
+    min_hours: 1,
+    min_amount: 0,
+    is_pos_quick_select: true,
+    is_active: true
+  }
+];
+
 /**
  * Ensure default POS Quick Promo Codes and Addon Items exist on server startup
  */
@@ -8,76 +79,7 @@ export const ensureDefaultCheckoutConfigs = async () => {
     const promoCount = await prisma.promoCode.count();
     if (promoCount === 0) {
       await prisma.promoCode.createMany({
-        data: [
-          {
-            code: 'CHECKIN30',
-            name: '📸 現場打卡／限動折 $30',
-            description: 'IG / FB / Threads 現場打卡或發限動即享整單折 $30',
-            discount_type: 'fixed_order',
-            discount_value: 30,
-            max_discount_amount: null,
-            target_scope: 'all',
-            day_type_limit: 'all',
-            mode_limit: 'all',
-            channel: 'all',
-            min_pax: 1,
-            min_hours: 1,
-            min_amount: 0,
-            is_pos_quick_select: true,
-            is_active: true
-          },
-          {
-            code: 'REVIEW50',
-            name: '⭐ Google 五星好評折 $50',
-            description: '出示 Google 地圖五星評論畫面折抵 $50',
-            discount_type: 'fixed_order',
-            discount_value: 50,
-            max_discount_amount: null,
-            target_scope: 'all',
-            day_type_limit: 'all',
-            mode_limit: 'all',
-            channel: 'all',
-            min_pax: 1,
-            min_hours: 1,
-            min_amount: 0,
-            is_pos_quick_select: true,
-            is_active: true
-          },
-          {
-            code: 'CHECKIN20P',
-            name: '👥 同行打卡每人折 $20',
-            description: '每位打卡貴賓各折 $20（依人數計算）',
-            discount_type: 'fixed_per_pax',
-            discount_value: 20,
-            max_discount_amount: null,
-            target_scope: 'all',
-            day_type_limit: 'all',
-            mode_limit: 'all',
-            channel: 'all',
-            min_pax: 1,
-            min_hours: 1,
-            min_amount: 0,
-            is_pos_quick_select: true,
-            is_active: true
-          },
-          {
-            code: 'VIP90',
-            name: '💎 貴賓 9 折優惠 (-10%)',
-            description: '整單座位與設備費用享 9 折優惠',
-            discount_type: 'percentage',
-            discount_value: 10,
-            max_discount_amount: null,
-            target_scope: 'all',
-            day_type_limit: 'all',
-            mode_limit: 'all',
-            channel: 'all',
-            min_pax: 1,
-            min_hours: 1,
-            min_amount: 0,
-            is_pos_quick_select: true,
-            is_active: true
-          }
-        ],
+        data: DEFAULT_PROMO_CODES,
         skipDuplicates: true
       });
       console.log('[Init] Seeded default PromoCode items.');
@@ -568,105 +570,11 @@ export const deleteAddonItem = async (req, res) => {
 };
 
 /**
- * POST /api/checkout/reservations/:booking_ref
- * Complete or update split-billing checkout for a reservation
+ * POST /api/checkout/reservations/:booking_ref (Deprecated legacy endpoint)
  */
-export const submitReservationCheckout = async (req, res) => {
-  const { booking_ref } = req.params;
-  const {
-    total_amount,
-    payment_method = 'cash',
-    checkout_unlimited_pax,
-    checkout_regular_hours,
-    checkout_details,
-    promo_code,
-    discount_amount = 0,
-    addons_amount = 0,
-    is_paid = true
-  } = req.body;
-
-  try {
-    const result = await prisma.$transaction(async (tx) => {
-      const existing = await tx.reservation.findMany({
-        where: { booking_ref }
-      });
-
-      if (existing.length === 0) {
-        throw new Error('NOT_FOUND');
-      }
-
-      const firstRes = existing[0];
-      const prevPromoCode = firstRes.promo_code || '';
-      const newPromoCode = promo_code ? String(promo_code).trim().toUpperCase() : null;
-
-      // Sync used_count for applied/removed promo codes
-      if (newPromoCode !== prevPromoCode) {
-        const codesList = newPromoCode ? newPromoCode.split(',').map(s => s.trim()).filter(Boolean) : [];
-        const prevCodesList = prevPromoCode ? prevPromoCode.split(',').map(s => s.trim()).filter(Boolean) : [];
-
-        // Increment newly applied codes
-        for (const c of codesList) {
-          if (!prevCodesList.includes(c)) {
-            await tx.promoCode.updateMany({
-              where: { code: c },
-              data: { used_count: { increment: 1 } }
-            });
-          }
-        }
-
-        // Decrement removed codes (not lower than 0)
-        for (const c of prevCodesList) {
-          if (!codesList.includes(c)) {
-            const promo = await tx.promoCode.findUnique({ where: { code: c } });
-            if (promo && promo.used_count > 0) {
-              await tx.promoCode.update({
-                where: { code: c },
-                data: { used_count: Math.max(0, promo.used_count - 1) }
-              });
-            }
-          }
-        }
-      }
-
-      const finalAmount = total_amount !== undefined && total_amount !== null
-        ? Math.max(0, parseInt(total_amount, 10) || 0)
-        : (firstRes.total_amount || 0);
-
-      const updateData = {
-        total_amount: finalAmount,
-        is_amount_manual: true,
-        is_paid: Boolean(is_paid),
-        paid_at: is_paid ? (firstRes.paid_at || new Date()) : null,
-        payment_method: is_paid ? (payment_method || 'cash') : null,
-        checkout_unlimited_pax: checkout_unlimited_pax !== undefined && checkout_unlimited_pax !== null
-          ? parseInt(checkout_unlimited_pax, 10)
-          : null,
-        checkout_regular_hours: checkout_regular_hours !== undefined && checkout_regular_hours !== null
-          ? parseFloat(checkout_regular_hours)
-          : null,
-        checkout_details: checkout_details || null,
-        promo_code: newPromoCode,
-        discount_amount: parseInt(discount_amount, 10) || 0,
-        addons_amount: parseInt(addons_amount, 10) || 0
-      };
-
-      await tx.reservation.updateMany({
-        where: { booking_ref },
-        data: updateData
-      });
-
-      return updateData;
-    });
-
-    res.json({
-      message: '結帳資料已儲存',
-      checkout: result
-    });
-  } catch (error) {
-    console.error('Error submitting reservation checkout:', error);
-    if (error.message === 'NOT_FOUND') {
-      return res.status(404).json({ error: '找不到此預約單' });
-    }
-    res.status(500).json({ error: '結帳處理失敗' });
-  }
+export const submitReservationCheckout = async (_req, res) => {
+  return res.status(410).json({
+    code: 'ENDPOINT_REMOVED',
+    error: '這個結帳方式已停用，請用結帳工作台'
+  });
 };
