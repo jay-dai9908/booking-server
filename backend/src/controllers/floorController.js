@@ -26,14 +26,19 @@ export async function getLive(req, res) {
     const serverNow = rawNow && !Number.isNaN(rawNow.getTime()) ? rawNow : new Date();
     const data = await getLiveFloorData(dateStr, serverNow);
 
-    const jsonStr = JSON.stringify(data);
+    const { server_now, ...rest } = data;
+    const jsonStr = JSON.stringify(rest);
     const etag = `"${crypto.createHash('md5').update(jsonStr).digest('hex')}"`;
+
+    const serverNowIso = server_now || serverNow.toISOString();
+    res.setHeader('X-Server-Now', serverNowIso);
+    res.setHeader('Access-Control-Expose-Headers', 'X-Server-Now, ETag');
+    res.setHeader('ETag', etag);
 
     if (req.headers['if-none-match'] === etag) {
       return res.status(304).end();
     }
 
-    res.setHeader('ETag', etag);
     return res.json(data);
   } catch (error) {
     console.error('[getLive] Error:', error);

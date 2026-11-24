@@ -28,6 +28,7 @@ export default function ForceAddModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [seatConflict, setSeatConflict] = useState(false);
+  const [insufficientSeats, setInsufficientSeats] = useState(false);
 
   // Sort sessions chronologically
   const sortedSessions = useMemo(() => {
@@ -39,6 +40,7 @@ export default function ForceAddModal({
     if (!isOpen) return;
     setError('');
     setSeatConflict(false);
+    setInsufficientSeats(false);
     setIsSubmitting(false);
     if (initialPax != null) {
       setPax(initialPax);
@@ -96,10 +98,11 @@ export default function ForceAddModal({
     }
   };
 
-  const handleSubmit = async (e, { skipPreselected = false } = {}) => {
+  const handleSubmit = async (e, { skipPreselected = false, forceWait = false } = {}) => {
     if (e) e.preventDefault();
     const cleanName = name.trim();
     const paxNum = parseInt(pax, 10);
+    const effectiveForceWait = Boolean(forceWait || isForceWait);
 
     if (!cleanName) {
       setError('請輸入顧客姓名');
@@ -118,6 +121,7 @@ export default function ForceAddModal({
       setIsSubmitting(true);
       setError('');
       setSeatConflict(false);
+      setInsufficientSeats(false);
 
       // Chronologically sorted session IDs
       const sortedIds = [...selectedSessionIds].sort((a, b) => {
@@ -132,12 +136,14 @@ export default function ForceAddModal({
         pax: paxNum,
         session_ids: sortedIds,
         isUnlimited,
-        isForceWait,
+        isForceWait: effectiveForceWait,
         forceSplit: true,
         isWalkIn: true,
-        attendance: isForceWait ? null : 'checked_in',
-        autoCheckIn: !isForceWait,
-        assigned_seats: (!skipPreselected && preselectedSeats.length > 0) ? preselectedSeats.slice(0, paxNum) : undefined,
+        attendance: effectiveForceWait ? null : 'checked_in',
+        autoCheckIn: !effectiveForceWait,
+        assigned_seats: (!effectiveForceWait && !skipPreselected && preselectedSeats.length > 0)
+          ? preselectedSeats.slice(0, paxNum)
+          : undefined,
         equipments: []
       });
 
@@ -159,12 +165,12 @@ export default function ForceAddModal({
         end_time: endTime,
         sessions: bookedSessions,
         is_unlimited: isUnlimited,
-        isForceWait
+        isForceWait: effectiveForceWait
       };
 
       onClose();
       if (onSuccess) {
-        onSuccess(isForceWait ? null : createdBooking, isForceWait);
+        onSuccess(effectiveForceWait ? null : createdBooking, effectiveForceWait);
       }
 
       // Reset
@@ -175,8 +181,10 @@ export default function ForceAddModal({
       setIsForceWait(false);
     } catch (err) {
       console.error('Failed to create walk-in reservation:', err);
-      const isConflict = err.response?.status === 409 && err.response?.data?.code === 'SEAT_CONFLICT';
+      const errCode = err.response?.data?.code;
+      const isConflict = err.response?.status === 409 && errCode === 'SEAT_CONFLICT';
       setSeatConflict(isConflict);
+      setInsufficientSeats(errCode === 'INSUFFICIENT_SEATS');
       setError(err.response?.data?.error || '建立失敗，請稍後再試');
     } finally {
       setIsSubmitting(false);
@@ -213,10 +221,24 @@ export default function ForceAddModal({
                   type="button"
                   data-testid="force-add-auto-seat-btn"
                   onClick={() => handleSubmit(null, { skipPreselected: true })}
-                  disabled={isSubmitting}
-                  className="px-2.5 py-1 rounded-lg bg-white border border-sg-danger/40 text-sg-danger hover:bg-sg-paper text-[11px] font-bold cursor-pointer"
+                  disabled={floorOffline || isSubmitting}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-sg-danger/40 text-sg-danger hover:bg-sg-paper text-[11px] font-bold cursor-pointer disabled:opacity-50"
                 >
                   改由系統安排座位
+                </button>
+              )}
+              {insufficientSeats && (
+                <button
+                  type="button"
+                  data-testid="force-add-fallback-wait-btn"
+                  onClick={() => {
+                    setIsForceWait(true);
+                    handleSubmit(null, { forceWait: true });
+                  }}
+                  disabled={floorOffline || isSubmitting}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-sg-danger/40 text-sg-danger hover:bg-sg-paper text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                >
+                  放入等待區
                 </button>
               )}
             </div>

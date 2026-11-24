@@ -14,6 +14,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
   const [forceSplit, setForceSplit] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [insufficientSeats, setInsufficientSeats] = useState(false);
 
   useEffect(() => {
     if (isOpen && reservation) {
@@ -21,6 +22,7 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
       setExtendMode('keep_seat');
       setSelectedSessions([]);
       setError('');
+      setInsufficientSeats(false);
     }
   }, [isOpen, reservation]);
 
@@ -97,26 +99,29 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
     }
   }, [selectedSessions, isCapacitySufficient]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e, overrideExtendMode = null) => {
+    if (e) e.preventDefault();
     if (selectedSessions.length === 0) {
       setError('請至少選擇一個加時時段');
       return;
     }
 
+    const modeToUse = overrideExtendMode || extendMode;
     setIsSubmitting(true);
     setError('');
+    setInsufficientSeats(false);
 
     try {
       await api.post(`/reservations/admin/${reservation.booking_ref}/extend`, {
         session_ids: selectedSessions.map(s => s.id),
-        extendMode,
+        extendMode: modeToUse,
         forceSplit
       });
       
       onSuccess();
       onClose();
     } catch (err) {
+      setInsufficientSeats(err.response?.data?.code === 'INSUFFICIENT_SEATS');
       setError(err.response?.data?.error || '加時失敗，請稍後再試');
     } finally {
       setIsSubmitting(false);
@@ -151,9 +156,25 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
     >
       <div className="p-2 sm:p-4 overflow-y-auto space-y-6">
         {error && (
-          <div className="p-3.5 bg-red-50 text-red-600 rounded-2xl text-[13px] border border-red-100 flex items-center gap-2">
-            <XCircle className="w-5 h-5 flex-shrink-0" />
-            {error}
+          <div className="p-3.5 bg-red-50 text-red-600 rounded-2xl text-[13px] border border-red-100 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <XCircle className="w-5 h-5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+            {insufficientSeats && (
+              <button
+                type="button"
+                data-testid="extend-fallback-wait-btn"
+                disabled={floorOffline || isSubmitting}
+                onClick={() => {
+                  setExtendMode('force_wait');
+                  handleSubmit(null, 'force_wait');
+                }}
+                className="px-2.5 py-1 rounded-lg bg-white border border-red-300 text-red-700 hover:bg-red-100 text-[12px] font-bold cursor-pointer disabled:opacity-50"
+              >
+                改成放入等待區
+              </button>
+            )}
           </div>
         )}
 

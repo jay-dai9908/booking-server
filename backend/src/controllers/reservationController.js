@@ -1200,15 +1200,15 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       return res.status(400).json({ error: error.message.replace('PROMO_ERROR:', '') });
     }
     if (error.message === 'SOME_SESSIONS_NOT_FOUND') {
-      return res.status(404).json({ error: 'One or more sessions not found.' });
+      return res.status(404).json({ error: '找不到選擇的時段，請重新整理後再試', code: 'SESSION_NOT_FOUND' });
     }
     if (error.message === 'INSUFFICIENT_CAPACITY') {
       return res.status(409).json({ error: '該時段已額滿或剩餘人數不足，請選擇其他時段。', code: 'INSUFFICIENT_CAPACITY' });
     }
     if (error.message === 'SPLIT_REQUIRED') {
-      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
+      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？', code: 'SPLIT_REQUIRED' });
     }
-    res.status(500).json({ error: 'Failed to create reservation.' });
+    res.status(500).json({ error: '建立預約失敗，請稍後再試', code: 'CREATE_FAILED' });
   }
 };
 
@@ -2268,7 +2268,7 @@ export const adminCreateReservation = async (req, res) => {
   }
 
   if (!isPlainString(name) || !name.trim()) {
-    return res.status(400).json({ error: 'Name is required for manual booking.' });
+    return res.status(400).json({ error: '請輸入顧客姓名', code: 'NAME_REQUIRED' });
   }
 
   if (phone !== undefined && phone !== null && !isPlainString(phone)) {
@@ -2462,9 +2462,12 @@ export const adminCreateReservation = async (req, res) => {
           if (!allocResult.success) {
             if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
             if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
-            throw new Error('ALLOCATION_FAILED');
+            throw { status: 400, code: 'CREATE_FAILED', message: '建立現場預約失敗，請稍後再試' };
           }
           const remainingSeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES')?.assigned_seats || [];
+          if (remainingSeats.some(s => String(s).startsWith('WAIT-'))) {
+            throw new Error('INSUFFICIENT_CAPACITY');
+          }
           await applyMovableSeatUpdates(tx, allocResult.updates);
           mySeats = [...cleanPreselectedSeats, ...remainingSeats];
         } else {
@@ -2504,10 +2507,13 @@ export const adminCreateReservation = async (req, res) => {
         if (!allocResult.success) {
           if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
           if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
-          throw new Error('ALLOCATION_FAILED');
+          throw { status: 400, code: 'CREATE_FAILED', message: '建立現場預約失敗，請稍後再試' };
         }
 
         mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
+        if (mySeats.some(s => String(s).startsWith('WAIT-'))) {
+          throw new Error('INSUFFICIENT_CAPACITY');
+        }
         allocReason = allocResult.reason || null;
 
         await applyMovableSeatUpdates(tx, allocResult.updates);
@@ -2665,15 +2671,15 @@ export const adminCreateReservation = async (req, res) => {
       return res.status(400).json({ error: '一筆預約只能包含同一天的時段' });
     }
     if (error.message === 'SOME_SESSIONS_NOT_FOUND') {
-      return res.status(404).json({ error: 'One or more sessions not found.' });
+      return res.status(404).json({ error: '找不到選擇的時段，請重新整理後再試', code: 'SESSION_NOT_FOUND' });
     }
     if (error.message === 'INSUFFICIENT_CAPACITY') {
-      return res.status(400).json({ error: 'Not enough capacity remaining for one or more selected sessions.' });
+      return res.status(400).json({ error: '所選時段的座位不夠', code: 'INSUFFICIENT_SEATS' });
     }
     if (error.message === 'SPLIT_REQUIRED') {
-      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
+      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？', code: 'SPLIT_REQUIRED' });
     }
-    res.status(500).json({ error: 'Failed to create manual reservation.' });
+    res.status(500).json({ error: '建立現場預約失敗，請稍後再試', code: 'CREATE_FAILED' });
   }
 };
 
@@ -2697,12 +2703,12 @@ export const extendReservation = async (req, res) => {
   const deviceInfo = getAdminDeviceInfo(req);
 
   if (!Array.isArray(session_ids) || session_ids.length === 0) {
-    return res.status(400).json({ error: '請至少選擇一個加時時段' });
+    return res.status(400).json({ error: '請至少選擇一個加時時段', code: 'SESSIONS_REQUIRED' });
   }
 
   const uniqueSessionIds = [...new Set(session_ids.map(Number).filter(Number.isInteger))];
   if (uniqueSessionIds.length !== session_ids.length || uniqueSessionIds.length === 0) {
-    return res.status(400).json({ error: '選取的時段格式不正確或有重複' });
+    return res.status(400).json({ error: '選取的時段格式不正確或有重複', code: 'SESSIONS_REQUIRED' });
   }
 
   try {
@@ -2711,7 +2717,7 @@ export const extendReservation = async (req, res) => {
       select: { id: true, session_date: true }
     });
     if (sessionsPre.length !== uniqueSessionIds.length) {
-      return res.status(404).json({ error: '找不到指定的時段' });
+      return res.status(404).json({ error: '找不到選擇的時段，請重新整理後再試', code: 'SESSION_NOT_FOUND' });
     }
     const extendDateStr = toTaipeiDateString(sessionsPre[0].session_date);
 
@@ -2727,7 +2733,7 @@ export const extendReservation = async (req, res) => {
       });
 
       if (existingReservations.length === 0) {
-        throw { status: 404, message: '找不到原本的預約' };
+        throw { status: 404, code: 'RESERVATION_NOT_FOUND', message: '找不到原本的預約' };
       }
 
       const baseReservation = existingReservations[0];
@@ -2752,7 +2758,7 @@ export const extendReservation = async (req, res) => {
       });
 
       if (sessions.length !== uniqueSessionIds.length) {
-        throw { status: 404, message: '找不到指定的時段' };
+        throw { status: 404, code: 'SESSION_NOT_FOUND', message: '找不到選擇的時段，請重新整理後再試' };
       }
 
       if (sessions.some(s => toTaipeiDateString(s.session_date) !== bookingDateStr)) {
@@ -2866,7 +2872,7 @@ export const extendReservation = async (req, res) => {
             ? activeLayout.capacity
             : ((activeLayout?.seats || []).filter(s => s.is_active).length || 16);
           if (layoutCapacity - bookedPax - heldPax < pax) {
-            throw { status: 400, code: 'INSUFFICIENT_CAPACITY', message: '加時時段座位已滿，無法加時' };
+            throw { status: 400, code: 'INSUFFICIENT_SEATS', message: '所選時段的座位不夠' };
           }
         }
 
@@ -2880,12 +2886,12 @@ export const extendReservation = async (req, res) => {
 
           if (!allocResult.success) {
             if (allocResult.error === 'INSUFFICIENT_SEATS') {
-              throw { status: 400, code: 'INSUFFICIENT_CAPACITY', message: '加時時段座位已滿，無法加時' };
+              throw { status: 400, code: 'INSUFFICIENT_SEATS', message: '所選時段的座位不夠' };
             }
             if (allocResult.error === 'SPLIT_REQUIRED') {
               throw { status: 409, code: 'SPLIT_REQUIRED', message: '連續座位不足，同行者將被拆散。是否確認預約？' };
             }
-            throw { status: 400, message: '無法為加時時段分配座位' };
+            throw { status: 400, code: 'EXTEND_FAILED', message: '加時失敗，請稍後再試' };
           }
 
           mySeats = allocResult.updates.find(u => u.booking_ref === 'NEW_RES').assigned_seats;
@@ -3043,18 +3049,18 @@ export const extendReservation = async (req, res) => {
       });
     }
     if (error.message === 'RESERVATION_NOT_FOUND') {
-      return res.status(404).json({ error: '找不到原本的預約' });
+      return res.status(404).json({ error: '找不到原本的預約', code: 'RESERVATION_NOT_FOUND' });
     }
     if (error.message === 'SOME_SESSIONS_NOT_FOUND') {
-      return res.status(404).json({ error: '找不到指定的時段' });
+      return res.status(404).json({ error: '找不到選擇的時段，請重新整理後再試', code: 'SESSION_NOT_FOUND' });
     }
     if (error.message === 'INSUFFICIENT_CAPACITY') {
-      return res.status(400).json({ error: '加時時段座位已滿，無法加時' });
+      return res.status(400).json({ error: '所選時段的座位不夠', code: 'INSUFFICIENT_SEATS' });
     }
     if (error.message === 'SPLIT_REQUIRED') {
-      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？' });
+      return res.status(409).json({ error: '連續座位不足，同行者將被拆散。是否確認預約？', code: 'SPLIT_REQUIRED' });
     }
-    res.status(500).json({ error: '加時失敗，請稍後再試' });
+    res.status(500).json({ error: '加時失敗，請稍後再試', code: 'EXTEND_FAILED' });
   }
 };
 
