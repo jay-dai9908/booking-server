@@ -270,6 +270,27 @@ async function run() {
         }
         await route.continue();
       });
+      await page.route('**/api/billing/**', async (route) => {
+        const req = route.request();
+        if (req.method() === 'GET') {
+          const reqUrl = new URL(req.url());
+          reqUrl.searchParams.set('now', mockNowIso);
+          await route.continue({ url: reqUrl.toString() });
+          return;
+        }
+        if (req.method() === 'POST') {
+          let bodyObj = {};
+          try {
+            bodyObj = JSON.parse(req.postData() || '{}');
+          } catch (_) {
+            bodyObj = {};
+          }
+          bodyObj.now = mockNowIso;
+          await route.continue({ postData: JSON.stringify(bodyObj) });
+          return;
+        }
+        await route.continue();
+      });
 
       await adminLogin(page);
       await page.goto(`${BASE_URL}/admin/seating`, { waitUntil: 'networkidle' });

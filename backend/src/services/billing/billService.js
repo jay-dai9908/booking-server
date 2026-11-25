@@ -1036,8 +1036,11 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
     });
     const priorValidCount = priorValidPayments.length;
 
-    // Recalculate bill
-    const billData = await getBookingBill(booking_ref, tx);
+    // Recalculate bill (respecting test-only clock override via resolveBillingDate)
+    const testNowRaw = resolveBillingDate(payload);
+    const testNowParsed = testNowRaw ? new Date(testNowRaw) : null;
+    const validTestNow = testNowParsed && !Number.isNaN(testNowParsed.getTime()) ? testNowParsed : null;
+    const billData = await getBookingBill(booking_ref, tx, validTestNow || new Date());
     const { bill, pricing, draft } = billData;
 
     // Filter target persons

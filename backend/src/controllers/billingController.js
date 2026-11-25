@@ -20,7 +20,9 @@ import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 export async function getBillingDetails(req, res) {
   const { booking_ref } = req.params;
   try {
-    const data = await getBookingBill(booking_ref);
+    const rawNow = process.env.NODE_ENV === 'test' && req.query?.now ? new Date(String(req.query.now)) : null;
+    const validNow = rawNow && !Number.isNaN(rawNow.getTime()) ? rawNow : null;
+    const data = await getBookingBill(booking_ref, prisma, validNow || new Date());
 
     const addonPresets = await prisma.addonItem.findMany({
       where: { is_active: true },
@@ -32,7 +34,7 @@ export async function getBillingDetails(req, res) {
     });
 
     return res.json({
-      server_now: new Date().toISOString(),
+      server_now: (validNow || new Date()).toISOString(),
       booking: data.booking,
       pricing: data.pricing,
       draft: data.draft,
