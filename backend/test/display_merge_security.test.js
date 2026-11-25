@@ -197,8 +197,7 @@ test('Display merge security: 4mb slide/settings body limits, >4mb 413, safeHttp
             { key: 'cash', label: '現金', enabled: true },
             { key: 'transfer', label: '轉帳', enabled: true },
             { key: 'linepay', label: 'LINE Pay', enabled: false },
-            { key: 'card', label: '信用卡', enabled: true },
-            { key: 'pass', label: '體驗券 / 票券', enabled: true }
+            { key: 'card', label: '信用卡', enabled: true }
           ]
         })
       });
