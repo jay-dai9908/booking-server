@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ShoppingBag,
   Package,
@@ -958,6 +959,14 @@ export default function ShopAdminPage() {
                 <option value="picked_up">已取貨完成</option>
                 <option value="cancelled">已取消</option>
               </select>
+
+              <Link
+                to="/admin/accounting?tab=shop"
+                className="px-3 py-1.5 bg-[#FAF7F2] hover:bg-[#EFE6D8] border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#8B5B43] inline-flex items-center gap-1 whitespace-nowrap"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                看商城收入統計
+              </Link>
 
               <button
                 type="button"

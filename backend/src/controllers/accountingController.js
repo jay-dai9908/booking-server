@@ -1,6 +1,6 @@
 import prisma from '../prismaClient.js';
 import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
-import { buildPaymentsCsv, buildEventsCsv } from '../../../shared/accountingExport.js';
+import { buildPaymentsCsv, buildShopPaymentsCsv, buildEventsCsv } from '../../../shared/accountingExport.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { queuePrintJob } from '../services/print/printService.js';
@@ -13,6 +13,7 @@ import {
   resolveRawMethodsMatchingFilter
 } from '../services/accounting/methodAggregation.js';
 import { getUnpaidBookings } from '../services/accounting/unpaidQuery.js';
+import { computeShopSummary } from '../services/accounting/shopRevenue.js';
 
 export const getAccountingSummary = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -56,35 +57,22 @@ export const getAccountingSummary = async (req, res) => {
       configuredMethods
     );
 
-    const shopCharges = shopPayments.filter(p => p.kind === 'charge' || p.kind === 'supplement');
-    const shopRefundsList = shopPayments.filter(p => p.kind === 'refund');
-    const shopByMethod = {};
-    for (const p of shopCharges) {
-      if (!shopByMethod[p.method]) shopByMethod[p.method] = { count: 0, amount: 0 };
-      shopByMethod[p.method].count += 1;
-      shopByMethod[p.method].amount += p.amount;
-    }
-    const shopRefundsByMethod = {};
-    for (const p of shopRefundsList) {
-      if (!shopRefundsByMethod[p.method]) shopRefundsByMethod[p.method] = { count: 0, amount: 0 };
-      shopRefundsByMethod[p.method].count += 1;
-      shopRefundsByMethod[p.method].amount += p.amount;
-    }
-    const shopChargeTotal = shopCharges.reduce((sum, p) => sum + p.amount, 0);
-    const shopRefundTotal = shopRefundsList.reduce((sum, p) => sum + p.amount, 0);
+    const startStr = toTaipeiDateString(start);
+    const endStr = toTaipeiDateString(end);
+    const shopSummary = await computeShopSummary(prisma, { start, end, startStr, endStr });
 
     const passValue = passes.reduce((sum, p) => sum + p.amount, 0);
 
     // Unpaid reservations in range (unified formula excluding no_show & deducting pass)
-    const sessionStartDate = dateOnly(start_date || toTaipeiDateString(start));
-    const sessionEndDate = dateOnly(end_date || toTaipeiDateString(end));
+    const sessionStartDate = dateOnly(start_date || startStr);
+    const sessionEndDate = dateOnly(end_date || endStr);
     const unpaidStats = await getUnpaidBookings(prisma, {
       dateFrom: sessionStartDate,
       dateTo: sessionEndDate
     });
 
     return res.json({
-      period: { start_date: toTaipeiDateString(start), end_date: toTaipeiDateString(end) },
+      period: { start_date: startStr, end_date: endStr },
       total_income: netRevenue,
       net_revenue: netRevenue,
       total_refunds: totalRefund,
@@ -108,10 +96,14 @@ export const getAccountingSummary = async (req, res) => {
         no_show_count: unpaidStats.no_show_count
       },
       shop: {
-        count: shopCharges.length,
-        amount: shopChargeTotal - shopRefundTotal,
-        by_method: shopByMethod,
-        refunds: shopRefundsByMethod
+        count: shopSummary.charge_count,
+        amount: shopSummary.net,
+        income: shopSummary.income,
+        refunds: shopSummary.refunds,
+        order_count: shopSummary.order_count,
+        by_method: shopSummary.by_method,
+        refunds_by_method: shopSummary.refunds_by_method,
+        methods: shopSummary.methods
       }
     });
   } catch (error) {
@@ -798,8 +790,85 @@ export const getUnpaidFollowUp = async (req, res) => {
   }
 };
 
+export const getShopSummary = async (req, res) => {
+  try {
+    const todayStr = toTaipeiDateString(new Date());
+    const fromStr = (req.query.date_from || req.query.start_date || todayStr).trim();
+    const toStr = (req.query.date_to || req.query.end_date || fromStr).trim();
+
+    const startD = new Date(`${fromStr}T00:00:00+08:00`);
+    const endD = new Date(`${toStr}T23:59:59.999+08:00`);
+    if (Number.isNaN(startD.getTime()) || Number.isNaN(endD.getTime()) || endD < startD) {
+      return res.status(400).json({ error: '日期格式或區間不正確' });
+    }
+    const diffDays = Math.floor((dateOnly(toStr).getTime() - dateOnly(fromStr).getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    if (diffDays > 366) {
+      return res.status(400).json({ error: '查詢範圍最多 366 天' });
+    }
+
+    const stats = await computeShopSummary(prisma, {
+      start: startD,
+      end: endD,
+      startStr: fromStr,
+      endStr: toStr
+    });
+
+    return res.json({
+      period: { date_from: fromStr, date_to: toStr },
+      ...stats
+    });
+  } catch (error) {
+    console.error('[getShopSummary] Error:', error);
+    return res.status(500).json({ error: '無法讀取商城收入統計' });
+  }
+};
+
+export const getShopPaymentsCsv = async (req, res) => {
+  try {
+    const todayStr = toTaipeiDateString(new Date());
+    const fromStr = (req.query.date_from || req.query.start_date || todayStr).trim();
+    const toStr = (req.query.date_to || req.query.end_date || fromStr).trim();
+
+    const startD = new Date(`${fromStr}T00:00:00+08:00`);
+    const endD = new Date(`${toStr}T23:59:59.999+08:00`);
+    if (Number.isNaN(startD.getTime()) || Number.isNaN(endD.getTime()) || endD < startD) {
+      return res.status(400).json({ error: '日期格式或區間不正確' });
+    }
+
+    const where = {
+      source: 'shop',
+      status: 'valid',
+      created_at: { gte: startD, lte: endD }
+    };
+
+    const totalRows = await prisma.payment.count({ where });
+    if (totalRows > 20000) {
+      return res.status(413).json({ error: `超過單次匯出上限 20,000 列（目前 ${totalRows} 列），請縮小日期範圍` });
+    }
+
+    const [rows, configuredMethods] = await Promise.all([
+      prisma.payment.findMany({
+        where,
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }]
+      }),
+      getConfiguredPaymentMethods(prisma)
+    ]);
+
+    const csv = buildShopPaymentsCsv(rows, configuredMethods);
+    const filename = encodeURIComponent(`商城收款明細_${fromStr}_${toStr}.csv`);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    return res.send(csv);
+  } catch (error) {
+    console.error('[getShopPaymentsCsv] Error:', error);
+    return res.status(500).json({ error: '匯出商城收款 CSV 失敗' });
+  }
+};
+
 export default {
   getAccountingSummary,
+  getShopSummary,
+  getShopPaymentsCsv,
   getDailyRevenue,
   getLedger,
   getPaymentsList,

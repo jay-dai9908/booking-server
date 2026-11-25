@@ -49,6 +49,34 @@ export function buildPaymentsCsv(payments = [], getMethodLabelOrMethods = []) {
 }
 
 /**
+ * Builds UTF-8 BOM CSV string for shop payments (includes order_ref '單號' column).
+ * @param {Array} payments
+ * @param {Function|Array} getMethodLabelOrMethods
+ * @returns {string}
+ */
+export function buildShopPaymentsCsv(payments = [], getMethodLabelOrMethods = []) {
+  const resolveLabel = resolveMethodFormatter(getMethodLabelOrMethods);
+  const headers = ['單號', '付款編號', '顧客', '種類', '方式', '金額', '經手店員', '時間', '備註'];
+  const rows = payments.map((p) => [
+    p.source_ref || p.booking_ref || '',
+    p.payment_no || '',
+    p.breakdown_json?.customer_name || p.target_label || '商城顧客',
+    p.kind === 'refund' ? '退款' : p.kind === 'supplement' ? '補收' : p.kind === 'waive' ? '免收' : '收款',
+    resolveLabel(p.method),
+    p.amount ?? 0,
+    p.created_by_name || p.staff_name || '',
+    p.created_at ? new Date(p.created_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '',
+    p.note || ''
+  ]);
+
+  const csvRows = [headers, ...rows].map((row) =>
+    row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')
+  );
+
+  return '\uFEFF' + csvRows.join('\r\n');
+}
+
+/**
  * Builds UTF-8 BOM CSV string for audit events.
  * @param {Array} events
  * @returns {string}

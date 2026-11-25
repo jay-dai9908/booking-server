@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   DollarSign,
   FileText,
@@ -66,15 +67,101 @@ function flattenObject(obj, prefix = '') {
   return result;
 }
 
+function DailyRevenueBarChart({ data = [], maxVal = 1000, emptyText = '此期間無數據' }) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="py-12 text-center text-sg-muted text-[13px]">
+        {emptyText}
+      </div>
+    );
+  }
+  const safeMax = maxVal > 0 ? maxVal : 1000;
+  return (
+    <div className="w-full overflow-x-auto py-2 no-scrollbar">
+      <div className="min-w-[480px]">
+        <svg viewBox="0 0 600 210" className="w-full h-52">
+          <line x1="40" y1="20" x2="580" y2="20" stroke="#E5E7EB" strokeDasharray="3 3" />
+          <line x1="40" y1="85" x2="580" y2="85" stroke="#E5E7EB" strokeDasharray="3 3" />
+          <line x1="40" y1="150" x2="580" y2="150" stroke="#D1D5DB" />
+
+          <text x="35" y="24" textAnchor="end" fontSize="10" fill="#9CA3AF">
+            {formatMoney(safeMax)}
+          </text>
+          <text x="35" y="89" textAnchor="end" fontSize="10" fill="#9CA3AF">
+            {formatMoney(Math.round(safeMax / 2))}
+          </text>
+          <text x="35" y="154" textAnchor="end" fontSize="10" fill="#9CA3AF">
+            0
+          </text>
+
+          {data.map((d, idx) => {
+            const totalBars = data.length;
+            const availW = 520;
+            const barSlotW = availW / totalBars;
+            const barW = Math.max(12, Math.min(36, barSlotW * 0.65));
+            const x = 50 + idx * barSlotW + (barSlotW - barW) / 2;
+            const val = d.revenue ?? d.net ?? 0;
+            const barH = safeMax > 0 ? Math.round((Math.max(0, val) / safeMax) * 125) : 0;
+            const y = 150 - barH;
+
+            return (
+              <g key={d.date} className="group">
+                <rect
+                  x={x}
+                  y={y}
+                  width={barW}
+                  height={Math.max(3, barH)}
+                  rx="4"
+                  className="fill-sg-brown hover:fill-sg-brown-hover transition-colors"
+                />
+                {val > 0 && (
+                  <text
+                    x={x + barW / 2}
+                    y={y - 5}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fontWeight="bold"
+                    fill="#4A3728"
+                  >
+                    {val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val}
+                  </text>
+                )}
+                <text
+                  x={x + barW / 2}
+                  y="170"
+                  textAnchor="middle"
+                  fontSize="10"
+                  fill="#6B7280"
+                >
+                  {d.date.slice(5)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 export default function AccountingPage() {
   const { can } = useAdminPermissions();
   const canMoneyWrite = can(MONEY_WRITE);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => {
+    if (searchParams.get('tab') === 'shop') return 'shop';
     if (typeof window !== 'undefined' && window.innerWidth < 640) {
       return 'closing';
     }
     return 'overview';
   });
+
+  useEffect(() => {
+    const qTab = searchParams.get('tab');
+    if (qTab && ['overview', 'payments', 'events', 'print-jobs', 'closing', 'unpaid', 'shop'].includes(qTab)) {
+      setActiveTab(qTab);
+    }
+  }, [searchParams]);
 
   // Today string in Asia/Taipei
   const todayStr = useMemo(() => {
@@ -131,6 +218,10 @@ export default function AccountingPage() {
   const [unpaidList, setUnpaidList] = useState([]);
   const [unpaidNoShowCount, setUnpaidNoShowCount] = useState(0);
   const [loadingUnpaid, setLoadingUnpaid] = useState(false);
+
+  // Tab 6: Shop revenue state (Round 44 Item 5)
+  const [shopSummary, setShopSummary] = useState(null);
+  const [loadingShop, setLoadingShop] = useState(false);
 
   // Void payment modal state
   const [voidPaymentTarget, setVoidPaymentTarget] = useState(null);
@@ -276,12 +367,29 @@ export default function AccountingPage() {
     }
   };
 
+  // Fetch Shop Revenue Summary (Round 44 Item 5)
+  const fetchShopSummary = async () => {
+    try {
+      setLoadingShop(true);
+      const res = await api.get('/accounting/shop-summary', {
+        params: { date_from: dateFrom, date_to: dateTo }
+      });
+      setShopSummary(res.data || null);
+    } catch (err) {
+      console.error(err);
+      showToast(err.response?.data?.error || '無法載入商城收入統計', true);
+    } finally {
+      setLoadingShop(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'payments' || activeTab === 'overview') fetchPayments();
     else if (activeTab === 'events') fetchEvents();
     else if (activeTab === 'print-jobs') fetchPrintJobs();
     else if (activeTab === 'closing') fetchClosing();
     else if (activeTab === 'unpaid') fetchUnpaid();
+    else if (activeTab === 'shop') fetchShopSummary();
   }, [activeTab, dateFrom, dateTo, closingDate, paymentKindFilter, paymentMethodFilter, eventCategoryFilter, printStatusFilter, selectedStaff]);
 
   // Void payment
@@ -512,6 +620,19 @@ export default function AccountingPage() {
     }
   };
 
+  const handleDownloadShopPaymentsCsv = async () => {
+    try {
+      const res = await api.get('/accounting/shop-payments.csv', {
+        params: { date_from: dateFrom, date_to: dateTo },
+        responseType: 'blob'
+      });
+      triggerBlobDownload(res.data, `商城收款明細_${dateFrom}_${dateTo}.csv`);
+    } catch (err) {
+      console.error(err);
+      showToast(err.response?.status === 413 ? '超過 20,000 筆上限，請縮小日期範圍' : '匯出商城收款 CSV 失敗');
+    }
+  };
+
   const handleDownloadEventsCsv = async () => {
     try {
       const res = await api.get('/accounting/events.csv', {
@@ -548,6 +669,33 @@ export default function AccountingPage() {
     return maxVal > 0 ? maxVal : 1000;
   }, [dailyRevenueData]);
 
+  const shopDailyData = useMemo(() => {
+    return (shopSummary?.daily || []).map((d) => ({
+      ...d,
+      revenue: d.net ?? d.income ?? 0
+    }));
+  }, [shopSummary?.daily]);
+
+  const maxShopDaily = useMemo(() => {
+    const maxVal = Math.max(0, ...shopDailyData.map((d) => d.revenue));
+    return maxVal > 0 ? maxVal : 1000;
+  }, [shopDailyData]);
+
+  const visibleShopMethods = useMemo(() => {
+    return (shopSummary?.methods || []).filter(
+      (m) => m.enabled || m.count > 0 || m.amount !== 0 || m.refund_count > 0
+    );
+  }, [shopSummary?.methods]);
+
+  const handleSelectTab = (tab) => {
+    setActiveTab(tab);
+    if (tab === 'shop') {
+      setSearchParams({ tab: 'shop' });
+    } else if (searchParams.get('tab')) {
+      setSearchParams({});
+    }
+  };
+
   return (
     <div className="space-y-4 max-w-7xl mx-auto pb-12">
       {/* Toast */}
@@ -568,10 +716,11 @@ export default function AccountingPage() {
               { id: 'events', label: '異動紀錄' },
               { id: 'print-jobs', label: '列印紀錄' },
               { id: 'closing', label: '日結' },
-              { id: 'unpaid', label: `未結追蹤 ${summary?.unpaid?.count ? `(${summary.unpaid.count})` : ''}` }
+              { id: 'unpaid', label: `未結追蹤 ${summary?.unpaid?.count ? `(${summary.unpaid.count})` : ''}` },
+              { id: 'shop', label: '商城收入' }
             ]}
             activeTab={activeTab}
-            onChange={setActiveTab}
+            onChange={handleSelectTab}
           />
 
           {activeTab === 'closing' && isPrintGloballyEnabled() && (
@@ -603,7 +752,7 @@ export default function AccountingPage() {
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className={`p-2 rounded-2xl border transition ${
-                ['overview', 'payments', 'print-jobs'].includes(activeTab)
+                ['overview', 'payments', 'print-jobs', 'shop'].includes(activeTab)
                   ? 'bg-sg-brown text-white border-sg-brown'
                   : 'bg-white text-sg-ink border-sg-line hover:border-sg-muted'
               }`}
@@ -617,7 +766,7 @@ export default function AccountingPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveTab('overview');
+                    handleSelectTab('overview');
                     setMobileMenuOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2 font-bold transition flex items-center justify-between ${
@@ -630,7 +779,7 @@ export default function AccountingPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveTab('payments');
+                    handleSelectTab('payments');
                     setMobileMenuOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2 font-bold transition flex items-center justify-between ${
@@ -643,7 +792,20 @@ export default function AccountingPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveTab('print-jobs');
+                    handleSelectTab('shop');
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2 font-bold transition flex items-center justify-between ${
+                    activeTab === 'shop' ? 'bg-sg-paper text-sg-brown' : 'text-sg-ink hover:bg-sg-paper/60'
+                  }`}
+                >
+                  <span>商城收入</span>
+                  {activeTab === 'shop' && <Check className="w-3.5 h-3.5 text-sg-brown" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSelectTab('print-jobs');
                     setMobileMenuOpen(false);
                   }}
                   className={`w-full text-left px-3 py-2 font-bold transition flex items-center justify-between ${
@@ -660,7 +822,7 @@ export default function AccountingPage() {
       </div>
 
       {/* Date & Search Filter Bar (Spec 5.2 Quick date chips) */}
-      {['overview', 'payments', 'events', 'print-jobs'].includes(activeTab) && (
+      {['overview', 'payments', 'events', 'print-jobs', 'shop'].includes(activeTab) && (
         <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-sg-line text-[12px]">
           <div className="space-y-1.5 w-full sm:w-auto">
             <span className="text-sg-muted text-[11px] font-bold block">日期區間</span>
@@ -781,75 +943,11 @@ export default function AccountingPage() {
               </span>
             </div>
 
-            {dailyRevenueData.length === 0 ? (
-              <div className="py-12 text-center text-sg-muted text-[13px]">
-                此期間無營收數據
-              </div>
-            ) : (
-              <div className="w-full overflow-x-auto py-2 no-scrollbar">
-                <div className="min-w-[480px]">
-                  <svg viewBox="0 0 600 210" className="w-full h-52">
-                    <line x1="40" y1="20" x2="580" y2="20" stroke="#E5E7EB" strokeDasharray="3 3" />
-                    <line x1="40" y1="85" x2="580" y2="85" stroke="#E5E7EB" strokeDasharray="3 3" />
-                    <line x1="40" y1="150" x2="580" y2="150" stroke="#D1D5DB" />
-
-                    <text x="35" y="24" textAnchor="end" fontSize="10" fill="#9CA3AF">
-                      {formatMoney(maxDailyRev)}
-                    </text>
-                    <text x="35" y="89" textAnchor="end" fontSize="10" fill="#9CA3AF">
-                      {formatMoney(Math.round(maxDailyRev / 2))}
-                    </text>
-                    <text x="35" y="154" textAnchor="end" fontSize="10" fill="#9CA3AF">
-                      0
-                    </text>
-
-                    {dailyRevenueData.map((d, idx) => {
-                      const totalBars = dailyRevenueData.length;
-                      const availW = 520;
-                      const barSlotW = availW / totalBars;
-                      const barW = Math.max(12, Math.min(36, barSlotW * 0.65));
-                      const x = 50 + idx * barSlotW + (barSlotW - barW) / 2;
-                      const barH = maxDailyRev > 0 ? Math.round((Math.max(0, d.revenue) / maxDailyRev) * 125) : 0;
-                      const y = 150 - barH;
-
-                      return (
-                        <g key={d.date} className="group">
-                          <rect
-                            x={x}
-                            y={y}
-                            width={barW}
-                            height={Math.max(3, barH)}
-                            rx="4"
-                            className="fill-sg-brown hover:fill-sg-brown-hover transition-colors"
-                          />
-                          {d.revenue > 0 && (
-                            <text
-                              x={x + barW / 2}
-                              y={y - 5}
-                              textAnchor="middle"
-                              fontSize="10"
-                              fontWeight="bold"
-                              fill="#4A3728"
-                            >
-                              {d.revenue >= 1000 ? `${(d.revenue / 1000).toFixed(1)}k` : d.revenue}
-                            </text>
-                          )}
-                          <text
-                            x={x + barW / 2}
-                            y="170"
-                            textAnchor="middle"
-                            fontSize="10"
-                            fill="#6B7280"
-                          >
-                            {d.date.slice(5)}
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </svg>
-                </div>
-              </div>
-            )}
+            <DailyRevenueBarChart
+              data={dailyRevenueData}
+              maxVal={maxDailyRev}
+              emptyText="此期間無營收數據"
+            />
           </div>
 
           {/* Payment Method Breakdown Cards (dynamic configured methods + separate pass deduction) */}
@@ -1838,6 +1936,92 @@ export default function AccountingPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* TAB 6: SHOP REVENUE (商城收入) */}
+      {activeTab === 'shop' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-sg-paper border border-sg-line px-4 py-2.5 rounded-2xl text-[12px] text-sg-ink font-medium">
+            <span>商城收入不算進上面的營收，交班時商城現金另外一行。</span>
+            <Button variant="secondary" size="sm" onClick={handleDownloadShopPaymentsCsv}>
+              <Download className="w-3.5 h-3.5 mr-1" />
+              下載商城明細 CSV
+            </Button>
+          </div>
+
+          {loadingShop && !shopSummary ? (
+            <div className="py-12 text-center text-sg-muted text-[13px]">載入商城收入中...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
+                  <span className="text-sg-muted text-[12px] font-medium block">商城收入</span>
+                  <div className="text-[24px] font-bold text-sg-ink font-num">
+                    {formatMoney(shopSummary?.income || 0)}
+                  </div>
+                  <span className="text-[11px] text-sg-muted block">
+                    共 {shopSummary?.charge_count || 0} 筆有效收款
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
+                  <span className="text-sg-muted text-[12px] font-medium block">商城退款</span>
+                  <div className="text-[24px] font-bold text-sg-danger font-num">
+                    {formatMoney(shopSummary?.refunds || 0)}
+                  </div>
+                  <span className="text-[11px] text-sg-muted block">
+                    共 {shopSummary?.refund_count || 0} 筆退款
+                  </span>
+                </div>
+
+                <div className="p-4 rounded-3xl bg-white border border-sg-line shadow-xs space-y-1">
+                  <span className="text-sg-muted text-[12px] font-medium block">商城淨額</span>
+                  <div className="text-[24px] font-bold text-sg-sage-ink font-num">
+                    {formatMoney(shopSummary?.net || 0)}
+                  </div>
+                  <span className="text-[11px] text-sg-muted block">
+                    共 {shopSummary?.order_count || 0} 筆有收款訂單
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {visibleShopMethods.map((m) => (
+                  <div key={m.key} className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
+                    <span className="text-sg-muted text-[11px] block">
+                      {m.label || formatPaymentMethod(m.key)}（{m.count || 0} 筆）
+                    </span>
+                    <span className="text-[18px] font-bold text-sg-ink font-num">
+                      {formatMoney(m.amount || 0)}
+                    </span>
+                    {(m.refund_count || 0) > 0 && (
+                      <span className="text-[11px] text-sg-danger block mt-0.5 font-num">
+                        退款 {m.refund_count} 筆（{formatMinus(m.refund_amount || 0)}）
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-white p-5 rounded-3xl border border-sg-line shadow-xs">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[15px] font-bold text-sg-ink flex items-center gap-2">
+                    <BarChart2 className="w-4 h-4 text-sg-brown" />
+                    每日商城收入統計
+                  </h3>
+                  <span className="text-[11px] text-sg-muted">
+                    {dateFrom} 至 {dateTo}
+                  </span>
+                </div>
+                <DailyRevenueBarChart
+                  data={shopDailyData}
+                  maxVal={maxShopDaily}
+                  emptyText="此期間無商城收款數據"
+                />
+              </div>
+            </>
+          )}
         </div>
       )}
 

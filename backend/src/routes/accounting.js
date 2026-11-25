@@ -2,6 +2,8 @@ import express from 'express';
 import {
   getAccountingSummary,
   getDailyRevenue,
+  getShopSummary,
+  getShopPaymentsCsv,
   getLedger,
   getPaymentsList,
   getPaymentsCsv,
@@ -21,6 +23,8 @@ router.use(verifyToken, requirePermission('accounting'));
 
 router.get('/summary', getAccountingSummary);
 router.get('/daily', getDailyRevenue);
+router.get('/shop-summary', getShopSummary);
+router.get('/shop-payments.csv', getShopPaymentsCsv);
 router.get('/ledger', getLedger);
 router.get('/payments', getPaymentsList);
 router.get('/payments.csv', getPaymentsCsv);
