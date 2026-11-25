@@ -36,7 +36,6 @@ import { buildClosingSlip, commandsToPreviewHtml } from '@shared/receipts.js';
 import { toTaipeiDateString } from '@shared/time.js';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
 import { formatMoney, formatMinus } from '../../utils/format';
-import { buildPaymentsCsv, buildEventsCsv, computeDailyRevenue } from '../../utils/admin/accountingExport';
 import { useAdminPermissions, MONEY_WRITE } from '../../hooks/admin/useAdminPermissions';
 
 function flattenObject(obj, prefix = '') {
@@ -91,13 +90,20 @@ export default function AccountingPage() {
 
   // Tab 1: Payments list state
   const [payments, setPayments] = useState([]);
+  const [paymentsCursor, setPaymentsCursor] = useState(null);
+  const [paymentsTotalCount, setPaymentsTotalCount] = useState(0);
+  const [loadingMorePayments, setLoadingMorePayments] = useState(false);
   const [summary, setSummary] = useState(null);
+  const [dailyRevenue, setDailyRevenue] = useState([]);
   const [paymentKindFilter, setPaymentKindFilter] = useState('all');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
   const [loadingPayments, setLoadingPayments] = useState(false);
 
   // Tab 2: Audit events state
   const [events, setEvents] = useState([]);
+  const [eventsCursor, setEventsCursor] = useState(null);
+  const [eventsTotalCount, setEventsTotalCount] = useState(0);
+  const [loadingMoreEvents, setLoadingMoreEvents] = useState(false);
   const [eventCategoryFilter, setEventCategoryFilter] = useState('all');
   const [selectedEventDetail, setSelectedEventDetail] = useState(null);
   const [loadingEvents, setLoadingEvents] = useState(false);
@@ -142,50 +148,79 @@ export default function AccountingPage() {
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  // Fetch Payments & Summary
-  const fetchPayments = async () => {
+  // Fetch Payments, Summary & Daily Trend
+  const fetchPayments = async (cursorArg = null) => {
+    const isLoadMore = Boolean(cursorArg);
     try {
-      setLoadingPayments(true);
-      const [sumRes, payRes] = await Promise.all([
-        api.get('/accounting/summary', { params: { start_date: dateFrom, end_date: dateTo } }),
-        api.get('/accounting/payments', {
-          params: {
-            date_from: dateFrom,
-            date_to: dateTo,
-            kind: paymentKindFilter !== 'all' ? paymentKindFilter : undefined,
-            method: paymentMethodFilter !== 'all' ? paymentMethodFilter : undefined,
-            staff: selectedStaff || undefined,
-            q: searchTerm || undefined
-          }
-        })
-      ]);
-      setSummary(sumRes.data);
-      setPayments(payRes.data?.payments || []);
+      if (isLoadMore) setLoadingMorePayments(true);
+      else setLoadingPayments(true);
+
+      const payParams = {
+        date_from: dateFrom,
+        date_to: dateTo,
+        kind: paymentKindFilter !== 'all' ? paymentKindFilter : undefined,
+        method: paymentMethodFilter !== 'all' ? paymentMethodFilter : undefined,
+        staff: selectedStaff || undefined,
+        q: searchTerm || undefined,
+        ...(isLoadMore ? { cursor: cursorArg } : {})
+      };
+
+      if (isLoadMore) {
+        const payRes = await api.get('/accounting/payments', { params: payParams });
+        const nextItems = payRes.data?.payments || [];
+        setPayments(prev => [...prev, ...nextItems]);
+        setPaymentsCursor(payRes.data?.next_cursor ?? null);
+        if (payRes.data?.total_count != null) setPaymentsTotalCount(payRes.data.total_count);
+      } else {
+        const [sumRes, dailyRes, payRes] = await Promise.all([
+          api.get('/accounting/summary', { params: { start_date: dateFrom, end_date: dateTo } }),
+          api.get('/accounting/daily', { params: { date_from: dateFrom, date_to: dateTo } }),
+          api.get('/accounting/payments', { params: payParams })
+        ]);
+        setSummary(sumRes.data);
+        setDailyRevenue(dailyRes.data?.daily || []);
+        setPayments(payRes.data?.payments || []);
+        setPaymentsCursor(payRes.data?.next_cursor ?? null);
+        setPaymentsTotalCount(payRes.data?.total_count ?? (payRes.data?.payments?.length || 0));
+      }
     } catch (err) {
       console.error(err);
     } finally {
-      setLoadingPayments(false);
+      if (isLoadMore) setLoadingMorePayments(false);
+      else setLoadingPayments(false);
     }
   };
 
   // Fetch Events
-  const fetchEvents = async () => {
+  const fetchEvents = async (cursorArg = null) => {
+    const isLoadMore = Boolean(cursorArg);
     try {
-      setLoadingEvents(true);
+      if (isLoadMore) setLoadingMoreEvents(true);
+      else setLoadingEvents(true);
+
       const res = await api.get('/accounting/events', {
         params: {
           date_from: dateFrom,
           date_to: dateTo,
           category: eventCategoryFilter !== 'all' ? eventCategoryFilter : undefined,
           staff: selectedStaff || undefined,
-          q: searchTerm || undefined
+          q: searchTerm || undefined,
+          ...(isLoadMore ? { cursor: cursorArg } : {})
         }
       });
-      setEvents(res.data?.events || []);
+      const nextItems = res.data?.events || [];
+      if (isLoadMore) {
+        setEvents(prev => [...prev, ...nextItems]);
+      } else {
+        setEvents(nextItems);
+      }
+      setEventsCursor(res.data?.next_cursor ?? null);
+      setEventsTotalCount(res.data?.total_count ?? nextItems.length);
     } catch (err) {
       console.error(err);
     } finally {
-      setLoadingEvents(false);
+      if (isLoadMore) setLoadingMoreEvents(false);
+      else setLoadingEvents(false);
     }
   };
 
@@ -427,48 +462,70 @@ export default function AccountingPage() {
     }
   };
 
-  // CSV download handlers (Spec 5.2)
-  const handleDownloadPaymentsCsv = () => {
-    const csvStr = buildPaymentsCsv(payments, getMethodLabel);
-    const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
+  // CSV download handlers (Round 44 Item 1: generated by backend without 50-row cap)
+  const triggerBlobDownload = (blobData, filename) => {
+    const blob = blobData instanceof Blob ? blobData : new Blob([blobData], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `收款明細_${dateFrom}_${dateTo}.csv`;
+    a.download = filename;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
     URL.revokeObjectURL(url);
-    showToast('已匯出收款明細 CSV');
   };
 
-  const handleDownloadEventsCsv = () => {
-    const csvStr = buildEventsCsv(events);
-    const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `異動紀錄_${dateFrom}_${dateTo}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('已匯出異動紀錄 CSV');
+  const handleDownloadPaymentsCsv = async () => {
+    try {
+      const res = await api.get('/accounting/payments.csv', {
+        params: {
+          date_from: dateFrom,
+          date_to: dateTo,
+          kind: paymentKindFilter !== 'all' ? paymentKindFilter : undefined,
+          method: paymentMethodFilter !== 'all' ? paymentMethodFilter : undefined,
+          staff: selectedStaff || undefined,
+          q: searchTerm || undefined
+        },
+        responseType: 'blob'
+      });
+      triggerBlobDownload(res.data, `收款明細_${dateFrom}_${dateTo}.csv`);
+      showToast('已匯出收款明細 CSV');
+    } catch (err) {
+      console.error(err);
+      showToast(err.response?.status === 413 ? '超過 20,000 筆上限，請縮小日期範圍' : '匯出收款明細 CSV 失敗');
+    }
   };
 
-  // Overview metrics (Spec 5.2)
-  const paidOrdersCount = useMemo(() => {
-    return new Set(
-      payments
-        .filter(p => p.status === 'valid' && p.source !== 'shop' && (p.kind === 'charge' || p.kind === 'supplement') && p.booking_ref)
-        .map(p => p.booking_ref)
-    ).size;
-  }, [payments]);
+  const handleDownloadEventsCsv = async () => {
+    try {
+      const res = await api.get('/accounting/events.csv', {
+        params: {
+          date_from: dateFrom,
+          date_to: dateTo,
+          category: eventCategoryFilter !== 'all' ? eventCategoryFilter : undefined,
+          staff: selectedStaff || undefined,
+          q: searchTerm || undefined
+        },
+        responseType: 'blob'
+      });
+      triggerBlobDownload(res.data, `異動紀錄_${dateFrom}_${dateTo}.csv`);
+      showToast('已匯出異動紀錄 CSV');
+    } catch (err) {
+      console.error(err);
+      showToast(err.response?.status === 413 ? '超過 20,000 筆上限，請縮小日期範圍' : '匯出異動紀錄 CSV 失敗');
+    }
+  };
 
-  const avgTicket = useMemo(() => {
-    const rev = summary?.net_revenue || 0;
-    return paidOrdersCount > 0 ? Math.round(rev / paidOrdersCount) : 0;
-  }, [summary, paidOrdersCount]);
+  // Overview metrics (Round 44 Item 1: sourced strictly from backend summary & daily)
+  const paidOrdersCount = summary?.paid_booking_count ?? 0;
+  const avgTicket = summary?.avg_ticket ?? 0;
 
   const dailyRevenueData = useMemo(() => {
-    return computeDailyRevenue(payments, dateFrom, dateTo);
-  }, [payments, dateFrom, dateTo]);
+    return (dailyRevenue || []).map((d) => ({
+      ...d,
+      revenue: d.net ?? d.revenue ?? 0
+    }));
+  }, [dailyRevenue]);
 
   const maxDailyRev = useMemo(() => {
     const maxVal = Math.max(0, ...dailyRevenueData.map(d => d.revenue));
@@ -893,15 +950,21 @@ export default function AccountingPage() {
               ))}
             </div>
 
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleDownloadPaymentsCsv}
-              className="whitespace-nowrap"
-            >
-              <Download className="w-3.5 h-3.5 mr-1 text-sg-muted" />
-              匯出 CSV
-            </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-sg-muted font-bold" data-testid="payments-total-count">
+                共 {paymentsTotalCount} 筆
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="download-payments-csv-btn"
+                onClick={handleDownloadPaymentsCsv}
+                className="whitespace-nowrap"
+              >
+                <Download className="w-3.5 h-3.5 mr-1 text-sg-muted" />
+                匯出 CSV
+              </Button>
+            </div>
           </div>
 
           {/* Desktop Table (>= 768px) */}
@@ -1106,6 +1169,20 @@ export default function AccountingPage() {
               })
             )}
           </div>
+
+          {paymentsCursor && (
+            <div className="flex justify-center pt-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="load-more-payments-btn"
+                loading={loadingMorePayments}
+                onClick={() => fetchPayments(paymentsCursor)}
+              >
+                載入更多（目前已顯示 {payments.length} / {paymentsTotalCount} 筆）
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1139,15 +1216,21 @@ export default function AccountingPage() {
               ))}
             </div>
 
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleDownloadEventsCsv}
-              className="whitespace-nowrap"
-            >
-              <Download className="w-3.5 h-3.5 mr-1 text-sg-muted" />
-              匯出 CSV
-            </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-sg-muted font-bold" data-testid="events-total-count">
+                共 {eventsTotalCount} 筆
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="download-events-csv-btn"
+                onClick={handleDownloadEventsCsv}
+                className="whitespace-nowrap"
+              >
+                <Download className="w-3.5 h-3.5 mr-1 text-sg-muted" />
+                匯出 CSV
+              </Button>
+            </div>
           </div>
 
           {/* Table */}
@@ -1214,6 +1297,20 @@ export default function AccountingPage() {
               </tbody>
             </table>
           </div>
+
+          {eventsCursor && (
+            <div className="flex justify-center pt-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid="load-more-events-btn"
+                loading={loadingMoreEvents}
+                onClick={() => fetchEvents(eventsCursor)}
+              >
+                載入更多（目前已顯示 {events.length} / {eventsTotalCount} 筆）
+              </Button>
+            </div>
+          )}
 
           <p className="text-[11px] text-sg-muted text-center">
             每一筆都記錄改之前和改之後的內容，不能刪除；作廢、退款、改金額一定要填原因。

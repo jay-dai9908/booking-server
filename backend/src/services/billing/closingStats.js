@@ -1,5 +1,6 @@
 import prisma from '../../prismaClient.js';
 import { dateOnly } from '../../../../shared/time.js';
+import { isRevenuePayment } from '../accounting/revenueScope.js';
 
 /**
  * Compute authoritative shift closing stats & receipt snapshot for `[start, end]`.
@@ -11,8 +12,8 @@ export async function computeClosingStats({ start, end, businessDate, txOrPrisma
     where: { created_at: { gte: start, lte: end } }
   });
 
-  const storePayments = payments.filter(p => p.source !== 'shop');
-  const shopPayments = payments.filter(p => p.source === 'shop');
+  const storePayments = payments.filter(isRevenuePayment);
+  const shopPayments = payments.filter(p => !isRevenuePayment(p));
 
   const validPayments = storePayments.filter(p => p.status === 'valid');
   const charges = validPayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');

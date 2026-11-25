@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPaymentsCsv, buildEventsCsv, computeDailyRevenue } from '../src/utils/admin/accountingExport.js';
+import { buildPaymentsCsv, buildEventsCsv, computeDailyRevenue } from '../../shared/accountingExport.js';
 
 test('accountingExport pure functions', async (t) => {
   await t.test('1. buildPaymentsCsv includes UTF-8 BOM and correct headers', () => {

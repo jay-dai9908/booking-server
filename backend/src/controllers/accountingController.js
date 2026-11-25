@@ -1,10 +1,12 @@
 import prisma from '../prismaClient.js';
 import { toTaipeiDateString, dateOnly } from '../../../shared/time.js';
+import { buildPaymentsCsv, buildEventsCsv } from '../../../shared/accountingExport.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { queuePrintJob } from '../services/print/printService.js';
 import { getShiftLock, canVoidPayment } from '../services/billing/shiftLock.js';
 import { computeClosingStats } from '../services/billing/closingStats.js';
+import { REVENUE_PAYMENT_SOURCES, revenuePaymentWhere, isRevenuePayment } from '../services/accounting/revenueScope.js';
 
 export const getAccountingSummary = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -23,18 +25,23 @@ export const getAccountingSummary = async (req, res) => {
     });
 
     const validPayments = payments.filter(p => p.status === 'valid');
-    const storePayments = validPayments.filter(p => p.source !== 'shop');
-    const shopPayments = validPayments.filter(p => p.source === 'shop');
+    const storePayments = validPayments.filter(isRevenuePayment);
+    const shopPayments = validPayments.filter(p => !isRevenuePayment(p));
 
     const charges = storePayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method !== 'pass');
     const passes = storePayments.filter(p => (p.kind === 'charge' || p.kind === 'supplement') && p.method === 'pass');
     const refunds = storePayments.filter(p => p.kind === 'refund' && p.method !== 'pass');
     const passRefunds = storePayments.filter(p => p.kind === 'refund' && p.method === 'pass');
-    const voids = payments.filter(p => p.status === 'voided' && p.source !== 'shop');
+    const voids = payments.filter(p => p.status === 'voided' && isRevenuePayment(p));
 
     const totalIncome = charges.reduce((sum, p) => sum + p.amount, 0);
     const totalRefund = refunds.reduce((sum, p) => sum + p.amount, 0);
     const netRevenue = totalIncome - totalRefund;
+    const paidBookingRefs = new Set(
+      charges.filter(p => p.source === 'booking' && p.booking_ref).map(p => p.booking_ref)
+    );
+    const paidBookingCount = paidBookingRefs.size;
+    const avgTicket = paidBookingCount > 0 ? Math.round(netRevenue / paidBookingCount) : 0;
 
     const byMethod = {};
     for (const p of charges) {
@@ -93,6 +100,8 @@ export const getAccountingSummary = async (req, res) => {
       total_income: netRevenue,
       net_revenue: netRevenue,
       total_refunds: totalRefund,
+      paid_booking_count: paidBookingCount,
+      avg_ticket: avgTicket,
       by_method: byMethod,
       refunds: refundsByMethod,
       voids: {
@@ -184,36 +193,160 @@ export const getLedger = async (req, res) => {
   }
 };
 
-export const getPaymentsList = async (req, res) => {
-  const { date_from, date_to, method, kind, status, staff, q, cursor } = req.query;
+const VALID_PAYMENT_SOURCES = new Set(['booking', 'pass_sale', 'shop']);
+const CSV_MAX_ROWS = 20000;
+const DATE_YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-  try {
-    const where = {};
-    if (date_from || date_to) {
-      where.created_at = {};
-      if (date_from) where.created_at.gte = new Date(`${date_from}T00:00:00+08:00`);
-      if (date_to) where.created_at.lte = new Date(`${date_to}T23:59:59.999+08:00`);
-    }
-    if (method) where.method = method;
-    if (kind) where.kind = kind;
-    if (status) where.status = status;
-    if (staff) where.staff_name = { contains: staff, mode: 'insensitive' };
+function buildPaymentsFilterWhere(query = {}, defaultSources = REVENUE_PAYMENT_SOURCES) {
+  const { date_from, date_to, method, kind, status, staff, q, source } = query;
+  const where = {};
 
-    if (q) {
-      const qTrim = q.trim();
+  if (source !== undefined && source !== '') {
+    const rawList = Array.isArray(source) ? source : String(source).split(',');
+    const sources = rawList
+      .map(s => String(s || '').trim())
+      .filter(s => VALID_PAYMENT_SOURCES.has(s));
+    const finalSources = sources.length > 0 ? sources : defaultSources;
+    where.source = finalSources.length === 1 ? finalSources[0] : { in: finalSources };
+  } else {
+    where.source = defaultSources.length === 1 ? defaultSources[0] : { in: defaultSources };
+  }
+
+  if (date_from || date_to) {
+    where.created_at = {};
+    if (date_from) where.created_at.gte = new Date(`${date_from}T00:00:00+08:00`);
+    if (date_to) where.created_at.lte = new Date(`${date_to}T23:59:59.999+08:00`);
+  }
+  if (method) where.method = method;
+  if (kind) where.kind = kind;
+  if (status) where.status = status;
+  if (staff) where.staff_name = { contains: staff, mode: 'insensitive' };
+
+  if (q) {
+    const qTrim = String(q).trim();
+    if (qTrim) {
       where.OR = [
         { booking_ref: { contains: qTrim, mode: 'insensitive' } },
+        { source_ref: { contains: qTrim, mode: 'insensitive' } },
         { payment_no: { contains: qTrim, mode: 'insensitive' } }
       ];
     }
+  }
+  return where;
+}
+
+function buildEventsFilterWhere(query = {}) {
+  const { date_from, date_to, category, staff, q } = query;
+  const where = {};
+  if (date_from || date_to) {
+    where.created_at = {};
+    if (date_from) where.created_at.gte = new Date(`${date_from}T00:00:00+08:00`);
+    if (date_to) where.created_at.lte = new Date(`${date_to}T23:59:59.999+08:00`);
+  }
+  if (category) where.category = category;
+  if (staff) where.staff_name = { contains: staff, mode: 'insensitive' };
+  if (q) {
+    const qTrim = String(q).trim();
+    if (qTrim) {
+      where.OR = [
+        { booking_ref: { contains: qTrim, mode: 'insensitive' } },
+        { summary: { contains: qTrim, mode: 'insensitive' } }
+      ];
+    }
+  }
+  return where;
+}
+
+export const getDailyRevenue = async (req, res) => {
+  try {
+    const todayStr = toTaipeiDateString(new Date());
+    const fromStr = req.query.date_from || todayStr;
+    const toStr = req.query.date_to || todayStr;
+
+    if (!DATE_YMD_RE.test(fromStr) || !DATE_YMD_RE.test(toStr)) {
+      return res.status(400).json({ error: '日期格式必須為 YYYY-MM-DD' });
+    }
+    const startUtc = new Date(`${fromStr}T00:00:00.000Z`);
+    const endUtc = new Date(`${toStr}T00:00:00.000Z`);
+    const daySpan = Math.round((endUtc.getTime() - startUtc.getTime()) / 86400000) + 1;
+    if (!Number.isFinite(daySpan) || daySpan < 1) {
+      return res.status(400).json({ error: '結束日期不可早於開始日期' });
+    }
+    if (daySpan > 366) {
+      return res.status(400).json({ error: '查詢區間最多 366 天' });
+    }
+
+    const start = new Date(`${fromStr}T00:00:00+08:00`);
+    const end = new Date(`${toStr}T23:59:59.999+08:00`);
+    const payments = await prisma.payment.findMany({
+      where: revenuePaymentWhere({
+        status: 'valid',
+        created_at: { gte: start, lte: end }
+      }),
+      select: { kind: true, method: true, amount: true, created_at: true }
+    });
+
+    const dailyMap = new Map();
+    const cur = new Date(startUtc);
+    while (cur <= endUtc) {
+      const dStr = cur.toISOString().slice(0, 10);
+      dailyMap.set(dStr, {
+        date: dStr,
+        revenue: 0,
+        refunds: 0,
+        net: 0,
+        count: 0,
+        by_method: {}
+      });
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+
+    for (const p of payments) {
+      if (p.method === 'pass') continue;
+      const dStr = toTaipeiDateString(p.created_at);
+      const row = dailyMap.get(dStr);
+      if (!row) continue;
+
+      if (p.kind === 'charge' || p.kind === 'supplement') {
+        row.revenue += p.amount;
+        row.net += p.amount;
+        row.count += 1;
+        if (!row.by_method[p.method]) row.by_method[p.method] = { count: 0, amount: 0 };
+        row.by_method[p.method].count += 1;
+        row.by_method[p.method].amount += p.amount;
+      } else if (p.kind === 'refund') {
+        row.refunds += p.amount;
+        row.net -= p.amount;
+      }
+    }
+
+    return res.json({
+      date_from: fromStr,
+      date_to: toStr,
+      daily: Array.from(dailyMap.values())
+    });
+  } catch (error) {
+    console.error('[getDailyRevenue] Error:', error);
+    return res.status(500).json({ error: '無法計算每日營收' });
+  }
+};
+
+export const getPaymentsList = async (req, res) => {
+  const { cursor } = req.query;
+
+  try {
+    const where = buildPaymentsFilterWhere(req.query, REVENUE_PAYMENT_SOURCES);
 
     const take = 50;
-    const payments = await prisma.payment.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      take: take + 1,
-      ...(cursor ? { skip: 1, cursor: { id: Number(cursor) } } : {})
-    });
+    const [totalCount, payments] = await Promise.all([
+      prisma.payment.count({ where }),
+      prisma.payment.findMany({
+        where,
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        take: take + 1,
+        ...(cursor ? { skip: 1, cursor: { id: Number(cursor) } } : {})
+      })
+    ]);
 
     const hasMore = payments.length > take;
     const rawItems = hasMore ? payments.slice(0, take) : payments;
@@ -234,48 +367,98 @@ export const getPaymentsList = async (req, res) => {
     });
     const nextCursor = hasMore ? items[items.length - 1].id : null;
 
-    return res.json({ payments: items, next_cursor: nextCursor });
+    return res.json({ payments: items, next_cursor: nextCursor, total_count: totalCount });
   } catch (error) {
     console.error('[getPaymentsList] Error:', error);
     return res.status(500).json({ error: '無法讀取收款清單' });
   }
 };
 
+export const getPaymentsCsv = async (req, res) => {
+  try {
+    const where = buildPaymentsFilterWhere(req.query, REVENUE_PAYMENT_SOURCES);
+    const totalCount = await prisma.payment.count({ where });
+    if (totalCount > CSV_MAX_ROWS) {
+      return res.status(413).json({ error: `資料共 ${totalCount} 筆，超過單次 ${CSV_MAX_ROWS} 筆匯出上限，請縮小日期範圍` });
+    }
+
+    const [rows, gs] = await Promise.all([
+      prisma.payment.findMany({
+        where,
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }]
+      }),
+      prisma.globalSetting.findUnique({ where: { id: 1 }, select: { payment_methods_json: true } })
+    ]);
+
+    const methods = Array.isArray(gs?.payment_methods_json) ? gs.payment_methods_json : [];
+    const csv = buildPaymentsCsv(rows, methods);
+    const todayStr = toTaipeiDateString(new Date());
+    const fromTag = req.query.date_from || todayStr;
+    const toTag = req.query.date_to || todayStr;
+    const filename = encodeURIComponent(`收款明細_${fromTag}_${toTag}.csv`);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    return res.status(200).send(csv);
+  } catch (error) {
+    console.error('[getPaymentsCsv] Error:', error);
+    return res.status(500).json({ error: '無法匯出收款明細 CSV' });
+  }
+};
+
 export const getEventsList = async (req, res) => {
-  const { date_from, date_to, category, staff, q, cursor } = req.query;
+  const { cursor } = req.query;
 
   try {
-    const where = {};
-    if (date_from || date_to) {
-      where.created_at = {};
-      if (date_from) where.created_at.gte = new Date(`${date_from}T00:00:00+08:00`);
-      if (date_to) where.created_at.lte = new Date(`${date_to}T23:59:59.999+08:00`);
-    }
-    if (category) where.category = category;
-    if (staff) where.staff_name = { contains: staff, mode: 'insensitive' };
-    if (q) {
-      where.OR = [
-        { booking_ref: { contains: q.trim(), mode: 'insensitive' } },
-        { summary: { contains: q.trim(), mode: 'insensitive' } }
-      ];
-    }
+    const where = buildEventsFilterWhere(req.query);
 
     const take = 50;
-    const events = await prisma.accountingEvent.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      take: take + 1,
-      ...(cursor ? { skip: 1, cursor: { id: Number(cursor) } } : {})
-    });
+    const [totalCount, events] = await Promise.all([
+      prisma.accountingEvent.count({ where }),
+      prisma.accountingEvent.findMany({
+        where,
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        take: take + 1,
+        ...(cursor ? { skip: 1, cursor: { id: Number(cursor) } } : {})
+      })
+    ]);
 
     const hasMore = events.length > take;
     const items = hasMore ? events.slice(0, take) : events;
     const nextCursor = hasMore ? items[items.length - 1].id : null;
 
-    return res.json({ events: items, next_cursor: nextCursor });
+    return res.json({ events: items, next_cursor: nextCursor, total_count: totalCount });
   } catch (error) {
     console.error('[getEventsList] Error:', error);
     return res.status(500).json({ error: '無法讀取異動清單' });
+  }
+};
+
+export const getEventsCsv = async (req, res) => {
+  try {
+    const where = buildEventsFilterWhere(req.query);
+    const totalCount = await prisma.accountingEvent.count({ where });
+    if (totalCount > CSV_MAX_ROWS) {
+      return res.status(413).json({ error: `資料共 ${totalCount} 筆，超過單次 ${CSV_MAX_ROWS} 筆匯出上限，請縮小日期範圍` });
+    }
+
+    const events = await prisma.accountingEvent.findMany({
+      where,
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }]
+    });
+
+    const csv = buildEventsCsv(events);
+    const todayStr = toTaipeiDateString(new Date());
+    const fromTag = req.query.date_from || todayStr;
+    const toTag = req.query.date_to || todayStr;
+    const filename = encodeURIComponent(`異動紀錄_${fromTag}_${toTag}.csv`);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    return res.status(200).send(csv);
+  } catch (error) {
+    console.error('[getEventsCsv] Error:', error);
+    return res.status(500).json({ error: '無法匯出異動紀錄 CSV' });
   }
 };
 
@@ -630,9 +813,12 @@ export const getUnpaidFollowUp = async (req, res) => {
 
 export default {
   getAccountingSummary,
+  getDailyRevenue,
   getLedger,
   getPaymentsList,
+  getPaymentsCsv,
   getEventsList,
+  getEventsCsv,
   getPrintJobsList,
   getClosingPreview,
   postClosing,
