@@ -193,6 +193,7 @@ export default function AccountingPage() {
   const [eventsTotalCount, setEventsTotalCount] = useState(0);
   const [loadingMoreEvents, setLoadingMoreEvents] = useState(false);
   const [eventCategoryFilter, setEventCategoryFilter] = useState('all');
+  const [eventTargetFilter, setEventTargetFilter] = useState(null);
   const [selectedEventDetail, setSelectedEventDetail] = useState(null);
   const [loadingEvents, setLoadingEvents] = useState(false);
 
@@ -296,6 +297,8 @@ export default function AccountingPage() {
           date_from: dateFrom,
           date_to: dateTo,
           category: eventCategoryFilter !== 'all' ? eventCategoryFilter : undefined,
+          target_type: eventTargetFilter?.type || undefined,
+          target_ref: eventTargetFilter?.ref || undefined,
           staff: selectedStaff || undefined,
           q: searchTerm || undefined,
           ...(isLoadMore ? { cursor: cursorArg } : {})
@@ -390,7 +393,7 @@ export default function AccountingPage() {
     else if (activeTab === 'closing') fetchClosing();
     else if (activeTab === 'unpaid') fetchUnpaid();
     else if (activeTab === 'shop') fetchShopSummary();
-  }, [activeTab, dateFrom, dateTo, closingDate, paymentKindFilter, paymentMethodFilter, eventCategoryFilter, printStatusFilter, selectedStaff]);
+  }, [activeTab, dateFrom, dateTo, closingDate, paymentKindFilter, paymentMethodFilter, eventCategoryFilter, eventTargetFilter, printStatusFilter, selectedStaff]);
 
   // Void payment
   const handleConfirmVoid = async () => {
@@ -640,6 +643,8 @@ export default function AccountingPage() {
           date_from: dateFrom,
           date_to: dateTo,
           category: eventCategoryFilter !== 'all' ? eventCategoryFilter : undefined,
+          target_type: eventTargetFilter?.type || undefined,
+          target_ref: eventTargetFilter?.ref || undefined,
           staff: selectedStaff || undefined,
           q: searchTerm || undefined
         },
@@ -1306,16 +1311,25 @@ export default function AccountingPage() {
             <div className="flex flex-wrap items-center gap-1.5">
               {[
                 { key: 'all', label: '全部' },
-                { key: 'charge', label: '收款' },
+                { key: 'payment', label: '收款' },
                 { key: 'void', label: '作廢' },
                 { key: 'refund', label: '退款' },
-                { key: 'amount_change', label: '改金額' },
+                { key: 'amount', label: '改金額' },
                 { key: 'print', label: '列印' },
-                { key: 'more', label: '更多 (免收/卡券/交班)' }
+                { key: 'setting', label: '設定' },
+                { key: 'promo', label: '優惠碼' },
+                { key: 'pass', label: '卡券' },
+                { key: 'shop', label: '商城' },
+                { key: 'member', label: '會員' },
+                { key: 'line', label: 'LINE 訊息' },
+                { key: 'session', label: '時段' },
+                { key: 'prepay', label: '半自助對帳' },
+                { key: 'more', label: '更多 (狀態/交班)' }
               ].map((c) => (
                 <button
                   key={c.key}
                   type="button"
+                  data-testid={`event-category-chip-${c.key}`}
                   onClick={() => setEventCategoryFilter(c.key)}
                   className={`px-3 py-1 rounded-2xl text-[12px] font-bold border transition ${
                     eventCategoryFilter === c.key
@@ -1326,6 +1340,19 @@ export default function AccountingPage() {
                   {c.label}
                 </button>
               ))}
+              {eventTargetFilter && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-2xl text-[12px] font-bold bg-sg-amber-soft text-sg-brown border border-sg-brown/30">
+                  只看對象：{eventTargetFilter.type} / {eventTargetFilter.ref}
+                  <button
+                    type="button"
+                    onClick={() => setEventTargetFilter(null)}
+                    className="ml-1 text-sg-danger hover:underline"
+                    title="清除對象篩選"
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -1368,12 +1395,34 @@ export default function AccountingPage() {
                   </tr>
                 ) : (
                   events.map((ev) => {
-                    const isSensitive = ev.category === 'void' || ev.category === 'refund' || ev.category === 'amount_change';
+                    const isSensitive = ev.category === 'void' || ev.category === 'refund' || ev.category === 'amount' || ev.category === 'amount_change';
                     const timeStr = new Date(ev.created_at).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' });
+                    const categoryLabelMap = {
+                      payment: '收款',
+                      charge: '收款',
+                      void: '作廢',
+                      refund: '退款',
+                      amount: '改金額',
+                      amount_change: '改金額',
+                      print: '列印',
+                      setting: '設定',
+                      promo: '優惠碼',
+                      pass: '卡券',
+                      shop: '商城',
+                      member: '會員',
+                      line: 'LINE 訊息',
+                      session: '時段',
+                      prepay: '半自助對帳',
+                      seating: '現場',
+                      status: '狀態',
+                      closing: '交班',
+                      security: '安全'
+                    };
 
                     return (
                       <tr
                         key={ev.id}
+                        data-testid={`event-row-${ev.id}`}
                         onClick={() => setSelectedEventDetail(ev)}
                         className={`cursor-pointer transition ${
                           isSensitive ? 'bg-sg-honey-soft/30 hover:bg-sg-honey-soft/50' : 'hover:bg-sg-paper/30'
@@ -1385,7 +1434,7 @@ export default function AccountingPage() {
                           <span className="text-[10px] text-sg-muted">{ev.device_label || '裝置'}</span>
                         </td>
                         <td className="py-3 px-3 font-mono text-[12px] text-sg-brown font-bold">
-                          {ev.booking_ref ? formatBookingRef(ev.booking_ref) : '-'}
+                          {ev.booking_ref ? formatBookingRef(ev.booking_ref) : (ev.target_ref || '-')}
                         </td>
                         <td className="py-3 px-3 text-[13px] text-sg-ink font-medium">
                           {ev.summary}
@@ -1399,7 +1448,7 @@ export default function AccountingPage() {
                             ev.category === 'refund' ? 'bg-sg-peach-soft text-sg-peach' :
                             'bg-sg-paper text-sg-muted'
                           }`}>
-                            {ev.category}
+                            {categoryLabelMap[ev.category] || ev.category}
                           </span>
                         </td>
                       </tr>
@@ -2138,7 +2187,7 @@ export default function AccountingPage() {
                 </div>
 
                 {/* 原因與相關連結 */}
-                {(selectedEventDetail.reason || selectedEventDetail.payment_id || selectedEventDetail.print_job_id) && (
+                {(selectedEventDetail.reason || selectedEventDetail.payment_id || selectedEventDetail.print_job_id || (selectedEventDetail.target_type && selectedEventDetail.target_ref)) && (
                   <div className="pt-2 border-t border-sg-line/60 text-[12px] space-y-1">
                     {selectedEventDetail.reason && (
                       <div>
@@ -2147,6 +2196,22 @@ export default function AccountingPage() {
                       </div>
                     )}
                     <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                      {selectedEventDetail.target_type && selectedEventDetail.target_ref && (
+                        <button
+                          type="button"
+                          data-testid="filter-same-target-btn"
+                          onClick={() => {
+                            setEventTargetFilter({
+                              type: selectedEventDetail.target_type,
+                              ref: selectedEventDetail.target_ref
+                            });
+                            setSelectedEventDetail(null);
+                          }}
+                          className="text-xs text-sg-brown bg-sg-brown-soft px-2 py-0.5 rounded font-bold hover:bg-sg-line transition"
+                        >
+                          只看這個對象 ({selectedEventDetail.target_ref})
+                        </button>
+                      )}
                       {selectedEventDetail.payment_id && (
                         <button
                           type="button"

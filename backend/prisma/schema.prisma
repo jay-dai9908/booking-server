@@ -676,6 +676,8 @@ model AccountingEvent {
   reason        String?
   payment_id    Int?
   print_job_id  Int?
+  target_type   String?
+  target_ref    String?
   staff_name    String
   staff_id      Int?
   device_id     String?
@@ -685,6 +687,7 @@ model AccountingEvent {
   @@index([created_at])
   @@index([booking_ref])
   @@index([category, created_at])
+  @@index([target_type, target_ref])
 }
 
 // -------------------------------------------------------------

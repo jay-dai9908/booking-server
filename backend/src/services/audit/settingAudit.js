@@ -51,10 +51,73 @@ const SECRET_SETTING_FIELDS = new Set(['line_messaging_token']);
 function valuesEqual(a, b) {
   if (a === b) return true;
   if (a == null && b == null) return true;
+  if (a instanceof Date || b instanceof Date) {
+    const da = a ? new Date(a).getTime() : null;
+    const db = b ? new Date(b).getTime() : null;
+    return da === db;
+  }
   if (typeof a === 'object' || typeof b === 'object') {
     return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
   }
   return false;
+}
+
+/**
+ * Compute changed fields between before and after objects.
+ * Returns { beforeChanged, afterChanged, changedKeys }.
+ */
+export function diffFields(before = {}, after = {}, { secretFields = [] } = {}) {
+  const secretSet = new Set(secretFields);
+  const beforeChanged = {};
+  const afterChanged = {};
+  const changedKeys = [];
+
+  if (!after || typeof after !== 'object') {
+    return { beforeChanged, afterChanged, changedKeys };
+  }
+
+  for (const field of Object.keys(after)) {
+    const nextVal = after[field];
+    if (nextVal === undefined) continue;
+
+    if (secretSet.has(field)) {
+      const hadSecret = Boolean(before?.[field]);
+      const nextStr = typeof nextVal === 'string' ? nextVal.trim() : '';
+      const hasNext = Boolean(nextStr);
+      if (!hadSecret && !hasNext) continue;
+      if (typeof before?.[field] === 'string' && typeof nextVal === 'string' && before[field].trim() === nextStr) {
+        continue;
+      }
+      beforeChanged[field] = hadSecret ? '已設定' : null;
+      afterChanged[field] = hasNext ? '已更換' : '已清除';
+      changedKeys.push(field);
+      continue;
+    }
+
+    const prevVal = before ? before[field] : undefined;
+    if (valuesEqual(prevVal, nextVal)) continue;
+
+    beforeChanged[field] = prevVal ?? null;
+    afterChanged[field] = nextVal ?? null;
+    changedKeys.push(field);
+  }
+
+  return { beforeChanged, afterChanged, changedKeys };
+}
+
+/**
+ * Mask bank account numbers down to last 4 digits before storing in audit logs.
+ */
+export function maskBankAccountsForAudit(accounts) {
+  if (!Array.isArray(accounts)) return accounts ?? null;
+  return accounts.map((acc) => {
+    if (!acc || typeof acc !== 'object') return acc;
+    const rawNum = acc.account_number != null ? String(acc.account_number).trim() : '';
+    return {
+      ...acc,
+      account_number: rawNum ? `****${rawNum.slice(-4)}` : null
+    };
+  });
 }
 
 /**
@@ -64,35 +127,23 @@ function valuesEqual(a, b) {
 export async function logSettingChange(tx, { before = {}, after = {}, staff = {}, scope = 'global', summaryPrefix = '' } = {}) {
   if (!after || typeof after !== 'object') return null;
 
-  const beforeChanged = {};
-  const afterChanged = {};
-  const changedLabels = [];
+  const normBefore = {
+    ...(before || {}),
+    ...(before?.line_messaging_token === undefined && before?.has_line_messaging_token
+      ? { line_messaging_token: '__MASKED__' }
+      : {})
+  };
 
-  for (const field of Object.keys(after)) {
-    const nextVal = after[field];
-    if (nextVal === undefined) continue;
+  const { beforeChanged, afterChanged, changedKeys } = diffFields(normBefore, after, {
+    secretFields: Array.from(SECRET_SETTING_FIELDS)
+  });
 
+  const changedLabels = changedKeys.map((field) => {
     if (SECRET_SETTING_FIELDS.has(field)) {
-      const hadToken = Boolean(before?.has_line_messaging_token || before?.line_messaging_token);
-      const nextTokenStr = typeof nextVal === 'string' ? nextVal.trim() : '';
-      const hasNextToken = Boolean(nextTokenStr);
-      if (!hadToken && !hasNextToken) continue;
-      if (typeof before?.[field] === 'string' && typeof nextVal === 'string' && before[field].trim() === nextTokenStr) {
-        continue;
-      }
-      beforeChanged[field] = hadToken ? '已設定' : null;
-      afterChanged[field] = hasNextToken ? '已更換' : '已清除';
-      changedLabels.push(`${SETTING_FIELD_LABELS[field] || field}（${afterChanged[field]}）`);
-      continue;
+      return `${SETTING_FIELD_LABELS[field] || field}（${afterChanged[field]}）`;
     }
-
-    const prevVal = before ? before[field] : undefined;
-    if (valuesEqual(prevVal, nextVal)) continue;
-
-    beforeChanged[field] = prevVal ?? null;
-    afterChanged[field] = nextVal ?? null;
-    changedLabels.push(SETTING_FIELD_LABELS[field] || field);
-  }
+    return SETTING_FIELD_LABELS[field] || field;
+  });
 
   if (changedLabels.length === 0) return null;
 
@@ -102,6 +153,8 @@ export async function logSettingChange(tx, { before = {}, after = {}, staff = {}
   return await auditService.log(tx, {
     event_type: 'setting_changed',
     category: 'setting',
+    target_type: scope === 'global' ? 'global_setting' : scope,
+    target_ref: scope === 'global' ? '1' : null,
     summary,
     before_json: beforeChanged,
     after_json: afterChanged,

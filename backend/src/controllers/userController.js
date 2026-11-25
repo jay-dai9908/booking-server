@@ -3,6 +3,8 @@ import { sendLinePushMessage, buildBrandFlexMessage, formatBookingRef } from '..
 import { isPlainString } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
 import auditService from '../services/audit/auditService.js';
+import { diffFields } from '../services/audit/settingAudit.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { methodLabel } from '../../../shared/paymentMethods.js';
 import { getConfiguredPaymentMethods } from '../services/accounting/methodAggregation.js';
@@ -643,7 +645,10 @@ export const getUserLoginLogs = async (req, res) => {
 export const updateUser = async (req, res) => {
   const { id } = req.params;
   const { name, phone, is_blacklisted, notes } = req.body;
-  
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
     const userId = parseInt(id, 10);
     const dataToUpdate = {};
@@ -675,35 +680,87 @@ export const updateUser = async (req, res) => {
       dataToUpdate.notes = notes;
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: dataToUpdate,
-      select: {
-        id: true,
-        line_user_id: true,
-        name: true,
-        phone: true,
-        line_display_name: true,
-        line_picture_url: true,
-        line_status_msg: true,
-        last_login_at: true,
-        created_at: true,
-        is_blacklisted: true,
-        notes: true,
-        reservations: {
-          select: {
-            booking_ref: true,
-            pax: true,
-            status: true,
-            attendance: true,
-            is_unlimited: true,
-            is_paid: true,
-            total_amount: true,
-            checkout_unlimited_pax: true,
-            checkout_regular_hours: true
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const before = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, name: true, phone: true, is_blacklisted: true, notes: true }
+      });
+      if (!before) {
+        const err = new Error('找不到該會員資料');
+        err.status = 404;
+        throw err;
+      }
+
+      const row = await tx.user.update({
+        where: { id: userId },
+        data: dataToUpdate,
+        select: {
+          id: true,
+          line_user_id: true,
+          name: true,
+          phone: true,
+          line_display_name: true,
+          line_picture_url: true,
+          line_status_msg: true,
+          last_login_at: true,
+          created_at: true,
+          is_blacklisted: true,
+          notes: true,
+          reservations: {
+            select: {
+              booking_ref: true,
+              pax: true,
+              status: true,
+              attendance: true,
+              is_unlimited: true,
+              is_paid: true,
+              total_amount: true,
+              checkout_unlimited_pax: true,
+              checkout_regular_hours: true
+            }
           }
         }
+      });
+
+      const targetRef = String(userId);
+      if (dataToUpdate.is_blacklisted !== undefined && Boolean(before.is_blacklisted) !== Boolean(row.is_blacklisted)) {
+        await auditService.log(tx, {
+          event_type: row.is_blacklisted ? 'member_blacklisted' : 'member_unblacklisted',
+          category: 'member',
+          target_type: 'user',
+          target_ref: targetRef,
+          summary: `${row.is_blacklisted ? '將會員加入黑名單' : '將會員移出黑名單'}：${row.name || `會員 #${userId}`}`,
+          before_json: { is_blacklisted: Boolean(before.is_blacklisted) },
+          after_json: { is_blacklisted: Boolean(row.is_blacklisted) },
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
       }
+
+      const profileUpdate = {};
+      if (dataToUpdate.name !== undefined) profileUpdate.name = dataToUpdate.name;
+      if (dataToUpdate.phone !== undefined) profileUpdate.phone = dataToUpdate.phone;
+      if (dataToUpdate.notes !== undefined) profileUpdate.notes = dataToUpdate.notes;
+      const { beforeChanged, afterChanged, changedKeys } = diffFields(before, profileUpdate);
+      if (changedKeys.length > 0) {
+        await auditService.log(tx, {
+          event_type: 'member_updated',
+          category: 'member',
+          target_type: 'user',
+          target_ref: targetRef,
+          summary: `修改會員「${row.name || `#${userId}`}」資料：${changedKeys.join('、')}`,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
+
+      return row;
     });
 
     const stats = computeUserDualStats(updatedUser.reservations);
@@ -718,6 +775,7 @@ export const updateUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating user:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update user' });
   }
 };
@@ -798,7 +856,34 @@ export const sendLineMessageToUser = async (req, res) => {
       };
     }
 
-    await sendLinePushMessage(user.line_user_id, [linePayload]);
+    const staffName = req.user?.name || '管理員';
+    const staffId = req.user?.id || null;
+    const deviceInfo = getAdminDeviceInfo(req);
+
+    const pushFn =
+      process.env.NODE_ENV === 'test' && typeof globalThis.__TEST_LINE_PUSH_FN__ === 'function'
+        ? globalThis.__TEST_LINE_PUSH_FN__
+        : sendLinePushMessage;
+
+    await pushFn(user.line_user_id, [linePayload]);
+
+    await auditService.log(prisma, {
+      event_type: 'line_message_sent',
+      category: 'line',
+      target_type: 'user',
+      target_ref: String(user.id),
+      summary: `發送 LINE 訊息給 ${user.name || user.line_display_name || `會員 #${user.id}`}`,
+      after_json: {
+        message_type: message_type || 'text',
+        title: message_type === 'flex' ? (title || '拾光製所 會員專屬通知') : (title || null),
+        content: content.trim(),
+        delivered: true
+      },
+      staff_name: staffName,
+      staff_id: staffId,
+      device_id: deviceInfo.device_id,
+      device_label: deviceInfo.device_label
+    });
 
     res.json({ message: 'LINE 訊息已成功發送至顧客手機！' });
   } catch (error) {

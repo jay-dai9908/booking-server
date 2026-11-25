@@ -559,6 +559,9 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `CREATE INDEX IF NOT EXISTS "AccountingEvent_created_at_idx" ON "AccountingEvent"("created_at")`,
     `CREATE INDEX IF NOT EXISTS "AccountingEvent_booking_ref_idx" ON "AccountingEvent"("booking_ref")`,
     `CREATE INDEX IF NOT EXISTS "AccountingEvent_category_created_at_idx" ON "AccountingEvent"("category", "created_at")`,
+    `ALTER TABLE "AccountingEvent" ADD COLUMN IF NOT EXISTS "target_type" TEXT`,
+    `ALTER TABLE "AccountingEvent" ADD COLUMN IF NOT EXISTS "target_ref" TEXT`,
+    `CREATE INDEX IF NOT EXISTS "AccountingEvent_target_type_target_ref_idx" ON "AccountingEvent"("target_type", "target_ref")`,
 
     GUARD_FUNCTION_SQL,
     DROP_GUARD_TRIGGER_SQL,

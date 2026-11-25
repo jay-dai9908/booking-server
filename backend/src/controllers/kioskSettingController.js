@@ -1,6 +1,9 @@
 import prisma from '../prismaClient.js';
 import { ensureKioskSetting } from './dailySettingController.js';
 import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
+import auditService from '../services/audit/auditService.js';
+import { diffFields } from '../services/audit/settingAudit.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
 export function sanitizeKioskSetting(setting, globalSetting = null) {
   if (!setting) return null;
@@ -97,22 +100,46 @@ export const updateKioskSettings = async (req, res) => {
 
   try {
     const [setting, globalSetting] = await Promise.all([
-      prisma.kioskSetting.upsert({
-        where: { id: 1 },
-        update: {
-          ...dataToUpdate,
-          config_rev: { increment: 1 }
-        },
-        create: {
-          id: 1,
-          early_minutes: dataToUpdate.early_minutes ?? 30,
-          after_close_minutes: dataToUpdate.after_close_minutes ?? 60,
-          prepay_deadline_hour: dataToUpdate.prepay_deadline_hour ?? 12,
-          max_unpaid_self_bookings: dataToUpdate.max_unpaid_self_bookings ?? 2,
-          line_url: dataToUpdate.line_url ?? null,
-          line_id: dataToUpdate.line_id ?? null,
-          config_rev: 1
+      prisma.$transaction(async (tx) => {
+        const before = await tx.kioskSetting.findUnique({ where: { id: 1 } });
+        const saved = await tx.kioskSetting.upsert({
+          where: { id: 1 },
+          update: {
+            ...dataToUpdate,
+            config_rev: { increment: 1 }
+          },
+          create: {
+            id: 1,
+            early_minutes: dataToUpdate.early_minutes ?? 30,
+            after_close_minutes: dataToUpdate.after_close_minutes ?? 60,
+            prepay_deadline_hour: dataToUpdate.prepay_deadline_hour ?? 12,
+            max_unpaid_self_bookings: dataToUpdate.max_unpaid_self_bookings ?? 2,
+            line_url: dataToUpdate.line_url ?? null,
+            line_id: dataToUpdate.line_id ?? null,
+            config_rev: 1
+          }
+        });
+
+        const { beforeChanged, afterChanged, changedKeys } = diffFields(before || {}, dataToUpdate, {
+          secretFields: ['backup_code', 'setup_pin']
+        });
+        if (changedKeys.length > 0) {
+          const deviceInfo = getAdminDeviceInfo(req);
+          await auditService.log(tx, {
+            event_type: 'kiosk_setting_changed',
+            category: 'setting',
+            target_type: 'kiosk_setting',
+            target_ref: '1',
+            summary: `修改半自助與進場規則設定：${changedKeys.join('、')}`,
+            before_json: beforeChanged,
+            after_json: afterChanged,
+            staff_name: req.user?.name || '管理員',
+            staff_id: req.user?.id || null,
+            device_id: deviceInfo?.device_id || null,
+            device_label: deviceInfo?.device_label || '後台'
+          });
         }
+        return saved;
       }),
       prisma.globalSetting.findUnique({
         where: { id: 1 },

@@ -221,14 +221,21 @@ async function buildPaymentsFilterWhere(query = {}, defaultSources = REVENUE_PAY
 }
 
 function buildEventsFilterWhere(query = {}) {
-  const { date_from, date_to, category, staff, q } = query;
+  const { date_from, date_to, category, staff, q, target_type, target_ref } = query;
   const where = {};
   if (date_from || date_to) {
     where.created_at = {};
     if (date_from) where.created_at.gte = new Date(`${date_from}T00:00:00+08:00`);
     if (date_to) where.created_at.lte = new Date(`${date_to}T23:59:59.999+08:00`);
   }
-  if (category) where.category = category;
+  if (category) {
+    if (category === 'charge') where.category = 'payment';
+    else if (category === 'amount_change') where.category = 'amount';
+    else if (category === 'more') where.category = { in: ['status', 'closing', 'security', 'seating'] };
+    else where.category = category;
+  }
+  if (target_type) where.target_type = String(target_type).trim();
+  if (target_ref) where.target_ref = String(target_ref).trim();
   if (staff) where.staff_name = { contains: staff, mode: 'insensitive' };
   if (q) {
     const qTrim = String(q).trim();

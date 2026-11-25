@@ -1,6 +1,6 @@
 import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
-import { logSettingChange } from '../services/audit/settingAudit.js';
+import { logSettingChange, diffFields } from '../services/audit/settingAudit.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
 import displayBus from '../services/display/displayBus.js';
@@ -238,19 +238,66 @@ export const updateDailySetting = async (req, res) => {
       dataToUpdate.iron_date = parsedIronDate;
     }
 
-    const setting = await prisma.dailySetting.upsert({
-      where: { date: targetDate },
-      update: dataToUpdate,
-      create: {
-        date: targetDate,
-        ...dataToUpdate,
-        allow_unlimited: allow_unlimited !== undefined ? allow_unlimited : true,
-        is_self_service: is_self_service !== undefined ? Boolean(is_self_service) : false,
-        self_allow_hourly: self_allow_hourly !== undefined ? Boolean(self_allow_hourly) : false,
-        self_allow_equipment: self_allow_equipment !== undefined ? Boolean(self_allow_equipment) : false,
-        iron_mode: effectiveIronMode,
-        iron_date: parsedIronDate
+    const setting = await prisma.$transaction(async (tx) => {
+      const saved = await tx.dailySetting.upsert({
+        where: { date: targetDate },
+        update: dataToUpdate,
+        create: {
+          date: targetDate,
+          ...dataToUpdate,
+          allow_unlimited: allow_unlimited !== undefined ? allow_unlimited : true,
+          is_self_service: is_self_service !== undefined ? Boolean(is_self_service) : false,
+          self_allow_hourly: self_allow_hourly !== undefined ? Boolean(self_allow_hourly) : false,
+          self_allow_equipment: self_allow_equipment !== undefined ? Boolean(self_allow_equipment) : false,
+          iron_mode: effectiveIronMode,
+          iron_date: parsedIronDate
+        }
+      });
+
+      const beforeSnap = existing
+        ? {
+            allow_unlimited: existing.allow_unlimited,
+            hourly_price: existing.hourly_price,
+            unlimited_price: existing.unlimited_price,
+            is_self_service: existing.is_self_service,
+            self_allow_hourly: existing.self_allow_hourly,
+            self_allow_equipment: existing.self_allow_equipment,
+            iron_mode: existing.iron_mode,
+            iron_date: existing.iron_date ? toTaipeiDateString(existing.iron_date) : null
+          }
+        : {};
+      const afterSnap = {
+        allow_unlimited: saved.allow_unlimited,
+        hourly_price: saved.hourly_price,
+        unlimited_price: saved.unlimited_price,
+        is_self_service: saved.is_self_service,
+        self_allow_hourly: saved.self_allow_hourly,
+        self_allow_equipment: saved.self_allow_equipment,
+        iron_mode: saved.iron_mode,
+        iron_date: saved.iron_date ? toTaipeiDateString(saved.iron_date) : null
+      };
+      const auditFields = existing
+        ? diffFields(beforeSnap, Object.fromEntries(Object.keys(dataToUpdate).map((k) => [k, afterSnap[k]])))
+        : { beforeChanged: {}, afterChanged: afterSnap, changedKeys: Object.keys(afterSnap) };
+
+      if (auditFields.changedKeys.length > 0) {
+        const deviceInfo = getAdminDeviceInfo(req);
+        await auditService.log(tx, {
+          event_type: 'daily_setting_changed',
+          category: 'setting',
+          target_type: 'daily_setting',
+          target_ref: targetDateStr,
+          summary: `修改單日設定 ${targetDateStr}：${auditFields.changedKeys.join('、')}`,
+          before_json: auditFields.beforeChanged,
+          after_json: auditFields.afterChanged,
+          staff_name: req.user?.name || '管理員',
+          staff_id: req.user?.id || null,
+          device_id: deviceInfo?.device_id || null,
+          device_label: deviceInfo?.device_label || '後台'
+        });
       }
+
+      return saved;
     });
 
     res.json({ message: 'Daily setting updated successfully', setting });
@@ -419,26 +466,67 @@ export const batchUpdateDailySettings = async (req, res) => {
       dataToUpdate.iron_date = iron_mode === 'date' ? parsedIronDate : null;
     }
 
-    const upserts = datesToUpdate.map(date =>
-      prisma.dailySetting.upsert({
-        where: { date },
-        update: dataToUpdate,
-        create: {
-          date,
-          ...dataToUpdate,
-          allow_unlimited: typeof allow_unlimited === 'boolean' ? allow_unlimited : true,
-          is_self_service: is_self_service !== undefined ? Boolean(is_self_service) : false,
-          self_allow_hourly: self_allow_hourly !== undefined ? Boolean(self_allow_hourly) : false,
-          self_allow_equipment: self_allow_equipment !== undefined ? Boolean(self_allow_equipment) : false,
-          iron_mode: iron_mode !== undefined ? String(iron_mode) : 'today',
-          iron_date: iron_mode === 'date' ? parsedIronDate : null
+    await prisma.$transaction(async (tx) => {
+      const existingBeforeRows = await tx.dailySetting.findMany({
+        where: { date: { in: datesToUpdate } }
+      });
+      const existingByDateStr = new Map(existingBeforeRows.map((r) => [toTaipeiDateString(r.date), r]));
+
+      for (const date of datesToUpdate) {
+        await tx.dailySetting.upsert({
+          where: { date },
+          update: dataToUpdate,
+          create: {
+            date,
+            ...dataToUpdate,
+            allow_unlimited: typeof allow_unlimited === 'boolean' ? allow_unlimited : true,
+            is_self_service: is_self_service !== undefined ? Boolean(is_self_service) : false,
+            self_allow_hourly: self_allow_hourly !== undefined ? Boolean(self_allow_hourly) : false,
+            self_allow_equipment: self_allow_equipment !== undefined ? Boolean(self_allow_equipment) : false,
+            iron_mode: iron_mode !== undefined ? String(iron_mode) : 'today',
+            iron_date: iron_mode === 'date' ? parsedIronDate : null
+          }
+        });
+      }
+
+      const dateStrings = datesToUpdate.map((d) => toTaipeiDateString(d));
+      const beforeByDate = {};
+      const changedFields = Object.keys(dataToUpdate);
+      for (const dStr of dateStrings) {
+        const prev = existingByDateStr.get(dStr);
+        if (!prev) {
+          beforeByDate[dStr] = null;
+        } else {
+          const snap = {};
+          for (const f of changedFields) {
+            snap[f] = f === 'iron_date' && prev[f] ? toTaipeiDateString(prev[f]) : (prev[f] ?? null);
+          }
+          beforeByDate[dStr] = snap;
         }
-      })
-    );
+      }
 
-    await prisma.$transaction(upserts);
+      const serializedChanges = { ...dataToUpdate };
+      if (serializedChanges.iron_date instanceof Date) {
+        serializedChanges.iron_date = toTaipeiDateString(serializedChanges.iron_date);
+      }
 
-    res.json({ message: `Successfully updated ${upserts.length} days` });
+      const deviceInfo = getAdminDeviceInfo(req);
+      await auditService.log(tx, {
+        event_type: 'daily_setting_changed',
+        category: 'setting',
+        target_type: 'daily_setting',
+        target_ref: dateStrings.join(','),
+        summary: `批次修改 ${dateStrings.length} 天設定（${dateStrings[0]}～${dateStrings[dateStrings.length - 1]}）：${changedFields.join('、')}`,
+        before_json: beforeByDate,
+        after_json: { dates: dateStrings, changes: serializedChanges },
+        staff_name: req.user?.name || '管理員',
+        staff_id: req.user?.id || null,
+        device_id: deviceInfo?.device_id || null,
+        device_label: deviceInfo?.device_label || '後台'
+      });
+    });
+
+    res.json({ message: `Successfully updated ${datesToUpdate.length} days` });
   } catch (error) {
     console.error('Error batch updating daily settings:', error);
     res.status(500).json({ error: 'Failed to batch update daily settings' });

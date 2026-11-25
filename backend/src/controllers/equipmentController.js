@@ -5,6 +5,9 @@ import { resolveEquipmentWindow } from '../utils/equipmentWindow.js';
 import { dateOnly } from '../../../shared/time.js';
 import { selfEquipmentTerms } from '../../../shared/selfService.js';
 import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
+import auditService from '../services/audit/auditService.js';
+import { diffFields } from '../services/audit/settingAudit.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
 export const DEFAULT_EQUIPMENT_CONFIGS = [
   {
@@ -634,31 +637,55 @@ export const updateGlobalEquipmentSetting = async (req, res) => {
   } = req.body;
 
   try {
-    const updated = await prisma.globalSetting.upsert({
-      where: { id: 1 },
-      update: {
-        ...(allow_equipment_exceed_pax !== undefined && { allow_equipment_exceed_pax: !!allow_equipment_exceed_pax }),
-        ...(show_equipment_live_stock !== undefined && { show_equipment_live_stock: !!show_equipment_live_stock }),
-        ...(equipment_discount_enabled !== undefined && { equipment_discount_enabled: !!equipment_discount_enabled }),
-        ...(equipment_discount_buy_hours !== undefined && { equipment_discount_buy_hours: Math.max(1, parseInt(equipment_discount_buy_hours, 10)) }),
-        ...(equipment_discount_free_hours !== undefined && { equipment_discount_free_hours: Math.max(1, parseInt(equipment_discount_free_hours, 10)) }),
-        ...(equipment_discount_stackable !== undefined && { equipment_discount_stackable: !!equipment_discount_stackable }),
-        ...(equipment_discount2_enabled !== undefined && { equipment_discount2_enabled: !!equipment_discount2_enabled }),
-        ...(equipment_discount2_buy_hours !== undefined && { equipment_discount2_buy_hours: Math.max(1, parseInt(equipment_discount2_buy_hours, 10)) }),
-        ...(equipment_discount2_free_hours !== undefined && { equipment_discount2_free_hours: Math.max(1, parseInt(equipment_discount2_free_hours, 10)) })
-      },
-      create: {
-        id: 1,
-        allow_equipment_exceed_pax: !!allow_equipment_exceed_pax,
-        show_equipment_live_stock: show_equipment_live_stock !== undefined ? !!show_equipment_live_stock : true,
-        equipment_discount_enabled: equipment_discount_enabled !== undefined ? !!equipment_discount_enabled : true,
-        equipment_discount_buy_hours: equipment_discount_buy_hours !== undefined ? Math.max(1, parseInt(equipment_discount_buy_hours, 10)) : 3,
-        equipment_discount_free_hours: equipment_discount_free_hours !== undefined ? Math.max(1, parseInt(equipment_discount_free_hours, 10)) : 1,
-        equipment_discount_stackable: equipment_discount_stackable !== undefined ? !!equipment_discount_stackable : true,
-        equipment_discount2_enabled: !!equipment_discount2_enabled,
-        equipment_discount2_buy_hours: equipment_discount2_buy_hours !== undefined ? Math.max(1, parseInt(equipment_discount2_buy_hours, 10)) : 8,
-        equipment_discount2_free_hours: equipment_discount2_free_hours !== undefined ? Math.max(1, parseInt(equipment_discount2_free_hours, 10)) : 4
+    const updatePayload = {
+      ...(allow_equipment_exceed_pax !== undefined && { allow_equipment_exceed_pax: !!allow_equipment_exceed_pax }),
+      ...(show_equipment_live_stock !== undefined && { show_equipment_live_stock: !!show_equipment_live_stock }),
+      ...(equipment_discount_enabled !== undefined && { equipment_discount_enabled: !!equipment_discount_enabled }),
+      ...(equipment_discount_buy_hours !== undefined && { equipment_discount_buy_hours: Math.max(1, parseInt(equipment_discount_buy_hours, 10)) }),
+      ...(equipment_discount_free_hours !== undefined && { equipment_discount_free_hours: Math.max(1, parseInt(equipment_discount_free_hours, 10)) }),
+      ...(equipment_discount_stackable !== undefined && { equipment_discount_stackable: !!equipment_discount_stackable }),
+      ...(equipment_discount2_enabled !== undefined && { equipment_discount2_enabled: !!equipment_discount2_enabled }),
+      ...(equipment_discount2_buy_hours !== undefined && { equipment_discount2_buy_hours: Math.max(1, parseInt(equipment_discount2_buy_hours, 10)) }),
+      ...(equipment_discount2_free_hours !== undefined && { equipment_discount2_free_hours: Math.max(1, parseInt(equipment_discount2_free_hours, 10)) })
+    };
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const before = await tx.globalSetting.findUnique({ where: { id: 1 } });
+      const saved = await tx.globalSetting.upsert({
+        where: { id: 1 },
+        update: updatePayload,
+        create: {
+          id: 1,
+          allow_equipment_exceed_pax: !!allow_equipment_exceed_pax,
+          show_equipment_live_stock: show_equipment_live_stock !== undefined ? !!show_equipment_live_stock : true,
+          equipment_discount_enabled: equipment_discount_enabled !== undefined ? !!equipment_discount_enabled : true,
+          equipment_discount_buy_hours: equipment_discount_buy_hours !== undefined ? Math.max(1, parseInt(equipment_discount_buy_hours, 10)) : 3,
+          equipment_discount_free_hours: equipment_discount_free_hours !== undefined ? Math.max(1, parseInt(equipment_discount_free_hours, 10)) : 1,
+          equipment_discount_stackable: equipment_discount_stackable !== undefined ? !!equipment_discount_stackable : true,
+          equipment_discount2_enabled: !!equipment_discount2_enabled,
+          equipment_discount2_buy_hours: equipment_discount2_buy_hours !== undefined ? Math.max(1, parseInt(equipment_discount2_buy_hours, 10)) : 8,
+          equipment_discount2_free_hours: equipment_discount2_free_hours !== undefined ? Math.max(1, parseInt(equipment_discount2_free_hours, 10)) : 4
+        }
+      });
+
+      const { beforeChanged, afterChanged, changedKeys } = diffFields(before || {}, updatePayload);
+      if (changedKeys.length > 0) {
+        const deviceInfo = getAdminDeviceInfo(req);
+        await auditService.log(tx, {
+          event_type: 'equipment_setting_changed',
+          category: 'setting',
+          target_type: 'equipment_setting',
+          target_ref: '1',
+          summary: `修改智能板全店設定：${changedKeys.join('、')}`,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: req.user?.name || '管理員',
+          staff_id: req.user?.id || null,
+          device_id: deviceInfo?.device_id || null,
+          device_label: deviceInfo?.device_label || '後台'
+        });
       }
+      return saved;
     });
 
     res.json(sanitizeGlobalSetting(updated));

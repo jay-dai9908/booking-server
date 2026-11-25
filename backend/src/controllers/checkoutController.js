@@ -2,6 +2,9 @@ import prisma from '../prismaClient.js';
 import { toTaipeiDateString } from '../../../shared/time.js';
 import { normalizePromoRule, computePromoDiscount } from '../../../shared/promo.js';
 import { splitAmount } from '../../../shared/splitAmount.js';
+import auditService from '../services/audit/auditService.js';
+import { diffFields } from '../services/audit/settingAudit.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
 export const DEFAULT_PROMO_CODES = [
   {
@@ -432,29 +435,47 @@ export const createPromoCode = async (req, res) => {
       finalDiscountValue = num;
     }
 
-    const created = await prisma.promoCode.create({
-      data: {
-        code: cleanCode,
-        name: name.trim(),
-        description: description ? description.trim() : null,
-        discount_type,
-        discount_value: finalDiscountValue,
-        percent_off: finalPercentOff,
-        max_discount_amount: max_discount_amount !== null && max_discount_amount !== '' ? parseInt(max_discount_amount, 10) : null,
-        target_scope: target_scope || 'all',
-        day_type_limit: day_type_limit || applicable_days || 'all',
-        mode_limit: mode_limit || applicable_mode || 'all',
-        channel: channel || 'all',
-        min_pax: parseInt(min_pax, 10) || 1,
-        min_hours: parseInt(min_hours, 10) || 1,
-        min_amount: parseInt(min_amount, 10) || 0,
-        max_uses: max_uses !== null && max_uses !== '' ? parseInt(max_uses, 10) : null,
-        max_uses_per_user: max_uses_per_user !== null && max_uses_per_user !== '' ? parseInt(max_uses_per_user, 10) : null,
-        start_date: startDateVal ? new Date(startDateVal) : null,
-        end_date: endDateVal ? new Date(endDateVal) : null,
-        is_pos_quick_select: Boolean(is_pos_quick_select),
-        is_active: Boolean(is_active)
-      }
+    const deviceInfo = getAdminDeviceInfo(req);
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.promoCode.create({
+        data: {
+          code: cleanCode,
+          name: name.trim(),
+          description: description ? description.trim() : null,
+          discount_type,
+          discount_value: finalDiscountValue,
+          percent_off: finalPercentOff,
+          max_discount_amount: max_discount_amount !== null && max_discount_amount !== '' ? parseInt(max_discount_amount, 10) : null,
+          target_scope: target_scope || 'all',
+          day_type_limit: day_type_limit || applicable_days || 'all',
+          mode_limit: mode_limit || applicable_mode || 'all',
+          channel: channel || 'all',
+          min_pax: parseInt(min_pax, 10) || 1,
+          min_hours: parseInt(min_hours, 10) || 1,
+          min_amount: parseInt(min_amount, 10) || 0,
+          max_uses: max_uses !== null && max_uses !== '' ? parseInt(max_uses, 10) : null,
+          max_uses_per_user: max_uses_per_user !== null && max_uses_per_user !== '' ? parseInt(max_uses_per_user, 10) : null,
+          start_date: startDateVal ? new Date(startDateVal) : null,
+          end_date: endDateVal ? new Date(endDateVal) : null,
+          is_pos_quick_select: Boolean(is_pos_quick_select),
+          is_active: Boolean(is_active)
+        }
+      });
+
+      await auditService.log(tx, {
+        event_type: 'promo_created',
+        category: 'promo',
+        target_type: 'promo_code',
+        target_ref: row.code,
+        summary: `新增優惠碼 ${row.code}（${row.name}）`,
+        after_json: row,
+        staff_name: req.user?.name || '管理員',
+        staff_id: req.user?.id || null,
+        device_id: deviceInfo?.device_id || null,
+        device_label: deviceInfo?.device_label || '後台'
+      });
+
+      return row;
     });
 
     res.status(201).json(created);
@@ -568,9 +589,31 @@ export const updatePromoCode = async (req, res) => {
       if (data.is_active) data.archived_at = null;
     }
 
-    const updated = await prisma.promoCode.update({
-      where: { id },
-      data
+    const deviceInfo = getAdminDeviceInfo(req);
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.promoCode.update({
+        where: { id },
+        data
+      });
+
+      const { beforeChanged, afterChanged, changedKeys } = diffFields(existingPromo, data);
+      if (changedKeys.length > 0) {
+        await auditService.log(tx, {
+          event_type: 'promo_updated',
+          category: 'promo',
+          target_type: 'promo_code',
+          target_ref: row.code,
+          summary: `修改優惠碼 ${row.code}：${changedKeys.join('、')}`,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: req.user?.name || '管理員',
+          staff_id: req.user?.id || null,
+          device_id: deviceInfo?.device_id || null,
+          device_label: deviceInfo?.device_label || '後台'
+        });
+      }
+
+      return row;
     });
     res.json(updated);
   } catch (error) {
@@ -587,13 +630,40 @@ export const updatePromoCode = async (req, res) => {
 export const deletePromoCode = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const updated = await prisma.promoCode.update({
-      where: { id },
-      data: {
-        is_active: false,
-        archived_at: new Date()
-      }
+    const deviceInfo = getAdminDeviceInfo(req);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const before = await tx.promoCode.findUnique({ where: { id } });
+      if (!before) return null;
+
+      const row = await tx.promoCode.update({
+        where: { id },
+        data: {
+          is_active: false,
+          archived_at: new Date()
+        }
+      });
+
+      await auditService.log(tx, {
+        event_type: 'promo_disabled',
+        category: 'promo',
+        target_type: 'promo_code',
+        target_ref: row.code,
+        summary: `停用優惠碼 ${row.code}（${row.name}）`,
+        before_json: before,
+        after_json: { is_active: row.is_active, archived_at: row.archived_at },
+        staff_name: req.user?.name || '管理員',
+        staff_id: req.user?.id || null,
+        device_id: deviceInfo?.device_id || null,
+        device_label: deviceInfo?.device_label || '後台'
+      });
+
+      return row;
     });
+
+    if (!updated) {
+      return res.status(404).json({ error: '找不到此優惠碼' });
+    }
     res.json({ message: '優惠券已停用', promo: updated });
   } catch (error) {
     console.error('Error deleting promo code:', error);

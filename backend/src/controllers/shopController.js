@@ -18,6 +18,19 @@ import { applyShopOrderPayment } from '../services/shop/shopPayment.js';
 import { refundShopOrder } from '../services/shop/shopRefund.js';
 import { getNextDailySeq } from '../services/billing/billService.js';
 import { toTaipeiDateString } from '../../../shared/time.js';
+import { diffFields, maskBankAccountsForAudit } from '../services/audit/settingAudit.js';
+
+function normalizeBankAccountsForAudit(val) {
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      return Array.isArray(parsed) ? maskBankAccountsForAudit(parsed) : val;
+    } catch {
+      return val;
+    }
+  }
+  return Array.isArray(val) ? maskBankAccountsForAudit(val) : (val ?? null);
+}
 
 /**
  * Public: Get active products for customer shop
@@ -745,12 +758,43 @@ export const updateAdminOrder = async (req, res) => {
       dataToUpdate.picked_up_at = new Date();
     }
 
+    const beforeSnapshot = {
+      estimated_arrival: order.estimated_arrival ?? null,
+      admin_note: order.admin_note ?? null,
+      wish_reply: order.wish_reply ?? null,
+      order_status: order.order_status
+    };
+
     const updated = await prisma.$transaction(async (tx) => {
       const row = await tx.productOrder.update({
         where: { id: order.id },
         data: dataToUpdate,
         include: { items: true, user: true }
       });
+
+      const { beforeChanged, afterChanged, changedKeys } = diffFields(beforeSnapshot, {
+        estimated_arrival: row.estimated_arrival ?? null,
+        admin_note: row.admin_note ?? null,
+        wish_reply: row.wish_reply ?? null,
+        order_status: row.order_status
+      });
+      if (changedKeys.length > 0) {
+        await auditService.log(tx, {
+          booking_ref: order.order_ref,
+          event_type: 'shop_order_updated',
+          category: 'shop',
+          target_type: 'product_order',
+          target_ref: order.order_ref,
+          summary: `修改商城訂單 ${order.order_ref}（${changedKeys.join('、')}）`,
+          reason: reason ? String(reason).trim() : null,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
 
       // If picked up AND fully_paid, check if any items grant bonus pass plans
       if (order_status === 'picked_up' && order.order_status !== 'picked_up' && order.payment_status === 'fully_paid') {
@@ -1031,6 +1075,10 @@ export const notifyOrderArrival = async (req, res) => {
     return res.status(400).json({ error: '請提供欲通知的訂單編號陣列' });
   }
 
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
     const orders = await prisma.productOrder.findMany({
       where: { id: { in: order_ids.map(id => parseInt(id, 10)) } },
@@ -1042,18 +1090,48 @@ export const notifyOrderArrival = async (req, res) => {
 
     for (const order of orders) {
       try {
-        await prisma.productOrder.update({
-          where: { id: order.id },
-          data: {
-            order_status: 'arrived',
-            arrived_notified_at: new Date()
-          }
-        });
+        await prisma.$transaction(async (tx) => {
+          await tx.productOrder.update({
+            where: { id: order.id },
+            data: {
+              order_status: 'arrived',
+              arrived_notified_at: new Date()
+            }
+          });
 
-        if (order.user?.line_user_id) {
-          await sendProductArrivalNotification(order, order.user);
-          successCount++;
-        }
+          let lineSent = false;
+          let sendError = null;
+          if (order.user?.line_user_id) {
+            try {
+              await sendProductArrivalNotification(order, order.user);
+              lineSent = true;
+              successCount++;
+            } catch (pushErr) {
+              sendError = pushErr.message;
+              errors.push(`單號 ${order.order_ref}: ${pushErr.message}`);
+            }
+          }
+
+          await auditService.log(tx, {
+            booking_ref: order.order_ref,
+            event_type: 'shop_arrival_notified',
+            category: 'shop',
+            target_type: 'product_order',
+            target_ref: order.order_ref,
+            summary: `發送商城到貨通知 ${order.order_ref}${lineSent ? '（LINE 已送出）' : '（未送出 LINE）'}`,
+            after_json: {
+              order_ref: order.order_ref,
+              order_status: 'arrived',
+              has_line: Boolean(order.user?.line_user_id),
+              line_sent: lineSent,
+              ...(sendError ? { line_error: sendError } : {})
+            },
+            staff_name: staffName,
+            staff_id: staffId,
+            device_id: deviceInfo.device_id,
+            device_label: deviceInfo.device_label
+          });
+        });
       } catch (err) {
         errors.push(`單號 ${order.order_ref}: ${err.message}`);
       }
@@ -1100,55 +1178,85 @@ export const batchImportAccountPool = async (req, res) => {
     return res.status(400).json({ error: '請輸入欲匯入的帳號文字' });
   }
 
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
     const rawLines = String(text_lines).split('\n');
 
-    let addedCount = 0;
-    let skippedCount = 0;
-    const invalid_url_lines = [];
+    const { addedCount, skippedCount, invalid_url_lines } = await prisma.$transaction(async (tx) => {
+      let added = 0;
+      let skipped = 0;
+      const invalidUrls = [];
+      const addedLast4 = [];
 
-    for (let i = 0; i < rawLines.length; i += 1) {
-      const lineNo = i + 1;
-      const line = rawLines[i].trim();
-      if (!line) continue;
+      for (let i = 0; i < rawLines.length; i += 1) {
+        const lineNo = i + 1;
+        const line = rawLines[i].trim();
+        if (!line) continue;
 
-      // Support comma or tab separated: account,payment_url,note
-      const parts = line.split(/[,\t]/).map(s => s.trim());
-      const account = parts[0];
-      const rawUrl = parts[1] || '';
-      const customNote = parts[2] || note || null;
+        // Support comma or tab separated: account,payment_url,note
+        const parts = line.split(/[,\t]/).map(s => s.trim());
+        const account = parts[0];
+        const rawUrl = parts[1] || '';
+        const customNote = parts[2] || note || null;
 
-      if (!account) continue;
+        if (!account) continue;
 
-      if (rawUrl && !isSafeHttpUrl(rawUrl)) {
-        skippedCount++;
-        invalid_url_lines.push(lineNo);
-        continue;
-      }
-      const url = rawUrl ? safeHttpUrl(rawUrl, null) : null;
-
-      const existing = await prisma.oneTimeAccountPool.findUnique({
-        where: { account_number: account }
-      });
-
-      if (existing) {
-        skippedCount++;
-        continue;
-      }
-
-      await prisma.oneTimeAccountPool.create({
-        data: {
-          payment_method_code,
-          bank_code,
-          bank_name: '中國信託（社群收款專屬帳號）',
-          account_number: account,
-          payment_url: url,
-          note: customNote,
-          status: 'AVAILABLE'
+        if (rawUrl && !isSafeHttpUrl(rawUrl)) {
+          skipped++;
+          invalidUrls.push(lineNo);
+          continue;
         }
-      });
-      addedCount++;
-    }
+        const url = rawUrl ? safeHttpUrl(rawUrl, null) : null;
+
+        const existing = await tx.oneTimeAccountPool.findUnique({
+          where: { account_number: account }
+        });
+
+        if (existing) {
+          skipped++;
+          continue;
+        }
+
+        await tx.oneTimeAccountPool.create({
+          data: {
+            payment_method_code,
+            bank_code,
+            bank_name: '中國信託（社群收款專屬帳號）',
+            account_number: account,
+            payment_url: url,
+            note: customNote,
+            status: 'AVAILABLE'
+          }
+        });
+        added++;
+        addedLast4.push(`****${String(account).slice(-4)}`);
+      }
+
+      if (added > 0) {
+        await auditService.log(tx, {
+          event_type: 'pool_account_imported',
+          category: 'shop',
+          target_type: 'account_pool',
+          target_ref: payment_method_code,
+          summary: `匯入 ${added} 組一次性帳號（略過 ${skipped} 組）`,
+          after_json: {
+            payment_method_code,
+            added_count: added,
+            skipped_count: skipped,
+            last4_list: addedLast4
+          },
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
+
+      return { addedCount: added, skippedCount: skipped, invalid_url_lines: invalidUrls };
+    });
 
     res.json({
       message: `匯入完成！成功新增 ${addedCount} 組帳號，略過 ${skippedCount} 組。`,
@@ -1172,17 +1280,56 @@ export const updateAccountPoolItem = async (req, res) => {
     }
   }
 
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
-    const updated = await prisma.oneTimeAccountPool.update({
-      where: { id: parseInt(id, 10) },
-      data: {
-        ...(status ? { status } : {}),
-        ...(note !== undefined ? { note } : {}),
-        ...(payment_url !== undefined ? { payment_url: safeHttpUrl(payment_url, null) } : {})
+    const updated = await prisma.$transaction(async (tx) => {
+      const poolId = parseInt(id, 10);
+      const before = await tx.oneTimeAccountPool.findUnique({ where: { id: poolId } });
+      if (!before) {
+        const err = new Error('找不到該帳號項目');
+        err.status = 404;
+        throw err;
       }
+
+      const row = await tx.oneTimeAccountPool.update({
+        where: { id: poolId },
+        data: {
+          ...(status ? { status } : {}),
+          ...(note !== undefined ? { note } : {}),
+          ...(payment_url !== undefined ? { payment_url: safeHttpUrl(payment_url, null) } : {})
+        }
+      });
+
+      const last4 = String(row.account_number || '').slice(-4);
+      const { beforeChanged, afterChanged, changedKeys } = diffFields(
+        { status: before.status, note: before.note, payment_url: before.payment_url },
+        { status: row.status, note: row.note, payment_url: row.payment_url }
+      );
+
+      if (changedKeys.length > 0) {
+        await auditService.log(tx, {
+          event_type: 'pool_account_updated',
+          category: 'shop',
+          target_type: 'account_pool',
+          target_ref: last4,
+          summary: `修改帳號池 ****${last4}（${changedKeys.join('、')}）`,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
+
+      return row;
     });
     res.json({ message: '帳號資訊已更新', item: updated });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: '更新帳號失敗' });
   }
 };
@@ -1227,22 +1374,68 @@ export const updateAdminPaymentMethod = async (req, res) => {
     sort_order
   } = req.body;
 
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
-    const updated = await prisma.paymentMethodConfig.update({
-      where: { id: parseInt(id, 10) },
-      data: {
-        ...(name !== undefined ? { name } : {}),
-        ...(is_enabled !== undefined ? { is_enabled: Boolean(is_enabled) } : {}),
-        ...(display_instructions !== undefined ? { display_instructions } : {}),
-        ...(bank_accounts_json !== undefined ? { bank_accounts_json } : {}),
-        ...(require_last5 !== undefined ? { require_last5: Boolean(require_last5) } : {}),
-        ...(show_line_verify_btn !== undefined ? { show_line_verify_btn: Boolean(show_line_verify_btn) } : {}),
-        ...(sort_order !== undefined ? { sort_order: parseInt(sort_order, 10) || 0 } : {})
+    const updated = await prisma.$transaction(async (tx) => {
+      const methodId = parseInt(id, 10);
+      const before = await tx.paymentMethodConfig.findUnique({ where: { id: methodId } });
+      if (!before) {
+        const err = new Error('找不到該付款方式');
+        err.status = 404;
+        throw err;
       }
+
+      const row = await tx.paymentMethodConfig.update({
+        where: { id: methodId },
+        data: {
+          ...(name !== undefined ? { name } : {}),
+          ...(is_enabled !== undefined ? { is_enabled: Boolean(is_enabled) } : {}),
+          ...(display_instructions !== undefined ? { display_instructions } : {}),
+          ...(bank_accounts_json !== undefined ? { bank_accounts_json } : {}),
+          ...(require_last5 !== undefined ? { require_last5: Boolean(require_last5) } : {}),
+          ...(show_line_verify_btn !== undefined ? { show_line_verify_btn: Boolean(show_line_verify_btn) } : {}),
+          ...(sort_order !== undefined ? { sort_order: parseInt(sort_order, 10) || 0 } : {})
+        }
+      });
+
+      const auditKeys = ['name', 'is_enabled', 'display_instructions', 'bank_accounts_json', 'require_last5', 'show_line_verify_btn', 'sort_order'];
+      const beforeAudit = {};
+      const afterAudit = {};
+      for (const k of auditKeys) {
+        if (k === 'bank_accounts_json') {
+          beforeAudit[k] = normalizeBankAccountsForAudit(before[k]);
+          afterAudit[k] = normalizeBankAccountsForAudit(row[k]);
+        } else {
+          beforeAudit[k] = before[k] ?? null;
+          afterAudit[k] = row[k] ?? null;
+        }
+      }
+      const { beforeChanged, afterChanged, changedKeys } = diffFields(beforeAudit, afterAudit);
+      if (changedKeys.length > 0) {
+        await auditService.log(tx, {
+          event_type: 'shop_payment_method_changed',
+          category: 'setting',
+          target_type: 'payment_method',
+          target_ref: row.code,
+          summary: `修改付款方式「${row.name}」：${changedKeys.join('、')}`,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
+
+      return row;
     });
 
     res.json({ message: '付款方式已更新', method: updated });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: '更新付款方式失敗' });
   }
 };
@@ -1258,6 +1451,10 @@ export const updateShopGlobalSettings = async (req, res) => {
     official_line_url,
     bead_colors_json
   } = req.body;
+
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
 
   try {
     const dataToUpdate = {};
@@ -1277,10 +1474,32 @@ export const updateShopGlobalSettings = async (req, res) => {
     }
     if (bead_colors_json !== undefined) dataToUpdate.bead_colors_json = Array.isArray(bead_colors_json) ? bead_colors_json : [];
 
-    const setting = await prisma.globalSetting.upsert({
-      where: { id: 1 },
-      update: dataToUpdate,
-      create: { id: 1, ...dataToUpdate }
+    const setting = await prisma.$transaction(async (tx) => {
+      const before = await tx.globalSetting.findUnique({ where: { id: 1 } });
+      const row = await tx.globalSetting.upsert({
+        where: { id: 1 },
+        update: dataToUpdate,
+        create: { id: 1, ...dataToUpdate }
+      });
+
+      const { beforeChanged, afterChanged, changedKeys } = diffFields(before || {}, dataToUpdate);
+      if (changedKeys.length > 0) {
+        await auditService.log(tx, {
+          event_type: 'shop_setting_changed',
+          category: 'setting',
+          target_type: 'shop_setting',
+          target_ref: '1',
+          summary: `修改商城全域設定：${changedKeys.join('、')}`,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
+
+      return row;
     });
 
     res.json({ message: '預購商城全域設定已儲存', setting: sanitizeGlobalSetting(setting) });
@@ -1328,27 +1547,55 @@ export const createAdminProduct = async (req, res) => {
     return res.status(400).json({ error: '商品代碼、名稱與售價為必填欄位' });
   }
 
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
-    const created = await prisma.product.create({
-      data: {
-        code: String(code).trim(),
-        name: String(name).trim(),
-        category,
-        description,
-        image_url: image_url || (Array.isArray(images_json) && images_json[0] ? images_json[0] : null),
-        images_json: Array.isArray(images_json) ? images_json : null,
-        price: parseInt(price, 10) || 0,
-        is_preorder: Boolean(is_preorder),
-        deposit_amount: parseInt(deposit_amount, 10) || 0,
-        estimated_arrival_text,
-        allow_wish_input: Boolean(allow_wish_input),
-        wish_input_placeholder,
-        bonus_pass_plan_code,
-        tier_pricing: tier_pricing || null,
-        tier_discount_mode: tier_discount_mode === 'per_color' ? 'per_color' : 'combined',
-        visibility_status,
-        sort_order: parseInt(sort_order, 10) || 0
-      }
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.product.create({
+        data: {
+          code: String(code).trim(),
+          name: String(name).trim(),
+          category,
+          description,
+          image_url: image_url || (Array.isArray(images_json) && images_json[0] ? images_json[0] : null),
+          images_json: Array.isArray(images_json) ? images_json : null,
+          price: parseInt(price, 10) || 0,
+          is_preorder: Boolean(is_preorder),
+          deposit_amount: parseInt(deposit_amount, 10) || 0,
+          estimated_arrival_text,
+          allow_wish_input: Boolean(allow_wish_input),
+          wish_input_placeholder,
+          bonus_pass_plan_code,
+          tier_pricing: tier_pricing || null,
+          tier_discount_mode: tier_discount_mode === 'per_color' ? 'per_color' : 'combined',
+          visibility_status,
+          sort_order: parseInt(sort_order, 10) || 0
+        }
+      });
+
+      await auditService.log(tx, {
+        event_type: 'product_created',
+        category: 'shop',
+        target_type: 'product',
+        target_ref: row.code,
+        summary: `新增商品「${row.name}」(${row.code})`,
+        after_json: {
+          code: row.code,
+          name: row.name,
+          category: row.category,
+          price: row.price,
+          deposit_amount: row.deposit_amount,
+          visibility_status: row.visibility_status
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      return row;
     });
 
     res.json({ message: '商品建立成功！', product: created });
@@ -1376,15 +1623,49 @@ export const updateAdminProduct = async (req, res) => {
     updateData.image_url = updateData.images_json[0];
   }
 
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
-    const updated = await prisma.product.update({
-      where: { id: parseInt(id, 10) },
-      data: updateData
+    const updated = await prisma.$transaction(async (tx) => {
+      const productId = parseInt(id, 10);
+      const before = await tx.product.findUnique({ where: { id: productId } });
+      if (!before) {
+        const err = new Error('找不到該商品');
+        err.status = 404;
+        throw err;
+      }
+
+      const row = await tx.product.update({
+        where: { id: productId },
+        data: updateData
+      });
+
+      const { beforeChanged, afterChanged, changedKeys } = diffFields(before, updateData);
+      if (changedKeys.length > 0) {
+        await auditService.log(tx, {
+          event_type: 'product_updated',
+          category: 'shop',
+          target_type: 'product',
+          target_ref: row.code,
+          summary: `修改商品「${row.name}」(${row.code})：${changedKeys.join('、')}`,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
+
+      return row;
     });
 
     res.json({ message: '商品更新成功！', product: updated });
   } catch (error) {
     console.error('updateAdminProduct error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: '更新商品失敗' });
   }
 };
