@@ -1,10 +1,11 @@
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { deductPass } from '../services/billing/passTender.js';
-import { assertEnabledPaymentMethod, nextSerialNo, resolveBillingDate } from '../services/billing/billService.js';
+import { assertEnabledPaymentMethod, getNextDailySeq, nextSerialNo, resolveBillingDate } from '../services/billing/billService.js';
 import { queuePrintJob } from '../services/print/printService.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+import { toTaipeiDateString } from '../../../shared/time.js';
 
 /**
  * Admin: Grant or sell pass to a user (mode: 'sale' | 'gift')
@@ -544,12 +545,60 @@ export const getAdminPassPlans = async (_req, res) => {
   }
 };
 
+const PASS_PLAN_CODE_RE = /^[a-z0-9_]{3,40}$/;
+const VALID_PASS_TYPES = new Set(['PUNCH_CARD', 'DISCOUNT_VOUCHER', 'MONTHLY_PASS', 'TIME_PASS']);
+const VALID_DAY_RESTRICTIONS = new Set(['ALL', 'WEEKDAY_ONLY', 'WEEKEND_ONLY']);
+const VALID_CHECKOUT_EFFECTS = new Set(['entry_hours', 'entry_full', 'percent_off', 'fixed_amount']);
+const VALID_CHECKOUT_SCOPES = new Set(['entry', 'all']);
+
+function parseStrictInt(val) {
+  if (typeof val === 'number') {
+    return Number.isInteger(val) ? val : null;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!/^-?\d+$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parseOptionalIntMin(val, min, field, label) {
+  if (val === null || val === '') {
+    return { ok: true, value: null };
+  }
+  const parsed = parseStrictInt(val);
+  if (parsed === null || parsed < min) {
+    return { ok: false, error: `${label}須為 ${min} 以上的整數`, field };
+  }
+  return { ok: true, value: parsed };
+}
+
+function parseRequiredIntMin(val, min, field, label) {
+  const parsed = parseStrictInt(val);
+  if (parsed === null || parsed < min) {
+    return { ok: false, error: `${label}須為 ${min} 以上的整數`, field };
+  }
+  return { ok: true, value: parsed };
+}
+
+function passPlanValuesEqual(a, b) {
+  return (a ?? null) === (b ?? null);
+}
+
 /**
  * Admin: Create pass plan template
  */
 export const createPassPlan = async (req, res) => {
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
+    const body = req.body || {};
     const {
+      code,
       name,
       pass_type,
       price,
@@ -563,38 +612,185 @@ export const createPassPlan = async (req, res) => {
       valid_days,
       day_restriction,
       is_active,
+      discount_percent,
+      is_purchasable_online,
       checkout_effect,
       checkout_scope,
       checkout_value
-    } = req.body;
+    } = body;
 
-    if (!name || !pass_type) {
-      return res.status(400).json({ error: '方案名稱與類型為必填' });
+    let explicitCode = null;
+    if (code !== undefined && code !== null && String(code).trim() !== '') {
+      const trimmedCode = String(code).trim();
+      if (!PASS_PLAN_CODE_RE.test(trimmedCode)) {
+        return res.status(422).json({ error: '方案代碼僅能包含小寫英文、數字與底線（3～40 字）', field: 'code' });
+      }
+      explicitCode = trimmedCode;
     }
 
-    const created = await prisma.passPlan.create({
-      data: {
-        name,
-        pass_type,
-        price: parseInt(price, 10) || 0,
-        original_value: parseInt(original_value, 10) || parseInt(price, 10) || 0,
-        total_quota: parseInt(total_quota, 10) || 1,
-        unit_name: unit_name || '次',
-        description: description || null,
-        max_hours_per_day: max_hours_per_day != null && max_hours_per_day !== '' ? parseInt(max_hours_per_day, 10) : null,
-        max_days_per_week: max_days_per_week != null && max_days_per_week !== '' ? parseInt(max_days_per_week, 10) : null,
-        max_hours_per_week: max_hours_per_week != null && max_hours_per_week !== '' ? parseInt(max_hours_per_week, 10) : null,
-        valid_days: valid_days != null && valid_days !== '' ? parseInt(valid_days, 10) : null,
-        day_restriction: day_restriction || 'ALL',
-        is_active: is_active !== false,
-        checkout_effect: checkout_effect || null,
-        checkout_scope: checkout_scope || 'entry',
-        checkout_value: checkout_value != null && checkout_value !== '' ? parseInt(checkout_value, 10) : null
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    if (!trimmedName || trimmedName.length > 40) {
+      return res.status(422).json({ error: '方案名稱須為 1～40 字', field: 'name' });
+    }
+
+    if (!VALID_PASS_TYPES.has(pass_type)) {
+      return res.status(422).json({ error: '卡券類型必須為 PUNCH_CARD、DISCOUNT_VOUCHER、MONTHLY_PASS 或 TIME_PASS', field: 'pass_type' });
+    }
+
+    const priceRes = parseRequiredIntMin(price === undefined ? 0 : price, 0, 'price', '售價');
+    if (!priceRes.ok) return res.status(422).json({ error: priceRes.error, field: priceRes.field });
+
+    const origValRes = original_value === undefined
+      ? { ok: true, value: null }
+      : parseOptionalIntMin(original_value, 0, 'original_value', '參考原價');
+    if (!origValRes.ok) return res.status(422).json({ error: origValRes.error, field: origValRes.field });
+
+    const allowNullQuota = pass_type === 'MONTHLY_PASS' || pass_type === 'TIME_PASS';
+    let parsedQuota = null;
+    if (total_quota === undefined || total_quota === null || total_quota === '') {
+      if (!allowNullQuota) {
+        return res.status(422).json({ error: '次數卡／折扣券的額度必須為 1 以上的整數', field: 'total_quota' });
       }
+    } else {
+      const quotaRes = parseRequiredIntMin(total_quota, 1, 'total_quota', '額度');
+      if (!quotaRes.ok) return res.status(422).json({ error: quotaRes.error, field: quotaRes.field });
+      parsedQuota = quotaRes.value;
+    }
+
+    const trimmedUnit = unit_name === undefined ? '次' : (typeof unit_name === 'string' ? unit_name.trim() : '');
+    if (!trimmedUnit || trimmedUnit.length > 4) {
+      return res.status(422).json({ error: '單位名稱須為 1～4 字', field: 'unit_name' });
+    }
+
+    const validDaysRes = valid_days === undefined
+      ? { ok: true, value: null }
+      : parseOptionalIntMin(valid_days, 1, 'valid_days', '有效天數');
+    if (!validDaysRes.ok) return res.status(422).json({ error: validDaysRes.error, field: validDaysRes.field });
+
+    const normalizedDayRestr = day_restriction === undefined || day_restriction === null || day_restriction === ''
+      ? 'ALL'
+      : day_restriction;
+    if (!VALID_DAY_RESTRICTIONS.has(normalizedDayRestr)) {
+      return res.status(422).json({ error: '適用日期限制不正確', field: 'day_restriction' });
+    }
+
+    const maxHoursDayRes = max_hours_per_day === undefined
+      ? { ok: true, value: null }
+      : parseOptionalIntMin(max_hours_per_day, 1, 'max_hours_per_day', '每日最高時數');
+    if (!maxHoursDayRes.ok) return res.status(422).json({ error: maxHoursDayRes.error, field: maxHoursDayRes.field });
+
+    const maxDaysWeekRes = max_days_per_week === undefined
+      ? { ok: true, value: null }
+      : parseOptionalIntMin(max_days_per_week, 1, 'max_days_per_week', '每週最高天數');
+    if (!maxDaysWeekRes.ok) return res.status(422).json({ error: maxDaysWeekRes.error, field: maxDaysWeekRes.field });
+
+    const maxHoursWeekRes = max_hours_per_week === undefined
+      ? { ok: true, value: null }
+      : parseOptionalIntMin(max_hours_per_week, 1, 'max_hours_per_week', '每週最高時數');
+    if (!maxHoursWeekRes.ok) return res.status(422).json({ error: maxHoursWeekRes.error, field: maxHoursWeekRes.field });
+
+    const discountRes = discount_percent === undefined
+      ? { ok: true, value: null }
+      : parseOptionalIntMin(discount_percent, 1, 'discount_percent', '折扣百分比');
+    if (!discountRes.ok || (discountRes.value !== null && discountRes.value > 100)) {
+      return res.status(422).json({ error: '折扣百分比須為 1～100 的整數', field: 'discount_percent' });
+    }
+
+    const normalizedEffect = (checkout_effect === undefined || checkout_effect === null || checkout_effect === '')
+      ? null
+      : checkout_effect;
+    if (normalizedEffect !== null && !VALID_CHECKOUT_EFFECTS.has(normalizedEffect)) {
+      return res.status(422).json({ error: '折抵方式不正確', field: 'checkout_effect' });
+    }
+
+    const normalizedScope = (checkout_scope === undefined || checkout_scope === null || checkout_scope === '')
+      ? 'entry'
+      : checkout_scope;
+    if (!VALID_CHECKOUT_SCOPES.has(normalizedScope)) {
+      return res.status(422).json({ error: '折抵範圍必須為 entry 或 all', field: 'checkout_scope' });
+    }
+
+    const checkoutValRes = checkout_value === undefined
+      ? { ok: true, value: null }
+      : parseOptionalIntMin(checkout_value, 1, 'checkout_value', '折抵金額');
+    if (!checkoutValRes.ok) return res.status(422).json({ error: checkoutValRes.error, field: checkoutValRes.field });
+
+    if (normalizedEffect === 'fixed_amount' && (checkoutValRes.value === null || checkoutValRes.value < 1)) {
+      return res.status(422).json({ error: '固定金額折抵必須填寫折抵金額（1 以上的整數）', field: 'checkout_value' });
+    }
+
+    const now = resolveBillingDate(body) || new Date();
+    const dateCompact = toTaipeiDateString(now).replace(/-/g, '');
+
+    const created = await prisma.$transaction(async (tx) => {
+      let finalCode = explicitCode;
+      if (finalCode) {
+        const dup = await tx.passPlan.findUnique({ where: { code: finalCode } });
+        if (dup) {
+          throw { status: 409, message: '方案代碼已存在', field: 'code' };
+        }
+      } else {
+        do {
+          const seq = await getNextDailySeq(tx, 'pass_plan', now);
+          finalCode = `plan_${dateCompact}_${String(seq).padStart(3, '0')}`;
+        } while (await tx.passPlan.findUnique({ where: { code: finalCode } }));
+      }
+
+      const plan = await tx.passPlan.create({
+        data: {
+          code: finalCode,
+          name: trimmedName,
+          pass_type,
+          price: priceRes.value,
+          original_value: origValRes.value,
+          total_quota: parsedQuota,
+          unit_name: trimmedUnit,
+          description: description != null && String(description).trim() !== '' ? String(description).trim() : null,
+          max_hours_per_day: maxHoursDayRes.value,
+          max_days_per_week: maxDaysWeekRes.value,
+          max_hours_per_week: maxHoursWeekRes.value,
+          valid_days: validDaysRes.value,
+          day_restriction: normalizedDayRestr,
+          is_active: is_active !== false,
+          is_purchasable_online: Boolean(is_purchasable_online),
+          discount_percent: discountRes.value,
+          checkout_effect: normalizedEffect,
+          checkout_scope: normalizedScope,
+          checkout_value: checkoutValRes.value
+        }
+      });
+
+      await auditLog(tx, {
+        event_type: 'pass_plan_created',
+        category: 'pass',
+        summary: `新增卡券方案「${plan.name}」（${plan.code}）`,
+        before_json: null,
+        after_json: {
+          id: plan.id,
+          code: plan.code,
+          name: plan.name,
+          pass_type: plan.pass_type,
+          price: plan.price,
+          original_value: plan.original_value,
+          total_quota: plan.total_quota,
+          unit_name: plan.unit_name
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        ...deviceInfo
+      });
+
+      return plan;
     });
 
     res.status(201).json(created);
   } catch (error) {
+    if (error?.status) {
+      return res.status(error.status).json({ error: error.message, ...(error.field ? { field: error.field } : {}) });
+    }
+    if (error?.code === 'P2002') {
+      return res.status(409).json({ error: '方案代碼已存在', field: 'code' });
+    }
     console.error('createPassPlan error:', error);
     res.status(500).json({ error: '建立卡券方案失敗' });
   }
@@ -604,8 +800,22 @@ export const createPassPlan = async (req, res) => {
  * Admin: Update pass plan template
  */
 export const updatePassPlan = async (req, res) => {
-  const { id } = req.params;
+  const planId = parseStrictInt(req.params?.id);
+  if (!planId || planId < 1) {
+    return res.status(404).json({ error: '找不到指定的卡券方案' });
+  }
+
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
+    const existing = await prisma.passPlan.findUnique({ where: { id: planId } });
+    if (!existing) {
+      return res.status(404).json({ error: '找不到指定的卡券方案' });
+    }
+
+    const body = req.body || {};
     const {
       name,
       pass_type,
@@ -620,32 +830,164 @@ export const updatePassPlan = async (req, res) => {
       valid_days,
       day_restriction,
       is_active,
+      discount_percent,
+      is_purchasable_online,
       checkout_effect,
       checkout_scope,
       checkout_value
-    } = req.body;
+    } = body;
 
     const data = {};
-    if (name !== undefined) data.name = name;
-    if (pass_type !== undefined) data.pass_type = pass_type;
-    if (price !== undefined) data.price = parseInt(price, 10) || 0;
-    if (original_value !== undefined) data.original_value = parseInt(original_value, 10) || 0;
-    if (total_quota !== undefined) data.total_quota = parseInt(total_quota, 10) || 1;
-    if (unit_name !== undefined) data.unit_name = unit_name;
-    if (description !== undefined) data.description = description;
-    if (max_hours_per_day !== undefined) data.max_hours_per_day = max_hours_per_day !== '' && max_hours_per_day !== null ? parseInt(max_hours_per_day, 10) : null;
-    if (max_days_per_week !== undefined) data.max_days_per_week = max_days_per_week !== '' && max_days_per_week !== null ? parseInt(max_days_per_week, 10) : null;
-    if (max_hours_per_week !== undefined) data.max_hours_per_week = max_hours_per_week !== '' && max_hours_per_week !== null ? parseInt(max_hours_per_week, 10) : null;
-    if (valid_days !== undefined) data.valid_days = valid_days !== '' && valid_days !== null ? parseInt(valid_days, 10) : null;
-    if (day_restriction !== undefined) data.day_restriction = day_restriction;
-    if (is_active !== undefined) data.is_active = Boolean(is_active);
-    if (checkout_effect !== undefined) data.checkout_effect = checkout_effect || null;
-    if (checkout_scope !== undefined) data.checkout_scope = checkout_scope || 'entry';
-    if (checkout_value !== undefined) data.checkout_value = checkout_value !== '' && checkout_value !== null ? parseInt(checkout_value, 10) : null;
 
-    const updated = await prisma.passPlan.update({
-      where: { id: parseInt(id, 10) },
-      data
+    if (name !== undefined) {
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      if (!trimmedName || trimmedName.length > 40) {
+        return res.status(422).json({ error: '方案名稱須為 1～40 字', field: 'name' });
+      }
+      data.name = trimmedName;
+    }
+
+    if (pass_type !== undefined) {
+      if (!VALID_PASS_TYPES.has(pass_type)) {
+        return res.status(422).json({ error: '卡券類型必須為 PUNCH_CARD、DISCOUNT_VOUCHER、MONTHLY_PASS 或 TIME_PASS', field: 'pass_type' });
+      }
+      data.pass_type = pass_type;
+    }
+
+    if (price !== undefined) {
+      const priceRes = parseRequiredIntMin(price, 0, 'price', '售價');
+      if (!priceRes.ok) return res.status(422).json({ error: priceRes.error, field: priceRes.field });
+      data.price = priceRes.value;
+    }
+
+    if (original_value !== undefined) {
+      const origRes = parseOptionalIntMin(original_value, 0, 'original_value', '參考原價');
+      if (!origRes.ok) return res.status(422).json({ error: origRes.error, field: origRes.field });
+      data.original_value = origRes.value;
+    }
+
+    const effectivePassType = data.pass_type ?? existing.pass_type;
+    const allowNullQuota = effectivePassType === 'MONTHLY_PASS' || effectivePassType === 'TIME_PASS';
+    if (total_quota !== undefined) {
+      if (total_quota === null || total_quota === '') {
+        if (!allowNullQuota) {
+          return res.status(422).json({ error: '次數卡／折扣券的額度必須為 1 以上的整數', field: 'total_quota' });
+        }
+        data.total_quota = null;
+      } else {
+        const quotaRes = parseRequiredIntMin(total_quota, 1, 'total_quota', '額度');
+        if (!quotaRes.ok) return res.status(422).json({ error: quotaRes.error, field: quotaRes.field });
+        data.total_quota = quotaRes.value;
+      }
+    } else if (data.pass_type !== undefined && !allowNullQuota && existing.total_quota === null) {
+      return res.status(422).json({ error: '改為次數卡／折扣券時必須設定額度', field: 'total_quota' });
+    }
+
+    if (unit_name !== undefined) {
+      const trimmedUnit = typeof unit_name === 'string' ? unit_name.trim() : '';
+      if (!trimmedUnit || trimmedUnit.length > 4) {
+        return res.status(422).json({ error: '單位名稱須為 1～4 字', field: 'unit_name' });
+      }
+      data.unit_name = trimmedUnit;
+    }
+
+    if (description !== undefined) {
+      data.description = description != null && String(description).trim() !== '' ? String(description).trim() : null;
+    }
+
+    if (max_hours_per_day !== undefined) {
+      const r = parseOptionalIntMin(max_hours_per_day, 1, 'max_hours_per_day', '每日最高時數');
+      if (!r.ok) return res.status(422).json({ error: r.error, field: r.field });
+      data.max_hours_per_day = r.value;
+    }
+    if (max_days_per_week !== undefined) {
+      const r = parseOptionalIntMin(max_days_per_week, 1, 'max_days_per_week', '每週最高天數');
+      if (!r.ok) return res.status(422).json({ error: r.error, field: r.field });
+      data.max_days_per_week = r.value;
+    }
+    if (max_hours_per_week !== undefined) {
+      const r = parseOptionalIntMin(max_hours_per_week, 1, 'max_hours_per_week', '每週最高時數');
+      if (!r.ok) return res.status(422).json({ error: r.error, field: r.field });
+      data.max_hours_per_week = r.value;
+    }
+    if (valid_days !== undefined) {
+      const r = parseOptionalIntMin(valid_days, 1, 'valid_days', '有效天數');
+      if (!r.ok) return res.status(422).json({ error: r.error, field: r.field });
+      data.valid_days = r.value;
+    }
+    if (day_restriction !== undefined) {
+      const val = day_restriction || 'ALL';
+      if (!VALID_DAY_RESTRICTIONS.has(val)) {
+        return res.status(422).json({ error: '適用日期限制不正確', field: 'day_restriction' });
+      }
+      data.day_restriction = val;
+    }
+    if (discount_percent !== undefined) {
+      const r = parseOptionalIntMin(discount_percent, 1, 'discount_percent', '折扣百分比');
+      if (!r.ok || (r.value !== null && r.value > 100)) {
+        return res.status(422).json({ error: '折扣百分比須為 1～100 的整數', field: 'discount_percent' });
+      }
+      data.discount_percent = r.value;
+    }
+    if (is_active !== undefined) data.is_active = Boolean(is_active);
+    if (is_purchasable_online !== undefined) data.is_purchasable_online = Boolean(is_purchasable_online);
+
+    if (checkout_effect !== undefined) {
+      const eff = (checkout_effect === null || checkout_effect === '') ? null : checkout_effect;
+      if (eff !== null && !VALID_CHECKOUT_EFFECTS.has(eff)) {
+        return res.status(422).json({ error: '折抵方式不正確', field: 'checkout_effect' });
+      }
+      data.checkout_effect = eff;
+    }
+    if (checkout_scope !== undefined) {
+      const sc = checkout_scope || 'entry';
+      if (!VALID_CHECKOUT_SCOPES.has(sc)) {
+        return res.status(422).json({ error: '折抵範圍必須為 entry 或 all', field: 'checkout_scope' });
+      }
+      data.checkout_scope = sc;
+    }
+    if (checkout_value !== undefined) {
+      const r = parseOptionalIntMin(checkout_value, 1, 'checkout_value', '折抵金額');
+      if (!r.ok) return res.status(422).json({ error: r.error, field: r.field });
+      data.checkout_value = r.value;
+    }
+
+    const effectiveEffect = data.checkout_effect !== undefined ? data.checkout_effect : existing.checkout_effect;
+    const effectiveCheckoutValue = data.checkout_value !== undefined ? data.checkout_value : existing.checkout_value;
+    if (effectiveEffect === 'fixed_amount' && (effectiveCheckoutValue === null || effectiveCheckoutValue < 1)) {
+      return res.status(422).json({ error: '固定金額折抵必須填寫折抵金額（1 以上的整數）', field: 'checkout_value' });
+    }
+
+    const beforeChanged = {};
+    const afterChanged = {};
+    for (const key of Object.keys(data)) {
+      if (!passPlanValuesEqual(existing[key], data[key])) {
+        beforeChanged[key] = existing[key] ?? null;
+        afterChanged[key] = data[key] ?? null;
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const plan = await tx.passPlan.update({
+        where: { id: planId },
+        data
+      });
+
+      const changedKeys = Object.keys(afterChanged);
+      if (changedKeys.length > 0) {
+        await auditLog(tx, {
+          event_type: 'pass_plan_updated',
+          category: 'pass',
+          summary: `修改卡券方案「${plan.name}」（${plan.code}）：${changedKeys.join('、')}`,
+          before_json: beforeChanged,
+          after_json: afterChanged,
+          staff_name: staffName,
+          staff_id: staffId,
+          ...deviceInfo
+        });
+      }
+
+      return plan;
     });
 
     res.json(updated);

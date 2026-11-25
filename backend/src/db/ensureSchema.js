@@ -110,6 +110,8 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "checkout_effect" TEXT`,
     `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "checkout_scope" TEXT NOT NULL DEFAULT 'entry'`,
     `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "checkout_value" INTEGER`,
+    `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "unit_name" TEXT NOT NULL DEFAULT '次'`,
+    `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "original_value" INTEGER`,
 
     `ALTER TABLE "AdminUser" ADD COLUMN IF NOT EXISTS "token_version" INTEGER NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS "UserLoginLog" (
@@ -345,6 +347,8 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
       "price" INTEGER NOT NULL DEFAULT 0,
       "is_purchasable_online" BOOLEAN NOT NULL DEFAULT false,
       "total_quota" INTEGER,
+      "unit_name" TEXT NOT NULL DEFAULT '次',
+      "original_value" INTEGER,
       "valid_days" INTEGER,
       "day_restriction" TEXT NOT NULL DEFAULT 'ALL',
       "max_hours_per_day" INTEGER,

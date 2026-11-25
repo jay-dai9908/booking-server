@@ -471,7 +471,7 @@ export default function CouponsPage() {
       pass_type: plan.pass_type || 'TIME_PASS',
       price: plan.price != null ? plan.price : 0,
       original_value: plan.original_value != null ? plan.original_value : '',
-      total_quota: plan.total_quota != null ? plan.total_quota : 1,
+      total_quota: plan.total_quota != null ? plan.total_quota : '',
       unit_name: plan.unit_name || '次',
       description: plan.description || '',
       max_hours_per_day: plan.max_hours_per_day != null ? plan.max_hours_per_day : '',
@@ -494,19 +494,23 @@ export default function CouponsPage() {
       return;
     }
     try {
+      const allowNullQuota = planForm.pass_type === 'MONTHLY_PASS' || planForm.pass_type === 'TIME_PASS';
       const payload = {
         ...planForm,
         name: planForm.name.trim(),
-        price: parseInt(planForm.price, 10) || 0,
-        original_value: planForm.original_value !== '' && planForm.original_value !== null ? parseInt(planForm.original_value, 10) : null,
-        total_quota: parseInt(planForm.total_quota, 10) || 1,
-        max_hours_per_day: planForm.max_hours_per_day !== '' && planForm.max_hours_per_day !== null ? parseInt(planForm.max_hours_per_day, 10) : null,
-        max_days_per_week: planForm.max_days_per_week !== '' && planForm.max_days_per_week !== null ? parseInt(planForm.max_days_per_week, 10) : null,
-        max_hours_per_week: planForm.max_hours_per_week !== '' && planForm.max_hours_per_week !== null ? parseInt(planForm.max_hours_per_week, 10) : null,
-        valid_days: planForm.valid_days !== '' && planForm.valid_days !== null ? parseInt(planForm.valid_days, 10) : null,
+        price: planForm.price === '' || planForm.price === null ? '' : Number(planForm.price),
+        original_value: planForm.original_value !== '' && planForm.original_value !== null ? Number(planForm.original_value) : null,
+        total_quota: (planForm.total_quota === '' || planForm.total_quota === null)
+          ? (allowNullQuota ? null : '')
+          : Number(planForm.total_quota),
+        unit_name: (planForm.unit_name || '').trim(),
+        max_hours_per_day: planForm.max_hours_per_day !== '' && planForm.max_hours_per_day !== null ? Number(planForm.max_hours_per_day) : null,
+        max_days_per_week: planForm.max_days_per_week !== '' && planForm.max_days_per_week !== null ? Number(planForm.max_days_per_week) : null,
+        max_hours_per_week: planForm.max_hours_per_week !== '' && planForm.max_hours_per_week !== null ? Number(planForm.max_hours_per_week) : null,
+        valid_days: planForm.valid_days !== '' && planForm.valid_days !== null ? Number(planForm.valid_days) : null,
         checkout_effect: planForm.checkout_effect || null,
         checkout_scope: planForm.checkout_scope || 'entry',
-        checkout_value: planForm.checkout_value !== '' && planForm.checkout_value !== null ? parseInt(planForm.checkout_value, 10) : null,
+        checkout_value: planForm.checkout_value !== '' && planForm.checkout_value !== null ? Number(planForm.checkout_value) : null,
       };
 
       if (editingPlan) {
@@ -1113,7 +1117,7 @@ export default function CouponsPage() {
                           <div className="flex items-center justify-between">
                             <span className="text-[#8C8279]">售價 / 額度</span>
                             <span className="font-extrabold text-[#3E332B]">
-                              NT$ {plan.price} / {plan.total_quota} {plan.unit_name || '次'}
+                              NT$ {plan.price} / {plan.total_quota != null ? `${plan.total_quota} ${plan.unit_name || '次'}` : '不限次數'}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
@@ -1639,6 +1643,11 @@ export default function CouponsPage() {
 
             {/* Modal Form Body */}
             <form onSubmit={handleSavePlan} className="p-6 overflow-y-auto space-y-5 flex-1">
+              {editingPlan && (
+                <div className="px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-900">
+                  修改只影響之後發出的卡券（已發出的卡券保留原本剩餘額度與效期）。
+                </div>
+              )}
               {/* Basic Fields */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -1697,13 +1706,16 @@ export default function CouponsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">額度 *</label>
+                  <label className="text-[12px] font-bold text-[#6D5D52] block mb-1">
+                    額度 {planForm.pass_type === 'MONTHLY_PASS' || planForm.pass_type === 'TIME_PASS' ? '（選填）' : '*'}
+                  </label>
                   <input
                     type="number"
                     min="1"
-                    required
+                    required={planForm.pass_type !== 'MONTHLY_PASS' && planForm.pass_type !== 'TIME_PASS'}
                     value={planForm.total_quota}
                     onChange={e => setPlanForm({ ...planForm, total_quota: e.target.value })}
+                    placeholder={planForm.pass_type === 'MONTHLY_PASS' || planForm.pass_type === 'TIME_PASS' ? '不限次數可留空' : ''}
                     className="w-full px-2.5 py-1.5 bg-white border border-[#E8DEC8] rounded-lg text-xs font-bold text-[#3E332B]"
                   />
                 </div>
@@ -1712,6 +1724,7 @@ export default function CouponsPage() {
                   <input
                     type="text"
                     required
+                    maxLength={4}
                     value={planForm.unit_name}
                     onChange={e => setPlanForm({ ...planForm, unit_name: e.target.value })}
                     placeholder="小時 / 次 / 天"

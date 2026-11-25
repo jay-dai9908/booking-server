@@ -448,6 +448,8 @@ model PassPlan {
   price                  Int       @default(0)
   is_purchasable_online  Boolean   @default(false)
   total_quota            Int?
+  unit_name              String    @default("次")
+  original_value         Int?
   valid_days             Int?
   day_restriction        String    @default("ALL") // "ALL", "WEEKDAY_ONLY", "WEEKEND_ONLY"
   max_hours_per_day      Int?
