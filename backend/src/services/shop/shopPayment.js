@@ -41,7 +41,7 @@ export async function recalcOrderPaid(txOrPrisma, orderId) {
       nextPaymentStatus = 'fully_paid';
     } else if (paidAmount > 0) {
       nextPaymentStatus = 'deposit_verified';
-    } else {
+    } else if (order.payment_status !== 'verified_unpaid') {
       nextPaymentStatus = order.remittance_reported_at ? 'reported_pending_verify' : 'pending_payment';
     }
   }

@@ -177,10 +177,10 @@ test('Round 45 Item 2: poolAccountService orderRef required, reuse safety, repor
     });
 
     // Cancel A while pending_payment -> releases reusedTargetAcct
-    let res = await fetch(`${srv.baseUrl}/api/shop/admin/orders/${orderA.id}`, {
-      method: 'PATCH',
+    let res = await fetch(`${srv.baseUrl}/api/shop/admin/orders/${orderA.id}/cancel`, {
+      method: 'POST',
       headers: adminHeaders,
-      body: JSON.stringify({ order_status: 'cancelled' })
+      body: JSON.stringify({ reason: 'R45測試待付款取消' })
     });
     assert.equal(res.status, 200);
     let poolRow = await prisma.oneTimeAccountPool.findUnique({ where: { account_number: reusedTargetAcct } });
@@ -225,6 +225,14 @@ test('Round 45 Item 2: poolAccountService orderRef required, reuse safety, repor
     });
     assert.equal(res.status, 409);
 
+    // Trying to cancel Order A again also fails (409) and keeps B's pool account
+    res = await fetch(`${srv.baseUrl}/api/shop/admin/orders/${orderA.id}/cancel`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ reason: '重複取消測試' })
+    });
+    assert.equal(res.status, 409);
+
     // Trying to release-account on Order A also fails (409 because pool account belongs to B)
     res = await fetch(`${srv.baseUrl}/api/shop/admin/orders/${orderA.id}/release-account`, {
       method: 'POST',
@@ -237,9 +245,10 @@ test('Round 45 Item 2: poolAccountService orderRef required, reuse safety, repor
     assert.equal(poolRow.status, 'ASSIGNED');
     assert.equal(poolRow.assigned_order_ref, orderBRef);
 
-    // Scenario 2: Order C reported_pending_verify -> cancelled -> keeps pool account held until manual release
+    // Scenario 2 (Option C): Order C reported_pending_verify -> verify no_payment_found -> POST /cancel -> keeps holdAcct ASSIGNED
     const orderCRef = `PO-R45C-${runId}`;
-    createdOrderRefs.push(orderCRef);
+    const orderDRef = `PO-R45D-${runId}`;
+    createdOrderRefs.push(orderCRef, orderDRef);
     const holdAcct = reusedTargetAcct === acct1 ? acct2 : acct1;
     await prisma.oneTimeAccountPool.update({
       where: { account_number: holdAcct },
@@ -272,15 +281,36 @@ test('Round 45 Item 2: poolAccountService orderRef required, reuse safety, repor
       }
     });
 
-    res = await fetch(`${srv.baseUrl}/api/shop/admin/orders/${orderC.id}`, {
+    // Mark no_payment_found first (keeps holdAcct ASSIGNED)
+    res = await fetch(`${srv.baseUrl}/api/shop/admin/orders/${orderC.id}/verify-payment`, {
       method: 'PATCH',
       headers: adminHeaders,
-      body: JSON.stringify({ order_status: 'cancelled' })
+      body: JSON.stringify({ no_payment_found: true, note: '銀行核對查無匯款' })
+    });
+    assert.equal(res.status, 200);
+    poolRow = await prisma.oneTimeAccountPool.findUnique({ where: { account_number: holdAcct } });
+    assert.equal(poolRow.status, 'ASSIGNED');
+
+    // Now cancel verified_unpaid Order C -> succeeds and keeps holdAcct ASSIGNED
+    res = await fetch(`${srv.baseUrl}/api/shop/admin/orders/${orderC.id}/cancel`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ reason: '查無入帳後取消' })
     });
     assert.equal(res.status, 200);
     poolRow = await prisma.oneTimeAccountPool.findUnique({ where: { account_number: holdAcct } });
     assert.equal(poolRow.status, 'ASSIGNED');
     assert.equal(poolRow.assigned_order_ref, orderCRef);
+
+    // Order D assigning from pool cannot receive holdAcct
+    const assignedD = await prisma.$transaction((tx) =>
+      assignPoolAccount(tx, { orderRef: orderDRef, userId: customer.id, paymentMethodCode: poolMethodCode })
+    );
+    assert.ok(assignedD);
+    assert.notEqual(assignedD.accountNumber, holdAcct);
+    await prisma.$transaction((tx) =>
+      releasePoolAccount(tx, { accountNumber: assignedD.accountNumber, orderRef: orderDRef })
+    );
 
     res = await fetch(`${srv.baseUrl}/api/shop/admin/orders?search=${encodeURIComponent(orderCRef)}`, {
       headers: adminHeaders

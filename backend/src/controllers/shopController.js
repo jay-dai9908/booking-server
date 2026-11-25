@@ -15,6 +15,7 @@ import auditService from '../services/audit/auditService.js';
 import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { applyShopOrderPayment } from '../services/shop/shopPayment.js';
+import { refundShopOrder } from '../services/shop/shopRefund.js';
 
 /**
  * Public: Get active products for customer shop
@@ -328,11 +329,18 @@ async function updateRemittanceLast5Core(req, res, { actor }) {
       return res.status(403).json({ error: '無權限修改此訂單' });
     }
 
+    if (!isAdmin && order.order_status === 'cancelled') {
+      return res.status(409).json({ error: '這張訂單已取消' });
+    }
+
     if (!isAdmin && !['pending_payment', 'reported_pending_verify'].includes(order.payment_status)) {
       return res.status(409).json({ error: '已核對的訂單不能修改末五碼' });
     }
 
     const cleanLast5 = String(remittance_last5).trim();
+    if (!isAdmin && !/^\d{5}$/.test(cleanLast5)) {
+      return res.status(400).json({ error: '匯款末五碼須為 5 位數字' });
+    }
     const updated = await prisma.productOrder.update({
       where: { id: order.id },
       data: {
@@ -492,10 +500,88 @@ export const verifyOrderPayment = async (req, res) => {
     client_batch_id,
     is_full_payment = false,
     send_line_notification = true,
-    note
+    note,
+    no_payment_found = false
   } = req.body || {};
 
   try {
+    if (no_payment_found === true) {
+      const cleanNote = String(note || '').trim();
+      if (!cleanNote) {
+        return res.status(422).json({ error: '標記「查無入帳」請填寫備註說明' });
+      }
+      const orderId = parseInt(id, 10);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: '訂單編號格式不正確' });
+      }
+
+      const staffName = req.user?.name || '門市人員';
+      const staffId = req.user?.id || null;
+      const deviceInfo = getAdminDeviceInfo(req);
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw`
+          SELECT * FROM "ProductOrder" WHERE id = ${orderId} FOR UPDATE
+        `;
+        const order = locked?.[0];
+        if (!order) {
+          throw { status: 404, message: '找不到該筆訂單' };
+        }
+        if (order.order_status === 'cancelled' || order.order_status === 'picked_up') {
+          throw { status: 409, message: '此訂單已取消或已完成取貨，不可再對帳' };
+        }
+        if (order.payment_status === 'fully_paid' || order.payment_status === 'refunded') {
+          throw { status: 409, message: '此訂單已結清或已退款，不可標記查無入帳' };
+        }
+        if ((order.paid_amount || 0) > 0) {
+          throw { status: 409, message: '此訂單已有實收金額，請改用取消退款或補收處理' };
+        }
+
+        const nextAdminNote = order.admin_note
+          ? `${order.admin_note}｜查無入帳：${cleanNote}`
+          : `查無入帳：${cleanNote}`;
+
+        // Do NOT call markPoolAccountUsed: keep ASSIGNED pool account held on this order
+        const row = await tx.productOrder.update({
+          where: { id: order.id },
+          data: {
+            payment_status: 'verified_unpaid',
+            admin_note: nextAdminNote
+          },
+          include: { items: true, user: true }
+        });
+
+        await auditService.log(tx, {
+          booking_ref: order.order_ref,
+          event_type: 'shop_payment_not_found',
+          category: 'shop',
+          summary: `商城訂單 ${order.order_ref} 對帳查無入帳（實收 NT$0）`,
+          amount: 0,
+          reason: cleanNote,
+          before_json: {
+            payment_status: order.payment_status,
+            paid_amount: order.paid_amount
+          },
+          after_json: {
+            payment_status: 'verified_unpaid',
+            paid_amount: 0
+          },
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+
+        return row;
+      });
+
+      return res.json({
+        message: '已標記為「已對帳・查無入帳」（帳號仍保留，可取消後釋放）',
+        order: updated,
+        no_payment_found: true
+      });
+    }
+
     const rawAmount = amount !== undefined && amount !== null && amount !== ''
       ? amount
       : paid_amount;
@@ -607,13 +693,12 @@ export const updateAdminOrder = async (req, res) => {
       return res.status(404).json({ error: '找不到該筆訂單' });
     }
 
+    if (order_status === 'cancelled') {
+      return res.status(409).json({ error: '請改用取消訂單並退款操作' });
+    }
+
     if (payment_status !== undefined && payment_status !== order.payment_status) {
-      if (payment_status !== 'refunded') {
-        return res.status(422).json({ error: '付款狀態只可透過對帳、收款或標記已退款更新' });
-      }
-      if (!reason || !String(reason).trim()) {
-        return res.status(422).json({ error: '標記為已退款請填寫原因' });
-      }
+      return res.status(409).json({ error: '付款狀態不可直接修改，請透過收款或取消訂單並退款更新' });
     }
 
     if (order_status === 'picked_up' && order.order_status !== 'picked_up') {
@@ -627,7 +712,6 @@ export const updateAdminOrder = async (req, res) => {
     if (admin_note !== undefined) dataToUpdate.admin_note = admin_note;
     if (wish_reply !== undefined) dataToUpdate.wish_reply = wish_reply;
     if (order_status !== undefined) dataToUpdate.order_status = order_status;
-    if (payment_status !== undefined) dataToUpdate.payment_status = payment_status;
 
     // If order transitioned to picked_up
     if (order_status === 'picked_up' && order.order_status !== 'picked_up') {
@@ -635,38 +719,14 @@ export const updateAdminOrder = async (req, res) => {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      // 僅待付款（pending_payment）才在取消時自動釋放帳號池；已回報匯款/已付款之取消維持綁定，由店員查無入帳後手動釋放
-      if (order_status === 'cancelled' && order.order_status !== 'cancelled') {
-        if (order.assigned_pool_account && order.payment_status === 'pending_payment') {
-          await releasePoolAccount(tx, {
-            accountNumber: order.assigned_pool_account,
-            orderRef: order.order_ref
-          });
-        }
-      }
-
       const row = await tx.productOrder.update({
         where: { id: order.id },
         data: dataToUpdate,
         include: { items: true, user: true }
       });
 
-      if (payment_status === 'refunded' && order.payment_status !== 'refunded') {
-        await auditService.log(tx, {
-          booking_ref: order.order_ref,
-          event_type: 'shop_refund_marked',
-          category: 'payment',
-          summary: `商城訂單 ${order.order_ref} 標記為已退款。原因「${String(reason).trim()}」`,
-          reason: String(reason).trim(),
-          staff_name: staffName,
-          staff_id: staffId,
-          device_id: deviceInfo.device_id,
-          device_label: deviceInfo.device_label
-        });
-      }
-
-      // If picked up, check if any items grant bonus pass plans (e.g. 221-color bundle grants free_ironing_5)
-      if (order_status === 'picked_up' && order.order_status !== 'picked_up') {
+      // If picked up AND fully_paid, check if any items grant bonus pass plans
+      if (order_status === 'picked_up' && order.order_status !== 'picked_up' && order.payment_status === 'fully_paid') {
         for (const item of order.items) {
           if (item.product_id) {
             const prod = await tx.product.findUnique({ where: { id: item.product_id } });
@@ -685,7 +745,7 @@ export const updateAdminOrder = async (req, res) => {
                   const totalQuota = plan.total_quota != null ? plan.total_quota * qty : null;
                   const passCode = `PASS-${Math.floor(10000000 + Math.random() * 90000000)}`;
 
-                  await tx.userPass.create({
+                  const createdPass = await tx.userPass.create({
                     data: {
                       pass_code: passCode,
                       user_id: order.user_id,
@@ -699,6 +759,24 @@ export const updateAdminOrder = async (req, res) => {
                       order_ref: order.order_ref,
                       status: 'ACTIVE'
                     }
+                  });
+
+                  await auditService.log(tx, {
+                    booking_ref: order.order_ref,
+                    event_type: 'pass_granted',
+                    category: 'pass',
+                    summary: `商城取貨發放贈品券「${plan.name}」(${passCode})`,
+                    reason: `商城贈品 單號 ${order.order_ref}`,
+                    after_json: {
+                      pass_id: createdPass.id,
+                      pass_code: passCode,
+                      plan_code: plan.code,
+                      order_ref: order.order_ref
+                    },
+                    staff_name: staffName,
+                    staff_id: staffId,
+                    device_id: deviceInfo.device_id,
+                    device_label: deviceInfo.device_label
                   });
                 }
               }
@@ -715,6 +793,131 @@ export const updateAdminOrder = async (req, res) => {
     console.error('updateAdminOrder error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: '更新訂單失敗' });
+  }
+};
+
+/**
+ * Admin: Cancel order with explicit refund validation & audit log
+ */
+export const cancelAdminOrder = async (req, res) => {
+  const orderId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ error: '訂單編號格式不正確' });
+  }
+
+  const { refund_amount, refund_method = 'cash', reason = '' } = req.body || {};
+  const cleanReason = String(reason || '').trim();
+  const staffName = req.user?.name || '門市人員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw`
+        SELECT * FROM "ProductOrder" WHERE id = ${orderId} FOR UPDATE
+      `;
+      const order = locked?.[0];
+      if (!order) {
+        throw { status: 404, message: '找不到該筆訂單' };
+      }
+      if (order.order_status === 'cancelled') {
+        throw { status: 409, message: '此訂單已取消' };
+      }
+      if (order.order_status === 'picked_up') {
+        throw { status: 409, message: '已取貨完成的訂單不可取消' };
+      }
+      if (order.payment_status === 'reported_pending_verify') {
+        throw { status: 409, message: '請先對帳確認實收金額' };
+      }
+
+      const paidAmt = order.paid_amount || 0;
+      let effectiveRefundAmt = 0;
+
+      if (paidAmt > 0) {
+        if (refund_amount === undefined || refund_amount === null || refund_amount === '') {
+          throw { status: 422, message: '此訂單已有收款，請填寫退款金額' };
+        }
+        const parsedRefund = Number(refund_amount);
+        if (!Number.isInteger(parsedRefund) || parsedRefund < 0 || parsedRefund > paidAmt) {
+          throw { status: 422, message: `退款金額須為 0 到 ${paidAmt} 之間的整數` };
+        }
+        if (parsedRefund < paidAmt && !cleanReason) {
+          throw { status: 422, message: '部分退款或不退款請填寫原因' };
+        }
+        effectiveRefundAmt = parsedRefund;
+
+        if (effectiveRefundAmt > 0) {
+          await refundShopOrder(tx, {
+            order,
+            amount: effectiveRefundAmt,
+            method: refund_method,
+            reason: cleanReason || '商城取消訂單全額退款',
+            staffName,
+            staffId,
+            deviceInfo,
+            reqBody: req.body
+          });
+        }
+      }
+
+      // 僅待付款（pending_payment）才在取消時自動釋放帳號池
+      if (order.assigned_pool_account && order.payment_status === 'pending_payment') {
+        await releasePoolAccount(tx, {
+          accountNumber: order.assigned_pool_account,
+          orderRef: order.order_ref
+        });
+      }
+
+      const updateData = { order_status: 'cancelled' };
+      if (paidAmt > 0 && effectiveRefundAmt === paidAmt) {
+        updateData.payment_status = 'refunded';
+      }
+
+      const cancelledOrder = await tx.productOrder.update({
+        where: { id: order.id },
+        data: updateData,
+        include: { items: true, user: true }
+      });
+
+      await auditService.log(tx, {
+        booking_ref: order.order_ref,
+        event_type: 'shop_order_cancelled',
+        category: 'shop',
+        summary:
+          paidAmt > 0
+            ? `取消商城訂單 ${order.order_ref}（原已付 NT$${paidAmt}，退款 NT$${effectiveRefundAmt}）`
+            : `取消商城訂單 ${order.order_ref}`,
+        reason: cleanReason || (paidAmt > 0 && effectiveRefundAmt === paidAmt ? '商城取消訂單全額退款' : '取消訂單'),
+        before_json: {
+          order_status: order.order_status,
+          payment_status: order.payment_status,
+          paid_amount: paidAmt
+        },
+        after_json: {
+          order_status: cancelledOrder.order_status,
+          payment_status: cancelledOrder.payment_status,
+          paid_amount: cancelledOrder.paid_amount,
+          refund_amount: effectiveRefundAmt
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      return { order: cancelledOrder, refund_amount: effectiveRefundAmt };
+    });
+
+    return res.json({
+      message: result.refund_amount > 0
+        ? `訂單已取消並退款 NT$${result.refund_amount}`
+        : '訂單已取消',
+      order: result.order
+    });
+  } catch (error) {
+    console.error('cancelAdminOrder error:', error);
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    return res.status(500).json({ error: '取消訂單失敗' });
   }
 };
 

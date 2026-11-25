@@ -160,6 +160,9 @@ function getOrderStatusInfo(o) {
   if (o.payment_status === 'deposit_verified' || o.payment_status === 'fully_paid') {
     return { pill: { variant: 'brand', text: '備貨中' }, step: 2 };
   }
+  if (o.payment_status === 'verified_unpaid') {
+    return { pill: { variant: 'full', text: '查無匯款' }, step: 1 };
+  }
   if (o.payment_status === 'reported_pending_verify') {
     return { pill: { variant: 'low', text: '待確認入帳' }, step: 1 };
   }
@@ -1148,9 +1151,16 @@ export default function HistoryPage() {
                 const paidAmount = o.paid_amount || 0;
                 const depositRemain = Math.max(0, depositRequired - paidAmount);
 
+                const isCancelledOrder = o.order_status === 'cancelled';
+                const isVerifiedUnpaidOrder = !isCancelledOrder && o.payment_status === 'verified_unpaid';
+                const isVerifiedOrder =
+                  !isCancelledOrder &&
+                  (o.payment_status === 'deposit_verified' ||
+                    o.payment_status === 'fully_paid');
                 const isPendingPayment =
-                  o.payment_status === 'pending_payment' ||
-                  o.payment_status === 'reported_pending_verify';
+                  !isCancelledOrder &&
+                  (o.payment_status === 'pending_payment' ||
+                    o.payment_status === 'reported_pending_verify');
                 const isTransfer = o.payment_method !== 'ONSITE';
 
                 const deadlineStr = o.payment_deadline ? formatDateShort(o.payment_deadline) : '';
@@ -1187,6 +1197,37 @@ export default function HistoryPage() {
                     />
 
                     {/* 4. Payment Box */}
+                    {isCancelledOrder && (
+                      <div className="rounded-[12px] bg-sg-bg px-3 py-2 text-[12px] font-bold text-sg-muted">
+                        已取消
+                      </div>
+                    )}
+                    {isVerifiedUnpaidOrder && (
+                      <div
+                        data-testid={`shop-order-unpaid-notice-${o.id}`}
+                        className="rounded-[12px] bg-rose-50 border border-rose-200 px-3 py-2.5 space-y-2"
+                      >
+                        <div className="text-[12px] font-bold text-rose-800">
+                          店家查無匯款，請聯繫店家
+                        </div>
+                        {safeOfficialLineUrl && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={<MessageCircle className="w-4 h-4" />}
+                            onClick={() => window.open(safeOfficialLineUrl, '_blank', 'noopener,noreferrer')}
+                            className="w-full"
+                          >
+                            聯繫店家 LINE
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {isVerifiedOrder && isTransfer && (
+                      <div className="rounded-[12px] bg-sg-bg px-3 py-2 text-[12px] font-bold text-sg-sage-ink">
+                        已核對{o.remittance_last5 ? `（匯款末五碼 ${o.remittance_last5}）` : ''}
+                      </div>
+                    )}
                     {isPendingPayment && isTransfer && (
                       <div className="grid gap-[6px] rounded-[12px] bg-sg-bg px-3 py-[10px]">
                         <div className="text-[13px] font-bold text-sg-ink">

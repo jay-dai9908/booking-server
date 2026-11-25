@@ -10,6 +10,7 @@ import {
   verifyOrderPayment,
   collectOrderBalance,
   releaseOrderPoolAccount,
+  cancelAdminOrder,
   updateAdminOrder,
   notifyOrderArrival,
   getAdminAccountPool,
@@ -42,6 +43,7 @@ router.get('/admin/orders', verifyToken, checkShopPermission, getAdminProductOrd
 router.patch('/admin/orders/:id/verify-payment', verifyToken, checkShopPermission, verifyOrderPayment);
 router.post('/admin/orders/:id/collect', verifyToken, checkShopPermission, collectOrderBalance);
 router.post('/admin/orders/:id/release-account', verifyToken, checkShopPermission, releaseOrderPoolAccount);
+router.post('/admin/orders/:id/cancel', verifyToken, checkShopPermission, cancelAdminOrder);
 router.patch('/admin/orders/:id/remittance', verifyToken, checkShopPermission, adminUpdateRemittanceLast5);
 router.patch('/admin/orders/:id', verifyToken, checkShopPermission, updateAdminOrder);
 router.post('/admin/orders/notify-arrival', verifyToken, checkShopPermission, notifyOrderArrival);

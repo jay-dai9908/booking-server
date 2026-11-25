@@ -65,6 +65,9 @@ export default function ShopAdminPage() {
   const [verifyCashReceived, setVerifyCashReceived] = useState('');
   const [verifyIsFullPayment, setVerifyIsFullPayment] = useState(false);
   const [verifySendLine, setVerifySendLine] = useState(true);
+  const [verifyNotFoundConfirm, setVerifyNotFoundConfirm] = useState(false);
+  const [verifyNotFoundNote, setVerifyNotFoundNote] = useState('');
+  const [verifyNotFoundSubmitting, setVerifyNotFoundSubmitting] = useState(false);
 
   const [collectModalOrder, setCollectModalOrder] = useState(null);
   const [collectAmount, setCollectAmount] = useState('');
@@ -84,6 +87,12 @@ export default function ShopAdminPage() {
   const [releasePoolOrder, setReleasePoolOrder] = useState(null);
   const [releasePoolNote, setReleasePoolNote] = useState('');
   const [releasingPool, setReleasingPool] = useState(false);
+
+  const [cancelModalOrder, setCancelModalOrder] = useState(null);
+  const [cancelRefundAmount, setCancelRefundAmount] = useState('0');
+  const [cancelRefundMethod, setCancelRefundMethod] = useState('cash');
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
 
   const [arrivalDateOrder, setArrivalDateOrder] = useState(null);
   const [arrivalDateText, setArrivalDateText] = useState('');
@@ -203,10 +212,34 @@ export default function ShopAdminPage() {
         send_line_notification: verifySendLine
       });
       setVerifyModalOrder(null);
+      setVerifyNotFoundConfirm(false);
+      setVerifyNotFoundNote('');
       fetchAdminOrders();
       window.dispatchEvent(new CustomEvent('admin-data-updated'));
     } catch (err) {
       showToast('對帳確認失敗：' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
+  const handleVerifyNotFoundSubmit = async (e) => {
+    e.preventDefault();
+    if (!verifyModalOrder || !verifyNotFoundNote.trim()) return;
+    setVerifyNotFoundSubmitting(true);
+    try {
+      const res = await api.patch(`/shop/admin/orders/${verifyModalOrder.id}/verify-payment`, {
+        no_payment_found: true,
+        note: verifyNotFoundNote.trim()
+      });
+      showToast(res.data?.message || '已標記為「已對帳・查無入帳」', 'info');
+      setVerifyModalOrder(null);
+      setVerifyNotFoundConfirm(false);
+      setVerifyNotFoundNote('');
+      fetchAdminOrders();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+    } catch (err) {
+      showToast('標記查無入帳失敗：' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setVerifyNotFoundSubmitting(false);
     }
   };
 
@@ -299,25 +332,48 @@ export default function ShopAdminPage() {
   };
 
   const handleCancelOrder = (order) => {
-    setConfirmDialog({
-      title: '取消訂單',
-      message: `確定要取消訂單 #${order.order_ref} 嗎？\n若該訂單佔用中信專屬一次性帳號，系統將會立即釋放回帳號池供其他客人使用。`,
-      confirmText: '確定取消',
-      danger: true,
-      onConfirm: async () => {
-        try {
-          await api.patch(`/shop/admin/orders/${order.id}`, {
-            order_status: 'cancelled'
-          });
-          showToast('訂單已取消，相關資源已釋放', 'success');
-          fetchAdminOrders();
-          fetchAccountPool();
-          window.dispatchEvent(new CustomEvent('admin-data-updated'));
-        } catch (err) {
-          showToast('取消訂單失敗：' + (err.response?.data?.error || err.message), 'error');
-        }
+    const paidAmt = order.paid_amount || 0;
+    const defaultMethod = storePaymentMethods[0]?.key || 'cash';
+    setCancelModalOrder(order);
+    setCancelRefundAmount(String(paidAmt));
+    setCancelRefundMethod(defaultMethod);
+    setCancelReason('');
+  };
+
+  const handleConfirmCancelOrder = async (e) => {
+    e.preventDefault();
+    if (!cancelModalOrder) return;
+    const paidAmt = cancelModalOrder.paid_amount || 0;
+    const body = { reason: cancelReason.trim() };
+    if (paidAmt > 0) {
+      const parsed = Number(cancelRefundAmount);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > paidAmt) {
+        showToast(`退款金額須為 0 到 ${paidAmt} 之間的整數`, 'error');
+        return;
       }
-    });
+      if (parsed < paidAmt && !cancelReason.trim()) {
+        showToast('部分退款或不退款請填寫原因', 'error');
+        return;
+      }
+      body.refund_amount = parsed;
+      if (parsed > 0) {
+        body.refund_method = cancelRefundMethod || 'cash';
+      }
+    }
+
+    setCancelSubmitting(true);
+    try {
+      const res = await api.post(`/shop/admin/orders/${cancelModalOrder.id}/cancel`, body);
+      showToast(res.data?.message || '訂單已取消', 'success');
+      setCancelModalOrder(null);
+      fetchAdminOrders();
+      fetchAccountPool();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+    } catch (err) {
+      showToast('取消訂單失敗：' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setCancelSubmitting(false);
+    }
   };
 
   const handleConfirmReleasePool = async (e) => {
@@ -965,6 +1021,7 @@ export default function ShopAdminPage() {
                 <option value="all">所有付款狀態</option>
                 <option value="pending_payment">待繳納訂金</option>
                 <option value="reported_pending_verify">已回報末五碼 (待對帳)</option>
+                <option value="verified_unpaid">已對帳・查無入帳</option>
                 <option value="deposit_verified">已收訂金 (已對帳)</option>
                 <option value="fully_paid">已全額結清</option>
               </select>
@@ -1214,9 +1271,11 @@ export default function ShopAdminPage() {
                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                     : isPaidDeposit
                                       ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                                      : isReported
-                                        ? 'bg-sg-brown-soft text-sg-brown border border-sg-line'
-                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                      : order.payment_status === 'verified_unpaid'
+                                        ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                        : isReported
+                                          ? 'bg-sg-brown-soft text-sg-brown border border-sg-line'
+                                          : 'bg-amber-50 text-amber-700 border border-amber-200'
                               }`}
                             >
                               {order.order_status === 'cancelled'
@@ -1225,9 +1284,11 @@ export default function ShopAdminPage() {
                                   ? '全額結清'
                                   : isPaidDeposit
                                     ? '已收訂金'
-                                    : isReported
-                                      ? '已報待對帳'
-                                      : '待繳訂金'}
+                                    : order.payment_status === 'verified_unpaid'
+                                      ? '已對帳・查無入帳'
+                                      : isReported
+                                        ? '已報待對帳'
+                                        : '待繳訂金'}
                             </span>
 
                             {order.order_status === 'cancelled' && order.has_held_pool_account && (
@@ -1253,6 +1314,8 @@ export default function ShopAdminPage() {
                                   setVerifyCashReceived('');
                                   setVerifyIsFullPayment(false);
                                   setVerifySendLine(true);
+                                  setVerifyNotFoundConfirm(false);
+                                  setVerifyNotFoundNote('');
                                 }}
                                 className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-2xs inline-flex items-center gap-1"
                               >
@@ -2174,23 +2237,78 @@ export default function ShopAdminPage() {
               </div>
             </div>
 
-            <div className="pt-3 flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setVerifyModalOrder(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-[#3E332B] rounded-xl text-xs font-bold"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                data-testid="shop-verify-confirm-btn"
-                onClick={handleVerifyPaymentSubmit}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs"
-              >
-                確認對帳
-              </button>
-            </div>
+            {verifyNotFoundConfirm ? (
+              <form onSubmit={handleVerifyNotFoundSubmit} className="mt-2 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 space-y-3">
+                <div className="text-xs font-bold text-rose-800">
+                  二次確認：標記為「已對帳・查無入帳」
+                </div>
+                <p className="text-[11px] text-rose-700">
+                  實收將記為 NT$ 0，專屬收款帳號仍會維持綁定保留（待取消訂單並再次查無入帳後再手動釋放）。
+                </p>
+                <textarea
+                  rows={2}
+                  required
+                  data-testid="shop-verify-not-found-note"
+                  value={verifyNotFoundNote}
+                  onChange={e => setVerifyNotFoundNote(e.target.value)}
+                  placeholder="請填寫查帳備註（必填，如：網銀核對當日明細無末五碼入帳）"
+                  className="w-full rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs focus:outline-none focus:border-rose-500"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={verifyNotFoundSubmitting}
+                    onClick={() => setVerifyNotFoundConfirm(false)}
+                    className="px-3 py-1.5 rounded-xl bg-white border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    返回
+                  </button>
+                  <button
+                    type="submit"
+                    data-testid="shop-verify-not-found-submit"
+                    disabled={verifyNotFoundSubmitting || !verifyNotFoundNote.trim()}
+                    className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold disabled:opacity-50"
+                  >
+                    {verifyNotFoundSubmitting ? '處理中...' : '確認標記查無入帳'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="pt-3 flex gap-2 justify-between items-center">
+                {(verifyModalOrder.paid_amount || 0) === 0 ? (
+                  <button
+                    type="button"
+                    data-testid="shop-verify-not-found-btn"
+                    onClick={() => {
+                      setVerifyNotFoundConfirm(true);
+                      setVerifyNotFoundNote('');
+                    }}
+                    className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold"
+                  >
+                    查無入帳
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVerifyModalOrder(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-[#3E332B] rounded-xl text-xs font-bold"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="shop-verify-confirm-btn"
+                    onClick={handleVerifyPaymentSubmit}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs"
+                  >
+                    確認對帳
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3030,6 +3148,110 @@ export default function ShopAdminPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {cancelModalOrder && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleConfirmCancelOrder}
+            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-4"
+          >
+            <div>
+              <h3 className="text-base font-bold text-[#3E332B]">取消商城訂單並處理退款</h3>
+              <p className="text-xs text-[#6D5D52] mt-1">
+                單號 #{cancelModalOrder.order_ref} · 已收金額 NT$ {(cancelModalOrder.paid_amount || 0).toLocaleString()}
+              </p>
+              {cancelModalOrder.payment_status === 'reported_pending_verify' && (
+                <p className="text-xs font-bold text-rose-700 mt-1.5 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">
+                  顧客已回報匯款（待對帳），請先對帳確認實收金額後再取消。
+                </p>
+              )}
+            </div>
+
+            {(cancelModalOrder.paid_amount || 0) > 0 && (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-[#3E332B] mb-1">
+                    退款金額（最多可退 NT$ {cancelModalOrder.paid_amount}）
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={cancelModalOrder.paid_amount}
+                    step={1}
+                    required
+                    data-testid="shop-cancel-refund-amount"
+                    value={cancelRefundAmount}
+                    onChange={(e) => setCancelRefundAmount(e.target.value)}
+                    className="w-full rounded-xl border border-[#E8DEC8] px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#8B5B43]"
+                  />
+                </div>
+                {Number(cancelRefundAmount) > 0 && (
+                  <div>
+                    <label className="block text-xs font-bold text-[#3E332B] mb-1">退款方式</label>
+                    <select
+                      data-testid="shop-cancel-refund-method"
+                      value={cancelRefundMethod}
+                      onChange={(e) => setCancelRefundMethod(e.target.value)}
+                      className="w-full rounded-xl border border-[#E8DEC8] px-3 py-2 text-sm focus:outline-none focus:border-[#8B5B43]"
+                    >
+                      {storePaymentMethods
+                        .filter((m) => String(m.key || '').toLowerCase() !== 'pass')
+                        .map((m) => (
+                          <option key={m.key} value={m.key}>
+                            {m.label}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+              </>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-[#3E332B] mb-1">
+                取消／退款原因
+                {(cancelModalOrder.paid_amount || 0) > 0 && Number(cancelRefundAmount) < cancelModalOrder.paid_amount
+                  ? '（部分／不退款必填）'
+                  : '（選填）'}
+              </label>
+              <textarea
+                rows={2}
+                data-testid="shop-cancel-reason"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                required={(cancelModalOrder.paid_amount || 0) > 0 && Number(cancelRefundAmount) < cancelModalOrder.paid_amount}
+                placeholder="例如：客人改約其他商品／同意保留部分手續費"
+                className="w-full rounded-xl border border-[#E8DEC8] px-3 py-2 text-sm focus:outline-none focus:border-[#8B5B43]"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={cancelSubmitting}
+                onClick={() => setCancelModalOrder(null)}
+                className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                返回
+              </button>
+              <button
+                type="submit"
+                data-testid="shop-cancel-submit"
+                disabled={
+                  cancelSubmitting ||
+                  cancelModalOrder.payment_status === 'reported_pending_verify' ||
+                  ((cancelModalOrder.paid_amount || 0) > 0 &&
+                    Number(cancelRefundAmount) < cancelModalOrder.paid_amount &&
+                    !cancelReason.trim())
+                }
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold disabled:opacity-50"
+              >
+                {cancelSubmitting ? '處理中...' : '確認取消訂單'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
