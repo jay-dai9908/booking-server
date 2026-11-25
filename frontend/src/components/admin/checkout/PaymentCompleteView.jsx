@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle2, Printer, RotateCcw, Check } from 'lucide-react';
 import Button from '../../customer/Button';
-import { PAYMENT_METHOD_LABELS, printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
+import { methodLabel } from '@shared/paymentMethods.js';
+import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../../utils/sunmiPrinter';
 import api from '../../../api/axios';
 
 export default function PaymentCompleteView({
@@ -14,6 +15,19 @@ export default function PaymentCompleteView({
   const [reprinting, setReprinting] = useState(false);
   const [printLocalMsg, setPrintLocalMsg] = useState(null);
   const [departing, setDeparting] = useState(false);
+  const [configuredMethods, setConfiguredMethods] = useState([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    api.get('/daily-settings/global')
+      .then((res) => {
+        if (isMounted && Array.isArray(res.data?.payment_methods_json)) {
+          setConfiguredMethods(res.data.payment_methods_json);
+        }
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, []);
 
   const payments = data?.payments || [];
   const firstPay = payments[0] || {};
@@ -24,7 +38,7 @@ export default function PaymentCompleteView({
   const passDiscountTotal = payments
     .filter(p => p.method === 'pass')
     .reduce((sum, p) => sum + (p.amount || 0), 0);
-  const methodLabel = PAYMENT_METHOD_LABELS[primaryPay.method] || primaryPay.method || '現金';
+  const payMethodLabel = methodLabel(primaryPay.method || 'cash', configuredMethods) || '現金';
   const changeGiven = primaryPay.change_given ?? 0;
   const personNos = primaryPay.person_nos?.length ? primaryPay.person_nos : (firstPay.person_nos || []);
   const personDesc = personNos.length > 0 ? `第 ${personNos.join('、')} 位` : '顧客';
@@ -165,7 +179,7 @@ export default function PaymentCompleteView({
             已收款 NT${cashOrOtherTotal}
           </div>
           <p className="text-[14px] text-sg-muted mt-0.5">
-            {personDesc} · {methodLabel} · 找零 NT${changeGiven}
+            {personDesc} · {payMethodLabel} · 找零 NT${changeGiven}
           </p>
           {passDiscountTotal > 0 && (
             <p className="text-[13px] font-bold text-sg-brown mt-0.5" data-testid="pass-discount-text">
@@ -238,7 +252,7 @@ export default function PaymentCompleteView({
               <div>
                 <span className="font-bold text-sg-ink mr-2">{p.payment_no}</span>
                 <span className="text-sg-muted">
-                  {PAYMENT_METHOD_LABELS[p.method] || p.method} NT${p.amount}
+                  {methodLabel(p.method, configuredMethods)} NT${p.amount}
                 </span>
               </div>
               <span className="text-sg-sage-ink font-bold">成功</span>

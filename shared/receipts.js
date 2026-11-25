@@ -1,7 +1,8 @@
 // shared/receipts.js
 // 收據排版，產生商米 JSON 指令與 HTML 預覽（純函式，58mm / 31 半形字元安全預算）
 
-import { PAYMENT_METHOD_LABELS, displayBoardName } from './billing.js';
+import { displayBoardName } from './billing.js';
+import { methodLabel } from './paymentMethods.js';
 
 export const RECEIPT_WIDTH = 31;
 export const DIVIDER = '-------------------------------';
@@ -359,13 +360,13 @@ export function buildReceipt(payment, booking = {}, opts = {}) {
     bold: true
   });
 
-  const methodLabel = PAYMENT_METHOD_LABELS[payment.method] || payment.method || '現金';
+  const payMethodText = methodLabel(payment.method || 'cash', opts.paymentMethods) || '現金';
   if (payment.method === 'cash') {
     const recv = payment.cash_received != null ? `  收 ${formatReceiptMoney(payment.cash_received)}` : '';
     const chg = payment.change_given != null ? `  找 ${formatReceiptMoney(payment.change_given)}` : '';
     commands.push({ type: 'text', text: `現金${recv}${chg}`, size: 22 });
   } else {
-    commands.push({ type: 'text', text: fitLine(methodLabel, formatReceiptMoney(payment.amount)), size: 22 });
+    commands.push({ type: 'text', text: fitLine(payMethodText, formatReceiptMoney(payment.amount)), size: 22 });
   }
 
   // Status line (Section 8.2 / 8.3)
@@ -446,7 +447,7 @@ export function buildSupplementReceipt(payment, booking = {}, opts = {}) {
     const chg = payment.change_given != null ? `  找 ${formatReceiptMoney(payment.change_given)}` : '';
     commands.push({ type: 'text', text: `現金${recv}${chg}`, size: 22 });
   } else {
-    commands.push({ type: 'text', text: fitLine(PAYMENT_METHOD_LABELS[payment.method] || payment.method, formatReceiptMoney(payment.amount)), size: 22 });
+    commands.push({ type: 'text', text: fitLine(methodLabel(payment.method, opts.paymentMethods), formatReceiptMoney(payment.amount)), size: 22 });
   }
 
   if (breakdown.person_total_paid != null) {
@@ -497,8 +498,8 @@ function buildSingleRefundSlip(payment, booking = {}, opts = {}, isCustomerCopy 
     });
   }
   commands.push({ type: 'text', text: fitLine('退款', formatReceiptMoney(-payment.amount)), size: 26, bold: true });
-  const methodLabel = payment.method === 'cash' ? '現金退回' : payment.method === 'line_pay' ? 'LINE Pay 退回' : '其他退回';
-  commands.push({ type: 'text', text: `方式 ${methodLabel}`, size: 22 });
+  const refundMethodLabel = payment.method === 'cash' ? '現金退回' : payment.method === 'line_pay' ? 'LINE Pay 退回' : '其他退回';
+  commands.push({ type: 'text', text: `方式 ${refundMethodLabel}`, size: 22 });
   commands.push({ type: 'text', text: `原因 ${payment.reason || '現場調整'}`, size: 22 });
   commands.push({ type: 'text', text: DIVIDER, size: 24, align: 1 });
 
@@ -544,7 +545,7 @@ export function buildOrderSummary(booking = {}, payments = [], opts = {}) {
     if (status !== 'valid') continue;
 
     const pNos = (pay.person_nos || []).join('、') || '1';
-    const mLabel = PAYMENT_METHOD_LABELS[pay.method] || pay.method || '現金';
+    const mLabel = methodLabel(pay.method || 'cash', opts.paymentMethods) || '現金';
     const timeStr = pay.created_at
       ? new Date(pay.created_at).toLocaleTimeString('en-GB', {
           timeZone: 'Asia/Taipei',
@@ -636,7 +637,7 @@ export function buildClosingSlip(closing = {}, opts = {}) {
 
   // Breakdown by method
   for (const bm of byMethod) {
-    const lbl = PAYMENT_METHOD_LABELS[bm.method] || bm.method;
+    const lbl = methodLabel(bm.method, opts.paymentMethods);
     commands.push({
       type: 'text',
       text: fitLine(`${lbl} ${bm.count} 筆`, formatReceiptMoney(bm.amount)),
@@ -777,8 +778,8 @@ export function buildPassSaleReceipt(payment, passInfo = {}, opts = {}) {
   commands.push({ type: 'text', text: fitLine(`${planName}`, quotaText), size: 22 });
   commands.push({ type: 'text', text: fitLine('實收金額', formatReceiptMoney(payment?.amount || 0)), size: 26, bold: true });
 
-  const methodLabel = PAYMENT_METHOD_LABELS[payment?.method] || payment?.method || '現金';
-  commands.push({ type: 'text', text: fitLine('付款方式', methodLabel), size: 22 });
+  const payMethodText = methodLabel(payment?.method || 'cash', opts.paymentMethods) || '現金';
+  commands.push({ type: 'text', text: fitLine('付款方式', payMethodText), size: 22 });
   if (payment?.method === 'cash' && payment?.cash_received != null) {
     commands.push({ type: 'text', text: fitLine('實收現金', formatReceiptMoney(payment.cash_received)), size: 22 });
     commands.push({ type: 'text', text: fitLine('找零', formatReceiptMoney(payment.change_given || 0)), size: 22 });

@@ -5,6 +5,7 @@ import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
 import displayBus from '../services/display/displayBus.js';
 import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
+import { normalizeMethodKey, RESERVED_PAYMENT_KEYS } from '../../../shared/paymentMethods.js';
 import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import {
@@ -955,25 +956,83 @@ export const updateGlobalSetting = async (req, res) => {
         }
       }
     }
+    let removedPaymentMethodsToCheck = [];
     if (payment_methods_json !== undefined) {
-      if (Array.isArray(payment_methods_json)) {
-        let methods = payment_methods_json
-          .filter(pm => String(pm.key || pm.code || '').trim().toLowerCase() !== 'pass')
-          .map(pm => {
-            const key = String(pm.key || pm.code || '').trim();
-            const isCash = key.toLowerCase() === 'cash';
-            return {
-              key,
-              label: pm.label || (isCash ? '現金' : key),
-              enabled: isCash ? true : Boolean(pm.enabled)
-            };
-          });
-        const hasCash = methods.some(m => m.key.toLowerCase() === 'cash');
-        if (!hasCash) {
-          methods.unshift({ key: 'cash', label: '現金', enabled: true });
-        }
-        dataToUpdate.payment_methods_json = methods;
+      if (!Array.isArray(payment_methods_json) || payment_methods_json.length === 0) {
+        return res.status(422).json({ error: '付款方式清單不可為空', field: 'payment_methods_json' });
       }
+      if (payment_methods_json.length > 12) {
+        return res.status(422).json({ error: '付款方式最多 12 個', field: 'payment_methods_json' });
+      }
+
+      const keyRe = /^[a-z][a-z0-9_]{1,23}$/;
+      const seenNormKeys = new Set();
+      const seenLabels = new Set();
+      const validatedMethods = [];
+
+      for (const pm of payment_methods_json) {
+        const key = String(pm?.key ?? pm?.code ?? '').trim();
+        if (!keyRe.test(key)) {
+          return res.status(422).json({
+            error: `付款方式代碼「${key || '(空)'}」須為小寫英文開頭、僅含小寫英數與底線（2～24 字）`,
+            field: 'payment_methods_json'
+          });
+        }
+        const normKey = normalizeMethodKey(key);
+        if (RESERVED_PAYMENT_KEYS.has(key) || RESERVED_PAYMENT_KEYS.has(normKey)) {
+          return res.status(422).json({
+            error: `保留字「${key}」不可作為付款方式代碼`,
+            field: 'payment_methods_json'
+          });
+        }
+        if (seenNormKeys.has(normKey)) {
+          return res.status(422).json({
+            error: `付款方式代碼「${key}」正規化後重複`,
+            field: 'payment_methods_json'
+          });
+        }
+        seenNormKeys.add(normKey);
+
+        const isCash = normKey === 'cash';
+        const label = isCash ? '現金' : String(pm?.label ?? '').trim();
+        if (!isCash && (!label || label.length > 12)) {
+          return res.status(422).json({
+            error: '付款方式名稱須為 1～12 字',
+            field: 'payment_methods_json'
+          });
+        }
+        if (seenLabels.has(label)) {
+          return res.status(422).json({
+            error: `付款方式名稱「${label}」不可重複`,
+            field: 'payment_methods_json'
+          });
+        }
+        seenLabels.add(label);
+
+        validatedMethods.push({
+          key,
+          label,
+          enabled: isCash ? true : Boolean(pm?.enabled)
+        });
+      }
+
+      if (!seenNormKeys.has('cash')) {
+        if (validatedMethods.length >= 12) {
+          return res.status(422).json({ error: '付款方式最多 12 個（須保留現金）', field: 'payment_methods_json' });
+        }
+        if (seenLabels.has('現金')) {
+          return res.status(422).json({ error: '付款方式名稱「現金」不可重複', field: 'payment_methods_json' });
+        }
+        validatedMethods.unshift({ key: 'cash', label: '現金', enabled: true });
+        seenNormKeys.add('cash');
+      }
+
+      removedPaymentMethodsToCheck = (effectiveOld.payment_methods_json || []).filter((oldPm) => {
+        const oldNorm = normalizeMethodKey(oldPm?.key || oldPm?.code);
+        return oldNorm && !RESERVED_PAYMENT_KEYS.has(oldNorm) && !seenNormKeys.has(oldNorm);
+      });
+
+      dataToUpdate.payment_methods_json = validatedMethods;
     }
     if (booking_note_chips !== undefined) {
       if (Array.isArray(booking_note_chips)) {
@@ -1028,6 +1087,24 @@ export const updateGlobalSetting = async (req, res) => {
     };
 
     const setting = await prisma.$transaction(async (tx) => {
+      if (removedPaymentMethodsToCheck.length > 0) {
+        const usedRows = await tx.payment.findMany({
+          distinct: ['method'],
+          select: { method: true }
+        });
+        const usedNormSet = new Set(usedRows.map(r => normalizeMethodKey(r.method)).filter(Boolean));
+        for (const oldPm of removedPaymentMethodsToCheck) {
+          const oldNorm = normalizeMethodKey(oldPm?.key || oldPm?.code);
+          if (usedNormSet.has(oldNorm)) {
+            throw {
+              status: 422,
+              field: 'payment_methods_json',
+              message: `付款方式「${oldPm.label || oldPm.key}」已有收款紀錄，只能停用`
+            };
+          }
+        }
+      }
+
       const saved = await tx.globalSetting.upsert({
         where: { id: 1 },
         update: dataToUpdate,
@@ -1081,6 +1158,12 @@ export const updateGlobalSetting = async (req, res) => {
 
     res.json({ message: 'Global setting updated successfully', setting: sanitizeGlobalSetting(setting) });
   } catch (error) {
+    if (error?.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.field ? { field: error.field } : {})
+      });
+    }
     console.error('Error updating global setting:', error);
     res.status(500).json({ error: 'Failed to update global setting' });
   }

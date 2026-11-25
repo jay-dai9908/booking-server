@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../api/axios';
-import { PAYMENT_METHOD_LABELS } from '../../utils/sunmiPrinter';
+import { methodLabel, normalizeMethodKey } from '@shared/paymentMethods.js';
 
 const DEFAULT_METHODS = [
   { key: 'cash', label: '現金', enabled: true },
@@ -45,7 +45,7 @@ export default function PayMethodGrid({
       const code = m.key || m.code;
       return {
         code,
-        label: m.label || PAYMENT_METHOD_LABELS[code] || code
+        label: methodLabel(code, rawList) || code
       };
     });
 
@@ -58,9 +58,7 @@ export default function PayMethodGrid({
   return (
     <div className={`grid grid-cols-3 gap-2 ${className}`}>
       {finalMethods.map((m) => {
-        const isSelected = value === m.code ||
-          (value === 'line_pay' && m.code === 'linepay') ||
-          (value === 'linepay' && m.code === 'line_pay');
+        const isSelected = normalizeMethodKey(value) === normalizeMethodKey(m.code);
 
         return (
           <button

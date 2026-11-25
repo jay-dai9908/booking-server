@@ -1321,7 +1321,11 @@ export default function ShopAdminPage() {
       {/* SUB-TAB 2: PAYMENT METHODS & CTBC ONE-TIME ACCOUNT POOL */}
       {/* ========================================================= */}
       {activeTab === 'payments' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-4">
+          <div className="px-4 py-2.5 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs text-[#6D5D52]">
+            這裡是<strong className="text-[#3E332B]">顧客線上預購</strong>付訂金的方式（含帳號池、銀行帳號、說明文字）。櫃檯結帳的付款方式在『系統設定』。
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 border border-[#E8DEC8] shadow-xs space-y-5">
             <div>
               <h3 className="text-base font-black text-[#3E332B] flex items-center gap-2">
@@ -1646,6 +1650,7 @@ export default function ShopAdminPage() {
               </div>
             </form>
           </div>
+        </div>
         </div>
       )}
 

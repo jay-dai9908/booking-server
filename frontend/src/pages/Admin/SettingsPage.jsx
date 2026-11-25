@@ -32,6 +32,7 @@ import AdminLoginGuardCard from '../../components/admin/AdminLoginGuardCard';
 import { setPrintGloballyEnabled } from '../../utils/sunmiPrinter';
 import { useAdminPermissions } from '../../hooks/admin/useAdminPermissions';
 import { diffSettings } from '../../utils/admin/settingsDiff';
+import { normalizeMethodKey } from '@shared/paymentMethods.js';
 
 const DEFAULT_PREVIEW_DISABLED_TEXT = '系統維護中，請點擊下方按鈕使用 LINE 進行預約';
 const DEFAULT_ANNOUNCEMENT_TEXT = '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
@@ -119,6 +120,9 @@ export default function SettingsPage() {
     { key: 'transfer', label: '銀行轉帳', enabled: true }
   ]);
   const [draggedMethodIdx, setDraggedMethodIdx] = useState(null);
+  const [savedMethodKeys, setSavedMethodKeys] = useState(['cash', 'linepay', 'transfer']);
+  const [newPaymentMethodLabel, setNewPaymentMethodLabel] = useState('');
+  const [paymentMethodError, setPaymentMethodError] = useState('');
 
   // 7. Printing & Station Settings (Spec 6.25)
   const [printEnabled, setPrintEnabled] = useState(true);
@@ -241,15 +245,26 @@ export default function SettingsPage() {
       setBoardSwapGraceMinutes(d.board_swap_grace_minutes ?? 10);
       setDefaultSplitMode(d.default_split_mode || 'proportional');
       setCashFloatAmount(d.cash_float_amount ?? 2000);
-      if (Array.isArray(d.payment_methods_json) && d.payment_methods_json.length > 0) {
-        setPaymentMethods(d.payment_methods_json.filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass'));
-      } else {
-        setPaymentMethods([
-          { key: 'cash', label: '現金', enabled: true },
-          { key: 'linepay', label: 'LINE Pay', enabled: true },
-          { key: 'transfer', label: '銀行轉帳', enabled: true }
-        ]);
-      }
+      const loadedMethods = (Array.isArray(d.payment_methods_json) && d.payment_methods_json.length > 0)
+        ? d.payment_methods_json
+            .filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass')
+            .map(m => {
+              const k = String(m.key || m.code || '').trim();
+              const isCash = normalizeMethodKey(k) === 'cash';
+              return {
+                key: k,
+                label: isCash ? '現金' : String(m.label || k).trim(),
+                enabled: isCash ? true : Boolean(m.enabled)
+              };
+            })
+        : [
+            { key: 'cash', label: '現金', enabled: true },
+            { key: 'linepay', label: 'LINE Pay', enabled: true },
+            { key: 'transfer', label: '銀行轉帳', enabled: true }
+          ];
+      setPaymentMethods(loadedMethods.map(m => ({ ...m })));
+      setSavedMethodKeys(loadedMethods.map(m => m.key));
+      setPaymentMethodError('');
 
       const nextPrintEnabled = d.print_enabled !== false;
       setPrintEnabled(nextPrintEnabled);
@@ -285,13 +300,6 @@ export default function SettingsPage() {
       const loadedChips = (Array.isArray(d.booking_note_chips) && d.booking_note_chips.length > 0)
         ? d.booking_note_chips
         : DEFAULT_BOOKING_NOTE_CHIPS;
-      const loadedMethods = (Array.isArray(d.payment_methods_json) && d.payment_methods_json.length > 0)
-        ? d.payment_methods_json.filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass')
-        : [
-            { key: 'cash', label: '現金', enabled: true },
-            { key: 'linepay', label: 'LINE Pay', enabled: true },
-            { key: 'transfer', label: '銀行轉帳', enabled: true }
-          ];
 
       setSavedSnapshot({
         require_line_login_every_time: !!d.require_line_login_every_time,
@@ -413,6 +421,9 @@ export default function SettingsPage() {
       const resData = err.response?.data;
       if (err.response?.status === 422 && resData?.field) {
         setFieldErrors({ [resData.field]: resData.error || '設定值不合法' });
+        if (resData.field === 'payment_methods_json') {
+          setPaymentMethodError(resData.error || '付款方式設定不合法');
+        }
       }
       showToast(resData?.error || '儲存系統設定失敗', 'error');
     } finally {
@@ -435,6 +446,36 @@ export default function SettingsPage() {
       setter(!nextValue);
       showToast(err.response?.data?.error || '更新設定失敗', 'error');
     }
+  };
+
+  const handleAddPaymentMethod = () => {
+    setPaymentMethodError('');
+    const trimmed = newPaymentMethodLabel.trim();
+    if (!trimmed || trimmed.length > 12) {
+      setPaymentMethodError('付款方式名稱須為 1～12 字');
+      return;
+    }
+    if (paymentMethods.some((pm) => String(pm.label || '').trim() === trimmed)) {
+      setPaymentMethodError(`付款方式名稱「${trimmed}」不可重複`);
+      return;
+    }
+    if (paymentMethods.length >= 12) {
+      setPaymentMethodError('付款方式最多 12 個');
+      return;
+    }
+    const usedNorm = new Set([
+      ...paymentMethods.map((pm) => normalizeMethodKey(pm.key)),
+      ...savedMethodKeys.map((k) => normalizeMethodKey(k))
+    ]);
+    let idx = 1;
+    while (usedNorm.has(normalizeMethodKey(`custom_${idx}`))) {
+      idx += 1;
+    }
+    setPaymentMethods([
+      ...paymentMethods,
+      { key: `custom_${idx}`, label: trimmed, enabled: true }
+    ]);
+    setNewPaymentMethodLabel('');
   };
 
   const handleRenameStation = (st) => {
@@ -1567,18 +1608,25 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Payment Methods Config (Round 16 Item 2) */}
+          {/* Payment Methods Config (Round 16 Item 2 / Round 43 Item 5) */}
           <div className="space-y-3 pt-4 border-t border-gray-200">
             <div>
               <label className="block text-xs font-bold text-gray-700 mb-0.5">現場付款方式清單</label>
+              <p
+                data-testid="counter-payment-methods-note"
+                className="text-xs text-[#6D5D52] bg-[#FAF7F2] border border-[#E8DEC8] rounded-lg px-3 py-2 my-1.5"
+              >
+                這裡是<strong className="text-[#3E332B]">櫃檯結帳</strong>時店員按的付款方式。顧客線上預購付訂金的方式在『商城管理 → 付款方式』，兩份清單互不影響。
+              </p>
               <span className="text-[12px] text-gray-400 block">
-                設定現場結帳時可使用的付款方式與顯示順序。每項一列，支援拖曳或上下箭頭排序。「現金」為必要付款方式無法停用。
+                設定現場結帳時可使用的付款方式與顯示順序（最多 12 個）。「現金」固定為「現金」且無法停用；已存檔項目只能停用不可移除。
               </span>
             </div>
 
             <div className="space-y-2 max-w-xl" data-testid="payment-methods-list">
               {paymentMethods.map((pm, idx) => {
-                const isCash = pm.key === 'cash';
+                const isCash = normalizeMethodKey(pm.key) === 'cash';
+                const isUnsavedNew = !savedMethodKeys.includes(pm.key);
                 return (
                   <div
                     key={pm.key}
@@ -1596,11 +1644,11 @@ export default function SettingsPage() {
                     data-testid={`payment-method-row-${pm.key}`}
                     className="flex items-center justify-between p-3 bg-[#FAF7F2] rounded-xl border border-[#E8DEC8] hover:border-[#8B5B43] transition gap-3"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="cursor-grab text-gray-400 hover:text-gray-600" title="拖曳排序">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="cursor-grab text-gray-400 hover:text-gray-600 shrink-0" title="拖曳排序">
                         <GripVertical className="w-4 h-4" />
                       </span>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
                           disabled={idx === 0}
@@ -1636,33 +1684,103 @@ export default function SettingsPage() {
                           <ArrowDown className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <span className="text-sm font-bold text-[#3E332B]">{pm.label}</span>
+                      {isCash ? (
+                        <span className="text-sm font-bold text-[#3E332B]">現金</span>
+                      ) : (
+                        <input
+                          type="text"
+                          maxLength={12}
+                          value={pm.label}
+                          data-testid={`payment-method-label-${pm.key}`}
+                          onChange={(e) => {
+                            setPaymentMethodError('');
+                            const updated = [...paymentMethods];
+                            updated[idx] = { ...updated[idx], label: e.target.value };
+                            setPaymentMethods(updated);
+                          }}
+                          className="w-32 sm:w-40 px-2.5 py-1 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                        />
+                      )}
+                      <span className="text-[11px] font-mono text-gray-400 shrink-0">{pm.key}</span>
                       {isCash && (
-                        <span className="text-[12px] bg-[#E8DEC8]/60 text-[#8B5B43] font-bold px-1.5 py-0.5 rounded">
+                        <span className="text-[12px] bg-[#E8DEC8]/60 text-[#8B5B43] font-bold px-1.5 py-0.5 rounded shrink-0">
                           固定開啟
                         </span>
                       )}
                     </div>
 
-                    <label className={`relative inline-flex items-center ${isCash ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} shrink-0`}>
-                      <input
-                        type="checkbox"
-                        checked={isCash ? true : Boolean(pm.enabled)}
-                        disabled={isCash}
-                        data-testid={`payment-method-toggle-${pm.key}`}
-                        onChange={(e) => {
-                          if (isCash) return;
-                          const updated = [...paymentMethods];
-                          updated[idx] = { ...updated[idx], enabled: e.target.checked };
-                          setPaymentMethods(updated);
-                        }}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                    </label>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isUnsavedNew && !isCash && (
+                        <button
+                          type="button"
+                          data-testid={`payment-method-remove-${pm.key}`}
+                          onClick={() => {
+                            setPaymentMethodError('');
+                            setPaymentMethods(paymentMethods.filter((_, i) => i !== idx));
+                          }}
+                          className="text-xs font-bold text-red-600 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 transition"
+                        >
+                          移除
+                        </button>
+                      )}
+                      <label className={`relative inline-flex items-center ${isCash ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} shrink-0`}>
+                        <input
+                          type="checkbox"
+                          checked={isCash ? true : Boolean(pm.enabled)}
+                          disabled={isCash}
+                          data-testid={`payment-method-toggle-${pm.key}`}
+                          onChange={(e) => {
+                            if (isCash) return;
+                            const updated = [...paymentMethods];
+                            updated[idx] = { ...updated[idx], enabled: e.target.checked };
+                            setPaymentMethods(updated);
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                      </label>
+                    </div>
                   </div>
                 );
               })}
+            </div>
+
+            <div className="max-w-xl pt-1 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  maxLength={12}
+                  value={newPaymentMethodLabel}
+                  onChange={(e) => {
+                    setPaymentMethodError('');
+                    setNewPaymentMethodLabel(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddPaymentMethod();
+                    }
+                  }}
+                  placeholder="輸入新付款方式名稱（1～12 字，如：街口）"
+                  data-testid="new-payment-method-input"
+                  className="flex-1 px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                />
+                <button
+                  type="button"
+                  data-testid="add-payment-method-btn"
+                  onClick={handleAddPaymentMethod}
+                  disabled={paymentMethods.length >= 12}
+                  className="px-3.5 py-2 bg-[#FAF7F2] hover:bg-[#F2EAE0] border border-[#E8DEC8] text-[#8B5B43] font-bold rounded-xl text-xs flex items-center gap-1 transition disabled:opacity-50"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>新增付款方式</span>
+                </button>
+              </div>
+              {(paymentMethodError || fieldErrors.payment_methods_json) && (
+                <p className="text-xs font-bold text-red-600" data-testid="payment-method-error">
+                  {paymentMethodError || fieldErrors.payment_methods_json}
+                </p>
+              )}
             </div>
           </div>
 

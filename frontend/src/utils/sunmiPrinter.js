@@ -28,9 +28,10 @@ export const isSunmiPosAvailable = () => {
   return typeof window !== 'undefined' && Boolean(window.AndroidPrinter);
 };
 
-import { PAYMENT_METHOD_LABELS as SHARED_PAYMENT_LABELS } from '@shared/billing.js';
+import { PAYMENT_METHOD_LABELS as SHARED_PAYMENT_LABELS, methodLabel } from '@shared/paymentMethods.js';
 import { commandsToPreviewHtml } from '@shared/receipts.js';
 
+export { methodLabel };
 export const PAYMENT_METHOD_LABELS = {
   ...SHARED_PAYMENT_LABELS,
   jkopay: '街口支付',
@@ -58,6 +59,7 @@ export const buildFullReceiptCommands = (data) => {
     discountAmount = 0,
     totalAmount = 0,
     paymentMethod = 'cash',
+    paymentMethods = [],
     note = ''
   } = data;
 
@@ -205,7 +207,7 @@ export const buildFullReceiptCommands = (data) => {
   });
   commands.push({
     type: 'columns',
-    cols: ['付款方式', PAYMENT_METHOD_LABELS[paymentMethod] || '現金付款'],
+    cols: ['付款方式', methodLabel(paymentMethod, paymentMethods) || '現金付款'],
     weights: [1, 1],
     aligns: [0, 2]
   });
@@ -236,7 +238,8 @@ export const buildPersonSplitReceiptCommands = (person, index, data) => {
     customerName = '現場貴賓',
     sessionDate = '',
     timeRange = '',
-    paymentMethod = 'cash'
+    paymentMethod = 'cash',
+    paymentMethods = []
   } = data;
 
   const shortRef = String(bookingRef).slice(0, 8).toUpperCase();
@@ -320,7 +323,7 @@ export const buildPersonSplitReceiptCommands = (person, index, data) => {
   });
   commands.push({
     type: 'columns',
-    cols: ['付款方式', PAYMENT_METHOD_LABELS[paymentMethod] || '現金付款'],
+    cols: ['付款方式', methodLabel(paymentMethod, paymentMethods) || '現金付款'],
     weights: [1, 1],
     aligns: [0, 2]
   });

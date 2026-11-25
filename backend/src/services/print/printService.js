@@ -48,6 +48,7 @@ export async function queuePrintJob({
   const opts = {
     footerText,
     receiptFooterText: footerText,
+    paymentMethods: Array.isArray(globalSetting.payment_methods_json) ? globalSetting.payment_methods_json : [],
     publicSiteUrl: process.env.PUBLIC_SITE_URL || device?.origin || 'https://shiguang.tw',
     ...passedOpts
   };

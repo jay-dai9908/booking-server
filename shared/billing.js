@@ -5,21 +5,9 @@ import { blocksBy1030, floorMinutes, formatTimerHMM, formatBillingHours } from '
 import { calculateBoardTotal } from './boardPricing.js';
 import { splitAmount } from './splitAmount.js';
 import { computePromoDiscount } from './promo.js';
+import { PAYMENT_METHOD_LABELS } from './paymentMethods.js';
 
-export { splitAmount };
-
-export const PAYMENT_METHOD_LABELS = {
-  cash: '現金',
-  line_pay: 'LINE Pay',
-  linepay: 'LINE Pay',
-  jkopay: '街口支付',
-  card: '刷卡',
-  transfer: '銀行轉帳',
-  pass: '卡券折抵',
-  other: '其他',
-  none: '免收',
-  mixed: '多種方式'
-};
+export { splitAmount, PAYMENT_METHOD_LABELS };
 
   /**
    * 顯示品名替換：把「洞洞板」替換為「智能板」
