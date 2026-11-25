@@ -95,6 +95,18 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "ended_reason" TEXT`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "planned_end_at" TIMESTAMP(3)`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "added_after_payment" BOOLEAN NOT NULL DEFAULT false`,
+    `CREATE INDEX IF NOT EXISTS "BookingEquipment_booking_ref_idx" ON "BookingEquipment"("booking_ref")`,
+    `CREATE INDEX IF NOT EXISTS "BookingEquipment_unit_group_idx" ON "BookingEquipment"("unit_group")`,
+    `CREATE TABLE IF NOT EXISTS "BoardPause" (
+      "id" SERIAL NOT NULL,
+      "unit_group" TEXT NOT NULL,
+      "started_at" TIMESTAMP(3) NOT NULL,
+      "ended_at" TIMESTAMP(3),
+      "source" TEXT NOT NULL,
+      "staff_name" TEXT,
+      CONSTRAINT "BoardPause_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE INDEX IF NOT EXISTS "BoardPause_unit_group_idx" ON "BoardPause"("unit_group")`,
     `ALTER TABLE "BookingPerson" ADD COLUMN IF NOT EXISTS "left_at" TIMESTAMP(3)`,
 
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "billing_grace_minutes" INTEGER NOT NULL DEFAULT 10`,
@@ -110,6 +122,9 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "print_lease_seconds" INTEGER NOT NULL DEFAULT 60`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "seat_layout_enabled" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "default_session_capacity" INTEGER NOT NULL DEFAULT 16`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "business_hours_json" JSONB`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "booking_note_chips" JSONB DEFAULT '["第一次玩", "有小孩同行", "生日慶祝", "希望坐一起"]'`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "guest_line_hint_text" TEXT DEFAULT '會打開拾光製所的官方 LINE，從選單點『預約』就能登入'`,
 
     `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "checkout_effect" TEXT`,
     `ALTER TABLE "PassPlan" ADD COLUMN IF NOT EXISTS "checkout_scope" TEXT NOT NULL DEFAULT 'entry'`,
@@ -219,9 +234,7 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `ALTER TABLE "AddonItem" ADD COLUMN IF NOT EXISTS "category" TEXT NOT NULL DEFAULT 'charm'`,
     `ALTER TABLE "AddonItem" ADD COLUMN IF NOT EXISTS "is_active" BOOLEAN NOT NULL DEFAULT true`,
     `ALTER TABLE "AddonItem" ADD COLUMN IF NOT EXISTS "sort_order" INTEGER NOT NULL DEFAULT 0`,
-
-    `DELETE FROM "BannedIP" WHERE "reason" IN ('Too many login attempts', 'Too many reservation queries')`,
-    `UPDATE "GlobalSetting" SET "is_lockdown_mode" = false WHERE "id" = 1`,
+    `CREATE INDEX IF NOT EXISTS "Payment_client_batch_id_idx" ON "Payment"("client_batch_id")`,
 
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_enabled" BOOLEAN NOT NULL DEFAULT true`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "show_shop_button" BOOLEAN NOT NULL DEFAULT true`,
