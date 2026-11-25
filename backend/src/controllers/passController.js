@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { deductPass } from '../services/billing/passTender.js';
+import { refundPassSale } from '../services/billing/passSaleRefund.js';
 import { assertEnabledPaymentMethod, getNextDailySeq, nextSerialNo, resolveBillingDate } from '../services/billing/billService.js';
 import { queuePrintJob } from '../services/print/printService.js';
 import { log as auditLog } from '../services/audit/auditService.js';
@@ -476,6 +477,90 @@ export const redeemUserPass = async (req, res) => {
   }
 };
 
+async function enrichPassesWithSource(passes = [], client = prisma) {
+  if (!Array.isArray(passes) || passes.length === 0) return [];
+  const passCodes = [...new Set(passes.map((p) => p.pass_code).filter(Boolean))];
+  const [saleCharges, saleRefunds, giftEvents] = passCodes.length > 0
+    ? await Promise.all([
+        client.payment.findMany({
+          where: { source: 'pass_sale', source_ref: { in: passCodes }, kind: 'charge', status: 'valid' },
+          orderBy: { id: 'desc' }
+        }),
+        client.payment.findMany({
+          where: { source: 'pass_sale', source_ref: { in: passCodes }, kind: 'refund', status: 'valid' },
+          select: { source_ref: true, amount: true }
+        }),
+        client.accountingEvent.findMany({
+          where: { event_type: 'pass_gifted', booking_ref: { in: passCodes } },
+          orderBy: { id: 'desc' },
+          select: { booking_ref: true, reason: true }
+        })
+      ])
+    : [[], [], []];
+
+  const saleChargeMap = new Map();
+  for (const pay of saleCharges) {
+    if (pay.source_ref && !saleChargeMap.has(pay.source_ref)) {
+      saleChargeMap.set(pay.source_ref, pay);
+    }
+  }
+  const saleRefundSumMap = new Map();
+  for (const refPay of saleRefunds) {
+    if (refPay.source_ref) {
+      saleRefundSumMap.set(
+        refPay.source_ref,
+        (saleRefundSumMap.get(refPay.source_ref) || 0) + (Number(refPay.amount) || 0)
+      );
+    }
+  }
+  const giftMap = new Map();
+  for (const ev of giftEvents) {
+    if (ev.booking_ref && !giftMap.has(ev.booking_ref)) {
+      giftMap.set(ev.booking_ref, ev);
+    }
+  }
+
+  return passes.map((p) => {
+    const salePay = saleChargeMap.get(p.pass_code);
+    const giftEv = giftMap.get(p.pass_code);
+
+    let source_type = 'legacy';
+    let source_label = '舊資料（來源不明）';
+    let sale_amount = null;
+    let sale_method = null;
+    let refunded_amount = 0;
+    let refundable_remaining = 0;
+    let gift_reason = null;
+
+    if (salePay) {
+      source_type = 'sale';
+      source_label = '販售';
+      sale_amount = salePay.amount;
+      sale_method = salePay.method;
+      refunded_amount = saleRefundSumMap.get(p.pass_code) || 0;
+      refundable_remaining = Math.max(0, (Number(salePay.amount) || 0) - refunded_amount);
+    } else if (giftEv) {
+      source_type = 'gift';
+      source_label = '贈送';
+      gift_reason = giftEv.reason || null;
+    } else if (p.order_ref) {
+      source_type = 'shop_bonus';
+      source_label = '商城贈品';
+    }
+
+    return {
+      ...p,
+      source_type,
+      source_label,
+      sale_amount,
+      sale_method,
+      refunded_amount,
+      refundable_remaining,
+      gift_reason
+    };
+  });
+}
+
 /**
  * Admin: Get passes of a specific member
  */
@@ -487,9 +572,162 @@ export const getUserPassesAdmin = async (req, res) => {
       include: { plan: true },
       orderBy: { created_at: 'desc' }
     });
-    res.json(passes);
+    const enriched = await enrichPassesWithSource(passes);
+    res.json(enriched);
   } catch (error) {
     res.status(500).json({ error: '獲取會員卡券失敗' });
+  }
+};
+
+/**
+ * Admin: Get store-wide passes overview with filters, pagination, and inferred source
+ * GET /api/passes/admin/all
+ */
+export const getAllPassesAdmin = async (req, res) => {
+  try {
+    const {
+      status,
+      plan_id,
+      q,
+      expiring_days,
+      page = '1',
+      limit = '30'
+    } = req.query || {};
+
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    const parsedLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 30));
+    const now = new Date();
+
+    const where = {};
+    if (status && status !== 'ALL' && status !== 'all') {
+      where.status = String(status).trim().toUpperCase();
+    }
+    if (plan_id !== undefined && plan_id !== '' && plan_id !== 'all') {
+      const parsedPlanId = parseInt(plan_id, 10);
+      if (Number.isInteger(parsedPlanId) && parsedPlanId > 0) {
+        where.plan_id = parsedPlanId;
+      }
+    }
+    if (expiring_days !== undefined && expiring_days !== '') {
+      const days = parseInt(expiring_days, 10);
+      if (Number.isInteger(days) && days > 0) {
+        const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+        where.status = 'ACTIVE';
+        where.expires_at = { gte: now, lte: cutoff };
+      }
+    }
+    if (q && String(q).trim()) {
+      const qTrim = String(q).trim();
+      where.OR = [
+        { pass_code: { contains: qTrim, mode: 'insensitive' } },
+        { user: { name: { contains: qTrim, mode: 'insensitive' } } },
+        { user: { phone: { contains: qTrim } } }
+      ];
+    }
+
+    const [total, rawPasses] = await Promise.all([
+      prisma.userPass.count({ where }),
+      prisma.userPass.findMany({
+        where,
+        include: {
+          user: { select: { id: true, name: true, phone: true, line_display_name: true } },
+          plan: { select: { id: true, code: true, name: true, pass_type: true, unit_name: true, price: true } }
+        },
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        skip: (parsedPage - 1) * parsedLimit,
+        take: parsedLimit
+      })
+    ]);
+
+    const enriched = await enrichPassesWithSource(rawPasses);
+    res.json({
+      passes: enriched,
+      total,
+      page: parsedPage,
+      limit: parsedLimit,
+      totalPages: Math.max(1, Math.ceil(total / parsedLimit))
+    });
+  } catch (error) {
+    console.error('getAllPassesAdmin error:', error);
+    res.status(500).json({ error: '獲取全店卡券總表失敗' });
+  }
+};
+
+/**
+ * Admin: Store-wide pass summary counts grouped overall & by plan
+ * GET /api/passes/admin/summary
+ */
+export const getPassesSummaryAdmin = async (_req, res) => {
+  try {
+    const now = new Date();
+    const cutoff30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const allPasses = await prisma.userPass.findMany({
+      select: {
+        id: true,
+        plan_id: true,
+        plan_name_snapshot: true,
+        status: true,
+        remaining_quota: true,
+        expires_at: true,
+        plan: { select: { id: true, name: true } }
+      }
+    });
+
+    let active_count = 0;
+    let active_remaining_quota = 0;
+    let expiring_30d_count = 0;
+    let expired_count = 0;
+    let revoked_count = 0;
+    const planMap = new Map();
+
+    for (const p of allPasses) {
+      const planKey = p.plan_id ?? `name:${p.plan_name_snapshot || '自訂'}`;
+      const planName = p.plan?.name || p.plan_name_snapshot || '自訂方案';
+      if (!planMap.has(planKey)) {
+        planMap.set(planKey, {
+          plan_id: p.plan_id,
+          plan_name: planName,
+          active_count: 0,
+          active_remaining_quota: 0,
+          expiring_30d_count: 0,
+          expired_count: 0,
+          revoked_count: 0
+        });
+      }
+      const bucket = planMap.get(planKey);
+
+      if (p.status === 'ACTIVE') {
+        active_count += 1;
+        bucket.active_count += 1;
+        if (typeof p.remaining_quota === 'number') {
+          active_remaining_quota += p.remaining_quota;
+          bucket.active_remaining_quota += p.remaining_quota;
+        }
+        if (p.expires_at && p.expires_at >= now && p.expires_at <= cutoff30) {
+          expiring_30d_count += 1;
+          bucket.expiring_30d_count += 1;
+        }
+      } else if (p.status === 'EXPIRED') {
+        expired_count += 1;
+        bucket.expired_count += 1;
+      } else if (p.status === 'REVOKED') {
+        revoked_count += 1;
+        bucket.revoked_count += 1;
+      }
+    }
+
+    res.json({
+      active_count,
+      active_remaining_quota,
+      expiring_30d_count,
+      expired_count,
+      revoked_count,
+      by_plan: Array.from(planMap.values())
+    });
+  } catch (error) {
+    console.error('getPassesSummaryAdmin error:', error);
+    res.status(500).json({ error: '獲取卡券摘要失敗' });
   }
 };
 
@@ -999,20 +1237,130 @@ export const updatePassPlan = async (req, res) => {
 };
 
 /**
- * Admin: Revoke or toggle pass status
+ * Admin: Revoke or restore pass status (only ACTIVE | REVOKED allowed, reason required)
  */
 export const togglePassStatus = async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, reason } = req.body || {};
+
+  if (status !== 'ACTIVE' && status !== 'REVOKED') {
+    return res.status(422).json({
+      error: status === 'EXPIRED' || status === 'EXHAUSTED'
+        ? `${status} 只能由系統自動設定，不可手動修改`
+        : '卡券狀態僅可設為 ACTIVE（恢復）或 REVOKED（作廢）'
+    });
+  }
+
+  const trimmedReason = reason ? String(reason).trim() : '';
+  if (!trimmedReason) {
+    return res.status(422).json({ error: '修改卡券狀態必須填寫原因' });
+  }
+
+  const passId = parseInt(id, 10);
+  if (!Number.isInteger(passId) || passId <= 0) {
+    return res.status(400).json({ error: '無效的卡券編號' });
+  }
+
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
 
   try {
-    const updated = await prisma.userPass.update({
-      where: { id: parseInt(id, 10) },
-      data: { status }
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "UserPass" WHERE id = ${passId} FOR UPDATE`;
+      const before = await tx.userPass.findUnique({ where: { id: passId } });
+      if (!before) {
+        return { notFound: true };
+      }
+
+      if (before.status === status) {
+        return { pass: before, unchanged: true };
+      }
+
+      const updated = await tx.userPass.update({
+        where: { id: passId },
+        data: { status }
+      });
+
+      const codeTail = String(updated.pass_code || '').slice(-4);
+      await auditLog(tx, {
+        booking_ref: updated.pass_code,
+        event_type: 'pass_status_changed',
+        category: 'pass',
+        target_type: 'user_pass',
+        target_ref: updated.pass_code,
+        summary: `調整卡券 *${codeTail} 狀態（${before.status} → ${updated.status}）· ${trimmedReason}`,
+        reason: trimmedReason,
+        before_json: {
+          status: before.status,
+          remaining_quota: before.remaining_quota
+        },
+        after_json: {
+          status: updated.status,
+          remaining_quota: updated.remaining_quota
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      return { pass: updated, unchanged: false };
     });
-    res.json({ message: '卡券狀態已更新', pass: updated });
+
+    if (result.notFound) {
+      return res.status(404).json({ error: '找不到該張卡券' });
+    }
+
+    res.json({ message: '卡券狀態已更新', pass: result.pass });
   } catch (error) {
+    console.error('togglePassStatus error:', error);
     res.status(500).json({ error: '更新卡券狀態失敗' });
+  }
+};
+
+/**
+ * Admin: Refund a purchased pass (source: 'pass_sale')
+ * POST /api/passes/admin/:id/refund
+ */
+export const refundUserPassSaleHandler = async (req, res) => {
+  const { id } = req.params;
+  const { amount, method, reason, client_batch_id } = req.body || {};
+
+  const staff = {
+    id: req.user?.id || null,
+    name: req.user?.name || '管理員'
+  };
+  const device = getAdminDeviceInfo(req);
+
+  try {
+    const result = await prisma.$transaction((tx) =>
+      refundPassSale(tx, {
+        userPassId: id,
+        amount,
+        method,
+        reason,
+        clientBatchId: client_batch_id || null,
+        staff,
+        device
+      })
+    );
+
+    res.json({
+      message: result.deduplicated ? '已處理相同退費請求（略過重複送出）' : '卡券退費完成並已作廢',
+      pass: result.pass,
+      payment: result.payment,
+      deduplicated: result.deduplicated
+    });
+  } catch (error) {
+    console.error('refundUserPassSaleHandler error:', error);
+    if (error.status) {
+      return res.status(error.status).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
+    }
+    res.status(500).json({ error: '卡券退費失敗' });
   }
 };
 

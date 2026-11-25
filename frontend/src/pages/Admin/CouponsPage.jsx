@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import api from '../../api/axios';
 import { useAdminPermissions, COUPON_WRITE } from '../../hooks/admin/useAdminPermissions';
+import MemberDetailsModal from '../../components/MemberDetailsModal';
+import { PassStatusReasonModal, PassRefundModal } from '../../components/admin/PassActionModals';
 import {
   parsePercentInput,
   initPercentInputFromPromo,
@@ -152,6 +154,21 @@ export default function CouponsPage() {
   // Delete confirmation
   const [deletingItem, setDeletingItem] = useState(null); // { type: 'promo' | 'addon', item }
 
+  // Store-wide passes overview state (Round 46 Item 3)
+  const [passOverviewList, setPassOverviewList] = useState([]);
+  const [passOverviewSummary, setPassOverviewSummary] = useState(null);
+  const [passOverviewLoading, setPassOverviewLoading] = useState(false);
+  const [passStatusFilter, setPassStatusFilter] = useState('ALL');
+  const [passPlanFilter, setPassPlanFilter] = useState('all');
+  const [passExpiringDays, setPassExpiringDays] = useState('');
+  const [passSearchQuery, setPassSearchQuery] = useState('');
+  const [passPage, setPassPage] = useState(1);
+  const [passTotal, setPassTotal] = useState(0);
+  const [passTotalPages, setPassTotalPages] = useState(1);
+  const [selectedPassMember, setSelectedPassMember] = useState(null);
+  const [passStatusTarget, setPassStatusTarget] = useState(null);
+  const [passRefundTarget, setPassRefundTarget] = useState(null);
+
   const showToast = (msg, type = 'success') => {
     setToastMsg({ msg, type });
     setTimeout(() => setToastMsg(null), 3000);
@@ -179,6 +196,50 @@ export default function CouponsPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  const fetchPassesOverview = async () => {
+    setPassOverviewLoading(true);
+    try {
+      const [summaryRes, listRes] = await Promise.all([
+        api.get('/passes/admin/summary'),
+        api.get('/passes/admin/all', {
+          params: {
+            status: passExpiringDays ? undefined : (passStatusFilter !== 'ALL' ? passStatusFilter : undefined),
+            plan_id: passPlanFilter !== 'all' ? passPlanFilter : undefined,
+            expiring_days: passExpiringDays || undefined,
+            q: passSearchQuery.trim() || undefined,
+            page: passPage,
+            limit: 30
+          }
+        })
+      ]);
+      setPassOverviewSummary(summaryRes.data || null);
+      setPassOverviewList(listRes.data?.passes || []);
+      setPassTotal(listRes.data?.total ?? 0);
+      setPassTotalPages(listRes.data?.totalPages ?? 1);
+    } catch (err) {
+      console.error('Failed to load passes overview:', err);
+      showToast('載入卡券總表失敗', 'error');
+    } finally {
+      setPassOverviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'all_passes') {
+      fetchPassesOverview();
+    }
+  }, [activeTab, passStatusFilter, passPlanFilter, passExpiringDays, passSearchQuery, passPage]);
+
+  const handleOpenMemberFromPass = async (passRow) => {
+    if (!passRow?.user?.id) return;
+    try {
+      const res = await api.get(`/users/${passRow.user.id}`);
+      setSelectedPassMember(res.data?.user || res.data || passRow.user);
+    } catch {
+      setSelectedPassMember(passRow.user);
+    }
+  };
 
   // Filtered coupons
   const filteredPromos = useMemo(() => {
@@ -605,6 +666,19 @@ export default function CouponsPage() {
             >
               <Layers className="w-3.5 h-3.5" />
               <span>會員卡券方案 ({passPlans.length})</span>
+            </button>
+            <button
+              type="button"
+              data-testid="coupons-tab-all-passes"
+              onClick={() => setActiveTab('all_passes')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'all_passes'
+                  ? 'bg-[#8B5B43] text-white shadow-xs'
+                  : 'text-[#6D5D52] hover:text-[#3E332B] hover:bg-[#FAF7F2]'
+              }`}
+            >
+              <Gift className="w-3.5 h-3.5" />
+              <span>卡券總表</span>
             </button>
           </div>
 
@@ -1172,6 +1246,230 @@ export default function CouponsPage() {
       )}
 
       {/* PROMO ADD / EDIT MODAL */}
+      {activeTab === 'all_passes' && (
+        <div className="space-y-4">
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="pass-overview-summary">
+            <div className="bg-white rounded-2xl border border-[#E8DEC8] p-4 shadow-2xs">
+              <div className="text-xs font-bold text-[#8C8279]">使用中張數</div>
+              <div className="text-2xl font-black text-emerald-700 mt-1" data-testid="summary-active-count">
+                {passOverviewSummary?.active_count ?? 0}
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl border border-[#E8DEC8] p-4 shadow-2xs">
+              <div className="text-xs font-bold text-[#8C8279]">剩餘總次數</div>
+              <div className="text-2xl font-black text-[#8B5B43] mt-1" data-testid="summary-active-quota">
+                {passOverviewSummary?.active_remaining_quota ?? 0}
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl border border-[#E8DEC8] p-4 shadow-2xs">
+              <div className="text-xs font-bold text-[#8C8279]">30 天內到期</div>
+              <div className="text-2xl font-black text-amber-700 mt-1" data-testid="summary-expiring-count">
+                {passOverviewSummary?.expiring_30d_count ?? 0}
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl border border-[#E8DEC8] p-4 shadow-2xs">
+              <div className="text-xs font-bold text-[#8C8279]">已過期張數</div>
+              <div className="text-2xl font-black text-rose-700 mt-1" data-testid="summary-expired-count">
+                {passOverviewSummary?.expired_count ?? 0}
+              </div>
+            </div>
+          </div>
+
+          {/* Filter bar */}
+          <div className="bg-white rounded-2xl border border-[#E8DEC8] p-4 flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="w-4 h-4 text-[#8C8279] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={passSearchQuery}
+                onChange={(e) => { setPassSearchQuery(e.target.value); setPassPage(1); }}
+                placeholder="搜尋會員姓名、電話或卡號..."
+                className="w-full pl-9 pr-3 py-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B]"
+              />
+            </div>
+
+            <select
+              value={passStatusFilter}
+              disabled={Boolean(passExpiringDays)}
+              onChange={(e) => { setPassStatusFilter(e.target.value); setPassPage(1); }}
+              className="px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] disabled:opacity-50"
+            >
+              <option value="ALL">全部狀態</option>
+              <option value="ACTIVE">使用中</option>
+              <option value="EXPIRED">已過期</option>
+              <option value="EXHAUSTED">已用罄</option>
+              <option value="REVOKED">已作廢</option>
+            </select>
+
+            <select
+              value={passPlanFilter}
+              onChange={(e) => { setPassPlanFilter(e.target.value); setPassPage(1); }}
+              className="px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B]"
+            >
+              <option value="all">全部方案</option>
+              {passPlans.map((pl) => (
+                <option key={pl.id} value={String(pl.id)}>{pl.name}</option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              data-testid="filter-expiring-30d-btn"
+              onClick={() => {
+                setPassExpiringDays((prev) => (prev === '30' ? '' : '30'));
+                setPassPage(1);
+              }}
+              className={`px-3 py-2 rounded-xl text-xs font-bold border transition ${
+                passExpiringDays === '30'
+                  ? 'bg-amber-600 text-white border-amber-600'
+                  : 'bg-white text-amber-800 border-amber-200 hover:bg-amber-50'
+              }`}
+            >
+              30 天內到期
+            </button>
+          </div>
+
+          {/* Table */}
+          <div className="bg-white rounded-2xl border border-[#E8DEC8] overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-[#FAF7F2] border-b border-[#E8DEC8] text-[#8C8279]">
+                    <th className="py-3 px-4 font-bold">卡號</th>
+                    <th className="py-3 px-4 font-bold">會員姓名</th>
+                    <th className="py-3 px-4 font-bold">方案</th>
+                    <th className="py-3 px-4 font-bold">剩餘 / 總次數</th>
+                    <th className="py-3 px-4 font-bold">到期日</th>
+                    <th className="py-3 px-4 font-bold">狀態</th>
+                    <th className="py-3 px-4 font-bold">來源</th>
+                    <th className="py-3 px-4 font-bold">建立時間</th>
+                    <th className="py-3 px-4 font-bold text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E8DEC8]/70">
+                  {passOverviewLoading ? (
+                    <tr><td colSpan={9} className="py-12 text-center text-[#8C8279]">載入全店卡券中...</td></tr>
+                  ) : passOverviewList.length === 0 ? (
+                    <tr><td colSpan={9} className="py-12 text-center text-[#8C8279]">尚無符合條件的卡券</td></tr>
+                  ) : (
+                    passOverviewList.map((p) => {
+                      const statusMeta = p.status === 'ACTIVE'
+                        ? { label: '使用中', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+                        : p.status === 'EXPIRED'
+                          ? { label: '已過期', cls: 'bg-rose-50 text-rose-700 border-rose-200' }
+                          : p.status === 'EXHAUSTED'
+                            ? { label: '已用罄', cls: 'bg-gray-100 text-gray-600 border-gray-200' }
+                            : p.status === 'REVOKED'
+                              ? { label: '已作廢', cls: 'bg-zinc-200 text-zinc-700 border-zinc-300' }
+                              : { label: p.status, cls: 'bg-gray-100 text-gray-600 border-gray-200' };
+
+                      const expStr = p.expires_at
+                        ? new Date(p.expires_at).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' })
+                        : '永久';
+                      const createdStr = p.created_at
+                        ? new Date(p.created_at).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' })
+                        : '-';
+
+                      return (
+                        <tr
+                          key={p.id}
+                          data-testid={`pass-overview-row-${p.pass_code}`}
+                          onClick={() => handleOpenMemberFromPass(p)}
+                          className="hover:bg-[#FAF7F2]/60 cursor-pointer transition-colors"
+                        >
+                          <td className="py-3 px-4 font-mono font-bold text-[#3E332B]">{p.pass_code}</td>
+                          <td className="py-3 px-4 font-bold text-[#3E332B]">
+                            {p.user?.name || '會員'}
+                            {p.user?.phone && <span className="block text-[11px] font-normal text-[#8C8279]">{p.user.phone}</span>}
+                          </td>
+                          <td className="py-3 px-4 text-[#3E332B] font-medium">{p.plan?.name || p.plan_name_snapshot || '-'}</td>
+                          <td className="py-3 px-4 font-bold text-[#8B5B43]">
+                            {p.remaining_quota !== null && p.remaining_quota !== undefined
+                              ? `${p.remaining_quota} / ${p.total_quota ?? p.remaining_quota}`
+                              : '無限制'}
+                          </td>
+                          <td className="py-3 px-4 text-[#6D5D52]">{expStr}</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${statusMeta.cls}`}>
+                              {statusMeta.label}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-[#6D5D52]">
+                            <span className="font-bold text-[#3E332B]">{p.source_label}</span>
+                            {p.source_type === 'sale' && p.sale_amount != null && (
+                              <span className="block text-[11px] text-[#8C8279]">NT${p.sale_amount} · {p.sale_method}</span>
+                            )}
+                            {p.source_type === 'gift' && p.gift_reason && (
+                              <span className="block text-[11px] text-[#8C8279]">{p.gift_reason}</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-[#8C8279]">{createdStr}</td>
+                          <td className="py-3 px-4 text-right space-x-1.5" onClick={(e) => e.stopPropagation()}>
+                            {p.status === 'ACTIVE' && (
+                              <button
+                                type="button"
+                                data-testid={`revoke-pass-btn-${p.pass_code}`}
+                                onClick={() => setPassStatusTarget({ pass: p, nextStatus: 'REVOKED' })}
+                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold"
+                              >
+                                作廢
+                              </button>
+                            )}
+                            {p.status === 'REVOKED' && (
+                              <button
+                                type="button"
+                                onClick={() => setPassStatusTarget({ pass: p, nextStatus: 'ACTIVE' })}
+                                className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8] font-bold"
+                              >
+                                恢復
+                              </button>
+                            )}
+                            {p.source_type === 'sale' && p.refundable_remaining > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setPassRefundTarget(p)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold"
+                              >
+                                退費
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {passTotalPages > 1 && (
+              <div className="px-4 py-3 border-t border-[#E8DEC8] flex items-center justify-between text-xs text-[#6D5D52]">
+                <span>共 {passTotal} 張（第 {passPage} / {passTotalPages} 頁）</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={passPage <= 1}
+                    onClick={() => setPassPage((p) => Math.max(1, p - 1))}
+                    className="px-3 py-1 rounded-lg border border-[#E8DEC8] bg-white disabled:opacity-40 font-bold"
+                  >
+                    上一頁
+                  </button>
+                  <button
+                    type="button"
+                    disabled={passPage >= passTotalPages}
+                    onClick={() => setPassPage((p) => Math.min(passTotalPages, p + 1))}
+                    className="px-3 py-1 rounded-lg border border-[#E8DEC8] bg-white disabled:opacity-40 font-bold"
+                  >
+                    下一頁
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showPromoModal && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-xs" onClick={() => setShowPromoModal(false)} />
@@ -1887,6 +2185,38 @@ export default function CouponsPage() {
           </div>
         </div>
       )}
+
+      {selectedPassMember && (
+        <MemberDetailsModal
+          member={selectedPassMember}
+          onClose={() => setSelectedPassMember(null)}
+          onMemberUpdated={() => {
+            if (activeTab === 'all_passes') fetchPassesOverview();
+          }}
+        />
+      )}
+
+      <PassStatusReasonModal
+        target={passStatusTarget}
+        onClose={() => setPassStatusTarget(null)}
+        onSuccess={() => {
+          setPassStatusTarget(null);
+          showToast('卡券狀態已更新');
+          fetchPassesOverview();
+        }}
+        onError={(msg) => showToast(msg, 'error')}
+      />
+
+      <PassRefundModal
+        pass={passRefundTarget}
+        onClose={() => setPassRefundTarget(null)}
+        onSuccess={() => {
+          setPassRefundTarget(null);
+          showToast('卡券退費完成並已作廢');
+          fetchPassesOverview();
+        }}
+        onError={(msg) => showToast(msg, 'error')}
+      />
     </div>
   );
 }

@@ -25,6 +25,7 @@ import api from '../api/axios';
 import ReservationDetailsModal, { getReservationStatusUI } from './ReservationDetailsModal';
 import SendLineMessageModal from './SendLineMessageModal';
 import ConfirmPanel from './admin/ConfirmPanel';
+import { PassStatusReasonModal, PassRefundModal } from './admin/PassActionModals';
 import { useAdminPermissions, PASS_GRANT } from '../hooks/admin/useAdminPermissions';
 
 export default function MemberDetailsModal({ member, onClose, onMemberUpdated, onSwitchMember, onBindRequestResolved }) {
@@ -84,6 +85,8 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
   ]);
   const [isGranting, setIsGranting] = useState(false);
   const [redeemingPassId, setRedeemingPassId] = useState(null);
+  const [passStatusTarget, setPassStatusTarget] = useState(null);
+  const [passRefundTarget, setPassRefundTarget] = useState(null);
   const [expandedLogPassId, setExpandedLogPassId] = useState(null);
   const [copiedCode, setCopiedCode] = useState(null);
 
@@ -1311,21 +1314,30 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
                                   <span className="text-base font-bold text-[#3E332B]">
                                     {p.plan?.name || '專屬集次/暢遊卡'}
                                   </span>
-                                  {isActive ? (
-                                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
-                                      有效中
+                                  {p.status === 'REVOKED' ? (
+                                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-200 text-zinc-700 border border-zinc-300 font-bold">
+                                      已作廢
                                     </span>
-                                  ) : isExpired ? (
+                                  ) : p.status === 'EXPIRED' || isExpired ? (
                                     <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-bold">
-                                      已逾期
+                                      已過期
                                     </span>
-                                  ) : isExhausted ? (
+                                  ) : p.status === 'EXHAUSTED' || isExhausted ? (
                                     <span className="text-xs px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200 font-bold">
                                       已用罄
+                                    </span>
+                                  ) : isActive ? (
+                                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+                                      使用中
                                     </span>
                                   ) : (
                                     <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600 border border-zinc-200 font-bold">
                                       {p.status}
+                                    </span>
+                                  )}
+                                  {p.source_label && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded bg-sg-paper text-sg-muted border border-sg-line font-bold">
+                                      {p.source_label}
                                     </span>
                                   )}
                                   {p.day_restriction === 'WEEKDAY_ONLY' && (
@@ -1389,6 +1401,34 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
                                 >
                                   {redeemingPassId === p.id ? '核銷中...' : '現場扣抵 1 次'}
                                 </button>
+
+                                {p.status === 'ACTIVE' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPassStatusTarget({ pass: p, nextStatus: 'REVOKED' })}
+                                    className="px-2.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors"
+                                  >
+                                    作廢
+                                  </button>
+                                )}
+                                {p.status === 'REVOKED' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPassStatusTarget({ pass: p, nextStatus: 'ACTIVE' })}
+                                    className="px-2.5 py-2 bg-white hover:bg-gray-50 text-[#8B5B43] border border-[#E8DEC8] rounded-xl text-xs font-bold transition-colors"
+                                  >
+                                    恢復
+                                  </button>
+                                )}
+                                {p.source_type === 'sale' && p.refundable_remaining > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPassRefundTarget(p)}
+                                    className="px-2.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition-colors"
+                                  >
+                                    退費
+                                  </button>
+                                )}
 
                                 <button
                                   type="button"
@@ -1756,6 +1796,31 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
           }} 
         />
       )}
+
+      {/* Pass Revoke/Restore & Sale Refund Modals */}
+      <PassStatusReasonModal
+        target={passStatusTarget}
+        onClose={() => setPassStatusTarget(null)}
+        onSuccess={() => {
+          setPassStatusTarget(null);
+          showToast('卡券狀態已更新');
+          if (localMember?.id) fetchUserPasses(localMember.id);
+        }}
+        onError={(msg) => showToast(msg, true)}
+      />
+      <PassRefundModal
+        pass={passRefundTarget}
+        onClose={() => setPassRefundTarget(null)}
+        onSuccess={() => {
+          setPassRefundTarget(null);
+          showToast('卡券退費完成並已作廢');
+          if (localMember?.id) {
+            fetchUserPasses(localMember.id);
+            fetchUserPayments(localMember.id);
+          }
+        }}
+        onError={(msg) => showToast(msg, true)}
+      />
 
       {/* Send LINE Message Modal */}
       <SendLineMessageModal
