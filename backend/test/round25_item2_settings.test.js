@@ -108,11 +108,15 @@ test('Round 25 Item 2: Daily self-service settings, kiosk settings, and equipmen
     const day3Row = await prisma.dailySetting.findUnique({ where: { date: dateObjs[2] } });
     assert.equal(day3Row, null, 'Batch conflict must leave all days untouched');
 
-    // 3. GET /daily-settings/range matches DB
+    // 3. GET /daily-settings/range returns full range with day_type & price_type
     const resRange = createMockRes();
     await getDailySettingsRange({ query: { start: '2099-05-01', end: '2099-05-10' } }, resRange);
     assert.equal(resRange.statusCode, 200);
-    assert.deepEqual(resRange.body, [{ date: '2099-05-01', is_self_service: true }]);
+    assert.equal(resRange.body.length, 10);
+    const selfRows = resRange.body.filter((r) => r.is_self_service);
+    assert.deepEqual(selfRows.map((r) => r.date), ['2099-05-01']);
+    assert.equal(selfRows[0].day_type, 'self');
+    assert.ok(resRange.body.every((r) => r.price_type === 'weekday' || r.price_type === 'holiday'));
 
     const resTooLong = createMockRes();
     await getDailySettingsRange({ query: { start: '2099-01-01', end: '2099-06-01' } }, resTooLong);

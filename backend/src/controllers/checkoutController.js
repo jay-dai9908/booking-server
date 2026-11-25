@@ -5,6 +5,7 @@ import { splitAmount } from '../../../shared/splitAmount.js';
 import auditService from '../services/audit/auditService.js';
 import { diffFields } from '../services/audit/settingAudit.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+import { getDayInfo } from '../services/calendar/dayType.js';
 
 export const DEFAULT_PROMO_CODES = [
   {
@@ -200,16 +201,16 @@ export const evaluatePromoCode = async (txOrPrisma, {
     }
   }
 
-  // 4. Day of week check (weekday vs weekend in Taipei date)
+  // 4. Day type check (uses getDayInfo price_type so manual holiday/weekday overrides apply)
   const dayLimit = promo.day_type_limit || promo.applicable_days || 'all';
   if (session_date && dayLimit !== 'all' && targetDateStr) {
-    const day = new Date(`${targetDateStr}T00:00:00Z`).getUTCDay();
-    const isWeekend = day === 0 || day === 6;
-    if (dayLimit === 'weekday' && isWeekend) {
+    const dayInfo = await getDayInfo(txOrPrisma || prisma, targetDateStr);
+    const isHoliday = dayInfo.price_type === 'holiday';
+    if (dayLimit === 'weekday' && isHoliday) {
       return { valid: false, error: '此優惠碼僅限平日使用' };
     }
-    if (dayLimit === 'weekend' && !isWeekend) {
-      return { valid: false, error: '此優惠碼僅限假日（週六／週日）使用' };
+    if (dayLimit === 'weekend' && !isHoliday) {
+      return { valid: false, error: '此優惠碼僅限假日使用' };
     }
   }
 

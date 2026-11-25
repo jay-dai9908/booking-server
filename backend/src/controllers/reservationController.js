@@ -38,6 +38,7 @@ import {
 import { earliestEntry, ironText } from '../../../shared/selfService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
+import { getDayInfo } from '../services/calendar/dayType.js';
 import { getReservationEntryPass } from '../services/kiosk/entryService.js';
 import { isPlainString } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
@@ -321,16 +322,18 @@ export const formatSessionsToTimeRange = (sessions = []) => {
 // Helper to resolve daily pricing rates
 export const getEffectiveDailyRates = async (tx, sessionDate) => {
   const dOnly = dateOnly(sessionDate);
-  const dailySetting = await tx.dailySetting.findUnique({
-    where: { date: dOnly }
-  });
+  const [dailySetting, dayInfo] = await Promise.all([
+    tx.dailySetting.findUnique({
+      where: { date: dOnly }
+    }),
+    getDayInfo(tx, dOnly)
+  ]);
 
   let hourly_price = dailySetting?.hourly_price;
   let unlimited_price = dailySetting?.unlimited_price;
   const allow_unlimited = dailySetting?.allow_unlimited ?? true;
 
-  const dayOfWeek = dOnly.getUTCDay();
-  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+  const isWeekend = dayInfo.price_type === 'holiday';
 
   if (hourly_price == null || unlimited_price == null) {
     const globalSetting = await tx.globalSetting.findUnique({

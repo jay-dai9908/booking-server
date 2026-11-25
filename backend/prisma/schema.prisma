@@ -143,6 +143,12 @@ model DailySetting {
   self_allow_equipment Boolean   @default(false)
   iron_mode            String    @default("today") // today | next | date
   iron_date            DateTime? @db.Date
+  day_type             String?
+  price_type           String?
+  day_type_source      String?
+  day_type_updated_by  String?
+  day_type_updated_at  DateTime?
+  closed_note          String?
 }
 
 model GlobalSetting {

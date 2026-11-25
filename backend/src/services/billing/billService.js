@@ -9,6 +9,7 @@ import { evaluatePromoCode } from '../../controllers/checkoutController.js';
 import { redeemPromo, releasePromo } from '../promo/redemption.js';
 import { log as auditLog } from '../audit/auditService.js';
 import { deductPass, restorePass, validatePassUsage } from './passTender.js';
+import { getDayInfo } from '../calendar/dayType.js';
 import { getShiftLock, canVoidPayment } from './shiftLock.js';
 import { buildBillInput } from './billInput.js';
 import { queuePrintJob } from '../print/printService.js';
@@ -895,6 +896,7 @@ export async function planPassTenders(txOrPrisma = prisma, {
     include: { session: true }
   });
   const sessionDate = firstRes?.session?.session_date || firstRes?.session_date || new Date();
+  const dayInfo = await getDayInfo(txOrPrisma, sessionDate);
 
   const usedPassIds = new Set();
   const personCovered = new Map();
@@ -925,7 +927,8 @@ export async function planPassTenders(txOrPrisma = prisma, {
     const validation = validatePassUsage(pass, {
       date: sessionDate,
       units: effectiveUnits,
-      hours: effectiveUnits
+      hours: effectiveUnits,
+      priceType: dayInfo.price_type
     });
     if (!validation.usable) {
       throw { status: 422, message: validation.reason };

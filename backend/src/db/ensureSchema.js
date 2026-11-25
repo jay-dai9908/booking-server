@@ -669,6 +669,12 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "self_allow_equipment" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "iron_mode" TEXT NOT NULL DEFAULT 'today'`,
     `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "iron_date" DATE`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "day_type" TEXT`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "price_type" TEXT`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "day_type_source" TEXT`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "day_type_updated_by" TEXT`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "day_type_updated_at" TIMESTAMP(3)`,
+    `ALTER TABLE "DailySetting" ADD COLUMN IF NOT EXISTS "closed_note" TEXT`,
 
     `ALTER TABLE "EquipmentConfig" ADD COLUMN IF NOT EXISTS "self_enabled" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "EquipmentConfig" ADD COLUMN IF NOT EXISTS "self_hourly_rate" INTEGER`,

@@ -1,5 +1,7 @@
 import prisma from '../../prismaClient.js';
 import { toTaipeiDateString } from '../../../../shared/time.js';
+import { computeDayInfo } from '../../../../shared/dayType.js';
+import { getDayInfo } from '../calendar/dayType.js';
 
 function toDateStrTaipei(dateInput = new Date()) {
   if (typeof dateInput === 'string') {
@@ -8,12 +10,6 @@ function toDateStrTaipei(dateInput = new Date()) {
     if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed.slice(0, 10);
   }
   return toTaipeiDateString(dateInput);
-}
-
-function getWeekdayFromYmd(ymd) {
-  const [y, m, d] = String(ymd).split('-').map(Number);
-  if (!y || !m || !d) return new Date().getUTCDay();
-  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
 function getTaipeiWeekBounds(ymd) {
@@ -28,16 +24,19 @@ function getTaipeiWeekBounds(ymd) {
   };
 }
 
-export function checkDayRestrictionForDate(restriction, dateInput) {
+export function checkDayRestrictionForDate(restriction, dateInput, priceType = null) {
   if (!restriction || restriction === 'ALL') return { ok: true };
   const ymd = toDateStrTaipei(dateInput);
-  const day = getWeekdayFromYmd(ymd); // 0 is Sunday, 6 is Saturday
-  const isWeekend = day === 0 || day === 6;
-  if (restriction === 'WEEKDAY_ONLY' && isWeekend) {
-    return { ok: false, reason: '今天是假日，這張限平日' };
+  const resolvedPriceType =
+    priceType === 'weekday' || priceType === 'holiday'
+      ? priceType
+      : computeDayInfo({ date: ymd }).price_type;
+  const isHoliday = resolvedPriceType === 'holiday';
+  if (restriction === 'WEEKDAY_ONLY' && isHoliday) {
+    return { ok: false, reason: '這天照假日計費，這張卡券限平日使用' };
   }
-  if (restriction === 'WEEKEND_ONLY' && !isWeekend) {
-    return { ok: false, reason: '這張限假日' };
+  if (restriction === 'WEEKEND_ONLY' && !isHoliday) {
+    return { ok: false, reason: '這張卡券限假日使用' };
   }
   return { ok: true };
 }
@@ -45,7 +44,7 @@ export function checkDayRestrictionForDate(restriction, dateInput) {
 /**
  * Validate pass eligibility for a specific date and intended units (spec 4.5.7)
  */
-export function validatePassUsage(userPass, { date = new Date(), units = 1 } = {}) {
+export function validatePassUsage(userPass, { date = new Date(), units = 1, priceType = null } = {}) {
   if (!userPass) {
     return { usable: false, reason: '找不到卡券' };
   }
@@ -67,7 +66,7 @@ export function validatePassUsage(userPass, { date = new Date(), units = 1 } = {
     return { usable: false, reason: '已過期' };
   }
 
-  const dayCheck = checkDayRestrictionForDate(userPass.day_restriction, targetDateStr);
+  const dayCheck = checkDayRestrictionForDate(userPass.day_restriction, targetDateStr, priceType);
   if (!dayCheck.ok) {
     return { usable: false, reason: dayCheck.reason };
   }
@@ -165,7 +164,9 @@ export async function deductPass(tx, {
       };
     }
 
-    const validation = validatePassUsage(pass, { date: date || new Date(), units });
+    const targetDate = date || new Date();
+    const { price_type } = await getDayInfo(client, targetDate);
+    const validation = validatePassUsage(pass, { date: targetDate, units, priceType: price_type });
     if (!validation.usable) {
       throw { status: 422, message: validation.reason };
     }

@@ -15,6 +15,7 @@ import {
 import { computePassTenderValue, resolvePassCheckoutEffect } from '../../../shared/passValue.js';
 import displayBus from '../services/display/displayBus.js';
 import { validatePassUsage } from '../services/billing/passTender.js';
+import { getDayInfo } from '../services/calendar/dayType.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
 export async function getBillingDetails(req, res) {
@@ -295,6 +296,7 @@ export async function getMemberPasses(req, res) {
 
     const { bill, pricing } = await getBookingBill(booking_ref);
     const sessionDate = reservation.session.session_date;
+    const dayInfo = await getDayInfo(prisma, sessionDate);
 
     const passes = await prisma.userPass.findMany({
       where: { user_id: reservation.user_id },
@@ -303,7 +305,7 @@ export async function getMemberPasses(req, res) {
     });
 
     const passList = passes.map(pass => {
-      const validation = validatePassUsage(pass, { date: sessionDate });
+      const validation = validatePassUsage(pass, { date: sessionDate, priceType: dayInfo.price_type });
       const effect = resolvePassCheckoutEffect(pass.plan?.checkout_effect, pass.pass_type);
       const suggests = [];
 

@@ -1,6 +1,7 @@
 import { calculateEquipmentChargeableHours } from '../equipmentPricing.js';
 import { boardDiscountTexts } from './discountText.js';
 import { toDateObj, formatMoney } from './format.js';
+import { computeDayInfo } from '../../../../shared/dayType.js';
 
 export function parseYMD(dateStr) {
   if (!dateStr) return new Date();
@@ -10,8 +11,11 @@ export function parseYMD(dateStr) {
 
 
 export function getDayPricing(dateStr, global, daily) {
-  const dow = parseYMD(dateStr).getDay();
-  const isWeekend = dow === 0 || dow === 6;
+  const resolvedPriceType =
+    daily?.price_type === 'holiday' || daily?.price_type === 'weekday'
+      ? daily.price_type
+      : computeDayInfo({ date: dateStr, dailySetting: daily, bookableSessionCount: 1 }).price_type;
+  const isWeekend = resolvedPriceType === 'holiday';
   const baseHourly = isWeekend ? global?.weekend_hourly_price : global?.weekday_hourly_price;
   const baseCap = isWeekend ? global?.weekend_unlimited_price : global?.weekday_unlimited_price;
   const hourly = daily?.hourly_price ?? baseHourly ?? 0;

@@ -1,6 +1,6 @@
 import prisma from '../../prismaClient.js';
 import { dateOnly, toTaipeiDateString } from '../../../../shared/time.js';
-import { getTaipeiDateParts } from '../../utils/dateUtils.js';
+import { getDayInfoRange } from '../calendar/dayType.js';
 
 /**
  * 將 through 日（含）以前所有曾有場次（Session）但尚未固化價格的日期，
@@ -31,11 +31,16 @@ export async function solidifyDailyPrices({ through, txOrPrisma = prisma } = {})
     return { count: 0, updatedDates: [] };
   }
 
-  const existingList = await client.dailySetting.findMany({
-    where: {
-      date: { in: sessionDates.map(s => dateOnly(s.session_date)) }
-    }
-  });
+  const firstStr = toTaipeiDateString(sessionDates[0].session_date);
+  const lastStr = toTaipeiDateString(sessionDates[sessionDates.length - 1].session_date);
+  const [existingList, dayInfoMap] = await Promise.all([
+    client.dailySetting.findMany({
+      where: {
+        date: { in: sessionDates.map(s => dateOnly(s.session_date)) }
+      }
+    }),
+    getDayInfoRange(client, firstStr, lastStr)
+  ]);
   const existingMap = new Map(existingList.map(ds => [toTaipeiDateString(ds.date), ds]));
 
   const updatedDates = [];
@@ -48,7 +53,7 @@ export async function solidifyDailyPrices({ through, txOrPrisma = prisma } = {})
       continue;
     }
 
-    const { isWeekend } = getTaipeiDateParts(dOnly);
+    const isWeekend = dayInfoMap.get(dStr)?.price_type === 'holiday';
     const defaultHourly = isWeekend
       ? globalSetting.weekend_hourly_price
       : globalSetting.weekday_hourly_price;

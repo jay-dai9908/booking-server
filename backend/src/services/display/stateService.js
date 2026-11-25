@@ -1,7 +1,7 @@
 import prisma from '../../prismaClient.js';
 import { getLiveFloorData } from '../floor/liveService.js';
 import { bookableSessionWhere } from '../calendar/sessionFilters.js';
-import { getDayType } from './dayType.js';
+import { getDayType } from '../calendar/dayType.js';
 import { decide, DEFAULT_DISPLAY_SCHEDULE } from '../../../../shared/displaySchedule.js';
 import { buildFloorMap } from '../../../../shared/floorMap.js';
 import { toTaipeiDateString, dateOnly } from '../../../../shared/time.js';

@@ -1,6 +1,7 @@
 import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
 import { logSettingChange, diffFields } from '../services/audit/settingAudit.js';
+import { getDayInfo, getDayInfoRange } from '../services/calendar/dayType.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
 import displayBus from '../services/display/displayBus.js';
@@ -79,9 +80,10 @@ export const getDailySetting = async (req, res) => {
     const dOnly = dateOnly(date);
     const dateStr = toTaipeiDateString(dOnly);
     const nowMs = (process.env.NODE_ENV === 'test' && now) ? new Date(now).getTime() : Date.now();
-    const setting = await prisma.dailySetting.findUnique({
-      where: { date: dOnly }
-    });
+    const [setting, dayInfo] = await Promise.all([
+      prisma.dailySetting.findUnique({ where: { date: dOnly } }),
+      getDayInfo(prisma, dateStr)
+    ]);
 
     if (!setting) {
       return res.json({
@@ -92,7 +94,13 @@ export const getDailySetting = async (req, res) => {
         self_allow_equipment: false,
         iron_mode: 'today',
         iron_date: null,
-        self_service: null
+        self_service: null,
+        day_type: dayInfo.type,
+        price_type: dayInfo.price_type,
+        day_type_source: dayInfo.source,
+        closed_note: dayInfo.closed_note,
+        raw_day_type: null,
+        raw_price_type: null
       });
     }
 
@@ -105,7 +113,13 @@ export const getDailySetting = async (req, res) => {
     res.json({
       ...setting,
       iron_date: setting.iron_date ? toTaipeiDateString(setting.iron_date) : null,
-      self_service
+      self_service,
+      day_type: dayInfo.type,
+      price_type: dayInfo.price_type,
+      day_type_source: dayInfo.source,
+      closed_note: dayInfo.closed_note,
+      raw_day_type: setting.day_type ?? null,
+      raw_price_type: setting.price_type ?? null
     });
   } catch (error) {
     console.error('Error fetching daily setting:', error);
@@ -131,24 +145,15 @@ export const getDailySettingsRange = async (req, res) => {
   }
 
   try {
-    const rows = await prisma.dailySetting.findMany({
-      where: {
-        date: {
-          gte: startDate,
-          lte: endDate
-        }
-      },
-      orderBy: { date: 'asc' },
-      select: {
-        date: true,
-        is_self_service: true
-      }
-    });
-
+    const infoMap = await getDayInfoRange(prisma, startDate, endDate);
     res.json(
-      rows.map(r => ({
-        date: toTaipeiDateString(r.date),
-        is_self_service: Boolean(r.is_self_service)
+      Array.from(infoMap.values()).map((info) => ({
+        date: info.date,
+        is_self_service: Boolean(info.is_self_service),
+        day_type: info.type,
+        price_type: info.price_type,
+        day_type_source: info.source,
+        closed_note: info.closed_note
       }))
     );
   } catch (error) {

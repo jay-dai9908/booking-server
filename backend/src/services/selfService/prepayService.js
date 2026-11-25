@@ -23,6 +23,7 @@ import { evaluatePromoCode } from '../../controllers/checkoutController.js';
 import { releasePoolAccount } from './poolAccountService.js';
 import { sendSelfServiceExpiredNotification } from '../../utils/lineMessaging.js';
 import { bookableSessionWhere } from '../calendar/sessionFilters.js';
+import { getDayInfo } from '../calendar/dayType.js';
 
 export function makePrepayError(code, message, status = 400, extra = {}) {
   const err = new Error(message);
@@ -90,18 +91,18 @@ export function isEligibleSelfServicePass(userPass) {
   return !effect || effect === 'entry_full';
 }
 
-export function computeUsableUnitsOnDate(userPass, targetDate) {
+export function computeUsableUnitsOnDate(userPass, targetDate, priceType = null) {
   if (!isEligibleSelfServicePass(userPass)) {
     return { usable_units: 0, reason: '僅限計次不限時卡可使用' };
   }
-  const firstCheck = validatePassUsage(userPass, { date: targetDate, units: 1 });
+  const firstCheck = validatePassUsage(userPass, { date: targetDate, units: 1, priceType });
   if (!firstCheck.usable) {
     return { usable_units: 0, reason: firstCheck.reason };
   }
   const maxCap = userPass.remaining_quota != null ? Math.min(userPass.remaining_quota, 20) : 20;
   let usableUnits = 0;
   for (let u = 1; u <= maxCap; u++) {
-    const check = validatePassUsage(userPass, { date: targetDate, units: u });
+    const check = validatePassUsage(userPass, { date: targetDate, units: u, priceType });
     if (check.usable) {
       usableUnits = u;
     } else {
@@ -117,10 +118,11 @@ export async function getPrepayOptions(txOrPrisma = prisma, { userId, dateStr, p
   const dateObj = new Date(`${ymd}T00:00:00.000Z`);
   const targetDateForPass = new Date(`${ymd}T00:00:00+08:00`);
 
-  const [kioskSetting, dailySetting, methods, ctbcPoolAvailableCount, rawPasses, unpaidCount] =
+  const [kioskSetting, dailySetting, dayInfo, methods, ctbcPoolAvailableCount, rawPasses, unpaidCount] =
     await Promise.all([
       ensureKioskSetting(client),
       client.dailySetting.findUnique({ where: { date: dateObj } }),
+      getDayInfo(client, ymd),
       client.paymentMethodConfig.findMany({
         where: {
           is_enabled: true,
@@ -161,7 +163,7 @@ export async function getPrepayOptions(txOrPrisma = prisma, { userId, dateStr, p
   const passes = rawPasses
     .filter(isEligibleSelfServicePass)
     .map((p) => {
-      const { usable_units, reason } = computeUsableUnitsOnDate(p, targetDateForPass);
+      const { usable_units, reason } = computeUsableUnitsOnDate(p, targetDateForPass, dayInfo.price_type);
       const maxAllowed = Math.min(usable_units, Math.max(1, Number(pax) || 1));
       return {
         user_pass_id: p.id,
@@ -278,10 +280,13 @@ export async function computeSelfServiceQuote(
   const validatedPasses = [];
   if (normalizedPassUses.length > 0) {
     const passIds = normalizedPassUses.map((x) => x.user_pass_id);
-    const dbPasses = await client.userPass.findMany({
-      where: { id: { in: passIds } },
-      include: { plan: true }
-    });
+    const [dbPasses, dayInfo] = await Promise.all([
+      client.userPass.findMany({
+        where: { id: { in: passIds } },
+        include: { plan: true }
+      }),
+      getDayInfo(client, dateStr)
+    ]);
     const dbPassMap = new Map(dbPasses.map((p) => [p.id, p]));
 
     for (const item of normalizedPassUses) {
@@ -296,7 +301,8 @@ export async function computeSelfServiceQuote(
       }
       const check = validatePassUsage(userPass, {
         date: targetDateForPass,
-        units: item.units
+        units: item.units,
+        priceType: dayInfo.price_type
       });
       if (!check.usable) {
         pushOrThrow('PASS_NOT_USABLE', check.reason || '此卡券目前無法於這天使用', 422);
