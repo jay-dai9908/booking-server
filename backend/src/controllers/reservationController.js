@@ -283,6 +283,8 @@ const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
       is_self_service: Boolean(group.is_self_service),
       cancelled_at: group.cancelled_at,
       cancelled_by: group.cancelled_by,
+      archived_at: group.archived_at || null,
+      archived_by: group.archived_by || null,
       checked_in_at: group.checked_in_at || null,
       equipments: finalEquipments
     };
