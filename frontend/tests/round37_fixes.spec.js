@@ -335,7 +335,7 @@ async function run() {
       if (monthYmd) {
         await page.locator('input[type="month"]').first().fill(monthYmd);
       }
-      await page.locator('input[placeholder="搜尋訂單編號或姓名..."]').first().fill(bookingRef);
+      await page.locator('input[placeholder="搜尋訂單編號、姓名或電話..."]').first().fill(bookingRef);
       await page.waitForTimeout(500);
       const rowBtn = page.locator(`[data-testid="reservation-card-${bookingRef}"] button:has-text("結帳"):visible, tr:has-text("${bookingRef.slice(-4)}") button:has-text("結帳"):visible`).first();
       await rowBtn.waitFor({ state: 'visible', timeout: 10000 });

@@ -195,7 +195,7 @@ async function run() {
 
     // Card should disappear and reservations tab should now show the merged reservation
     await card.waitFor({ state: 'detached', timeout: 8000 });
-    const resTabBtn = page.locator('button', { hasText: '歷史預約紀錄 (1)' });
+    const resTabBtn = page.locator('button', { hasText: '預約 (1)' });
     await resTabBtn.waitFor({ state: 'visible', timeout: 8000 });
 
     // Also verify merged manual user view shows "已併入 #<newUser.id>" link

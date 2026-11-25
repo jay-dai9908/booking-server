@@ -191,7 +191,7 @@ async function run() {
     // =========================================================================
     console.log('Step 1: Testing pass sale in MemberDetailsModal...');
     await page.goto(`${BASE_URL}/admin/members?userId=${user.id}`, { waitUntil: 'networkidle' });
-    const passTabBtn = page.locator('button:has-text("卡券與集次卡"):visible').first();
+    const passTabBtn = page.locator('button:has-text("卡券 ("):visible').first();
     await passTabBtn.waitFor({ state: 'visible', timeout: 10000 });
     await passTabBtn.click();
 
@@ -272,7 +272,7 @@ async function run() {
     console.log('Step 3: Testing local print claim and no-auto-print...');
     await page.goto(`${BASE_URL}/admin/reservations`, { waitUntil: 'networkidle' });
     await page.locator('input[type="month"]').first().fill(todayStr.slice(0, 7));
-    await page.locator('input[placeholder="搜尋訂單編號或姓名..."]').first().fill(bookingRef);
+    await page.locator('input[placeholder="搜尋訂單編號、姓名或電話..."]').first().fill(bookingRef);
     await page.waitForTimeout(500);
     const resCheckoutBtn = page.locator(`[data-testid="reservation-card-${bookingRef}"] button:has-text("結帳"):visible, tr:has-text("${bookingRef.slice(-4)}") button:has-text("結帳"):visible`).first();
     await resCheckoutBtn.waitFor({ state: 'visible', timeout: 10000 });
