@@ -1850,7 +1850,7 @@ export default function SessionsPage() {
                   className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs space-y-1 text-emerald-900"
                 >
                   <div className="font-bold">
-                    處理結果：已取消 {closureResult.cancelled?.length || 0} 筆、略過 {closureResult.skipped?.length || 0} 筆、失敗 {closureResult.failed?.length || 0} 筆
+                    處理結果：已取消 {closureResult.cancelled?.length || 0} 筆、已推播 LINE {(closureResult.cancelled || []).filter((c) => c.line_status === 'sent').length} 筆、沒有 LINE {(closureResult.cancelled || []).filter((c) => c.line_status === 'no_line').length} 筆、略過 {closureResult.skipped?.length || 0} 筆、失敗 {closureResult.failed?.length || 0} 筆
                   </div>
                   {(closureResult.cancelled || []).map((c) => (
                     <div key={c.booking_ref}>
@@ -2204,10 +2204,10 @@ export default function SessionsPage() {
       {/* Closure Batch Cancel & LINE Announcement Modal */}
       {showClosureCancelModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           data-testid="closure-cancel-modal"
         >
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-xl animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-xl border border-gray-200">
             <h3 className="text-lg font-bold text-gray-900">
               批次取消並推送 LINE 公告（{selectedClosureRefs.length} 筆）
             </h3>

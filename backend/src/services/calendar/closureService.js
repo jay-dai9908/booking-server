@@ -27,6 +27,9 @@ function getPushFn() {
   if (process.env.NODE_ENV === 'test' && typeof globalThis.__TEST_LINE_PUSH_FN__ === 'function') {
     return globalThis.__TEST_LINE_PUSH_FN__;
   }
+  if (process.env.NODE_ENV === 'test' && process.env.TEST_LINE_PUSH_MODE === 'mock') {
+    return async () => ({ mocked: true });
+  }
   return sendLinePushMessage;
 }
 
