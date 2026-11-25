@@ -67,7 +67,7 @@ export default function Preview() {
   const { dayPricing: selectedDayPricing } = useDayPricing(date, globalSettings);
   const { sessions, loading: sessionsLoading } = useSessions(date, { autoRefresh: true });
   const { sessionsByDate } = useSessionRange(todayStr, lookaheadEndStr);
-  const { selfServiceDates } = useSelfServiceRange(todayStr, lookaheadEndStr);
+  const { selfServiceDates, dayInfoByDate } = useSelfServiceRange(todayStr, lookaheadEndStr);
 
   useEffect(() => {
     api.get(`/equipment/availability?date=${date}`)
@@ -243,6 +243,7 @@ export default function Preview() {
                     currentMonth={calendarMonth}
                     sessionsByDate={sessionsByDate}
                     selfServiceDates={selfServiceDates}
+                    dayInfoByDate={dayInfoByDate}
                     onSelectDate={(newDate) => {
                       setDate(newDate);
                       setIsMonthExpanded(false);

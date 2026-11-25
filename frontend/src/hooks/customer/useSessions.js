@@ -10,6 +10,8 @@ export function useSessions(dateStr, options = {}) {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [updateText, setUpdateText] = useState('剛剛更新');
+  const [dayClosed, setDayClosed] = useState(false);
+  const [closedNote, setClosedNote] = useState(null);
   const onUpdatedRef = useRef(onUpdated);
   onUpdatedRef.current = onUpdated;
 
@@ -19,7 +21,10 @@ export function useSessions(dateStr, options = {}) {
 
     try {
       const res = await api.get(`/sessions?date=${dateStr}`);
-      const data = Array.isArray(res.data) ? res.data : [];
+      const isClosedPayload = !Array.isArray(res.data) && Boolean(res.data?.day_closed);
+      const data = Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.sessions) ? res.data.sessions : []);
+      setDayClosed(isClosedPayload);
+      setClosedNote(isClosedPayload ? (res.data?.closed_note || null) : null);
       setSessions(data);
       const now = new Date();
       setLastUpdated(now);
@@ -93,6 +98,8 @@ export function useSessions(dateStr, options = {}) {
     error,
     lastUpdated,
     updateText,
+    dayClosed,
+    closedNote,
     reload: () => fetchSessions(false),
   };
 }
@@ -144,6 +151,7 @@ export function useSessionRange(startDate, endDate) {
 
 export function useSelfServiceRange(startDate, endDate) {
   const [selfServiceDates, setSelfServiceDates] = useState({});
+  const [dayInfoByDate, setDayInfoByDate] = useState({});
   const [loading, setLoading] = useState(false);
 
   const fetchSelfRange = useCallback(async () => {
@@ -153,12 +161,17 @@ export function useSelfServiceRange(startDate, endDate) {
       const res = await api.get(`/daily-settings/range?start=${startDate}&end=${endDate}`);
       const list = Array.isArray(res.data) ? res.data : [];
       const map = {};
+      const infoMap = {};
       for (const item of list) {
-        if (item?.is_self_service && item?.date) {
-          map[String(item.date).slice(0, 10)] = true;
+        if (!item?.date) continue;
+        const key = String(item.date).slice(0, 10);
+        infoMap[key] = item;
+        if (item.is_self_service) {
+          map[key] = true;
         }
       }
       setSelfServiceDates(map);
+      setDayInfoByDate(infoMap);
     } catch (err) {
       console.error('Failed to fetch self-service range', err);
     } finally {
@@ -170,5 +183,5 @@ export function useSelfServiceRange(startDate, endDate) {
     fetchSelfRange();
   }, [fetchSelfRange]);
 
-  return { selfServiceDates, loading, reload: fetchSelfRange };
+  return { selfServiceDates, dayInfoByDate, loading, reload: fetchSelfRange };
 }

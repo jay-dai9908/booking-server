@@ -2,6 +2,7 @@ import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
 import { logSettingChange, diffFields } from '../services/audit/settingAudit.js';
 import { getDayInfo, getDayInfoRange } from '../services/calendar/dayType.js';
+import { computeDayInfo } from '../../../shared/dayType.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
 import displayBus from '../services/display/displayBus.js';
@@ -306,9 +307,254 @@ export const updateDailySetting = async (req, res) => {
     });
 
     res.json({ message: 'Daily setting updated successfully', setting });
+    displayBus.settingsChanged();
   } catch (error) {
     console.error('Error updating daily setting:', error);
     res.status(500).json({ error: 'Failed to update daily setting' });
+  }
+};
+
+const VALID_DAY_TYPE_INPUTS = new Set(['auto', 'weekday', 'holiday', 'self', 'closed']);
+
+function parseDayTypeInputs({ day_type, price_type, closed_note }) {
+  const cleanDayType = String(day_type ?? '').trim();
+  if (!VALID_DAY_TYPE_INPUTS.has(cleanDayType)) {
+    return { error: { status: 422, message: '日期類型必須為 auto、weekday、holiday、self 或 closed' } };
+  }
+  const dbDayType = cleanDayType === 'auto' ? null : cleanDayType;
+
+  let dbPriceType = null;
+  if (cleanDayType === 'self' || cleanDayType === 'closed') {
+    const rawPt = price_type === undefined || price_type === null ? '' : String(price_type).trim();
+    if (rawPt && rawPt !== 'auto') {
+      if (rawPt !== 'weekday' && rawPt !== 'holiday') {
+        return { error: { status: 422, message: '價格比照必須為依星期、平日或假日' } };
+      }
+      dbPriceType = rawPt;
+    }
+  }
+
+  let dbClosedNote = null;
+  if (cleanDayType === 'closed' && closed_note !== undefined && closed_note !== null) {
+    const trimmedNote = String(closed_note).trim();
+    if (trimmedNote.length > 60) {
+      return { error: { status: 422, message: '公休說明最多 60 個字' } };
+    }
+    dbClosedNote = trimmedNote || null;
+  }
+
+  return {
+    cleanDayType,
+    dbDayType,
+    dbPriceType,
+    dbClosedNote
+  };
+}
+
+async function findAffectedLegacyUnpaidBookingsForDates(client, dateObjs) {
+  const rows = await client.reservation.findMany({
+    where: {
+      status: 'confirmed',
+      is_paid: false,
+      session: { session_date: { in: dateObjs } }
+    },
+    select: {
+      booking_ref: true,
+      pax: true,
+      is_paid: true,
+      is_self_service: true,
+      billing_status: true,
+      pricing_snapshot: true,
+      user: { select: { name: true } },
+      session: { select: { session_date: true } }
+    }
+  });
+
+  const candidateRows = rows.filter((r) => {
+    if (r.is_paid) return false;
+    if (r.billing_status === 'paid' || r.billing_status === 'waived') return false;
+    if (r.pricing_snapshot !== null && r.pricing_snapshot !== undefined) return false;
+    return true;
+  });
+
+  if (candidateRows.length === 0) return [];
+
+  const refs = Array.from(new Set(candidateRows.map((r) => r.booking_ref)));
+  const prepays = await client.bookingPrepay.findMany({
+    where: { booking_ref: { in: refs } },
+    select: { booking_ref: true, pricing_snapshot: true }
+  });
+  const prepayWithSnap = new Set(
+    prepays.filter((p) => p.pricing_snapshot !== null && p.pricing_snapshot !== undefined).map((p) => p.booking_ref)
+  );
+
+  const byRef = new Map();
+  for (const r of candidateRows) {
+    if (prepayWithSnap.has(r.booking_ref)) continue;
+    if (!byRef.has(r.booking_ref)) {
+      byRef.set(r.booking_ref, {
+        booking_ref: r.booking_ref,
+        date: toTaipeiDateString(r.session.session_date),
+        user_name: r.user?.name || '顧客',
+        pax: r.pax
+      });
+    }
+  }
+  return Array.from(byRef.values());
+}
+
+export const updateDayType = async (req, res) => {
+  const { date, day_type, price_type, closed_note, confirm_affected } = req.body || {};
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+    return res.status(400).json({ error: '請提供有效日期 (YYYY-MM-DD)' });
+  }
+
+  const targetDateStr = String(date).trim();
+  const targetDate = dateOnly(targetDateStr);
+  if (isNaN(targetDate.getTime()) || targetDate.toISOString().slice(0, 10) !== targetDateStr) {
+    return res.status(400).json({ error: '日期格式無效' });
+  }
+
+  const todayStr = toTaipeiDateString(new Date());
+  if (targetDateStr < todayStr) {
+    return res.status(422).json({ error: '不可修改今天以前（台北時間）的日期類型' });
+  }
+
+  const parsed = parseDayTypeInputs({ day_type, price_type, closed_note });
+  if (parsed.error) {
+    return res.status(parsed.error.status).json({ error: parsed.error.message });
+  }
+
+  const { cleanDayType, dbDayType, dbPriceType, dbClosedNote } = parsed;
+
+  try {
+    const existing = await prisma.dailySetting.findUnique({ where: { date: targetDate } });
+    const prevIsSelf = Boolean(existing?.is_self_service);
+    const nextIsSelf = cleanDayType === 'self'
+      ? true
+      : (cleanDayType === 'closed' ? prevIsSelf : false);
+
+    if (nextIsSelf !== prevIsSelf) {
+      const bookingCount = await countConfirmedBookingsForDate(targetDate);
+      if (bookingCount > 0) {
+        return res.status(422).json({
+          error: `這天已經有 ${bookingCount} 筆預約，請先處理後再切換半自助模式`,
+          booking_count: bookingCount
+        });
+      }
+    }
+
+    const prevPriceType = computeDayInfo({
+      date: targetDateStr,
+      dailySetting: existing,
+      bookableSessionCount: 1
+    }).price_type;
+    const nextPriceType = computeDayInfo({
+      date: targetDateStr,
+      dailySetting: {
+        ...(existing || {}),
+        day_type: dbDayType,
+        price_type: dbPriceType,
+        is_self_service: nextIsSelf
+      },
+      bookableSessionCount: 1
+    }).price_type;
+
+    if (prevPriceType !== nextPriceType && confirm_affected !== true) {
+      const affected = await findAffectedLegacyUnpaidBookingsForDates(prisma, [targetDate]);
+      if (affected.length > 0) {
+        const fromLabel = prevPriceType === 'holiday' ? '假日' : '平日';
+        const toLabel = nextPriceType === 'holiday' ? '假日' : '平日';
+        return res.status(409).json({
+          code: 'AFFECTS_UNPAID',
+          count: affected.length,
+          bookings: affected,
+          from_price_type: prevPriceType,
+          to_price_type: nextPriceType,
+          error: `這天有 ${affected.length} 筆舊預約還沒付款，價格會從${fromLabel}改成${toLabel}`
+        });
+      }
+    }
+
+    const actorName = req.user?.name || '管理員';
+    const nowAt = new Date();
+    const setting = await prisma.$transaction(async (tx) => {
+      const saved = await tx.dailySetting.upsert({
+        where: { date: targetDate },
+        update: {
+          day_type: dbDayType,
+          price_type: dbPriceType,
+          day_type_source: 'manual',
+          day_type_updated_by: actorName,
+          day_type_updated_at: nowAt,
+          closed_note: dbClosedNote,
+          ...(cleanDayType !== 'closed' ? { is_self_service: nextIsSelf } : {})
+        },
+        create: {
+          date: targetDate,
+          allow_unlimited: true,
+          is_self_service: nextIsSelf,
+          self_allow_hourly: false,
+          self_allow_equipment: false,
+          iron_mode: 'today',
+          iron_date: null,
+          day_type: dbDayType,
+          price_type: dbPriceType,
+          day_type_source: 'manual',
+          day_type_updated_by: actorName,
+          day_type_updated_at: nowAt,
+          closed_note: dbClosedNote
+        }
+      });
+
+      const deviceInfo = getAdminDeviceInfo(req);
+      await auditService.log(tx, {
+        event_type: 'daily_setting_changed',
+        category: 'setting',
+        target_type: 'daily_setting',
+        target_ref: targetDateStr,
+        summary: `設定日期類型 ${targetDateStr}：${cleanDayType}${dbPriceType ? `（價格比照 ${dbPriceType}）` : ''}`,
+        before_json: existing
+          ? {
+              day_type: existing.day_type ?? null,
+              price_type: existing.price_type ?? null,
+              closed_note: existing.closed_note ?? null,
+              is_self_service: existing.is_self_service
+            }
+          : {},
+        after_json: {
+          day_type: saved.day_type ?? null,
+          price_type: saved.price_type ?? null,
+          closed_note: saved.closed_note ?? null,
+          is_self_service: saved.is_self_service
+        },
+        staff_name: actorName,
+        staff_id: req.user?.id || null,
+        device_id: deviceInfo?.device_id || null,
+        device_label: deviceInfo?.device_label || '後台'
+      });
+
+      return saved;
+    });
+
+    const dayInfo = await getDayInfo(prisma, targetDateStr);
+    displayBus.settingsChanged();
+
+    res.json({
+      message: '日期類型已更新',
+      setting: {
+        ...setting,
+        day_type: dayInfo.type,
+        price_type: dayInfo.price_type,
+        day_type_source: dayInfo.source,
+        closed_note: dayInfo.closed_note,
+        raw_day_type: setting.day_type ?? null,
+        raw_price_type: setting.price_type ?? null
+      }
+    });
+  } catch (error) {
+    console.error('Error updating day type:', error);
+    res.status(500).json({ error: '更新日期類型失敗' });
   }
 };
 
@@ -327,7 +573,11 @@ export const batchUpdateDailySettings = async (req, res) => {
     self_allow_hourly,
     self_allow_equipment,
     iron_mode,
-    iron_date
+    iron_date,
+    day_type,
+    price_type,
+    closed_note,
+    confirm_affected
   } = req.body;
 
   let datesToUpdate = [];
@@ -402,10 +652,20 @@ export const batchUpdateDailySettings = async (req, res) => {
       dataToUpdate.unlimited_price = parsedUnlimited;
     }
 
+    const hasDayTypeChange = day_type !== undefined && day_type !== null && String(day_type).trim() !== '';
+    let parsedDayType = null;
+    if (hasDayTypeChange) {
+      parsedDayType = parseDayTypeInputs({ day_type, price_type, closed_note });
+      if (parsedDayType.error) {
+        return res.status(parsedDayType.error.status).json({ error: parsedDayType.error.message });
+      }
+    }
+
     const touchesPricingOrUnlimited =
       dataToUpdate.hourly_price !== undefined ||
       dataToUpdate.unlimited_price !== undefined ||
-      dataToUpdate.allow_unlimited !== undefined;
+      dataToUpdate.allow_unlimited !== undefined ||
+      hasDayTypeChange;
 
     if (touchesPricingOrUnlimited) {
       const todayStr = toTaipeiDateString(new Date());
@@ -416,18 +676,21 @@ export const batchUpdateDailySettings = async (req, res) => {
         return res.status(422).json({
           field: 'dates',
           past_dates: pastDates,
-          error: `不可批次修改今天以前日期的價格或不限時設定（${pastDates.join('、')}），整批未修改`
+          error: `不可批次修改今天以前日期的設定（${pastDates.join('、')}），整批未修改`
         });
       }
     }
 
-    if (typeof is_self_service === 'boolean') {
-      const existingRows = await prisma.dailySetting.findMany({
-        where: { date: { in: datesToUpdate } },
-        select: { date: true, is_self_service: true }
-      });
-      const existingByDate = new Map(existingRows.map(r => [toTaipeiDateString(r.date), Boolean(r.is_self_service)]));
+    const targetIsSelfService = hasDayTypeChange
+      ? (parsedDayType.cleanDayType === 'self' ? true : (parsedDayType.cleanDayType === 'closed' ? null : false))
+      : (typeof is_self_service === 'boolean' ? is_self_service : null);
 
+    const existingRowsForCheck = (targetIsSelfService !== null || hasDayTypeChange)
+      ? await prisma.dailySetting.findMany({ where: { date: { in: datesToUpdate } } })
+      : [];
+    const existingRowByDate = new Map(existingRowsForCheck.map(r => [toTaipeiDateString(r.date), r]));
+
+    if (targetIsSelfService !== null) {
       const confirmedRows = await prisma.reservation.findMany({
         where: {
           status: 'confirmed',
@@ -445,8 +708,8 @@ export const batchUpdateDailySettings = async (req, res) => {
       const conflicts = [];
       for (const dt of datesToUpdate) {
         const dStr = toTaipeiDateString(dt);
-        const prev = existingByDate.get(dStr) ?? false;
-        if (is_self_service !== prev) {
+        const prev = Boolean(existingRowByDate.get(dStr)?.is_self_service);
+        if (targetIsSelfService !== prev) {
           const cnt = refsByDate.get(dStr)?.size || 0;
           if (cnt > 0) {
             conflicts.push({ date: dStr, count: cnt });
@@ -463,7 +726,56 @@ export const batchUpdateDailySettings = async (req, res) => {
       }
     }
 
-    if (typeof is_self_service === 'boolean') dataToUpdate.is_self_service = is_self_service;
+    if (hasDayTypeChange && confirm_affected !== true) {
+      const priceChangingDates = [];
+      for (const dt of datesToUpdate) {
+        const dStr = toTaipeiDateString(dt);
+        const prevRow = existingRowByDate.get(dStr) || null;
+        const nextIsSelf = parsedDayType.cleanDayType === 'self'
+          ? true
+          : (parsedDayType.cleanDayType === 'closed' ? Boolean(prevRow?.is_self_service) : false);
+        const prevPt = computeDayInfo({ date: dStr, dailySetting: prevRow, bookableSessionCount: 1 }).price_type;
+        const nextPt = computeDayInfo({
+          date: dStr,
+          dailySetting: {
+            ...(prevRow || {}),
+            day_type: parsedDayType.dbDayType,
+            price_type: parsedDayType.dbPriceType,
+            is_self_service: nextIsSelf
+          },
+          bookableSessionCount: 1
+        }).price_type;
+        if (prevPt !== nextPt) {
+          priceChangingDates.push(dt);
+        }
+      }
+      if (priceChangingDates.length > 0) {
+        const affected = await findAffectedLegacyUnpaidBookingsForDates(prisma, priceChangingDates);
+        if (affected.length > 0) {
+          return res.status(409).json({
+            code: 'AFFECTS_UNPAID',
+            count: affected.length,
+            bookings: affected,
+            error: `這些日期中有 ${affected.length} 筆舊預約還沒付款，價格將會變動`
+          });
+        }
+      }
+    }
+
+    if (hasDayTypeChange) {
+      const actorName = req.user?.name || '管理員';
+      dataToUpdate.day_type = parsedDayType.dbDayType;
+      dataToUpdate.price_type = parsedDayType.dbPriceType;
+      dataToUpdate.day_type_source = 'manual';
+      dataToUpdate.day_type_updated_by = actorName;
+      dataToUpdate.day_type_updated_at = new Date();
+      dataToUpdate.closed_note = parsedDayType.dbClosedNote;
+      if (parsedDayType.cleanDayType !== 'closed') {
+        dataToUpdate.is_self_service = parsedDayType.cleanDayType === 'self';
+      }
+    } else if (typeof is_self_service === 'boolean') {
+      dataToUpdate.is_self_service = is_self_service;
+    }
     if (typeof self_allow_hourly === 'boolean') dataToUpdate.self_allow_hourly = self_allow_hourly;
     if (typeof self_allow_equipment === 'boolean') dataToUpdate.self_allow_equipment = self_allow_equipment;
     if (iron_mode !== undefined) {
@@ -485,7 +797,9 @@ export const batchUpdateDailySettings = async (req, res) => {
             date,
             ...dataToUpdate,
             allow_unlimited: typeof allow_unlimited === 'boolean' ? allow_unlimited : true,
-            is_self_service: is_self_service !== undefined ? Boolean(is_self_service) : false,
+            is_self_service: dataToUpdate.is_self_service !== undefined
+              ? Boolean(dataToUpdate.is_self_service)
+              : (is_self_service !== undefined ? Boolean(is_self_service) : false),
             self_allow_hourly: self_allow_hourly !== undefined ? Boolean(self_allow_hourly) : false,
             self_allow_equipment: self_allow_equipment !== undefined ? Boolean(self_allow_equipment) : false,
             iron_mode: iron_mode !== undefined ? String(iron_mode) : 'today',
@@ -531,6 +845,7 @@ export const batchUpdateDailySettings = async (req, res) => {
       });
     });
 
+    displayBus.settingsChanged();
     res.json({ message: `Successfully updated ${datesToUpdate.length} days` });
   } catch (error) {
     console.error('Error batch updating daily settings:', error);

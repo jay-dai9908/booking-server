@@ -215,7 +215,8 @@ export default function ReservationsPage() {
     setIsManualLoading(true);
     try {
       const res = await api.get(`/sessions?date=${manualDate}`);
-      setManualSessions(res.data);
+      const list = Array.isArray(res.data) ? res.data : (res.data?.sessions || []);
+      setManualSessions(list);
       setManualSelectedSessions([]); // reset when date changes
     } catch (err) {
       console.error(err);

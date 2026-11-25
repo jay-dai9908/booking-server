@@ -39,6 +39,7 @@ import { earliestEntry, ironText } from '../../../shared/selfService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { getDayInfo } from '../services/calendar/dayType.js';
+import { assertDateBookable } from '../services/calendar/sessionFilters.js';
 import { getReservationEntryPass } from '../services/kiosk/entryService.js';
 import { isPlainString } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
@@ -516,6 +517,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
 
       // Lock ALL sessions for the same date in canonical id ASC order, then lockDaySeats
       const { dateStr, sessions: allSessionsOfDay } = await lockDaySessionsAndSeats(tx, sessionDate);
+      await assertDateBookable(tx, dateStr);
       const reqSessionIdSet = new Set(session_ids.map(Number));
       const requestedSessions = allSessionsOfDay.filter(s => reqSessionIdSet.has(s.id));
       if (requestedSessions.some(s => Boolean(s.closed_at))) {
@@ -1189,7 +1191,8 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
     if (error.status) {
       return res.status(error.status).json({
         error: error.message,
-        ...(error.code ? { code: error.code } : {})
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
     if (error.message && error.message.startsWith('EQUIPMENT_WINDOW_INVALID:')) {
@@ -2221,7 +2224,8 @@ export const moveSeat = async (req, res) => {
     if (error.status) {
       return res.status(error.status).json({
         error: error.message,
-        ...(error.code ? { code: error.code } : {})
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
     res.status(500).json({ error: 'Failed to move seat' });
@@ -2284,7 +2288,8 @@ export const swapSeats = async (req, res) => {
     if (error.status) {
       return res.status(error.status).json({
         error: error.message,
-        ...(error.code ? { code: error.code } : {})
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
     res.status(500).json({ error: 'Failed to swap seats' });
@@ -2562,6 +2567,7 @@ export const adminCreateReservation = async (req, res) => {
 
       // Lock ALL sessions for the same date in canonical id ASC order, then lockDaySeats
       const { dateStr, sessions: allSessionsOfDay } = await lockDaySessionsAndSeats(tx, sessionDate);
+      await assertDateBookable(tx, dateStr, { isAdmin: true });
       const reqSessionIdSet = new Set(session_ids.map(Number));
       const requestedSessions = allSessionsOfDay.filter(s => reqSessionIdSet.has(s.id));
       if (requestedSessions.some(s => Boolean(s.closed_at))) {
@@ -2898,7 +2904,8 @@ export const adminCreateReservation = async (req, res) => {
     if (error.status) {
       return res.status(error.status).json({
         error: error.message,
-        ...(error.code ? { code: error.code } : {})
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
     if (error.message === 'CROSS_DATE_SESSIONS') {
@@ -2960,6 +2967,7 @@ export const extendReservation = async (req, res) => {
 
     const result = await prisma.$transaction(async (tx) => {
       await lockDaySessionsAndSeats(tx, extendDateStr);
+      await assertDateBookable(tx, extendDateStr, { isAdmin: true });
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${booking_ref}))`;
 
       // Find existing reservation details with session info
@@ -3285,7 +3293,8 @@ export const extendReservation = async (req, res) => {
     if (error.status) {
       return res.status(error.status).json({
         error: error.message,
-        ...(error.code ? { code: error.code } : {})
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
     if (error.message === 'RESERVATION_NOT_FOUND') {
@@ -3465,7 +3474,8 @@ export const updateAttendance = async (req, res) => {
     if (error.status) {
       return res.status(error.status).json({
         error: error.message,
-        ...(error.code ? { code: error.code } : {})
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
     res.status(500).json({ error: 'Failed to update attendance' });

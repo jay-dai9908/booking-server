@@ -4,6 +4,7 @@ import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { syncAndVerifyAdminUser } from '../middlewares/authMiddleware.js';
 import { bookableSessionWhere } from '../services/calendar/sessionFilters.js';
+import { getDayInfo, getDayInfoRange } from '../services/calendar/dayType.js';
 import auditService from '../services/audit/auditService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
@@ -73,8 +74,20 @@ export const getSessions = async (req, res) => {
       whereClause = { ...whereClause, ...bookableSessionWhere() };
     }
 
+    if (date !== undefined && !includeClosed) {
+      const cleanDate = String(date).trim();
+      const dayInfo = await getDayInfo(prisma, cleanDate);
+      if (dayInfo.type === 'closed') {
+        return res.json({
+          sessions: [],
+          day_closed: true,
+          closed_note: dayInfo.closed_note || null
+        });
+      }
+    }
+
     // Fetch sessions
-    const sessions = await prisma.session.findMany({
+    let sessions = await prisma.session.findMany({
       where: whereClause,
       include: {
         reservations: {
@@ -87,6 +100,14 @@ export const getSessions = async (req, res) => {
         { start_time: 'asc' }
       ]
     });
+
+    if (date === undefined && !includeClosed && !callerIsAdmin && sessions.length > 0) {
+      const infoMap = await getDayInfoRange(prisma, String(start_date).trim(), String(end_date).trim());
+      sessions = sessions.filter((s) => {
+        const dStr = s.session_date.toISOString().slice(0, 10);
+        return infoMap.get(dStr)?.type !== 'closed';
+      });
+    }
 
     const activeLayoutMap = new Map();
     for (const s of sessions) {

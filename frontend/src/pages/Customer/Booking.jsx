@@ -69,7 +69,7 @@ export default function Booking() {
   const todayStr = useMemo(() => getTodayString(), []);
   const lookaheadEndStr = useMemo(() => getEndDateString(BOOKING_LOOKAHEAD_DAYS - 1), []);
   const { sessionsByDate } = useSessionRange(todayStr, lookaheadEndStr);
-  const { selfServiceDates } = useSelfServiceRange(todayStr, lookaheadEndStr);
+  const { selfServiceDates, dayInfoByDate } = useSelfServiceRange(todayStr, lookaheadEndStr);
 
   // Draft state
   const initialDraft = useMemo(() => loadInitialDraft(), []);
@@ -284,6 +284,7 @@ export default function Booking() {
           sessionsLoading={sessionsLoading}
           sessionsByDate={sessionsByDate}
           selfServiceDates={selfServiceDates}
+          dayInfoByDate={dayInfoByDate}
           daily={daily}
           equipmentConfigs={equipmentConfigs}
           onNext={() => navigate('/booking?step=2')}

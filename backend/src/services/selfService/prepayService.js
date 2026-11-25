@@ -22,7 +22,7 @@ import { resolveEquipmentWindow } from '../../utils/equipmentWindow.js';
 import { evaluatePromoCode } from '../../controllers/checkoutController.js';
 import { releasePoolAccount } from './poolAccountService.js';
 import { sendSelfServiceExpiredNotification } from '../../utils/lineMessaging.js';
-import { bookableSessionWhere } from '../calendar/sessionFilters.js';
+import { bookableSessionWhere, assertDateBookable } from '../calendar/sessionFilters.js';
 import { getDayInfo } from '../calendar/dayType.js';
 
 export function makePrepayError(code, message, status = 400, extra = {}) {
@@ -257,6 +257,7 @@ export async function computeSelfServiceQuote(
   const sessionDate = sortedSessions[0].session_date;
   const dateStr = toTaipeiDateString(sessionDate);
   const targetDateForPass = new Date(`${dateStr}T00:00:00+08:00`);
+  await assertDateBookable(client, dateStr);
 
   const meta = buildSelfServiceMeta({
     dailySetting,

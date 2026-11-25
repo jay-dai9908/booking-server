@@ -54,6 +54,7 @@ export default function StepSelectTime({
   sessionsLoading = false,
   sessionsByDate = {},
   selfServiceDates = {},
+  dayInfoByDate = {},
   daily = null,
   equipmentConfigs = [],
   onNext,
@@ -336,6 +337,7 @@ export default function StepSelectTime({
           currentMonth={calendarMonth}
           sessionsByDate={sessionsByDate}
           selfServiceDates={selfServiceDates}
+          dayInfoByDate={dayInfoByDate}
           onSelectDate={(newDate) => {
             onChangeDate(newDate);
             setIsMonthExpanded(false);
@@ -354,8 +356,8 @@ export default function StepSelectTime({
       {/* 4. Plan Selection or Closed state */}
       {isClosed ? (
         <EmptyState
-          title="這天沒有開放"
-          description="可以選有色條的其他日子"
+          title={daily?.day_type === 'closed' ? '今日臨時公休' : '這天沒有開放'}
+          description={daily?.closed_note || '可以選有色條的其他日子'}
         />
       ) : (
         <>

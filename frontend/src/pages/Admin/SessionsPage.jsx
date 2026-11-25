@@ -50,6 +50,7 @@ export default function SessionsPage() {
   const [selectedDates, setSelectedDates] = useState([format(new Date(), 'yyyy-MM-dd')]);
   const [listDate, setListDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [monthSessionsMap, setMonthSessionsMap] = useState({});
+  const [monthDayInfoMap, setMonthDayInfoMap] = useState({});
 
   const [startTime, setStartTime] = useState('10:00');
   const [endTime, setEndTime] = useState('21:00');
@@ -83,13 +84,19 @@ export default function SessionsPage() {
   const [batchClearUnlimited, setBatchClearUnlimited] = useState(false);
   const [batchAllowUnlimited, setBatchAllowUnlimited] = useState('unchanged'); // 'unchanged' | 'true' | 'false'
   const [batchConfirmState, setBatchConfirmState] = useState(null);
-  const [batchSetSelfService, setBatchSetSelfService] = useState(false);
+  const [batchDayType, setBatchDayType] = useState('unchanged'); // 'unchanged' | 'auto' | 'weekday' | 'holiday' | 'self' | 'closed'
+  const [batchPriceType, setBatchPriceType] = useState('');
+  const [batchClosedNote, setBatchClosedNote] = useState('');
   const [batchSelfAllowEquipment, setBatchSelfAllowEquipment] = useState(false);
   const [batchIronMode, setBatchIronMode] = useState('today');
   const [batchIronDate, setBatchIronDate] = useState('');
   const [isBatching, setIsBatching] = useState(false);
 
-  // Daily Self-Service States (for listDate)
+  // Daily Day-Type & Self-Service States (for listDate)
+  const [selectedDayType, setSelectedDayType] = useState('auto'); // 'auto' | 'weekday' | 'holiday' | 'self' | 'closed'
+  const [selectedPriceType, setSelectedPriceType] = useState(''); // '' | 'weekday' | 'holiday'
+  const [closedNote, setClosedNote] = useState('');
+  const [affectConfirmState, setAffectConfirmState] = useState(null);
   const [isSelfService, setIsSelfService] = useState(false);
   const [selfAllowHourly, setSelfAllowHourly] = useState(false);
   const [selfAllowEquipment, setSelfAllowEquipment] = useState(false);
@@ -177,6 +184,10 @@ export default function SessionsPage() {
       setDailyHourly(res.data.hourly_price || '');
       setDailyUnlimited(res.data.unlimited_price || '');
       setIsSelfService(Boolean(res.data.is_self_service));
+      const rawDt = res.data.raw_day_type;
+      setSelectedDayType(rawDt || (res.data.is_self_service ? 'self' : 'auto'));
+      setSelectedPriceType(res.data.raw_price_type || '');
+      setClosedNote(res.data.closed_note || '');
       setSelfAllowHourly(Boolean(res.data.self_allow_hourly));
       setSelfAllowEquipment(Boolean(res.data.self_allow_equipment));
       setIronMode(res.data.iron_mode || 'today');
@@ -213,27 +224,50 @@ export default function SessionsPage() {
     }
   };
 
-  const handleSaveDailySelfService = async (e) => {
-    if (e) e.preventDefault();
+  const saveDailyDayTypeAndSelf = async (confirmAffected = false) => {
     setSavingDailySelf(true);
     setDailySelfError('');
     try {
-      await api.put('/daily-settings', {
+      await api.put('/daily-settings/day-type', {
         date: listDate,
-        allow_unlimited: isSelfService ? true : allowUnlimited,
-        hourly_price: dailyHourly || null,
-        unlimited_price: dailyUnlimited || null,
-        is_self_service: isSelfService,
-        self_allow_hourly: selfAllowHourly,
-        self_allow_equipment: selfAllowEquipment,
-        iron_mode: ironMode,
-        iron_date: ironMode === 'date' ? ironDate : null
+        day_type: selectedDayType,
+        price_type: (selectedDayType === 'self' || selectedDayType === 'closed') ? (selectedPriceType || null) : null,
+        closed_note: selectedDayType === 'closed' ? closedNote : null,
+        confirm_affected: confirmAffected
       });
-      if (isSelfService) setAllowUnlimited(true);
-      showToast(`已儲存 ${listDate} 的半自助日設定`);
+
+      if (selectedDayType === 'self') {
+        await api.put('/daily-settings', {
+          date: listDate,
+          allow_unlimited: true,
+          hourly_price: dailyHourly || null,
+          unlimited_price: dailyUnlimited || null,
+          is_self_service: true,
+          self_allow_hourly: selfAllowHourly,
+          self_allow_equipment: selfAllowEquipment,
+          iron_mode: ironMode,
+          iron_date: ironMode === 'date' ? ironDate : null
+        });
+        setAllowUnlimited(true);
+        setIsSelfService(true);
+      } else if (selectedDayType !== 'closed') {
+        setIsSelfService(false);
+      }
+
+      showToast(selectedDayType === 'self' ? `已儲存 ${listDate} 的半自助日設定` : `已儲存 ${listDate} 的日期類型`);
       fetchDailySetting(listDate);
+      fetchMonthSessions(currentMonth);
+      fetchSessions(listDate);
     } catch (err) {
-      const msg = err.response?.data?.error || '儲存半自助日設定失敗';
+      const data = err.response?.data;
+      if (err.response?.status === 409 && data?.code === 'AFFECTS_UNPAID' && !confirmAffected) {
+        setAffectConfirmState({
+          mode: 'single',
+          message: data.error || `這天有 ${data.count} 筆舊預約還沒付款，價格會變動，確定要套用嗎？`
+        });
+        return;
+      }
+      const msg = data?.error || '儲存日期設定失敗';
       setDailySelfError(msg);
       showToast(msg);
       fetchDailySetting(listDate);
@@ -242,17 +276,32 @@ export default function SessionsPage() {
     }
   };
 
+  const handleSaveDailySelfService = async (e) => {
+    if (e) e.preventDefault();
+    await saveDailyDayTypeAndSelf(false);
+  };
+
   const fetchMonthSessions = async (monthDate = currentMonth) => {
     try {
       const mStart = format(startOfWeek(startOfMonth(monthDate)), 'yyyy-MM-dd');
       const mEnd = format(endOfWeek(endOfMonth(monthDate)), 'yyyy-MM-dd');
-      const res = await api.get(`/sessions?start_date=${mStart}&end_date=${mEnd}`);
+      const [sessRes, rangeRes] = await Promise.all([
+        api.get(`/sessions?start_date=${mStart}&end_date=${mEnd}`),
+        api.get(`/daily-settings/range?start=${mStart}&end=${mEnd}`).catch(() => ({ data: [] }))
+      ]);
+      const sessList = Array.isArray(sessRes.data) ? sessRes.data : (sessRes.data?.sessions || []);
       const map = {};
-      (res.data || []).forEach(s => {
+      sessList.forEach(s => {
         const dStr = format(new Date(s.session_date), 'yyyy-MM-dd');
         map[dStr] = (map[dStr] || 0) + 1;
       });
       setMonthSessionsMap(map);
+
+      const infoMap = {};
+      (Array.isArray(rangeRes.data) ? rangeRes.data : []).forEach((item) => {
+        if (item?.date) infoMap[item.date] = item;
+      });
+      setMonthDayInfoMap(infoMap);
     } catch (err) {
       console.error('Error fetching month sessions:', err);
     }
@@ -317,11 +366,28 @@ export default function SessionsPage() {
       allowUnlimitedSummary = '不開放';
     }
 
-    if (batchSetSelfService) {
-      payload.is_self_service = true;
-      payload.self_allow_equipment = batchSelfAllowEquipment;
-      payload.iron_mode = batchIronMode;
-      payload.iron_date = batchIronMode === 'date' ? batchIronDate : null;
+    const DAY_TYPE_LABELS = {
+      unchanged: '不變',
+      auto: '自動（依星期與時段）',
+      weekday: '平日',
+      holiday: '假日',
+      self: '半自助日',
+      closed: '公休'
+    };
+
+    if (batchDayType !== 'unchanged') {
+      payload.day_type = batchDayType;
+      if (batchDayType === 'self' || batchDayType === 'closed') {
+        payload.price_type = batchPriceType || null;
+      }
+      if (batchDayType === 'closed') {
+        payload.closed_note = batchClosedNote || null;
+      }
+      if (batchDayType === 'self') {
+        payload.self_allow_equipment = batchSelfAllowEquipment;
+        payload.iron_mode = batchIronMode;
+        payload.iron_date = batchIronMode === 'date' ? batchIronDate : null;
+      }
     }
 
     let daysCount = 0;
@@ -350,24 +416,41 @@ export default function SessionsPage() {
       hourlySummary,
       unlimitedSummary,
       allowUnlimitedSummary,
-      selfServiceSummary: batchSetSelfService ? '設成半自助日' : '不變'
+      selfServiceSummary: DAY_TYPE_LABELS[batchDayType] || '不變'
     });
+  };
+
+  const executeBatchSubmit = async (payload, confirmAffected = false) => {
+    setIsBatching(true);
+    try {
+      const res = await api.post('/daily-settings/batch', {
+        ...payload,
+        ...(confirmAffected ? { confirm_affected: true } : {})
+      });
+      showToast(`批次修改成功！${res.data?.message || ''}`);
+      fetchDailySetting(listDate);
+      fetchMonthSessions(currentMonth);
+    } catch (err) {
+      const data = err.response?.data;
+      if (err.response?.status === 409 && data?.code === 'AFFECTS_UNPAID' && !confirmAffected) {
+        setAffectConfirmState({
+          mode: 'batch',
+          payload,
+          message: data.error || `這些日期中有 ${data.count} 筆舊預約還沒付款，價格會變動，確定套用嗎？`
+        });
+        return;
+      }
+      showToast(data?.error || '批次修改失敗');
+    } finally {
+      setIsBatching(false);
+    }
   };
 
   const handleConfirmBatchSubmit = async () => {
     if (!batchConfirmState) return;
     const { payload } = batchConfirmState;
     setBatchConfirmState(null);
-    setIsBatching(true);
-    try {
-      const res = await api.post('/daily-settings/batch', payload);
-      showToast(`批次修改成功！${res.data?.message || ''}`);
-      fetchDailySetting(listDate);
-    } catch (err) {
-      showToast(err.response?.data?.error || '批次修改失敗');
-    } finally {
-      setIsBatching(false);
-    }
+    await executeBatchSubmit(payload, false);
   };
 
   const fetchSessions = async (date = listDate) => {
@@ -665,13 +748,31 @@ export default function SessionsPage() {
                       const isPast = isBefore(startOfDay(date), startOfDay(new Date()));
                       const isViewingList = dateStr === listDate;
                       const sessionCount = monthSessionsMap[dateStr] || 0;
+                      const dayInfo = monthDayInfoMap[dateStr];
+                      const typeChar =
+                        dayInfo?.day_type === 'closed' ? '休'
+                        : dayInfo?.day_type === 'self' ? '半'
+                        : dayInfo?.day_type === 'holiday' ? '假'
+                        : dayInfo?.day_type === 'weekday' ? '平'
+                        : '';
+                      const isManualType = dayInfo?.day_type_source === 'manual';
+                      const typeBadgeClass = isSelected
+                        ? 'text-white/90'
+                        : dayInfo?.day_type === 'closed'
+                        ? 'text-rose-600'
+                        : dayInfo?.day_type === 'self'
+                        ? 'text-amber-700'
+                        : dayInfo?.day_type === 'holiday'
+                        ? 'text-orange-600'
+                        : 'text-gray-500';
 
                       return (
                         <div key={i} className="flex justify-center items-center">
                           <button
                             type="button"
+                            data-testid={`admin-calendar-day-${dateStr}`}
                             onClick={() => handleDateCellClick(date)}
-                            className={`relative w-8 h-8 sm:w-9 sm:h-9 rounded-xl text-xs font-semibold transition-all duration-150 flex flex-col items-center justify-center ${
+                            className={`relative w-9 h-10 sm:w-10 sm:h-11 rounded-xl text-xs font-semibold transition-all duration-150 flex flex-col items-center justify-center ${
                               !isCurrentMonth
                                 ? 'text-gray-300 opacity-40 hover:opacity-80'
                                 : isPast
@@ -682,16 +783,29 @@ export default function SessionsPage() {
                             } ${
                               isViewingList ? 'ring-2 ring-amber-500 ring-offset-1' : ''
                             }`}
-                            title={`${dateStr}${sessionCount > 0 ? ` (已建立 ${sessionCount} 個時段)` : ''}${isViewingList ? ' [右側時段列表檢視中]' : ''}`}
+                            title={`${dateStr}${typeChar ? ` [${typeChar}${isManualType ? '・手動' : ''}]` : ''}${sessionCount > 0 ? ` (已建立 ${sessionCount} 個時段)` : ''}${isViewingList ? ' [右側時段列表檢視中]' : ''}`}
                           >
-                            <span className="leading-none">{format(date, 'd')}</span>
-                            {sessionCount > 0 && (
-                              <span 
-                                className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
-                                  isSelected ? 'bg-emerald-300' : 'bg-emerald-500'
-                                }`} 
+                            {isManualType && (
+                              <span
+                                data-testid={`manual-dot-${dateStr}`}
+                                className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-500"
                               />
                             )}
+                            <span className="leading-none">{format(date, 'd')}</span>
+                            <div className="flex items-center gap-0.5 mt-0.5">
+                              {typeChar && (
+                                <span className={`text-[10px] leading-none font-bold ${typeBadgeClass}`}>
+                                  {typeChar}
+                                </span>
+                              )}
+                              {sessionCount > 0 && (
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    isSelected ? 'bg-emerald-300' : 'bg-emerald-500'
+                                  }`}
+                                />
+                              )}
+                            </div>
                           </button>
                         </div>
                       );
@@ -713,6 +827,10 @@ export default function SessionsPage() {
                     <span className="flex items-center gap-1">
                       <span className="w-2.5 h-2.5 rounded border-2 border-amber-500 inline-block" />
                       右側檢視中
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+                      手動類型
                     </span>
                   </div>
                 </div>
@@ -1228,17 +1346,53 @@ export default function SessionsPage() {
             </div>
 
             <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 space-y-2.5">
-              <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-gray-800">
-                <input
-                  type="checkbox"
-                  checked={batchSetSelfService}
-                  onChange={(e) => setBatchSetSelfService(e.target.checked)}
-                  className="w-4 h-4 accent-[#8B5B43]"
-                />
-                <span>把這些日期設成半自助日</span>
-              </label>
-              {batchSetSelfService && (
-                <div className="space-y-2.5 pl-6 text-xs">
+              <div className="space-y-1.5">
+                <label className="block text-sm font-bold text-gray-800">日期類型</label>
+                <select
+                  data-testid="batch-day-type-select"
+                  value={batchDayType}
+                  onChange={(e) => setBatchDayType(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-800"
+                >
+                  <option value="unchanged">不變</option>
+                  <option value="auto">自動（依星期與時段）</option>
+                  <option value="weekday">平日</option>
+                  <option value="holiday">假日</option>
+                  <option value="self">半自助日</option>
+                  <option value="closed">公休</option>
+                </select>
+              </div>
+              {(batchDayType === 'self' || batchDayType === 'closed') && (
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-gray-700">價格比照</label>
+                  <select
+                    data-testid="batch-price-type-select"
+                    value={batchPriceType}
+                    onChange={(e) => setBatchPriceType(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs"
+                  >
+                    <option value="">依星期</option>
+                    <option value="weekday">平日</option>
+                    <option value="holiday">假日</option>
+                  </select>
+                </div>
+              )}
+              {batchDayType === 'closed' && (
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-gray-700">給顧客看的說明（最多 60 字）</label>
+                  <input
+                    type="text"
+                    maxLength={60}
+                    data-testid="batch-closed-note-input"
+                    value={batchClosedNote}
+                    onChange={(e) => setBatchClosedNote(e.target.value)}
+                    placeholder="例如：設備維修、員工旅遊"
+                    className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs"
+                  />
+                </div>
+              )}
+              {batchDayType === 'self' && (
+                <div className="space-y-2.5 pt-1 text-xs">
                   <label className="flex items-center gap-2 cursor-pointer font-semibold text-gray-700">
                     <input
                       type="checkbox"
@@ -1301,34 +1455,111 @@ export default function SessionsPage() {
 
       {/* Self-Service Settings Grid (Single Day + Global Kiosk Rules) */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-8">
-        {/* Daily Self-Service Card */}
+        {/* Daily Day-Type & Self-Service Card */}
         <form onSubmit={handleSaveDailySelfService} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4">
-          <div className="flex items-start justify-between gap-3">
+          <div className="space-y-3">
             <div>
               <h2 className="text-lg font-bold text-gray-900">
-                {listDate} 半自助日設定
+                {listDate} 日期類型與營業設定
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                顧客要先付款，當天憑門口報到機進場
+                已預約的客人照預約時的價格，新預約才用新的類型
               </p>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer shrink-0">
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  data-testid="daily-self-service-toggle"
-                  className="sr-only"
-                  checked={isSelfService}
-                  onChange={(e) => {
-                    setIsSelfService(e.target.checked);
-                    setDailySelfError('');
-                  }}
-                />
-                <div className={`block w-11 h-6 rounded-full transition-colors ${isSelfService ? 'bg-[#8B5B43]' : 'bg-gray-300'}`} />
-                <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${isSelfService ? 'translate-x-5' : ''}`} />
+
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-gray-700">日期類型</label>
+              <div className="flex flex-wrap gap-1.5" data-testid="day-type-selector">
+                {[
+                  { id: 'auto', label: '自動（依星期與時段）' },
+                  { id: 'weekday', label: '平日' },
+                  { id: 'holiday', label: '假日' },
+                  { id: 'self', label: '半自助' },
+                  { id: 'closed', label: '公休' }
+                ].map((opt) => {
+                  const active = selectedDayType === opt.id;
+                  if (opt.id === 'self') {
+                    return (
+                      <label
+                        key={opt.id}
+                        data-testid="day-type-opt-self"
+                        className={`cursor-pointer px-3 py-1.5 rounded-xl border text-xs font-bold transition select-none ${
+                          active
+                            ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                            : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          data-testid="daily-self-service-toggle"
+                          className="sr-only"
+                          checked={selectedDayType === 'self'}
+                          onChange={(e) => {
+                            const next = e.target.checked ? 'self' : 'auto';
+                            setSelectedDayType(next);
+                            setIsSelfService(next === 'self');
+                            setDailySelfError('');
+                          }}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    );
+                  }
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      data-testid={`day-type-opt-${opt.id}`}
+                      onClick={() => {
+                        setSelectedDayType(opt.id);
+                        setIsSelfService(opt.id === 'self');
+                        setDailySelfError('');
+                      }}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition ${
+                        active
+                          ? (opt.id === 'closed'
+                              ? 'bg-rose-600 text-white border-rose-600'
+                              : 'bg-[#8B5B43] text-white border-[#8B5B43]')
+                          : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
-              <span className="text-sm font-bold text-gray-800">半自助日</span>
-            </label>
+            </div>
+
+            {(selectedDayType === 'self' || selectedDayType === 'closed') && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-gray-700">價格比照</label>
+                <select
+                  data-testid="price-type-select"
+                  value={selectedPriceType}
+                  onChange={(e) => setSelectedPriceType(e.target.value)}
+                  className="w-full sm:w-64 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm"
+                >
+                  <option value="">依星期</option>
+                  <option value="weekday">平日</option>
+                  <option value="holiday">假日</option>
+                </select>
+              </div>
+            )}
+
+            {selectedDayType === 'closed' && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-gray-700">給顧客看的說明（最多 60 字）</label>
+                <input
+                  type="text"
+                  maxLength={60}
+                  data-testid="closed-note-input"
+                  value={closedNote}
+                  onChange={(e) => setClosedNote(e.target.value)}
+                  placeholder="例如：設備維修、員工旅遊"
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm"
+                />
+              </div>
+            )}
           </div>
 
           {dailySelfError && (
@@ -1337,7 +1568,7 @@ export default function SessionsPage() {
             </div>
           )}
 
-          {isSelfService ? (
+          {selectedDayType === 'self' ? (
             <div className="space-y-4 pt-2 border-t border-gray-100">
               {/* Plans */}
               <div className="space-y-2 text-sm">
@@ -1437,9 +1668,13 @@ export default function SessionsPage() {
                 </div>
               </div>
             </div>
+          ) : selectedDayType === 'closed' ? (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3">
+              臨時公休：這天會停止接受新預約，且報到機不開門。已存在的預約不受影響，請於下方處理。
+            </div>
           ) : (
             <div className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl p-3">
-              一般營業日：照原本價格和不限時開關運作，顧客現場報到、離場結帳。
+              一般營業日：照設定的平假日價格和不限時開關運作，顧客現場報到、離場結帳。
             </div>
           )}
 
@@ -1449,7 +1684,7 @@ export default function SessionsPage() {
             data-testid="save-daily-self-service-btn"
             className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
           >
-            {savingDailySelf ? '儲存中...' : `儲存 ${listDate} 半自助日設定`}
+            {savingDailySelf ? '儲存中...' : `儲存 ${listDate} 日期與營業設定`}
           </button>
         </form>
 
@@ -1563,6 +1798,25 @@ export default function SessionsPage() {
         message={`確定要刪除 ${listDate} 的所有未被預約時段嗎？已有預約的時段會自動保留。`}
         confirmText="確認刪除"
         danger
+      />
+
+      {/* Legacy Unpaid Bookings Price Change Confirmation */}
+      <ConfirmPanel
+        isOpen={Boolean(affectConfirmState)}
+        onClose={() => setAffectConfirmState(null)}
+        onConfirm={async () => {
+          const state = affectConfirmState;
+          setAffectConfirmState(null);
+          if (!state) return;
+          if (state.mode === 'single') {
+            await saveDailyDayTypeAndSelf(true);
+          } else if (state.mode === 'batch' && state.payload) {
+            await executeBatchSubmit(state.payload, true);
+          }
+        }}
+        title="變更將影響舊未付款預約"
+        message={affectConfirmState?.message || ''}
+        confirmText="確定套用"
       />
 
       {/* Batch Update Confirmation Modal */}

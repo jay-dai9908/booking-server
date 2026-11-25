@@ -4,6 +4,7 @@ import { earliestEntry } from '../../../shared/selfService.js';
 import { getEffectiveDailyRates } from './reservationController.js';
 import { getBookingBill } from '../services/billing/billService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+import { assertDateBookable } from '../services/calendar/sessionFilters.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { markPoolAccountUsed, releasePoolAccount } from '../services/selfService/poolAccountService.js';
 import {
@@ -82,6 +83,8 @@ export const postPrepayQuoteHandler = async (req, res) => {
     const dateStr = toTaipeiDateString(sessionDate);
     const dateObj = new Date(`${dateStr}T00:00:00.000Z`);
 
+    await assertDateBookable(prisma, dateStr);
+
     const [dailySetting, dailyRates, kioskSetting] = await Promise.all([
       prisma.dailySetting.findUnique({ where: { date: dateObj } }),
       getEffectiveDailyRates(prisma, sessionDate),
@@ -132,6 +135,13 @@ export const postPrepayQuoteHandler = async (req, res) => {
     if (err.isPrepayError) {
       return res.status(err.status || 400).json({ error: err.message, code: err.code });
     }
+    if (err.status) {
+      return res.status(err.status).json({
+        error: err.message || err.error,
+        ...(err.code ? { code: err.code } : {}),
+        ...(err.closed_note !== undefined ? { closed_note: err.closed_note } : {})
+      });
+    }
     res.status(500).json({ error: '計算半自助預約金額失敗' });
   }
 };
@@ -156,6 +166,13 @@ export const patchRemittanceLast5Handler = async (req, res) => {
   } catch (err) {
     if (err.isPrepayError) {
       return res.status(err.status || 400).json({ error: err.message, code: err.code });
+    }
+    if (err.status) {
+      return res.status(err.status).json({
+        error: err.message || err.error,
+        ...(err.code ? { code: err.code } : {}),
+        ...(err.closed_note !== undefined ? { closed_note: err.closed_note } : {})
+      });
     }
     console.error('[prepayController] patchRemittanceLast5 error:', err);
     res.status(500).json({ error: '回報匯款末五碼失敗' });
@@ -619,6 +636,13 @@ export const verifyAdminPrepayHandler = async (req, res) => {
   } catch (err) {
     if (err.isPrepayError) {
       return res.status(err.status || 400).json({ error: err.message, code: err.code });
+    }
+    if (err.status) {
+      return res.status(err.status).json({
+        error: err.message || err.error,
+        ...(err.code ? { code: err.code } : {}),
+        ...(err.closed_note !== undefined ? { closed_note: err.closed_note } : {})
+      });
     }
     console.error('[prepayController] verifyAdminPrepay error:', err);
     res.status(500).json({ error: '對帳確認失敗' });

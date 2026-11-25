@@ -52,10 +52,11 @@ const ExtendTimeModal = ({ isOpen, onClose, reservation, onSuccess }) => {
       }
       
       const res = await api.get(`/sessions?date=${sessionDate}`);
+      const list = Array.isArray(res.data) ? res.data : (res.data?.sessions || []);
       
       // Filter out sessions that are BEFORE or EQUAL to the current end time
       // Simple string comparison works for "HH:mm" formats like "13:00" > "12:00"
-      const availableSessions = res.data.filter(s => s.start_time >= endTime);
+      const availableSessions = list.filter(s => s.start_time >= endTime);
       setSessions(availableSessions);
     } catch (err) {
       console.error('Failed to fetch sessions', err);
