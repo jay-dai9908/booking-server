@@ -4,7 +4,7 @@ import prisma from '../src/prismaClient.js';
 import { checkIn, moveSeat, addPerson } from '../src/controllers/floorController.js';
 import { previewPublish, publishLayout, createLayoutDraft } from '../src/controllers/seatLayoutController.js';
 import { createBulkSessions } from '../src/controllers/sessionController.js';
-import { dateOnly } from '../../shared/time.js';
+import { dateOnly, toTaipeiDateString } from '../../shared/time.js';
 
 function createMockReqRes({ body = {}, params = {}, query = {}, user = { name: '店長', id: 1 } }) {
   const req = { body, params, query, user, headers: {} };
@@ -366,9 +366,12 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
     }
 
     // Set future session max_capacity to 20 to test capacity_before = 20
-    const futureDate = dateOnly('2026-11-25');
+    const futureStr = toTaipeiDateString(new Date(Date.now() + 7 * 86400000));
+    const futureNextStr = toTaipeiDateString(new Date(Date.now() + 8 * 86400000));
+    const futureDate = dateOnly(futureStr);
+    const futureNextDate = dateOnly(futureNextStr);
     await prisma.session.deleteMany({
-      where: { session_date: { in: [futureDate, dateOnly('2026-11-26')] } }
+      where: { session_date: { in: [futureDate, futureNextDate] } }
     });
     const futureSession = await prisma.session.upsert({
       where: { session_date_start_time: { session_date: futureDate, start_time: '14:00' } },
@@ -416,7 +419,7 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
     // Test previewPublish
     const previewRes = createMockReqRes({
       params: { id: draft.id },
-      body: { effective_from: '2026-11-25' }
+      body: { effective_from: futureStr }
     });
     await previewPublish(previewRes.req, previewRes.res);
     assert.equal(previewRes.res.getStatusCode(), 200);
@@ -428,7 +431,7 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
     // Test publishLayout
     const pubRes = createMockReqRes({
       params: { id: draft.id },
-      body: { effective_from: '2026-11-25', confirm: true }
+      body: { effective_from: futureStr, confirm: true }
     });
     await publishLayout(pubRes.req, pubRes.res);
     assert.equal(pubRes.res.getStatusCode(), 200);
@@ -456,7 +459,7 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
     // Test createBulkSessions with max_capacity
     const bulkRes = createMockReqRes({
       body: {
-        session_dates: ['2026-11-26'],
+        session_dates: [futureNextStr],
         start_time: '10:00',
         end_time: '12:00',
         max_capacity: 14
@@ -465,7 +468,7 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
     await createBulkSessions(bulkRes.req, bulkRes.res);
     assert.equal(bulkRes.res.getStatusCode(), 201);
     const createdSessions = await prisma.session.findMany({
-      where: { session_date: dateOnly('2026-11-26') }
+      where: { session_date: futureNextDate }
     });
     assert.equal(createdSessions.length, 2);
     assert.equal(createdSessions[0].max_capacity, 14, 'createBulkSessions should use provided max_capacity 14');
@@ -487,6 +490,6 @@ test('Step 5 Seating Tests (Sections 4.1 - 4.3)', async (t) => {
     }
   });
   await prisma.session.deleteMany({
-    where: { session_date: { in: [dateOnly('2026-11-25'), dateOnly('2026-11-26')] } }
+    where: { session_date: { in: [dateOnly(toTaipeiDateString(new Date(Date.now() + 7 * 86400000))), dateOnly(toTaipeiDateString(new Date(Date.now() + 8 * 86400000)))] } }
   });
 });
