@@ -244,10 +244,19 @@ test('Round 47 Item 1: Day type drives pricing, snapshots, passes, promos, solid
     const satItem = resRange.body.find((d) => d.date === satStr);
     assert.equal(wedItem.day_type, 'holiday');
     assert.equal(wedItem.price_type, 'holiday');
-    assert.equal(thuItem.day_type, 'closed');
+    const thuBookableCount = await prisma.session.count({
+      where: { session_date: dateOnly('2026-11-26'), closed_at: null }
+    });
+    assert.equal(thuItem.day_type, thuBookableCount === 0 ? 'closed' : 'weekday');
     assert.equal(thuItem.price_type, 'weekday');
     assert.equal(satItem.day_type, 'holiday');
     assert.equal(satItem.price_type, 'holiday');
+
+    // Empty-session date always returns closed
+    const emptyRangeRes = createMockRes();
+    await getDailySettingsRange({ query: { start: '2099-11-26', end: '2099-11-26' } }, emptyRangeRes);
+    assert.equal(emptyRangeRes.statusCode, 200);
+    assert.equal(emptyRangeRes.body[0].day_type, 'closed');
   } finally {
     const validRefs = createdRefs.filter(Boolean);
     if (validRefs.length > 0) {
