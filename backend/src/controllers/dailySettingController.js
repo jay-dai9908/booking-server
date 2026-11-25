@@ -2,6 +2,13 @@ import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
 import { logSettingChange, diffFields } from '../services/audit/settingAudit.js';
 import { getDayInfo, getDayInfoRange } from '../services/calendar/dayType.js';
+import {
+  getClosureImpact,
+  buildClosureImpactCsv,
+  batchCancelClosureBookings,
+  dispatchClosureLineNotice
+} from '../services/calendar/closureService.js';
+import { formatSessionsToTimeRange } from '../services/booking/cancelService.js';
 import { computeDayInfo } from '../../../shared/dayType.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
@@ -555,6 +562,117 @@ export const updateDayType = async (req, res) => {
   } catch (error) {
     console.error('Error updating day type:', error);
     res.status(500).json({ error: '更新日期類型失敗' });
+  }
+};
+
+export const getClosureImpactHandler = async (req, res) => {
+  const { date } = req.params;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+    return res.status(400).json({ error: '請提供有效日期 (YYYY-MM-DD)' });
+  }
+  try {
+    const impact = await getClosureImpact(prisma, String(date).trim());
+    res.json(impact);
+  } catch (err) {
+    console.error('Error getting closure impact:', err);
+    res.status(500).json({ error: '讀取公休影響預約清單失敗' });
+  }
+};
+
+export const getClosureImpactCsvHandler = async (req, res) => {
+  const { date } = req.params;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+    return res.status(400).json({ error: '請提供有效日期 (YYYY-MM-DD)' });
+  }
+  try {
+    const dateStr = String(date).trim();
+    const impact = await getClosureImpact(prisma, dateStr);
+    const csv = buildClosureImpactCsv(impact);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="closure-impact-${dateStr}.csv"`);
+    res.send(csv);
+  } catch (err) {
+    console.error('Error exporting closure impact CSV:', err);
+    res.status(500).json({ error: '匯出需處理清單失敗' });
+  }
+};
+
+export const postClosureCancelHandler = async (req, res) => {
+  const { date } = req.params;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+    return res.status(400).json({ error: '請提供有效日期 (YYYY-MM-DD)' });
+  }
+  const { booking_refs = [], notify_line = false, message = '' } = req.body || {};
+  try {
+    const result = await batchCancelClosureBookings(prisma, {
+      dateStr: String(date).trim(),
+      booking_refs,
+      notify_line: Boolean(notify_line),
+      message,
+      staffName: req.user?.name || '管理員',
+      staffId: req.user?.id || null,
+      deviceInfo: getAdminDeviceInfo(req)
+    });
+    res.json(result);
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    console.error('Error batch cancelling closure bookings:', err);
+    res.status(500).json({ error: '批次取消公休預約失敗' });
+  }
+};
+
+export const postClosureNotifySingleHandler = async (req, res) => {
+  const { date } = req.params;
+  const { booking_ref, message = '' } = req.body || {};
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim()) || !booking_ref) {
+    return res.status(400).json({ error: '請提供有效日期與預約編號' });
+  }
+  const trimmedMsg = message ? String(message).trim() : '';
+  if (trimmedMsg.length > 300) {
+    return res.status(422).json({ error: '公告內容最多 300 個字' });
+  }
+  try {
+    const dateStr = String(date).trim();
+    const dayInfo = await getDayInfo(prisma, dateStr);
+    if (dayInfo.type !== 'closed') {
+      return res.status(409).json({ error: '這天尚未設為公休' });
+    }
+    const rows = await prisma.reservation.findMany({
+      where: { booking_ref: String(booking_ref), session: { session_date: dateOnly(dateStr) } },
+      include: {
+        session: true,
+        user: { select: { id: true, name: true, line_user_id: true } }
+      }
+    });
+    if (rows.length === 0) {
+      return res.status(404).json({ error: '找不到這天的預約' });
+    }
+    const user = rows[0].user;
+    if (!user?.line_user_id || user.line_user_id.startsWith('manual_')) {
+      return res.status(400).json({ error: '此顧客尚未綁定 LINE' });
+    }
+    const timeRange = formatSessionsToTimeRange(rows.map((r) => r.session));
+    const rendered = await dispatchClosureLineNotice(prisma, {
+      booking_ref: String(booking_ref),
+      user,
+      dateStr,
+      timeRange,
+      pax: rows[0].pax,
+      closedNote: dayInfo.closed_note,
+      messageTemplate: trimmedMsg,
+      staffName: req.user?.name || '管理員',
+      staffId: req.user?.id || null,
+      deviceInfo: getAdminDeviceInfo(req)
+    });
+    res.json({ ok: true, booking_ref, message: rendered });
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    console.error('Error sending single closure notice:', err);
+    res.status(500).json({ error: '補發公休通知失敗' });
   }
 };
 

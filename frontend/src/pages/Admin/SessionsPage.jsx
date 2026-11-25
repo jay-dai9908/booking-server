@@ -31,9 +31,27 @@ import {
 import api from '../../api/axios';
 import HourRangeScrollPicker from '../../components/HourRangeScrollPicker';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
+import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench';
 import SelfServiceInfoCard from '../../components/customer/SelfServiceInfoCard';
 import { ironText as buildIronText } from '../../../../shared/selfService.js';
 import { useAdminPermissions } from '../../hooks/admin/useAdminPermissions';
+
+const DEFAULT_CLOSURE_ANNOUNCEMENT =
+  '拾光製所 {日期} 臨時公休，您預約的 {時段}（{人數} 位）已取消。{店家說明}造成不便非常抱歉，如需改約請直接回覆這個 LINE。';
+
+function renderClosurePreview(template, { dateStr, timeRange, pax, closedNote }) {
+  const raw = template && String(template).trim()
+    ? String(template).trim()
+    : DEFAULT_CLOSURE_ANNOUNCEMENT;
+  const noteText = closedNote && String(closedNote).trim()
+    ? `${String(closedNote).trim()}。`
+    : '';
+  return raw
+    .replaceAll('{日期}', dateStr || '')
+    .replaceAll('{時段}', timeRange || '')
+    .replaceAll('{人數}', String(pax ?? ''))
+    .replaceAll('{店家說明}', noteText);
+}
 
 export default function SessionsPage() {
   const { can } = useAdminPermissions();
@@ -104,6 +122,17 @@ export default function SessionsPage() {
   const [ironDate, setIronDate] = useState('');
   const [savingDailySelf, setSavingDailySelf] = useState(false);
   const [dailySelfError, setDailySelfError] = useState('');
+
+  // Closure Impact & Batch Cancel States
+  const [closureImpact, setClosureImpact] = useState(null);
+  const [closureLoading, setClosureLoading] = useState(false);
+  const [selectedClosureRefs, setSelectedClosureRefs] = useState([]);
+  const [showClosureCancelModal, setShowClosureCancelModal] = useState(false);
+  const [closureNotifyLine, setClosureNotifyLine] = useState(true);
+  const [closureAnnouncement, setClosureAnnouncement] = useState(DEFAULT_CLOSURE_ANNOUNCEMENT);
+  const [closureCancelling, setClosureCancelling] = useState(false);
+  const [closureResult, setClosureResult] = useState(null);
+  const [closureCheckoutRef, setClosureCheckoutRef] = useState(null);
 
   // Shared Kiosk/Self-Service Settings (read-only display in SessionsPage; unique editor in KioskPage)
   const [kioskSettings, setKioskSettings] = useState({
@@ -177,6 +206,21 @@ export default function SessionsPage() {
     }
   };
 
+  const fetchClosureImpact = async (date = listDate) => {
+    setClosureLoading(true);
+    try {
+      const res = await api.get(`/daily-settings/${date}/closure-impact`);
+      setClosureImpact(res.data);
+      const directList = res.data?.groups?.direct_cancel || [];
+      setSelectedClosureRefs(directList.map((item) => item.booking_ref));
+    } catch (err) {
+      console.error('Error fetching closure impact:', err);
+      setClosureImpact(null);
+    } finally {
+      setClosureLoading(false);
+    }
+  };
+
   const fetchDailySetting = async (date) => {
     try {
       const res = await api.get(`/daily-settings?date=${date}`);
@@ -193,6 +237,12 @@ export default function SessionsPage() {
       setIronMode(res.data.iron_mode || 'today');
       setIronDate(res.data.iron_date ? String(res.data.iron_date).slice(0, 10) : '');
       setDailySelfError('');
+      setClosureResult(null);
+      if (res.data.day_type === 'closed') {
+        fetchClosureImpact(date);
+      } else {
+        setClosureImpact(null);
+      }
     } catch (err) {
       console.error('Error fetching daily setting:', err);
     }
@@ -273,6 +323,57 @@ export default function SessionsPage() {
       fetchDailySetting(listDate);
     } finally {
       setSavingDailySelf(false);
+    }
+  };
+
+  const handleBatchClosureCancel = async () => {
+    if (selectedClosureRefs.length === 0) return;
+    setClosureCancelling(true);
+    try {
+      const res = await api.post(`/daily-settings/${listDate}/closure/cancel`, {
+        booking_refs: selectedClosureRefs,
+        notify_line: closureNotifyLine,
+        message: closureAnnouncement
+      });
+      setClosureResult(res.data);
+      setShowClosureCancelModal(false);
+      showToast(`已處理 ${res.data?.cancelled?.length || 0} 筆取消`);
+      await fetchClosureImpact(listDate);
+      fetchSessions(listDate);
+    } catch (err) {
+      showToast(err.response?.data?.error || '批次取消失敗');
+    } finally {
+      setClosureCancelling(false);
+    }
+  };
+
+  const handleDownloadClosureCsv = async () => {
+    try {
+      const res = await api.get(`/daily-settings/${listDate}/closure-impact.csv`, {
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv;charset=utf-8;' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `closure-impact-${listDate}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast(err.response?.data?.error || '下載清單失敗');
+    }
+  };
+
+  const handleSingleClosureNotice = async (bookingRef) => {
+    try {
+      await api.post(`/daily-settings/${listDate}/closure/notify`, {
+        booking_ref: bookingRef,
+        message: closureAnnouncement
+      });
+      showToast('已補發公休公告');
+    } catch (err) {
+      showToast(err.response?.data?.error || '補發公告失敗');
     }
   };
 
@@ -1686,6 +1787,235 @@ export default function SessionsPage() {
           >
             {savingDailySelf ? '儲存中...' : `儲存 ${listDate} 日期與營業設定`}
           </button>
+
+          {/* Closure Impact Handling Panel */}
+          {closureImpact?.is_closed && (
+            <div
+              data-testid="closure-impact-panel"
+              className="pt-4 mt-4 border-t border-rose-200 space-y-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-bold text-gray-900">
+                    當天預約處理（{listDate}）
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    {closureLoading ? '載入受影響預約中...' : `共 ${closureImpact.counts?.total || 0} 筆確認中預約`}
+                  </p>
+                </div>
+                {(closureImpact.counts?.need_refund > 0 ||
+                  closureImpact.counts?.pass_deducted > 0 ||
+                  closureImpact.counts?.pending_reconcile > 0) && (
+                  <button
+                    type="button"
+                    data-testid="download-closure-csv-btn"
+                    onClick={handleDownloadClosureCsv}
+                    className="px-3 py-1.5 rounded-xl border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    下載需處理清單
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2">
+                  <div className="text-emerald-700 font-semibold">可以直接取消</div>
+                  <div className="text-lg font-extrabold text-emerald-900" data-testid="impact-count-direct">
+                    {closureImpact.counts?.direct_cancel ?? 0}
+                  </div>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2">
+                  <div className="text-amber-700 font-semibold">需退款</div>
+                  <div className="text-lg font-extrabold text-amber-900" data-testid="impact-count-refund">
+                    {closureImpact.counts?.need_refund ?? 0}
+                  </div>
+                </div>
+                <div className="bg-purple-50 border border-purple-200 rounded-xl p-2">
+                  <div className="text-purple-700 font-semibold">卡券已扣</div>
+                  <div className="text-lg font-extrabold text-purple-900" data-testid="impact-count-pass">
+                    {closureImpact.counts?.pass_deducted ?? 0}
+                  </div>
+                </div>
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-2">
+                  <div className="text-sky-700 font-semibold">半自助待對帳</div>
+                  <div className="text-lg font-extrabold text-sky-900" data-testid="impact-count-pending">
+                    {closureImpact.counts?.pending_reconcile ?? 0}
+                  </div>
+                </div>
+              </div>
+
+              {closureResult && (
+                <div
+                  data-testid="closure-cancel-result"
+                  className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs space-y-1 text-emerald-900"
+                >
+                  <div className="font-bold">
+                    處理結果：已取消 {closureResult.cancelled?.length || 0} 筆、略過 {closureResult.skipped?.length || 0} 筆、失敗 {closureResult.failed?.length || 0} 筆
+                  </div>
+                  {(closureResult.cancelled || []).map((c) => (
+                    <div key={c.booking_ref}>
+                      • {c.user_name}（{c.booking_ref.slice(0, 8)}）：已取消 ·{' '}
+                      {c.line_status === 'sent'
+                        ? '已推播 LINE'
+                        : c.line_status === 'no_line'
+                        ? '沒有 LINE'
+                        : c.line_status === 'failed'
+                        ? `LINE 推播失敗（${c.line_error || ''}）`
+                        : '未推播'}
+                    </div>
+                  ))}
+                  {(closureResult.skipped || []).map((s) => (
+                    <div key={s.booking_ref} className="text-amber-800">
+                      • {s.booking_ref.slice(0, 8)}：已略過（{s.reason}）
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Group 1: Direct Cancel */}
+              {(closureImpact.groups?.direct_cancel || []).length > 0 && (
+                <div className="space-y-2 border border-gray-200 rounded-xl p-3 bg-gray-50/70">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-gray-800">
+                      可以直接取消（沒有有效收款）
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="open-closure-cancel-btn"
+                      disabled={selectedClosureRefs.length === 0}
+                      onClick={() => setShowClosureCancelModal(true)}
+                      className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold disabled:opacity-50"
+                    >
+                      批次取消並推送 LINE 公告 ({selectedClosureRefs.length})
+                    </button>
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {closureImpact.groups.direct_cancel.map((item) => {
+                      const checked = selectedClosureRefs.includes(item.booking_ref);
+                      return (
+                        <label
+                          key={item.booking_ref}
+                          className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-2.5 py-2 text-xs cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              data-testid={`closure-select-${item.booking_ref}`}
+                              checked={checked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedClosureRefs((prev) => [...prev, item.booking_ref]);
+                                } else {
+                                  setSelectedClosureRefs((prev) => prev.filter((r) => r !== item.booking_ref));
+                                }
+                              }}
+                              className="w-4 h-4 accent-[#8B5B43]"
+                            />
+                            <span className="font-bold text-gray-900 truncate">{item.user_name}</span>
+                            <span className="text-gray-500">{item.time_range}（{item.pax} 位）</span>
+                          </div>
+                          <span className={`px-1.5 py-0.5 rounded font-semibold shrink-0 ${item.has_line ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>
+                            {item.has_line ? '可推 LINE' : '無 LINE'}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Group 2: Need Refund */}
+              {(closureImpact.groups?.need_refund || []).length > 0 && (
+                <div className="space-y-2 border border-amber-200 rounded-xl p-3 bg-amber-50/40">
+                  <div className="text-xs font-bold text-amber-900">需退款（請先至結帳工作台退款後再取消）</div>
+                  <div className="space-y-1.5">
+                    {closureImpact.groups.need_refund.map((item) => (
+                      <div key={item.booking_ref} className="flex flex-wrap items-center justify-between gap-2 bg-white border border-amber-200 rounded-lg px-2.5 py-2 text-xs">
+                        <div>
+                          <span className="font-bold text-gray-900">{item.user_name}</span>{' '}
+                          <span className="text-gray-500">{item.time_range}（{item.pax} 位）</span>{' '}
+                          <span className="font-bold text-amber-800">
+                            已收 NT${item.paid_amount}（{(item.payments || []).map((p) => p.method_label).join('、')}）
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setClosureCheckoutRef(item.booking_ref)}
+                            className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold hover:bg-amber-700"
+                          >
+                            結帳／退款
+                          </button>
+                          {item.has_line && (
+                            <button
+                              type="button"
+                              onClick={() => handleSingleClosureNotice(item.booking_ref)}
+                              className="px-2 py-1 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50"
+                            >
+                              補發公告
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Group 3: Pass Deducted */}
+              {(closureImpact.groups?.pass_deducted || []).length > 0 && (
+                <div className="space-y-2 border border-purple-200 rounded-xl p-3 bg-purple-50/40">
+                  <div className="text-xs font-bold text-purple-900">卡券已扣（需先作廢收款退回次數才能取消）</div>
+                  <div className="space-y-1.5">
+                    {closureImpact.groups.pass_deducted.map((item) => (
+                      <div key={item.booking_ref} className="flex flex-wrap items-center justify-between gap-2 bg-white border border-purple-200 rounded-lg px-2.5 py-2 text-xs">
+                        <div>
+                          <span className="font-bold text-gray-900">{item.user_name}</span>{' '}
+                          <span className="text-gray-500">{item.time_range}（{item.pax} 位）</span>{' '}
+                          <span className="text-purple-800 font-semibold">
+                            {(item.passes || []).map((p) => `末4碼 ${p.last4} 扣 ${p.units} 次`).join('、')}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setClosureCheckoutRef(item.booking_ref)}
+                          className="px-2.5 py-1 rounded-lg bg-purple-600 text-white font-bold hover:bg-purple-700"
+                        >
+                          結帳／作廢
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Group 4: Pending Reconcile */}
+              {(closureImpact.groups?.pending_reconcile || []).length > 0 && (
+                <div className="space-y-2 border border-sky-200 rounded-xl p-3 bg-sky-50/40">
+                  <div className="text-xs font-bold text-sky-900">半自助待對帳（需先到對帳區確認實收金額）</div>
+                  <div className="space-y-1.5">
+                    {closureImpact.groups.pending_reconcile.map((item) => (
+                      <div key={item.booking_ref} className="flex flex-wrap items-center justify-between gap-2 bg-white border border-sky-200 rounded-lg px-2.5 py-2 text-xs">
+                        <div>
+                          <span className="font-bold text-gray-900">{item.user_name}</span>{' '}
+                          <span className="text-gray-500">{item.time_range}（{item.pax} 位）</span>{' '}
+                          <span className="text-sky-800 font-semibold">
+                            {item.remittance_last5 ? `末五碼 ${item.remittance_last5}` : item.prepay_status}
+                          </span>
+                        </div>
+                        <Link
+                          to="/admin/reservations"
+                          className="px-2.5 py-1 rounded-lg bg-sky-600 text-white font-bold hover:bg-sky-700"
+                        >
+                          前往對帳
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </form>
 
         {/* Shared Kiosk / Self-Service Settings (Read-only; unique editor is KioskPage) */}
@@ -1869,6 +2199,107 @@ export default function SessionsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Closure Batch Cancel & LINE Announcement Modal */}
+      {showClosureCancelModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          data-testid="closure-cancel-modal"
+        >
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-xl animate-fade-in">
+            <h3 className="text-lg font-bold text-gray-900">
+              批次取消並推送 LINE 公告（{selectedClosureRefs.length} 筆）
+            </h3>
+
+            <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-gray-800">
+              <input
+                type="checkbox"
+                data-testid="closure-notify-checkbox"
+                checked={closureNotifyLine}
+                onChange={(e) => setClosureNotifyLine(e.target.checked)}
+                className="w-4 h-4 accent-[#8B5B43]"
+              />
+              <span>取消成功後同時推送 LINE 公告給有綁定帳號的客人</span>
+            </label>
+
+            {closureNotifyLine && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-semibold text-gray-700">公告文字（可使用 {'{日期}'} {'{時段}'} {'{人數}'} {'{店家說明}'}）</span>
+                    <span className="text-gray-400">{closureAnnouncement.length}/300</span>
+                  </div>
+                  <textarea
+                    rows={4}
+                    maxLength={300}
+                    data-testid="closure-announcement-input"
+                    value={closureAnnouncement}
+                    onChange={(e) => setClosureAnnouncement(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm"
+                  />
+                </div>
+
+                {(() => {
+                  const firstTarget = (closureImpact?.groups?.direct_cancel || []).find((i) =>
+                    selectedClosureRefs.includes(i.booking_ref)
+                  ) || closureImpact?.groups?.direct_cancel?.[0];
+                  const previewText = firstTarget
+                    ? renderClosurePreview(closureAnnouncement, {
+                        dateStr: listDate,
+                        timeRange: firstTarget.time_range,
+                        pax: firstTarget.pax,
+                        closedNote: closureImpact?.closed_note || closedNote
+                      })
+                    : '';
+                  return (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
+                      <div className="text-xs font-bold text-amber-900">
+                        公告預覽{firstTarget ? `（以 ${firstTarget.user_name} 帶入）` : ''}
+                      </div>
+                      <p className="text-xs text-gray-800 whitespace-pre-wrap" data-testid="closure-announcement-preview">
+                        {previewText}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClosureCancelModal(false)}
+                className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-xl"
+              >
+                先不要
+              </button>
+              <button
+                type="button"
+                data-testid="closure-cancel-submit-btn"
+                disabled={closureCancelling}
+                onClick={handleBatchClosureCancel}
+                className="px-5 py-2 text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs disabled:opacity-50"
+              >
+                {closureCancelling ? '處理中...' : '確認取消'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {closureCheckoutRef && (
+        <CheckoutWorkbench
+          isOpen={Boolean(closureCheckoutRef)}
+          bookingRef={closureCheckoutRef}
+          onClose={() => {
+            setClosureCheckoutRef(null);
+            fetchClosureImpact(listDate);
+          }}
+          onPaymentSuccess={() => {
+            fetchClosureImpact(listDate);
+          }}
+        />
       )}
     </div>
   );
