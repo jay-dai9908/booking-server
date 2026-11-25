@@ -81,6 +81,10 @@ export default function ShopAdminPage() {
   const [wishReplyOrder, setWishReplyOrder] = useState(null);
   const [wishReplyText, setWishReplyText] = useState('');
 
+  const [releasePoolOrder, setReleasePoolOrder] = useState(null);
+  const [releasePoolNote, setReleasePoolNote] = useState('');
+  const [releasingPool, setReleasingPool] = useState(false);
+
   const [arrivalDateOrder, setArrivalDateOrder] = useState(null);
   const [arrivalDateText, setArrivalDateText] = useState('');
   const [showPickingModal, setShowPickingModal] = useState(false);
@@ -314,6 +318,27 @@ export default function ShopAdminPage() {
         }
       }
     });
+  };
+
+  const handleConfirmReleasePool = async (e) => {
+    e.preventDefault();
+    if (!releasePoolOrder || !releasePoolNote.trim()) return;
+    setReleasingPool(true);
+    try {
+      const res = await api.post(`/shop/admin/orders/${releasePoolOrder.id}/release-account`, {
+        note: releasePoolNote.trim()
+      });
+      showToast(res.data?.message || '已釋放收款帳號回帳號池', 'success');
+      setReleasePoolOrder(null);
+      setReleasePoolNote('');
+      fetchAdminOrders();
+      fetchAccountPool();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+    } catch (err) {
+      showToast('釋放收款帳號失敗：' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setReleasingPool(false);
+    }
   };
 
   // Payments & Account Pool handlers
@@ -1204,6 +1229,15 @@ export default function ShopAdminPage() {
                                       ? '已報待對帳'
                                       : '待繳訂金'}
                             </span>
+
+                            {order.order_status === 'cancelled' && order.has_held_pool_account && (
+                              <span
+                                data-testid={`shop-held-pool-badge-${order.id}`}
+                                className="mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold block w-fit bg-amber-100 text-amber-800 border border-amber-200"
+                              >
+                                帳號保留中（已回報匯款）
+                              </span>
+                            )}
                           </td>
 
                           <td className="p-3 text-right whitespace-nowrap space-x-1">
@@ -1312,6 +1346,20 @@ export default function ShopAdminPage() {
                               >
                                 <X className="w-3.5 h-3.5" />
                                 <span>取消</span>
+                              </button>
+                            )}
+
+                            {order.order_status === 'cancelled' && order.has_held_pool_account && (
+                              <button
+                                type="button"
+                                data-testid={`shop-release-pool-btn-${order.id}`}
+                                onClick={() => {
+                                  setReleasePoolOrder(order);
+                                  setReleasePoolNote('');
+                                }}
+                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
+                              >
+                                <span>確認沒有入帳，釋放帳號</span>
                               </button>
                             )}
                           </td>
@@ -2982,6 +3030,54 @@ export default function ShopAdminPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {releasePoolOrder && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleConfirmReleasePool}
+            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-4"
+          >
+            <div>
+              <h3 className="text-base font-bold text-[#3E332B]">確認沒有入帳，釋放帳號</h3>
+              <p className="text-xs text-[#6D5D52] mt-1">
+                訂單 #{releasePoolOrder.order_ref} 已取消但仍保留專屬收款帳號（{releasePoolOrder.assigned_pool_account}）。請先查明銀行明細確認未收到此筆匯款後再釋放回帳號池。
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-[#3E332B] mb-1">
+                查帳確認說明（必填）
+              </label>
+              <textarea
+                rows={3}
+                required
+                data-testid="shop-release-pool-note"
+                value={releasePoolNote}
+                onChange={(e) => setReleasePoolNote(e.target.value)}
+                placeholder="例如：已核對網銀明細，確認無末五碼匯入"
+                className="w-full rounded-xl border border-[#E8DEC8] px-3 py-2 text-sm focus:outline-none focus:border-[#8B5B43]"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={releasingPool}
+                onClick={() => setReleasePoolOrder(null)}
+                className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                data-testid="shop-release-pool-submit"
+                disabled={releasingPool || !releasePoolNote.trim()}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold disabled:opacity-50"
+              >
+                {releasingPool ? '釋放中...' : '確認沒有入帳，釋放帳號'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

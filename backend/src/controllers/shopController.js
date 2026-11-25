@@ -454,8 +454,21 @@ export const getAdminProductOrders = async (req, res) => {
       prisma.productOrder.count({ where: whereClause })
     ]);
 
+    const orderRefs = orders.map((o) => o.order_ref).filter(Boolean);
+    const heldAccounts = orderRefs.length > 0
+      ? await prisma.oneTimeAccountPool.findMany({
+          where: { assigned_order_ref: { in: orderRefs }, status: 'ASSIGNED' },
+          select: { assigned_order_ref: true }
+        })
+      : [];
+    const heldOrderRefSet = new Set(heldAccounts.map((a) => a.assigned_order_ref));
+    const ordersWithHold = orders.map((o) => ({
+      ...o,
+      has_held_pool_account: Boolean(o.assigned_pool_account) && heldOrderRefSet.has(o.order_ref)
+    }));
+
     res.json({
-      orders,
+      orders: ordersWithHold,
       totalCount,
       page: pageNum,
       totalPages: Math.ceil(totalCount / take)
@@ -622,10 +635,13 @@ export const updateAdminOrder = async (req, res) => {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      // If order transitioned to cancelled, release any assigned pool account back to AVAILABLE
+      // 僅待付款（pending_payment）才在取消時自動釋放帳號池；已回報匯款/已付款之取消維持綁定，由店員查無入帳後手動釋放
       if (order_status === 'cancelled' && order.order_status !== 'cancelled') {
-        if (order.assigned_pool_account) {
-          await releasePoolAccount(tx, { accountNumber: order.assigned_pool_account });
+        if (order.assigned_pool_account && order.payment_status === 'pending_payment') {
+          await releasePoolAccount(tx, {
+            accountNumber: order.assigned_pool_account,
+            orderRef: order.order_ref
+          });
         }
       }
 
@@ -699,6 +715,80 @@ export const updateAdminOrder = async (req, res) => {
     console.error('updateAdminOrder error:', error);
     if (error.status) return res.status(error.status).json({ error: error.message });
     res.status(500).json({ error: '更新訂單失敗' });
+  }
+};
+
+/**
+ * Admin: Manually release held pool account from a cancelled order after verifying no incoming remittance
+ */
+export const releaseOrderPoolAccount = async (req, res) => {
+  const orderId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ error: '訂單編號格式不正確' });
+  }
+  const cleanNote = String(req.body?.note || '').trim();
+  if (!cleanNote) {
+    return res.status(422).json({ error: '請填寫查帳無入帳之釋放說明' });
+  }
+
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  try {
+    const txResult = await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw`
+        SELECT id, order_ref, order_status, payment_status, assigned_pool_account
+        FROM "ProductOrder"
+        WHERE id = ${orderId}
+        FOR UPDATE
+      `;
+      const order = locked?.[0];
+      if (!order) {
+        return { errorStatus: 404, errorBody: { error: '找不到該筆訂單' } };
+      }
+      if (order.order_status !== 'cancelled') {
+        return { errorStatus: 409, errorBody: { error: '僅已取消的訂單可手動釋放收款帳號' } };
+      }
+      if (!order.assigned_pool_account) {
+        return { errorStatus: 409, errorBody: { error: '此訂單沒有綁定收款帳號' } };
+      }
+
+      const released = await releasePoolAccount(tx, {
+        accountNumber: order.assigned_pool_account,
+        orderRef: order.order_ref
+      });
+      if (!released || released.count === 0) {
+        return { errorStatus: 409, errorBody: { error: '此訂單的收款帳號已釋放或已入帳' } };
+      }
+
+      const last4 = String(order.assigned_pool_account).slice(-4);
+      await auditService.log(tx, {
+        booking_ref: order.order_ref,
+        event_type: 'pool_account_released',
+        category: 'shop',
+        summary: `手動釋放訂單 #${order.order_ref} 保留中帳號末四碼 ${last4}`,
+        reason: cleanNote,
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      return { ok: true, order_ref: order.order_ref, account_last4: last4 };
+    });
+
+    if (txResult.errorStatus) {
+      return res.status(txResult.errorStatus).json(txResult.errorBody);
+    }
+
+    return res.json({
+      message: `已確認無入帳並釋放帳號（末四碼 ${txResult.account_last4}）回帳號池`,
+      ...txResult
+    });
+  } catch (error) {
+    console.error('releaseOrderPoolAccount error:', error);
+    return res.status(500).json({ error: '釋放收款帳號失敗' });
   }
 };
 

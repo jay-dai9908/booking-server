@@ -82,20 +82,20 @@ export async function assignPoolAccount(
 }
 
 /**
- * 將 ASSIGNED 的虛擬帳號釋放回 AVAILABLE
+ * 將 ASSIGNED 的虛擬帳號釋放回 AVAILABLE（必填 orderRef，避免誤釋放其他訂單帳號）
  */
-export async function releasePoolAccount(tx, { accountNumber, orderRef = null }) {
+export async function releasePoolAccount(tx, { accountNumber, orderRef }) {
+  if (!orderRef || !String(orderRef).trim()) {
+    throw new Error('releasePoolAccount requires orderRef');
+  }
   if (!accountNumber) return { count: 0 };
   const client = tx || prisma;
-  const where = {
-    account_number: accountNumber,
-    status: 'ASSIGNED'
-  };
-  if (orderRef) {
-    where.assigned_order_ref = orderRef;
-  }
   return client.oneTimeAccountPool.updateMany({
-    where,
+    where: {
+      account_number: accountNumber,
+      assigned_order_ref: String(orderRef).trim(),
+      status: 'ASSIGNED'
+    },
     data: {
       status: 'AVAILABLE',
       assigned_order_ref: null,
@@ -106,20 +106,20 @@ export async function releasePoolAccount(tx, { accountNumber, orderRef = null })
 }
 
 /**
- * 對帳確認後將虛擬帳號標記為 USED
+ * 對帳確認後將虛擬帳號標記為 USED（必填 orderRef，避免誤標其他訂單帳號）
  */
-export async function markPoolAccountUsed(tx, { accountNumber, orderRef = null }) {
+export async function markPoolAccountUsed(tx, { accountNumber, orderRef }) {
+  if (!orderRef || !String(orderRef).trim()) {
+    throw new Error('markPoolAccountUsed requires orderRef');
+  }
   if (!accountNumber) return { count: 0 };
   const client = tx || prisma;
-  const where = {
-    account_number: accountNumber,
-    status: 'ASSIGNED'
-  };
-  if (orderRef) {
-    where.assigned_order_ref = orderRef;
-  }
   return client.oneTimeAccountPool.updateMany({
-    where,
+    where: {
+      account_number: accountNumber,
+      assigned_order_ref: String(orderRef).trim(),
+      status: 'ASSIGNED'
+    },
     data: {
       status: 'USED',
       verified_at: new Date()

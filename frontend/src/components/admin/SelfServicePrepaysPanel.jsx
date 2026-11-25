@@ -47,6 +47,10 @@ export default function SelfServicePrepaysPanel({ onCountsChange, onToast }) {
   const [overpaidRefundNote, setOverpaidRefundNote] = useState('');
   const [submittingOverpaidRefund, setSubmittingOverpaidRefund] = useState(false);
 
+  const [releasePoolTarget, setReleasePoolTarget] = useState(null);
+  const [releasePoolNote, setReleasePoolNote] = useState('');
+  const [releasingPool, setReleasingPool] = useState(false);
+
   const [remindingRef, setRemindingRef] = useState(null);
 
   const notify = (msg) => {
@@ -169,6 +173,27 @@ export default function SelfServicePrepaysPanel({ onCountsChange, onToast }) {
       notify(err.response?.data?.error || '發送提醒失敗');
     } finally {
       setRemindingRef(null);
+    }
+  };
+
+  const handleSubmitReleasePool = async (e) => {
+    e.preventDefault();
+    if (!releasePoolTarget || !releasePoolNote.trim()) return;
+    setReleasingPool(true);
+    try {
+      const res = await api.post(
+        `/reservations/admin/prepays/${releasePoolTarget.booking_ref}/release-account`,
+        { note: releasePoolNote.trim() }
+      );
+      notify(res.data?.message || '已釋放收款帳號回帳號池');
+      setReleasePoolTarget(null);
+      setReleasePoolNote('');
+      await fetchPrepays();
+      window.dispatchEvent(new CustomEvent('admin-data-updated'));
+    } catch (err) {
+      notify(err.response?.data?.error || '釋放收款帳號失敗');
+    } finally {
+      setReleasingPool(false);
     }
   };
 
@@ -342,11 +367,28 @@ export default function SelfServicePrepaysPanel({ onCountsChange, onToast }) {
                           多收 NT${item.overpaid_amount.toLocaleString()}，待退還
                         </div>
                       )}
+                      {(item.status === 'cancelled' || item.status === 'expired') && item.has_held_pool_account && (
+                        <div className="text-amber-800 font-bold pt-0.5">
+                          帳號保留中（已回報匯款）
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between gap-2 pt-1">
                       <span className="font-mono text-[11px] text-gray-400">{formatBookingRef(item.booking_ref)}</span>
                       <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                        {(item.status === 'cancelled' || item.status === 'expired') && item.has_held_pool_account && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReleasePoolTarget(item);
+                              setReleasePoolNote('');
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold"
+                          >
+                            確認沒有入帳，釋放帳號
+                          </button>
+                        )}
                         {canAct(item.status) && (
                           <>
                             <button
@@ -497,10 +539,31 @@ export default function SelfServicePrepaysPanel({ onCountsChange, onToast }) {
                                 已退還多收 NT${item.overpaid_amount.toLocaleString()}
                               </span>
                             )}
+                            {(item.status === 'cancelled' || item.status === 'expired') && item.has_held_pool_account && (
+                              <span
+                                data-testid={`prepay-held-pool-badge-${item.booking_ref}`}
+                                className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200"
+                              >
+                                帳號保留中（已回報匯款）
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="inline-flex items-center gap-1.5">
+                            {(item.status === 'cancelled' || item.status === 'expired') && item.has_held_pool_account && (
+                              <button
+                                type="button"
+                                data-testid={`prepay-release-pool-btn-${item.booking_ref}`}
+                                onClick={() => {
+                                  setReleasePoolTarget(item);
+                                  setReleasePoolNote('');
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold"
+                              >
+                                確認沒有入帳，釋放帳號
+                              </button>
+                            )}
                             {canAct(item.status) && (
                               <>
                                 <button
@@ -704,6 +767,55 @@ export default function SelfServicePrepaysPanel({ onCountsChange, onToast }) {
                 className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold disabled:opacity-50"
               >
                 {submittingOverpaidRefund ? '儲存中...' : '確認已退還'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Release Held Pool Account Modal */}
+      {releasePoolTarget && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSubmitReleasePool}
+            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-4"
+          >
+            <div>
+              <h3 className="text-base font-bold text-gray-900">確認沒有入帳，釋放帳號</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                {releasePoolTarget.user_name} · {formatBookingRef(releasePoolTarget.booking_ref)}（帳號 {releasePoolTarget.assigned_pool_account}）
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                查帳確認說明（必填）
+              </label>
+              <textarea
+                rows={3}
+                required
+                data-testid="prepay-release-pool-note"
+                value={releasePoolNote}
+                onChange={(e) => setReleasePoolNote(e.target.value)}
+                placeholder="例如：已核對網銀明細，確認無匯款入帳"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sg-brown"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={releasingPool}
+                onClick={() => setReleasePoolTarget(null)}
+                className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                data-testid="prepay-release-pool-submit"
+                disabled={releasingPool || !releasePoolNote.trim()}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold disabled:opacity-50"
+              >
+                {releasingPool ? '釋放中...' : '確認沒有入帳，釋放帳號'}
               </button>
             </div>
           </form>

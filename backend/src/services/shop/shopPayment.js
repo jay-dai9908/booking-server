@@ -182,7 +182,10 @@ export async function applyShopOrderPayment({
     }
 
     if (markPoolUsed && order.assigned_pool_account) {
-      await markPoolAccountUsed(tx, { accountNumber: order.assigned_pool_account });
+      await markPoolAccountUsed(tx, {
+        accountNumber: order.assigned_pool_account,
+        orderRef: order.order_ref
+      });
     }
 
     const orderUser = await tx.user.findUnique({

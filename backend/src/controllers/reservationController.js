@@ -1674,8 +1674,8 @@ async function cancelReservationCore(req, res, { actor }) {
           }
           await refreshBillingCache(tx, booking_ref);
         } else {
-          // Release held pool account if any
-          if (lockedPrepay.assigned_pool_account) {
+          // 只有待付款（尚未回報末五碼）才在取消時直接放回帳號池；已回報/不符/已付款保留綁定以便對帳排查
+          if (lockedPrepay.assigned_pool_account && lockedPrepay.status === 'pending_payment') {
             await releasePoolAccount(tx, {
               accountNumber: lockedPrepay.assigned_pool_account,
               orderRef: booking_ref

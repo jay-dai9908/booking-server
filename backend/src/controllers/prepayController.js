@@ -5,7 +5,7 @@ import { getEffectiveDailyRates } from './reservationController.js';
 import { getBookingBill } from '../services/billing/billService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { log as auditLog } from '../services/audit/auditService.js';
-import { markPoolAccountUsed } from '../services/selfService/poolAccountService.js';
+import { markPoolAccountUsed, releasePoolAccount } from '../services/selfService/poolAccountService.js';
 import {
   sendSelfServiceVerifiedNotification,
   sendSelfServiceMismatchNotification,
@@ -252,7 +252,7 @@ export const getAdminPrepaysHandler = async (req, res) => {
     const methodMap = new Map(methodConfigs.map((m) => [m.code, m.name]));
     const refs = prepays.map((p) => p.booking_ref);
 
-    const [reservations, equipments] = refs.length
+    const [reservations, equipments, heldAccounts] = refs.length
       ? await Promise.all([
           prisma.reservation.findMany({
             where: { booking_ref: { in: refs } },
@@ -266,9 +266,15 @@ export const getAdminPrepaysHandler = async (req, res) => {
           }),
           prisma.bookingEquipment.findMany({
             where: { booking_ref: { in: refs } }
+          }),
+          prisma.oneTimeAccountPool.findMany({
+            where: { assigned_order_ref: { in: refs }, status: 'ASSIGNED' },
+            select: { assigned_order_ref: true }
           })
         ])
-      : [[], []];
+      : [[], [], []];
+
+    const heldRefSet = new Set(heldAccounts.map((a) => a.assigned_order_ref));
 
     const resByRef = new Map();
     for (const r of reservations) {
@@ -337,6 +343,7 @@ export const getAdminPrepaysHandler = async (req, res) => {
           : '銀行匯款',
         selected_bank_info: p.selected_bank_info,
         assigned_pool_account: p.assigned_pool_account,
+        has_held_pool_account: Boolean(p.assigned_pool_account) && heldRefSet.has(p.booking_ref),
         remittance_last5: p.remittance_last5,
         remittance_reported_at: p.remittance_reported_at,
         deadline_at: p.deadline_at,
@@ -814,5 +821,70 @@ export const remindAdminPrepayHandler = async (req, res) => {
   } catch (err) {
     console.error('[prepayController] remindAdminPrepay error:', err);
     res.status(500).json({ error: '發送匯款提醒失敗' });
+  }
+};
+
+/**
+ * 後台：手動釋放已取消/逾期預約仍保留中（已回報匯款後取消）的一次性收款帳號
+ */
+export const releasePrepayPoolAccountHandler = async (req, res) => {
+  const { booking_ref } = req.params;
+  const cleanNote = String(req.body?.note || '').trim();
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  if (!cleanNote) {
+    return res.status(422).json({ error: '請填寫查帳無入帳之釋放說明' });
+  }
+
+  try {
+    const txResult = await prisma.$transaction(async (tx) => {
+      const prepay = await lockPrepay(tx, booking_ref);
+      if (!prepay) {
+        return { errorStatus: 404, errorBody: { error: '找不到這筆預付紀錄' } };
+      }
+      if (prepay.status !== 'cancelled' && prepay.status !== 'expired') {
+        return { errorStatus: 409, errorBody: { error: '僅已取消或逾期的預約可手動釋放收款帳號' } };
+      }
+      if (!prepay.assigned_pool_account) {
+        return { errorStatus: 409, errorBody: { error: '此筆預約沒有綁定收款帳號' } };
+      }
+
+      const released = await releasePoolAccount(tx, {
+        accountNumber: prepay.assigned_pool_account,
+        orderRef: prepay.booking_ref
+      });
+      if (!released || released.count === 0) {
+        return { errorStatus: 409, errorBody: { error: '此筆預約的收款帳號已釋放或已入帳' } };
+      }
+
+      const last4 = String(prepay.assigned_pool_account).slice(-4);
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'pool_account_released',
+        category: 'prepay',
+        summary: `手動釋放半自助預約 ${booking_ref} 保留中帳號末四碼 ${last4}`,
+        reason: cleanNote,
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id,
+        device_label: deviceInfo?.device_label
+      });
+
+      return { ok: true, booking_ref, account_last4: last4 };
+    });
+
+    if (txResult.errorStatus) {
+      return res.status(txResult.errorStatus).json(txResult.errorBody);
+    }
+
+    return res.json({
+      message: `已確認無入帳並釋放帳號（末四碼 ${txResult.account_last4}）回帳號池`,
+      ...txResult
+    });
+  } catch (err) {
+    console.error('[prepayController] releasePrepayPoolAccount error:', err);
+    return res.status(500).json({ error: '釋放收款帳號失敗' });
   }
 };
