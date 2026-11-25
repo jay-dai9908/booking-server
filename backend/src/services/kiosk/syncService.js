@@ -6,6 +6,8 @@ import { ensureKioskSetting } from '../selfService/prepayService.js';
 import { getActiveLayoutForDate } from '../seating/layoutService.js';
 import { buildFloorMap } from '../../../../shared/floorMap.js';
 import { notifyBackupCodeUsed, resolveEventTime, sendKioskAlertMessage } from './alertService.js';
+import { getDayInfoRange } from '../calendar/dayType.js';
+import { bookableSessionWhere } from '../calendar/sessionFilters.js';
 
 export function addDaysYmd(ymd, offsetDays) {
   const [y, m, d] = String(ymd).split('-').map(Number);
@@ -22,16 +24,18 @@ export async function buildSevenDaysSchedule(db = prisma, now = new Date()) {
   const todayStr = toTaipeiDateString(now);
   const dateStrs = Array.from({ length: 7 }, (_, i) => addDaysYmd(todayStr, i));
   const dateObjs = dateStrs.map((s) => dateOnly(s));
+  const lastStr = dateStrs[dateStrs.length - 1];
 
-  const [sessions, dailySettings] = await Promise.all([
+  const [sessions, dailySettings, dayInfoMap] = await Promise.all([
     db.session.findMany({
-      where: { session_date: { in: dateObjs } },
+      where: { session_date: { in: dateObjs }, ...bookableSessionWhere() },
       select: { session_date: true, start_time: true, end_time: true }
     }),
     db.dailySetting.findMany({
       where: { date: { in: dateObjs } },
       select: { date: true, is_self_service: true, iron_mode: true, iron_date: true }
-    })
+    }),
+    getDayInfoRange(db, todayStr, lastStr)
   ]);
 
   const sessionsByDate = new Map();
@@ -48,8 +52,9 @@ export async function buildSevenDaysSchedule(db = prisma, now = new Date()) {
   return dateStrs.map((dateStr) => {
     const daySessions = sessionsByDate.get(dateStr) || [];
     const setting = settingByDate.get(dateStr) || null;
+    const dayInfo = dayInfoMap.get(dateStr);
 
-    if (daySessions.length === 0) {
+    if (dayInfo?.type === 'closed' || daySessions.length === 0) {
       return {
         date: dateStr,
         mode: 'closed',
@@ -64,15 +69,15 @@ export async function buildSevenDaysSchedule(db = prisma, now = new Date()) {
     const open = sortedStarts[0];
     const close = sortedEnds[sortedEnds.length - 1];
 
-    if (setting?.is_self_service) {
+    if (dayInfo?.type === 'self' || setting?.is_self_service) {
       return {
         date: dateStr,
         mode: 'self',
         open,
         close,
         iron_text: ironText({
-          iron_mode: setting.iron_mode || 'today',
-          iron_date: setting.iron_date,
+          iron_mode: setting?.iron_mode || 'today',
+          iron_date: setting?.iron_date,
           date: dateStr,
           today: dateStr
         })

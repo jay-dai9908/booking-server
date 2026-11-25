@@ -8,6 +8,7 @@ import { reseatBookings } from '../seating/allocator.js';
 import { applyCheckInRecords } from '../floor/checkInService.js';
 import { sendSelfServiceFirstCheckinNotification } from '../../utils/lineMessaging.js';
 import { activeUserWhere } from '../../utils/userQuery.js';
+import { getDayInfo } from '../calendar/dayType.js';
 
 export function isBookingClearedForEntry(firstRes, prepay) {
   if (!firstRes) return false;
@@ -149,8 +150,116 @@ export async function processKioskAccess(db = prisma, {
   const todayStr = toTaipeiDateString(now);
   const todayDate = dateOnly(todayStr);
 
+  const [dayInfo, dailySetting] = await Promise.all([
+    getDayInfo(db, todayStr),
+    db.dailySetting.findUnique({ where: { date: todayDate } })
+  ]);
+
+  // 0. 今天是公休日（含手動臨時公休）-> 一律不開門：
+  // 選 ENDED 回應有預約者而非 NORMAL_DAY/NOT_FOUND/其他代碼的原因：
+  //   - NORMAL_DAY 畫面會叫客人「目前為一般營業時段，可直接入場」，不能用。
+  //   - NOT_FOUND 對有效預約訊息錯誤，且輸入電話會累積錯碼次數並鎖定鍵盤。
+  //   - UNVERIFIED（款項核對中）、TOO_EARLY、QR_EXPIRED 語意都不符。
+  //   - 協定只有 ENDED 語意最接近「今天不能再進場」、open_door: false，且畫面提供 LINE 客服按鈕供客人聯絡店家。
+  if (dayInfo.type === 'closed') {
+    if (cleanMethod === 'qr') {
+      if (!parsedQr) return finish('NOT_FOUND', false);
+    } else if (cleanMethod === 'phone') {
+      if (!/^09\d{8}$/.test(rawPayload)) return finish('NOT_FOUND', false);
+    } else {
+      return finish('NOT_FOUND', false);
+    }
+
+    const [kioskSetting, allDaySessions] = await Promise.all([
+      ensureKioskSetting(db),
+      db.session.findMany({
+        where: { session_date: todayDate },
+        select: { id: true, start_time: true, end_time: true },
+        orderBy: { start_time: 'asc' }
+      })
+    ]);
+    const earlyMinutes = kioskSetting?.early_minutes ?? 30;
+    const until = allDaySessions.length > 0
+      ? allDaySessions.reduce((mx, s) => (s.end_time > mx ? s.end_time : mx), '')
+      : '21:00';
+    const closedIronStr = dailySetting?.iron_mode
+      ? ironText({
+          iron_mode: dailySetting.iron_mode || 'today',
+          iron_date: dailySetting.iron_date,
+          date: todayStr,
+          today: todayStr
+        })
+      : '';
+
+    let closedGroup = null;
+    if (cleanMethod === 'qr') {
+      const prefix = bookingRefPrefix(parsedQr.entry);
+      const matchingRows = await db.reservation.findMany({
+        where: {
+          status: 'confirmed',
+          booking_ref: { startsWith: prefix },
+          session: { session_date: todayDate }
+        },
+        include: {
+          session: true,
+          user: { select: { id: true, name: true, phone: true, line_user_id: true } }
+        },
+        orderBy: { session: { start_time: 'asc' } }
+      });
+      if (matchingRows.length === 0) {
+        return finish('NOT_FOUND', false);
+      }
+      const groups = groupReservationsByRef(matchingRows);
+      closedGroup = Array.from(groups.values())[0];
+      const targetRef = closedGroup[0].booking_ref;
+      const qrKey = qrKeyFrom(process.env.JWT_SECRET);
+      const macStatus = verifyQrMac(qrKey, targetRef, parsedQr.mac, Math.floor(now.getTime() / 1000));
+      if (macStatus !== 'ok') {
+        return finish('QR_EXPIRED', false, undefined, {
+          bookingRef: targetRef,
+          userId: closedGroup[0].user_id
+        });
+      }
+    } else {
+      const matchingRows = await db.reservation.findMany({
+        where: {
+          status: 'confirmed',
+          user: activeUserWhere({ phone: rawPayload }),
+          session: { session_date: todayDate }
+        },
+        include: {
+          session: true,
+          user: { select: { id: true, name: true, phone: true, line_user_id: true } }
+        },
+        orderBy: { session: { start_time: 'asc' } }
+      });
+      if (matchingRows.length === 0) {
+        return finish('NOT_FOUND', false);
+      }
+      const groups = groupReservationsByRef(matchingRows);
+      closedGroup = Array.from(groups.values())[0];
+    }
+
+    const firstClosedRes = closedGroup[0];
+    const start = firstClosedRes.session.start_time;
+    const openAt = earliestEntry(start, earlyMinutes);
+    return finish(
+      'ENDED',
+      false,
+      buildBookingBody({
+        user: firstClosedRes.user,
+        pax: firstClosedRes.pax,
+        start,
+        openAt,
+        until,
+        ironStr: closedIronStr,
+        includeSeats: false
+      }),
+      { bookingRef: firstClosedRes.booking_ref, userId: firstClosedRes.user_id }
+    );
+  }
+
   // 1. 今天不是半自助日 -> NORMAL_DAY
-  const dailySetting = await db.dailySetting.findUnique({ where: { date: todayDate } });
   if (!dailySetting?.is_self_service) {
     return finish('NORMAL_DAY', false);
   }
