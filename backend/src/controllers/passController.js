@@ -129,7 +129,8 @@ export const grantUserPass = async (req, res) => {
       }
 
       const result = await prisma.$transaction(async (tx) => {
-        await assertEnabledPaymentMethod(tx, normalizedMethod);
+        const matchedMethod = await assertEnabledPaymentMethod(tx, normalizedMethod);
+        const canonicalMethod = matchedMethod.key;
 
         const defaultPlan = plan || await tx.passPlan.findFirst();
         if (!defaultPlan) {
@@ -180,9 +181,9 @@ export const grantUserPass = async (req, res) => {
             source_ref: passCode,
             kind: 'charge',
             status: 'valid',
-            method: normalizedMethod,
+            method: canonicalMethod,
             amount: rawAmount,
-            cash_received: normalizedMethod === 'cash' ? providedCash : null,
+            cash_received: canonicalMethod === 'cash' ? providedCash : null,
             change_given: changeGiven,
             person_nos: [],
             breakdown_json: {
@@ -209,7 +210,7 @@ export const grantUserPass = async (req, res) => {
           booking_ref: passCode,
           event_type: 'pass_sold',
           category: 'payment',
-          summary: `販售卡券 ${planName}（${passCode}）· ${normalizedMethod === 'cash' ? '現金' : normalizedMethod} NT$${rawAmount}`,
+          summary: `販售卡券 ${planName}（${passCode}）· ${canonicalMethod === 'cash' ? '現金' : canonicalMethod} NT$${rawAmount}`,
           amount: rawAmount,
           payment_id: pay.id,
           reason: trimmedReason || null,
@@ -220,7 +221,7 @@ export const grantUserPass = async (req, res) => {
             total_quota: totalQuota,
             expires_at: expiresAt ? expiresAt.toISOString() : null,
             amount: rawAmount,
-            method: normalizedMethod
+            method: canonicalMethod
           },
           staff_name: staffName,
           staff_id: staffId,

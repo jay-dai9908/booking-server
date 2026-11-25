@@ -33,6 +33,7 @@ import CheckoutWorkbench from '../../components/admin/checkout/CheckoutWorkbench
 import ReservationDetailsModal from '../../components/ReservationDetailsModal';
 import { printJobOnThisDevice, isPrintGloballyEnabled } from '../../utils/sunmiPrinter';
 import { buildClosingSlip, commandsToPreviewHtml } from '@shared/receipts.js';
+import { methodLabel } from '@shared/paymentMethods.js';
 import { toTaipeiDateString } from '@shared/time.js';
 import { formatBookingRef } from '../../utils/admin/floorSelectors';
 import { formatMoney, formatMinus } from '../../utils/format';
@@ -416,7 +417,8 @@ export default function AccountingPage() {
           left_in_drawer: leftNum,
           difference: diff,
           totals_json: closingPreview
-        }
+        },
+        { paymentMethods: closingPreview.methods || summary?.methods || [] }
       );
       setClosingSlipHtml(commandsToPreviewHtml(cmds));
       setShowClosingPreviewModal(true);
@@ -425,19 +427,29 @@ export default function AccountingPage() {
     }
   };
 
-  // Format payment method
-  const getMethodLabel = (m) => {
-    switch (m) {
-      case 'cash': return '現金';
-      case 'line_pay': return 'LINE Pay';
-      case 'jkopay': return '街口支付';
-      case 'card': return '刷卡';
-      case 'transfer': return '銀行轉帳';
-      case 'pass': return '卡券折抵';
-      case 'other': return '其他';
-      default: return m || '其他';
-    }
-  };
+  // Format payment method label dynamically from summary/closing methods
+  const configuredMethods = useMemo(() => {
+    return summary?.methods || closingPreview?.methods || [];
+  }, [summary?.methods, closingPreview?.methods]);
+
+  const visibleSummaryMethods = useMemo(() => {
+    return (summary?.methods || []).filter(
+      (m) => m.enabled || m.count > 0 || m.amount !== 0 || m.refund_count > 0
+    );
+  }, [summary?.methods]);
+
+  const formatPaymentMethod = (m) => methodLabel(m, configuredMethods) || '其他';
+
+  const paymentFilterOptions = useMemo(() => {
+    return visibleSummaryMethods.length > 0
+      ? visibleSummaryMethods.map((m) => ({ key: m.key, label: m.label || methodLabel(m.key, configuredMethods) }))
+      : [
+          { key: 'cash', label: '現金' },
+          { key: 'linepay', label: 'LINE Pay' },
+          { key: 'card', label: '刷卡' },
+          { key: 'transfer', label: '銀行轉帳' }
+        ];
+  }, [visibleSummaryMethods, configuredMethods]);
 
   // Quick date chips handlers
   const handleDatePreset = (preset) => {
@@ -835,28 +847,25 @@ export default function AccountingPage() {
             )}
           </div>
 
-          {/* Payment Method Breakdown Cards */}
+          {/* Payment Method Breakdown Cards (dynamic configured methods + separate pass deduction) */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {visibleSummaryMethods.map((m) => (
+              <div key={m.key} className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
+                <span className="text-sg-muted text-[11px] block">
+                  {m.label || formatPaymentMethod(m.key)}（{m.count || 0} 筆）
+                </span>
+                <span className="text-[18px] font-bold text-sg-ink font-num">
+                  {formatMoney(m.amount || 0)}
+                </span>
+                {(m.refund_count || 0) > 0 && (
+                  <span className="text-[11px] text-sg-danger block mt-0.5 font-num">
+                    退款 {m.refund_count} 筆（{formatMinus(m.refund_amount || 0)}）
+                  </span>
+                )}
+              </div>
+            ))}
             <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
-              <span className="text-sg-muted text-[11px] block">現金實收</span>
-              <span className="text-[18px] font-bold text-sg-ink font-num">
-                {formatMoney(summary?.by_method?.cash?.amount || 0)}
-              </span>
-            </div>
-            <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
-              <span className="text-sg-muted text-[11px] block">LINE Pay</span>
-              <span className="text-[18px] font-bold text-sg-ink font-num">
-                {formatMoney(summary?.by_method?.line_pay?.amount || 0)}
-              </span>
-            </div>
-            <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
-              <span className="text-sg-muted text-[11px] block">刷卡 / 轉帳</span>
-              <span className="text-[18px] font-bold text-sg-ink font-num">
-                {formatMoney((summary?.by_method?.card?.amount || 0) + (summary?.by_method?.transfer?.amount || 0))}
-              </span>
-            </div>
-            <div className="p-3.5 rounded-2xl bg-white border border-sg-line shadow-2xs">
-              <span className="text-sg-muted text-[11px] block">卡券折抵額</span>
+              <span className="text-sg-muted text-[11px] block">卡券折抵額（不計入營收）</span>
               <span className="text-[18px] font-bold text-sg-brown font-num">
                 {formatMoney(summary?.pass_value || 0)}
               </span>
@@ -882,18 +891,14 @@ export default function AccountingPage() {
                   {formatMoney(summary.net_revenue)}
                 </span>
               </div>
-              <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
-                <span className="text-sg-muted text-[11px] block">現金實收</span>
-                <span className="text-[18px] font-bold text-sg-ink font-num">
-                  {formatMoney(summary.by_method?.cash?.amount || 0)}
-                </span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
-                <span className="text-sg-muted text-[11px] block">LINE Pay</span>
-                <span className="text-[18px] font-bold text-sg-ink font-num">
-                  {formatMoney(summary.by_method?.line_pay?.amount || 0)}
-                </span>
-              </div>
+              {visibleSummaryMethods.map((m) => (
+                <div key={m.key} className="p-3.5 rounded-2xl bg-white border border-sg-line">
+                  <span className="text-sg-muted text-[11px] block">{m.label || formatPaymentMethod(m.key)}</span>
+                  <span className="text-[18px] font-bold text-sg-ink font-num">
+                    {formatMoney(m.amount || 0)}
+                  </span>
+                </div>
+              ))}
               <div className="p-3.5 rounded-2xl bg-white border border-sg-line">
                 <span className="text-sg-muted text-[11px] block">退款合計</span>
                 <span className="text-[18px] font-bold text-sg-danger font-num">
@@ -934,18 +939,22 @@ export default function AccountingPage() {
               ))}
 
               <span className="text-[12px] text-sg-muted ml-3">方式：</span>
-              {['all', 'cash', 'line_pay', 'card', 'transfer', 'pass'].map((m) => (
+              {[
+                { key: 'all', label: '全部方式' },
+                ...paymentFilterOptions,
+                { key: 'pass', label: '卡券折抵' }
+              ].map((opt) => (
                 <button
-                  key={m}
+                  key={opt.key}
                   type="button"
-                  onClick={() => setPaymentMethodFilter(m)}
+                  onClick={() => setPaymentMethodFilter(opt.key)}
                   className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border ${
-                    paymentMethodFilter === m
+                    paymentMethodFilter === opt.key
                       ? 'bg-sg-brown text-white border-sg-brown'
                       : 'bg-white text-sg-ink border-sg-line'
                   }`}
                 >
-                  {m === 'all' ? '全部方式' : getMethodLabel(m)}
+                  {opt.label}
                 </button>
               ))}
             </div>
@@ -1021,7 +1030,7 @@ export default function AccountingPage() {
                           </span>
                         </td>
                         <td className="py-3 px-2 text-[12px] text-sg-ink">
-                          {getMethodLabel(p.method)}
+                          {formatPaymentMethod(p.method)}
                         </td>
                         <td className="py-3 px-3 text-right font-bold text-sg-ink font-num">
                           {p.kind === 'refund' ? formatMinus(p.amount) : formatMoney(p.amount)}
@@ -1126,7 +1135,7 @@ export default function AccountingPage() {
                           {p.source && p.source !== 'booking' ? (p.source_ref || p.booking_ref) : formatBookingRef(p.booking_ref)}
                         </span>
                       </div>
-                      <span>{getMethodLabel(p.method)}</span>
+                      <span>{formatPaymentMethod(p.method)}</span>
                     </div>
 
                     <div className="flex items-center justify-between text-[11px] text-sg-muted pt-1 border-t border-sg-line/50">
@@ -1485,23 +1494,46 @@ export default function AccountingPage() {
                     <span className="font-num">{formatMoney(closingPreview.shop?.non_cash_amount || 0)}</span>
                   </div>
                 )}
-                <div className="py-2 flex justify-between">
-                  <span className="text-sg-ink">現金收款（{closingPreview.by_method?.cash?.count || 0} 筆）</span>
-                  <span className="font-num font-bold">{formatMoney(closingPreview.by_method?.cash?.amount || 0)}</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-sg-ink">LINE Pay（{closingPreview.by_method?.line_pay?.count || 0} 筆）</span>
-                  <span className="font-num font-bold">{formatMoney(closingPreview.by_method?.line_pay?.amount || 0)}</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-sg-ink">銀行轉帳（{closingPreview.by_method?.transfer?.count || 0} 筆）</span>
-                  <span className="font-num font-bold">{formatMoney(closingPreview.by_method?.transfer?.amount || 0)}</span>
-                </div>
-                {closingPreview.refunds?.cash?.amount > 0 && (
-                  <div className="py-2 flex justify-between text-sg-danger">
-                    <span>退款（{closingPreview.refunds?.cash?.count || 0} 筆）</span>
-                    <span className="font-num font-bold">{formatMinus(closingPreview.refunds?.cash?.amount || 0)}</span>
-                  </div>
+                {Array.isArray(closingPreview.methods) && closingPreview.methods.length > 0 ? (
+                  <>
+                    {closingPreview.methods
+                      .filter((m) => m.enabled || m.count > 0 || m.amount !== 0 || m.refund_count > 0)
+                      .map((m) => (
+                        <div key={m.key} className="py-2 flex justify-between">
+                          <span className="text-sg-ink">
+                            {m.label || formatPaymentMethod(m.key)}（{m.count || 0} 筆）
+                          </span>
+                          <span className="font-num font-bold">{formatMoney(m.amount || 0)}</span>
+                        </div>
+                      ))}
+                    {closingPreview.methods
+                      .filter((m) => (m.refund_amount || 0) > 0 || (m.refund_count || 0) > 0)
+                      .map((m) => (
+                        <div key={`refund-${m.key}`} className="py-2 flex justify-between text-sg-danger">
+                          <span>
+                            {m.label || formatPaymentMethod(m.key)} 退款（{m.refund_count || 0} 筆）
+                          </span>
+                          <span className="font-num font-bold">{formatMinus(m.refund_amount || 0)}</span>
+                        </div>
+                      ))}
+                  </>
+                ) : (
+                  <>
+                    {Object.entries(closingPreview.by_method || {}).map(([k, v]) => (
+                      <div key={k} className="py-2 flex justify-between">
+                        <span className="text-sg-ink">{formatPaymentMethod(k)}（{v?.count || 0} 筆）</span>
+                        <span className="font-num font-bold">{formatMoney(v?.amount || 0)}</span>
+                      </div>
+                    ))}
+                    {Object.entries(closingPreview.refunds || {})
+                      .filter(([, v]) => (v?.amount || 0) > 0 || (v?.count || 0) > 0)
+                      .map(([k, v]) => (
+                        <div key={`refund-${k}`} className="py-2 flex justify-between text-sg-danger">
+                          <span>{formatPaymentMethod(k)} 退款（{v?.count || 0} 筆）</span>
+                          <span className="font-num font-bold">{formatMinus(v?.amount || 0)}</span>
+                        </div>
+                      ))}
+                  </>
                 )}
                 <div className="py-2 flex justify-between text-sg-muted">
                   <span>卡券折抵（{closingPreview.passes?.count || 0} 筆，不計入）</span>

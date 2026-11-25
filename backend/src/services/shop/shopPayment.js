@@ -166,11 +166,12 @@ export async function applyShopOrderPayment({
     if (normalizedMethod === 'pass') {
       throw { status: 422, message: '商城收款不支援使用卡券' };
     }
-    await assertEnabledPaymentMethod(tx, normalizedMethod);
+    const matchedMethod = await assertEnabledPaymentMethod(tx, normalizedMethod);
+    const canonicalMethod = matchedMethod.key;
 
     let providedCash = null;
     let changeGiven = null;
-    if (normalizedMethod === 'cash') {
+    if (canonicalMethod === 'cash') {
       providedCash = (cashReceived !== undefined && cashReceived !== null && cashReceived !== '')
         ? Number(cashReceived)
         : payAmount;
@@ -203,7 +204,7 @@ export async function applyShopOrderPayment({
         source_ref: order.order_ref,
         kind: 'charge',
         status: 'valid',
-        method: normalizedMethod,
+        method: canonicalMethod,
         amount: payAmount,
         cash_received: providedCash,
         change_given: changeGiven,
@@ -227,14 +228,14 @@ export async function applyShopOrderPayment({
       booking_ref: order.order_ref,
       event_type: 'shop_payment',
       category: 'payment',
-      summary: `商城收款 ${order.order_ref} · ${normalizedMethod === 'cash' ? '現金' : normalizedMethod} NT$${payAmount}`,
+      summary: `商城收款 ${order.order_ref} · ${canonicalMethod === 'cash' ? '現金' : canonicalMethod} NT$${payAmount}`,
       amount: payAmount,
       payment_id: payment.id,
       after_json: {
         order_id: order.id,
         order_ref: order.order_ref,
         amount: payAmount,
-        method: normalizedMethod
+        method: canonicalMethod
       },
       staff_name: staffName,
       staff_id: staffId,

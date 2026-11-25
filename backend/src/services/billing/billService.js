@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../../prismaClient.js';
 import { computeBill, billingStatus, calculatePersonRefundInfo } from '../../../../shared/billing.js';
+import { normalizeMethodKey, methodLabel as resolveMethodDisplayLabel } from '../../../../shared/paymentMethods.js';
 import { computePassTenderValue, resolvePassCheckoutEffect } from '../../../../shared/passValue.js';
 import { toTaipeiDateString, blocksBy1030, dateOnly } from '../../../../shared/time.js';
 import { getEffectiveDailyRates } from '../../controllers/reservationController.js';
@@ -145,21 +146,40 @@ export async function assertEnabledPaymentMethod(txOrPrisma, method) {
         { key: 'transfer', label: '銀行轉帳', enabled: true },
         { key: 'card', label: '信用卡', enabled: true }
       ]
-  ).filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass');
+  ).filter(m => normalizeMethodKey(m.key || m.code) !== 'pass');
 
   const enabledMethods = rawMethods.filter(m => {
-    const k = String(m.key || m.code || '').toLowerCase();
+    const k = normalizeMethodKey(m.key || m.code);
     return k === 'cash' ? true : Boolean(m.enabled);
   });
 
-  const reqMethodNorm = String(method || 'cash').toLowerCase().replace(/[-_]/g, '');
-  const isMethodAllowed = enabledMethods.some(m => {
-    const k = String(m.key || m.code || '').toLowerCase().replace(/[-_]/g, '');
-    return k === reqMethodNorm;
-  });
-  if (!isMethodAllowed) {
+  const reqMethodNorm = normalizeMethodKey(method || 'cash');
+  const matched = enabledMethods.find(m => normalizeMethodKey(m.key || m.code) === reqMethodNorm);
+  if (!matched) {
     throw { status: 422, message: `付款方式「${method}」未啟用或不支援` };
   }
+  const canonicalKey = String(matched.key || matched.code || '').trim();
+  return {
+    key: canonicalKey,
+    label: resolveMethodDisplayLabel(canonicalKey, rawMethods),
+    enabled: true
+  };
+}
+
+export async function resolveConfiguredPaymentMethodKey(txOrPrisma, method) {
+  const raw = String(method || '').trim();
+  if (!raw) return 'cash';
+  const norm = normalizeMethodKey(raw);
+  if (norm === 'pass') return 'pass';
+
+  const client = txOrPrisma || prisma;
+  const gs = await client.globalSetting.findUnique({ where: { id: 1 } });
+  const rawMethods = Array.isArray(gs?.payment_methods_json) ? gs.payment_methods_json : [];
+  const matched = rawMethods.find(m => normalizeMethodKey(m?.key || m?.code) === norm);
+  if (matched) {
+    return String(matched.key || matched.code || '').trim();
+  }
+  return norm || raw;
 }
 
 export async function getNextDailySeq(tx, key, date = new Date()) {
@@ -1084,8 +1104,10 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       throw { status: 422, message: '卡券請用卡券折抵' };
     }
 
+    let canonicalMethod = await resolveConfiguredPaymentMethodKey(tx, method);
     if (!hasPassTenders) {
-      await assertEnabledPaymentMethod(tx, method);
+      const matched = await assertEnabledPaymentMethod(tx, method);
+      canonicalMethod = matched.key;
     }
 
     const targetPersons = bill.persons.filter(p => targetPersonNos.includes(p.person_no));
@@ -1208,7 +1230,8 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
         if (String(method || '').trim().toLowerCase() === 'pass') {
           throw { status: 422, message: '卡券請用卡券折抵' };
         }
-        await assertEnabledPaymentMethod(tx, method);
+        const matched = await assertEnabledPaymentMethod(tx, method);
+        canonicalMethod = matched.key;
       }
       const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
 
@@ -1216,7 +1239,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
       const providedCash = (cash_received !== null && cash_received !== undefined && cash_received !== '')
         ? Number(cash_received)
         : remainingAmount;
-      if (method === 'cash') {
+      if (canonicalMethod === 'cash') {
         if (!Number.isFinite(providedCash) || providedCash < remainingAmount) {
           throw { status: 400, message: `實收現金（NT$${Number.isFinite(providedCash) ? providedCash : 0}）不足（應收 NT$${remainingAmount}）` };
         }
@@ -1236,10 +1259,10 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
           booking_ref,
           kind: 'charge',
           status: 'valid',
-          method,
+          method: canonicalMethod,
           amount: remainingAmount,
-          cash_received: method === 'cash' ? providedCash : null,
-          change_given: method === 'cash' ? change : null,
+          cash_received: canonicalMethod === 'cash' ? providedCash : null,
+          change_given: canonicalMethod === 'cash' ? change : null,
           person_nos: targetPersonNos,
           breakdown_json: {
             persons: targetPersonsWithNet,
@@ -1265,7 +1288,7 @@ export async function collectPayment(booking_ref, payload, staffUser, deviceInfo
         booking_ref,
         event_type: 'payment_created',
         category: 'payment',
-        summary: `收款 第 ${targetPersonNos.join('、')} 位 · ${method === 'cash' ? '現金' : method} NT$${remainingAmount}`,
+        summary: `收款 第 ${targetPersonNos.join('、')} 位 · ${canonicalMethod === 'cash' ? '現金' : canonicalMethod} NT$${remainingAmount}`,
         amount: remainingAmount,
         payment_id: mainPay.id,
         staff_name: staffName,
@@ -1531,12 +1554,13 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
       throw { status: 422, message: '沒有需要補收的金額' };
     }
 
+    const canonicalMethod = await resolveConfiguredPaymentMethodKey(tx, method);
     const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     let effectiveCashReceived = null;
     let change = null;
-    if (method === 'cash') {
+    if (canonicalMethod === 'cash') {
       const hasCashInput = cash_received !== null && cash_received !== undefined && cash_received !== '';
       const cashAmt = hasCashInput ? Number(cash_received) : supplementAmount;
       if (!Number.isFinite(cashAmt) || cashAmt < supplementAmount) {
@@ -1554,7 +1578,7 @@ export async function supplementPayment(booking_ref, payload, staffUser, deviceI
         booking_ref,
         kind: 'supplement',
         status: 'valid',
-        method,
+        method: canonicalMethod,
         amount: supplementAmount,
         cash_received: effectiveCashReceived,
         change_given: change,
@@ -1717,6 +1741,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
       }
     }
 
+    const canonicalRefundMethod = await resolveConfiguredPaymentMethodKey(tx, method);
     const payNo = await nextSerialNo(tx, 'payment', resolveBillingDate(payload));
     const batchNo = `B-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -1728,7 +1753,7 @@ export async function refundPayment(booking_ref, payload, staffUser, deviceInfo)
         booking_ref,
         kind: 'refund',
         status: 'valid',
-        method,
+        method: canonicalRefundMethod,
         amount: effectiveRefundAmt,
         related_payment_id: relatedPaymentId,
         person_nos: [pNo],

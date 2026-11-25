@@ -191,7 +191,9 @@ test('Round 36 Item 4: closing snapshot stores complete totals_json, drives Prin
   assert.equal(closing.difference, -50);
 
   assert.equal(closing.totals_json.by_method.cash.amount, 500);
-  assert.equal(closing.totals_json.by_method.line_pay.amount, 300);
+  // Round 44 Item 2: legacy line_pay and canonical linepay merge under normalized key 'linepay'
+  assert.equal(closing.totals_json.by_method.linepay.amount, 300);
+  assert.equal(closing.totals_json.by_method.line_pay, undefined);
   assert.equal(closing.totals_json.refund_amount, 100);
   assert.equal(closing.totals_json.pass_amount, 800);
   assert.equal(closing.totals_json.actual_received, 700);

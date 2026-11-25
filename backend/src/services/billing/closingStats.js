@@ -1,6 +1,7 @@
 import prisma from '../../prismaClient.js';
 import { dateOnly } from '../../../../shared/time.js';
 import { isRevenuePayment } from '../accounting/revenueScope.js';
+import { getConfiguredPaymentMethods, buildMethodBreakdown } from '../accounting/methodAggregation.js';
 
 /**
  * Compute authoritative shift closing stats & receipt snapshot for `[start, end]`.
@@ -31,26 +32,21 @@ export async function computeClosingStats({ start, end, businessDate, txOrPrisma
     shopCharges.filter(p => p.method !== 'cash').reduce((sum, p) => sum + p.amount, 0) -
     shopRefunds.filter(p => p.method !== 'cash').reduce((sum, p) => sum + p.amount, 0);
 
-  const byMethod = {};
-  for (const p of charges) {
-    if (!byMethod[p.method]) byMethod[p.method] = { count: 0, amount: 0 };
-    byMethod[p.method].count += 1;
-    byMethod[p.method].amount += p.amount;
-  }
-
-  const refundsByMethod = {};
-  for (const p of refundsList) {
-    if (!refundsByMethod[p.method]) refundsByMethod[p.method] = { count: 0, amount: 0 };
-    refundsByMethod[p.method].count += 1;
-    refundsByMethod[p.method].amount += p.amount;
-  }
+  const configuredMethods = await getConfiguredPaymentMethods(txOrPrisma);
+  const { by_method: byMethod, refunds: refundsByMethod, methods } = buildMethodBreakdown(
+    charges,
+    refundsList,
+    configuredMethods
+  );
 
   const totalIncome = charges.reduce((sum, p) => sum + p.amount, 0);
   const totalRefund = refundsList.reduce((sum, p) => sum + p.amount, 0);
   const netRevenue = totalIncome - totalRefund;
 
-  const cashIncome = charges.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
-  const cashRefund = refundsList.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
+  const cashStats = byMethod.cash || { amount: 0 };
+  const cashRefundStats = refundsByMethod.cash || { amount: 0 };
+  const cashIncome = cashStats.amount;
+  const cashRefund = cashRefundStats.amount;
 
   const passAmount = passes.reduce((sum, p) => sum + p.amount, 0);
   const passRefundAmount = passRefundsList.reduce((sum, p) => sum + p.amount, 0);
@@ -76,6 +72,7 @@ export async function computeClosingStats({ start, end, businessDate, txOrPrisma
   return {
     by_method: byMethod,
     refunds: refundsByMethod,
+    methods,
     voids: {
       count: voids.length,
       amount: voidAmount

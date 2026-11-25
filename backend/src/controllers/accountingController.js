@@ -7,6 +7,11 @@ import { queuePrintJob } from '../services/print/printService.js';
 import { getShiftLock, canVoidPayment } from '../services/billing/shiftLock.js';
 import { computeClosingStats } from '../services/billing/closingStats.js';
 import { REVENUE_PAYMENT_SOURCES, revenuePaymentWhere, isRevenuePayment } from '../services/accounting/revenueScope.js';
+import {
+  getConfiguredPaymentMethods,
+  buildMethodBreakdown,
+  resolveRawMethodsMatchingFilter
+} from '../services/accounting/methodAggregation.js';
 
 export const getAccountingSummary = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -43,19 +48,12 @@ export const getAccountingSummary = async (req, res) => {
     const paidBookingCount = paidBookingRefs.size;
     const avgTicket = paidBookingCount > 0 ? Math.round(netRevenue / paidBookingCount) : 0;
 
-    const byMethod = {};
-    for (const p of charges) {
-      if (!byMethod[p.method]) byMethod[p.method] = { count: 0, amount: 0 };
-      byMethod[p.method].count += 1;
-      byMethod[p.method].amount += p.amount;
-    }
-
-    const refundsByMethod = {};
-    for (const p of refunds) {
-      if (!refundsByMethod[p.method]) refundsByMethod[p.method] = { count: 0, amount: 0 };
-      refundsByMethod[p.method].count += 1;
-      refundsByMethod[p.method].amount += p.amount;
-    }
+    const configuredMethods = await getConfiguredPaymentMethods(prisma);
+    const { by_method: byMethod, refunds: refundsByMethod, methods } = buildMethodBreakdown(
+      charges,
+      refunds,
+      configuredMethods
+    );
 
     const shopCharges = shopPayments.filter(p => p.kind === 'charge' || p.kind === 'supplement');
     const shopRefundsList = shopPayments.filter(p => p.kind === 'refund');
@@ -104,6 +102,7 @@ export const getAccountingSummary = async (req, res) => {
       avg_ticket: avgTicket,
       by_method: byMethod,
       refunds: refundsByMethod,
+      methods,
       voids: {
         count: voids.length,
         amount: voids.reduce((sum, p) => sum + p.amount, 0)
@@ -197,7 +196,7 @@ const VALID_PAYMENT_SOURCES = new Set(['booking', 'pass_sale', 'shop']);
 const CSV_MAX_ROWS = 20000;
 const DATE_YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function buildPaymentsFilterWhere(query = {}, defaultSources = REVENUE_PAYMENT_SOURCES) {
+async function buildPaymentsFilterWhere(query = {}, defaultSources = REVENUE_PAYMENT_SOURCES, client = prisma) {
   const { date_from, date_to, method, kind, status, staff, q, source } = query;
   const where = {};
 
@@ -217,7 +216,10 @@ function buildPaymentsFilterWhere(query = {}, defaultSources = REVENUE_PAYMENT_S
     if (date_from) where.created_at.gte = new Date(`${date_from}T00:00:00+08:00`);
     if (date_to) where.created_at.lte = new Date(`${date_to}T23:59:59.999+08:00`);
   }
-  if (method) where.method = method;
+  if (method && method !== 'all') {
+    const matchedRaw = await resolveRawMethodsMatchingFilter(client, method);
+    where.method = matchedRaw.length === 1 ? matchedRaw[0] : { in: matchedRaw };
+  }
   if (kind) where.kind = kind;
   if (status) where.status = status;
   if (staff) where.staff_name = { contains: staff, mode: 'insensitive' };
@@ -278,13 +280,16 @@ export const getDailyRevenue = async (req, res) => {
 
     const start = new Date(`${fromStr}T00:00:00+08:00`);
     const end = new Date(`${toStr}T23:59:59.999+08:00`);
-    const payments = await prisma.payment.findMany({
-      where: revenuePaymentWhere({
-        status: 'valid',
-        created_at: { gte: start, lte: end }
+    const [payments, configuredMethods] = await Promise.all([
+      prisma.payment.findMany({
+        where: revenuePaymentWhere({
+          status: 'valid',
+          created_at: { gte: start, lte: end }
+        }),
+        select: { kind: true, method: true, amount: true, created_at: true }
       }),
-      select: { kind: true, method: true, amount: true, created_at: true }
-    });
+      getConfiguredPaymentMethods(prisma)
+    ]);
 
     const dailyMap = new Map();
     const cur = new Date(startUtc);
@@ -296,7 +301,8 @@ export const getDailyRevenue = async (req, res) => {
         refunds: 0,
         net: 0,
         count: 0,
-        by_method: {}
+        _charges: [],
+        _refunds: []
       });
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
@@ -311,19 +317,31 @@ export const getDailyRevenue = async (req, res) => {
         row.revenue += p.amount;
         row.net += p.amount;
         row.count += 1;
-        if (!row.by_method[p.method]) row.by_method[p.method] = { count: 0, amount: 0 };
-        row.by_method[p.method].count += 1;
-        row.by_method[p.method].amount += p.amount;
+        row._charges.push(p);
       } else if (p.kind === 'refund') {
         row.refunds += p.amount;
         row.net -= p.amount;
+        row._refunds.push(p);
       }
     }
+
+    const daily = Array.from(dailyMap.values()).map((row) => {
+      const breakdown = buildMethodBreakdown(row._charges, row._refunds, configuredMethods);
+      return {
+        date: row.date,
+        revenue: row.revenue,
+        refunds: row.refunds,
+        net: row.net,
+        count: row.count,
+        by_method: breakdown.by_method,
+        methods: breakdown.methods
+      };
+    });
 
     return res.json({
       date_from: fromStr,
       date_to: toStr,
-      daily: Array.from(dailyMap.values())
+      daily
     });
   } catch (error) {
     console.error('[getDailyRevenue] Error:', error);
@@ -335,7 +353,7 @@ export const getPaymentsList = async (req, res) => {
   const { cursor } = req.query;
 
   try {
-    const where = buildPaymentsFilterWhere(req.query, REVENUE_PAYMENT_SOURCES);
+    const where = await buildPaymentsFilterWhere(req.query, REVENUE_PAYMENT_SOURCES);
 
     const take = 50;
     const [totalCount, payments] = await Promise.all([
@@ -376,7 +394,7 @@ export const getPaymentsList = async (req, res) => {
 
 export const getPaymentsCsv = async (req, res) => {
   try {
-    const where = buildPaymentsFilterWhere(req.query, REVENUE_PAYMENT_SOURCES);
+    const where = await buildPaymentsFilterWhere(req.query, REVENUE_PAYMENT_SOURCES);
     const totalCount = await prisma.payment.count({ where });
     if (totalCount > CSV_MAX_ROWS) {
       return res.status(413).json({ error: `資料共 ${totalCount} 筆，超過單次 ${CSV_MAX_ROWS} 筆匯出上限，請縮小日期範圍` });
