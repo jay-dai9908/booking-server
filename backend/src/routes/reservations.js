@@ -10,6 +10,7 @@ import {
   getAdminPrepaysHandler,
   verifyAdminPrepayHandler,
   mismatchAdminPrepayHandler,
+  markOverpaidRefundedHandler,
   remindAdminPrepayHandler
 } from '../controllers/prepayController.js';
 import { prepayQuoteLimiter, entryPassLimiter } from '../middlewares/rateLimiter.js';
@@ -27,6 +28,7 @@ router.get('/:booking_ref/entry', verifyToken, requireRegisteredUser, entryPassL
 router.get('/admin/prepays', ...prepayStaffAuth, getAdminPrepaysHandler);
 router.post('/admin/prepays/:booking_ref/verify', ...prepayStaffAuth, verifyAdminPrepayHandler);
 router.post('/admin/prepays/:booking_ref/mismatch', ...prepayStaffAuth, mismatchAdminPrepayHandler);
+router.post('/admin/prepays/:booking_ref/overpaid-refunded', ...prepayStaffAuth, markOverpaidRefundedHandler);
 router.post('/admin/prepays/:booking_ref/remind', ...prepayStaffAuth, remindAdminPrepayHandler);
 
 router.post('/', verifyToken, requireRegisteredUser, createReservation);

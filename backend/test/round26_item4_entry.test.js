@@ -237,7 +237,7 @@ test('Round 26 Item 4: Customer Entry API returns all 8 states, 403 on non-owner
       createMockRes()
     );
     await verifyAdminPrepayHandler(
-      makeAdminReq({ params: { booking_ref: refConfirmed } }),
+      makeAdminReq({ params: { booking_ref: refConfirmed }, body: { received_amount: 1500 } }),
       createMockRes()
     );
     const passConfirmed = await getReservationEntryPass(prisma, {

@@ -202,8 +202,8 @@ test('Round 25b Item 3: Prepay verify vs expiry, verify vs cancel, and concurren
 
       const vRes = createMockRes();
       const tasks = i % 2 === 0
-        ? [verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref } }), vRes), releaseExpiredPrepays(new Date())]
-        : [releaseExpiredPrepays(new Date()), verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref } }), vRes)];
+        ? [verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref }, body: { received_amount: 750 } }), vRes), releaseExpiredPrepays(new Date())]
+        : [releaseExpiredPrepays(new Date()), verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref }, body: { received_amount: 750 } }), vRes)];
       await Promise.all(tasks);
 
       const [dbPrepay, dbRes, validPayments] = await Promise.all([
@@ -261,12 +261,12 @@ test('Round 25b Item 3: Prepay verify vs expiry, verify vs cancel, and concurren
       const cRes = createMockRes();
       const tasks = i % 2 === 0
         ? [
-            verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref } }), vRes),
+            verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref }, body: { received_amount: 750 } }), vRes),
             cancelReservation(makeCustomerReq(testUser, { params: { id: ref } }), cRes)
           ]
         : [
             cancelReservation(makeCustomerReq(testUser, { params: { id: ref } }), cRes),
-            verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref } }), vRes)
+            verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref }, body: { received_amount: 750 } }), vRes)
           ];
       await Promise.all(tasks);
 

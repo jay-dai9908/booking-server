@@ -839,6 +839,10 @@ model BookingPrepay {
   settled_at             DateTime?
   verified_at            DateTime?
   verified_by_name       String?
+  received_amount        Int?
+  overpaid_amount        Int?
+  overpaid_refunded_at   DateTime?
+  overpaid_refund_note   String?
   reminded_at            DateTime?
   admin_note             String?
   created_at             DateTime  @default(now())

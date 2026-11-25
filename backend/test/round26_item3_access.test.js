@@ -302,7 +302,7 @@ test('Round 26 Item 3: Kiosk access handles all 8 outcomes, QR windows, WAIT fal
 
     // Verify payment by admin
     const rVerify1 = createMockRes();
-    await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref1 } }), rVerify1);
+    await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: ref1 }, body: { received_amount: 1070 } }), rVerify1);
     assert.equal(rVerify1.statusCode, 200);
 
     // QR checks: 2 windows ago -> QR_EXPIRED, another booking's MAC -> QR_EXPIRED

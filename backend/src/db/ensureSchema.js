@@ -703,6 +703,10 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
       "settled_at" TIMESTAMP(3),
       "verified_at" TIMESTAMP(3),
       "verified_by_name" TEXT,
+      "received_amount" INTEGER,
+      "overpaid_amount" INTEGER,
+      "overpaid_refunded_at" TIMESTAMP(3),
+      "overpaid_refund_note" TEXT,
       "reminded_at" TIMESTAMP(3),
       "admin_note" TEXT,
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -713,6 +717,10 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `CREATE INDEX IF NOT EXISTS "BookingPrepay_user_id_status_idx" ON "BookingPrepay"("user_id", "status")`,
     `CREATE INDEX IF NOT EXISTS "BookingPrepay_status_deadline_at_idx" ON "BookingPrepay"("status", "deadline_at")`,
     `ALTER TABLE "BookingPrepay" ADD COLUMN IF NOT EXISTS "pricing_snapshot" JSONB`,
+    `ALTER TABLE "BookingPrepay" ADD COLUMN IF NOT EXISTS "received_amount" INTEGER`,
+    `ALTER TABLE "BookingPrepay" ADD COLUMN IF NOT EXISTS "overpaid_amount" INTEGER`,
+    `ALTER TABLE "BookingPrepay" ADD COLUMN IF NOT EXISTS "overpaid_refunded_at" TIMESTAMP(3)`,
+    `ALTER TABLE "BookingPrepay" ADD COLUMN IF NOT EXISTS "overpaid_refund_note" TEXT`,
 
     `CREATE TABLE IF NOT EXISTS "KioskDevice" (
       "id" SERIAL NOT NULL,

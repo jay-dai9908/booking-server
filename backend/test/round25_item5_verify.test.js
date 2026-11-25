@@ -259,7 +259,7 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
 
       // Verify A
       const vRes = createMockRes();
-      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refA } }), vRes);
+      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refA }, body: { received_amount: 1500 } }), vRes);
       assert.equal(vRes.statusCode, 200, JSON.stringify(vRes.body));
       assert.equal(vRes.body.alreadyVerified, false);
 
@@ -314,7 +314,7 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
       assert.equal(quotaBeforeVerify, 3);
 
       const vRes = createMockRes();
-      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refB } }), vRes);
+      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refB }, body: { received_amount: 1500 } }), vRes);
       assert.equal(vRes.statusCode, 200);
 
       // Quota MUST still be 3 (not deducted again!)
@@ -364,7 +364,7 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
       createdRefs.push(refC);
 
       const vRes = createMockRes();
-      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refC } }), vRes);
+      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refC }, body: { received_amount: 160 } }), vRes);
       assert.equal(vRes.statusCode, 200);
 
       const paymentsC = await prisma.payment.findMany({ where: { booking_ref: refC, status: 'valid' } });
@@ -513,7 +513,7 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
 
       // Verify self-service booking E -> must still use pinned 750 -> 200 OK & paid
       const vSelf = createMockRes();
-      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refSelf } }), vSelf);
+      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refSelf }, body: { received_amount: 750 } }), vSelf);
       assert.equal(vSelf.statusCode, 200, 'Expected verify 200 despite price change when pricing_snapshot is pinned');
       assert.equal(vSelf.body.prepay.amount_due, 750);
       const dbSelfRes = await prisma.reservation.findFirst({ where: { booking_ref: refSelf } });

@@ -1865,6 +1865,8 @@ async function reopenVerifiedPrepayIfUnsettled(tx, { booking_ref, reason, staffN
       settled_at: null,
       verified_at: null,
       verified_by_name: null,
+      received_amount: null,
+      overpaid_amount: null,
       admin_note: nextNote
     }
   });
@@ -1874,6 +1876,18 @@ async function reopenVerifiedPrepayIfUnsettled(tx, { booking_ref, reason, staffN
     event_type: 'prepay_reopened',
     category: 'status',
     summary: `預付單 ${booking_ref} 因作廢入帳改回待重新對帳`,
+    reason: String(reason || '').trim() || null,
+    staff_name: staffName,
+    staff_id: staffId,
+    device_id: deviceInfo?.device_id,
+    device_label: deviceInfo?.device_label
+  });
+
+  await auditLog(tx, {
+    booking_ref,
+    event_type: 'prepay_received_reset',
+    category: 'status',
+    summary: `預付單 ${booking_ref} 已清除累計實收金額，待重新核對`,
     reason: String(reason || '').trim() || null,
     staff_name: staffName,
     staff_id: staffId,

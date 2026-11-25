@@ -154,7 +154,7 @@ test('Round 38 Item 4: voidPayment & markUnpaid reopen verified BookingPrepay wi
       assert.equal(p5.statusCode, 200);
 
       const ver = createMockRes();
-      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: bRef } }), ver);
+      await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: bRef }, body: { received_amount: 500 } }), ver);
       assert.equal(ver.statusCode, 200);
       return bRef;
     }
@@ -203,7 +203,7 @@ test('Round 38 Item 4: voidPayment & markUnpaid reopen verified BookingPrepay wi
 
     // Re-verify -> succeeds without deducting pass again -> quota still 2 -> kiosk clears
     const reVer = createMockRes();
-    await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refA } }), reVer);
+    await verifyAdminPrepayHandler(makeAdminReq({ params: { booking_ref: refA }, body: { received_amount: 500 } }), reVer);
     assert.equal(reVer.statusCode, 200);
     const prepayA3 = await prisma.bookingPrepay.findUnique({ where: { booking_ref: refA } });
     assert.equal(prepayA3.status, 'verified');

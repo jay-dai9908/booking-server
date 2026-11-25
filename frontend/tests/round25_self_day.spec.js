@@ -396,9 +396,13 @@ async function run() {
     console.log(`Saved Screenshot 3: ${shot3}`);
 
     await adminPage.locator('[data-testid^="prepay-verify-btn-"] >> visible=true').first().click();
-    await adminPage.locator('[role="dialog"] h4:has-text("確認已收到匯款並入帳")').waitFor({ state: 'visible', timeout: 5000 });
-    // Click Confirm button inside ConfirmPanel
-    await adminPage.locator('[role="dialog"] button:has-text("確認收款")').click();
+    const verifyDialog = adminPage.locator('[role="dialog"]');
+    await verifyDialog.locator('h4:has-text("確認已收到匯款並入帳")').waitFor({ state: 'visible', timeout: 5000 });
+    const dlgText = await verifyDialog.innerText();
+    const amtMatch = dlgText.match(/應匯金額：NT\$\s*([\d,]+)/);
+    assert.ok(amtMatch, `Expected 應匯金額 in verify dialog, got: ${dlgText}`);
+    await verifyDialog.locator('[data-testid="prepay-received-amount-input"]').fill(amtMatch[1].replace(/,/g, ''));
+    await verifyDialog.locator('[data-testid="prepay-confirm-submit-btn"]').click();
     await adminPage.locator('text=目前沒有符合篩選條件的半自助預付紀錄').waitFor({ state: 'visible', timeout: 10000 });
     console.log('Step 4 passed: admin verified prepay booking.');
 

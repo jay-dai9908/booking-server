@@ -279,7 +279,7 @@ test('Round 34 Item 1: unified promo evaluation, self-service consistency, legac
   const verifyRes = await fetch(`${srv.baseUrl}/api/reservations/admin/prepays/${selfLegacyRef}/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-    body: JSON.stringify({})
+    body: JSON.stringify({ received_amount: 90 })
   });
   assert.equal(verifyRes.status, 200);
 

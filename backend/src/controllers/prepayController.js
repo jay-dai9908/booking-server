@@ -1,9 +1,10 @@
 import prisma from '../prismaClient.js';
-import { toTaipeiDateString } from '../../../shared/time.js';
+import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { earliestEntry } from '../../../shared/selfService.js';
 import { getEffectiveDailyRates } from './reservationController.js';
 import { getBookingBill } from '../services/billing/billService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+import { log as auditLog } from '../services/audit/auditService.js';
 import { markPoolAccountUsed } from '../services/selfService/poolAccountService.js';
 import {
   sendSelfServiceVerifiedNotification,
@@ -168,20 +169,85 @@ const PREPAY_SORT_PRIORITY = {
 };
 
 /**
- * 後台：取得半自助預約預付對帳清單
+ * 後台：取得半自助預約預付對帳清單（資料庫分頁 + groupBy 計數）
  */
 export const getAdminPrepaysHandler = async (req, res) => {
-  const { status = '', date = '' } = req.query;
+  const { status = 'all', date = '' } = req.query;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
+  const skip = (page - 1) * limit;
 
   try {
-    const [prepays, methodConfigs] = await Promise.all([
+    let dateBookingRefs = null;
+    if (date) {
+      const targetDate = dateOnly(String(date));
+      const dateReservations = await prisma.reservation.findMany({
+        where: { session: { session_date: targetDate } },
+        select: { booking_ref: true },
+        distinct: ['booking_ref']
+      });
+      dateBookingRefs = dateReservations.map((r) => r.booking_ref);
+      if (dateBookingRefs.length === 0) {
+        return res.json({
+          items: [],
+          counts: { pending_payment: 0, reported_pending_verify: 0, verified: 0, expired: 0 },
+          total: 0,
+          page,
+          total_pages: 1
+        });
+      }
+    }
+
+    const baseScope = dateBookingRefs ? { booking_ref: { in: dateBookingRefs } } : {};
+
+    let statusWhere = {};
+    if (status === 'pending_payment') {
+      statusWhere = { status: 'pending_payment', amount_due: { gt: 0 } };
+    } else if (status === 'reported_pending_verify' || status === 'reported') {
+      statusWhere = { status: { in: ['reported_pending_verify', 'mismatch'] }, amount_due: { gt: 0 } };
+    } else if (status && status !== 'all') {
+      statusWhere = { status: String(status) };
+    }
+
+    const listWhere = { ...baseScope, ...statusWhere };
+    const isAllStatus = !status || status === 'all';
+    const orderBy = isAllStatus
+      ? [{ created_at: 'desc' }, { id: 'desc' }]
+      : [{ deadline_at: 'asc' }, { created_at: 'desc' }, { id: 'desc' }];
+
+    const [gtZeroGroups, allStatusGroups, total, prepays, methodConfigs] = await Promise.all([
+      prisma.bookingPrepay.groupBy({
+        by: ['status'],
+        where: { ...baseScope, amount_due: { gt: 0 } },
+        _count: { _all: true }
+      }),
+      prisma.bookingPrepay.groupBy({
+        by: ['status'],
+        where: baseScope,
+        _count: { _all: true }
+      }),
+      prisma.bookingPrepay.count({ where: listWhere }),
       prisma.bookingPrepay.findMany({
-        orderBy: [{ created_at: 'desc' }]
+        where: listWhere,
+        orderBy,
+        skip,
+        take: limit
       }),
       prisma.paymentMethodConfig.findMany({
         select: { code: true, name: true }
       })
     ]);
+
+    const gtZeroCountMap = new Map(gtZeroGroups.map((g) => [g.status, g._count?._all || 0]));
+    const allCountMap = new Map(allStatusGroups.map((g) => [g.status, g._count?._all || 0]));
+
+    const counts = {
+      pending_payment: gtZeroCountMap.get('pending_payment') || 0,
+      reported_pending_verify:
+        (gtZeroCountMap.get('reported_pending_verify') || 0) + (gtZeroCountMap.get('mismatch') || 0),
+      verified: allCountMap.get('verified') || 0,
+      expired: allCountMap.get('expired') || 0
+    };
 
     const methodMap = new Map(methodConfigs.map((m) => [m.code, m.name]));
     const refs = prepays.map((p) => p.booking_ref);
@@ -219,9 +285,7 @@ export const getAdminPrepaysHandler = async (req, res) => {
     }
 
     const now = new Date();
-    const enriched = [];
-
-    for (const p of prepays) {
+    const items = prepays.map((p) => {
       const rList = resByRef.get(p.booking_ref) || [];
       const sortedSess = rList
         .map((r) => r.session)
@@ -231,10 +295,6 @@ export const getAdminPrepaysHandler = async (req, res) => {
       const lastSess = sortedSess[sortedSess.length - 1];
       const sessionDateStr = firstSess ? toTaipeiDateString(firstSess.session_date) : '';
 
-      if (date && sessionDateStr !== String(date)) {
-        continue;
-      }
-
       const firstRes = rList[0];
       const user = firstRes?.user || null;
       const isOverdue =
@@ -242,7 +302,12 @@ export const getAdminPrepaysHandler = async (req, res) => {
         now > new Date(p.deadline_at) &&
         (p.status === 'reported_pending_verify' || p.status === 'mismatch');
 
-      enriched.push({
+      const shortfall =
+        p.status === 'mismatch' && p.received_amount != null && p.amount_due > p.received_amount
+          ? p.amount_due - p.received_amount
+          : 0;
+
+      return {
         id: p.id,
         booking_ref: p.booking_ref,
         user_id: p.user_id,
@@ -257,6 +322,11 @@ export const getAdminPrepaysHandler = async (req, res) => {
         board_count: eqCountByRef.get(p.booking_ref) || 0,
         total_amount: p.total_amount,
         amount_due: p.amount_due,
+        received_amount: p.received_amount,
+        shortfall,
+        overpaid_amount: p.overpaid_amount,
+        overpaid_refunded_at: p.overpaid_refunded_at,
+        overpaid_refund_note: p.overpaid_refund_note,
         status: p.status,
         is_overdue: isOverdue,
         payment_method_code: p.payment_method_code,
@@ -275,42 +345,16 @@ export const getAdminPrepaysHandler = async (req, res) => {
         reminded_at: p.reminded_at,
         admin_note: p.admin_note,
         created_at: p.created_at
-      });
-    }
-
-    const counts = {
-      pending_payment: enriched.filter((x) => x.status === 'pending_payment' && x.amount_due > 0).length,
-      reported_pending_verify: enriched.filter(
-        (x) => (x.status === 'reported_pending_verify' || x.status === 'mismatch') && x.amount_due > 0
-      ).length,
-      verified: enriched.filter((x) => x.status === 'verified').length,
-      expired: enriched.filter((x) => x.status === 'expired').length
-    };
-
-    const filtered = enriched.filter((x) => {
-      if (!status || status === 'all') {
-        return true;
-      }
-      if (status === 'pending_payment') {
-        return x.status === 'pending_payment' && x.amount_due > 0;
-      }
-      if (status === 'reported_pending_verify' || status === 'reported') {
-        return (x.status === 'reported_pending_verify' || x.status === 'mismatch') && x.amount_due > 0;
-      }
-      return x.status === status;
+      };
     });
 
-    filtered.sort((a, b) => {
-      const pa = PREPAY_SORT_PRIORITY[a.status] ?? 99;
-      const pb = PREPAY_SORT_PRIORITY[b.status] ?? 99;
-      if (pa !== pb) return pa - pb;
-      if (a.session_date && b.session_date && a.session_date !== b.session_date) {
-        return a.session_date.localeCompare(b.session_date);
-      }
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    res.json({
+      items,
+      counts,
+      total,
+      page,
+      total_pages: Math.max(1, Math.ceil(total / limit))
     });
-
-    res.json({ items: filtered, counts });
   } catch (err) {
     console.error('[prepayController] getAdminPrepays error:', err);
     res.status(500).json({ error: '取得半自助對帳清單失敗' });
@@ -318,13 +362,14 @@ export const getAdminPrepaysHandler = async (req, res) => {
 };
 
 /**
- * 後台：確認收款並一次入帳
+ * 後台：確認收款並依實收金額入帳／記錄少匯／記錄多匯
  */
 export const verifyAdminPrepayHandler = async (req, res) => {
   const { booking_ref } = req.params;
   const staffName = req.user?.name || '管理員';
   const staffId = req.user?.id || null;
   const deviceInfo = getAdminDeviceInfo(req);
+  const rawReceived = req.body?.received_amount;
 
   try {
     const txResult = await prisma.$transaction(async (tx) => {
@@ -352,7 +397,7 @@ export const verifyAdminPrepayHandler = async (req, res) => {
         };
       }
 
-      // Recompute authoritative bill before settling
+      // Recompute authoritative bill before checking received_amount
       const billData = await getBookingBill(booking_ref, tx);
       const bill = billData.bill;
       const passHolds = Array.isArray(prepay.pass_holds) ? prepay.pass_holds : [];
@@ -385,12 +430,87 @@ export const verifyAdminPrepayHandler = async (req, res) => {
         };
       }
 
+      let thisReceived = 0;
+      if (recalcTransfer > 0) {
+        if (rawReceived === undefined || rawReceived === null || String(rawReceived).trim() === '') {
+          return { errorStatus: 422, errorBody: { error: '請填寫這次查到的實收整數金額（至少 NT$ 1）' } };
+        }
+        const parsed = Number(rawReceived);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          return { errorStatus: 422, errorBody: { error: '實收金額須為大於 0 的整數' } };
+        }
+        thisReceived = parsed;
+      }
+
+      const cumulative = (prepay.received_amount || 0) + thisReceived;
+
+      // Case 1: Shortfall (< amount_due) -> keep unsettled, status = 'mismatch'
+      if (cumulative < recalcTransfer) {
+        const shortfall = recalcTransfer - cumulative;
+        const reasonStr = `已收 ${cumulative} 元，還差 ${shortfall} 元`;
+        const updatedShort = await tx.bookingPrepay.update({
+          where: { booking_ref },
+          data: {
+            status: 'mismatch',
+            received_amount: cumulative,
+            admin_note: reasonStr
+          }
+        });
+
+        await auditLog(tx, {
+          booking_ref,
+          event_type: 'prepay_short',
+          category: 'prepay',
+          amount: thisReceived,
+          summary: `半自助對帳少匯：本次查得 NT$${thisReceived}，累計 NT$${cumulative}，還差 NT$${shortfall}`,
+          reason: reasonStr,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id,
+          device_label: deviceInfo?.device_label
+        });
+
+        return {
+          alreadyVerified: false,
+          isShort: true,
+          prepay: updatedShort,
+          received_amount: cumulative,
+          shortfall,
+          expected_amount: recalcTransfer
+        };
+      }
+
+      // Case 2 & 3: Cumulative >= amount_due -> settle with exact recalcTransfer
+      const overpaidAmount = Math.max(0, cumulative - recalcTransfer);
       const settled = await settleSelfServiceBooking(tx, {
         booking_ref,
         staffName,
         staffId,
         deviceInfo
       });
+
+      const finalPrepay = await tx.bookingPrepay.update({
+        where: { booking_ref },
+        data: {
+          received_amount: recalcTransfer > 0 ? cumulative : 0,
+          overpaid_amount: overpaidAmount > 0 ? overpaidAmount : null
+        }
+      });
+
+      if (overpaidAmount > 0) {
+        await auditLog(tx, {
+          booking_ref,
+          event_type: 'prepay_overpaid',
+          category: 'prepay',
+          amount: overpaidAmount,
+          summary: `半自助對帳多匯：累計實收 NT$${cumulative}，應匯 NT$${recalcTransfer}，多收 NT$${overpaidAmount} 待退還`,
+          reason: `多收 ${overpaidAmount} 元`,
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo?.device_id,
+          device_label: deviceInfo?.device_label
+        });
+      }
 
       if (prepay.assigned_pool_account) {
         await markPoolAccountUsed(tx, {
@@ -399,11 +519,45 @@ export const verifyAdminPrepayHandler = async (req, res) => {
         });
       }
 
-      return { alreadyVerified: false, prepay: settled.prepay, billing_status: settled.billing_status };
+      return {
+        alreadyVerified: false,
+        isShort: false,
+        prepay: finalPrepay,
+        billing_status: settled.billing_status,
+        overpaid_amount: overpaidAmount
+      };
     });
 
     if (txResult.errorStatus) {
       return res.status(txResult.errorStatus).json(txResult.errorBody);
+    }
+
+    if (txResult.isShort) {
+      // Best-effort LINE mismatch notification with shortfall details
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: txResult.prepay.user_id },
+          select: { id: true, name: true, line_user_id: true }
+        });
+        await sendSelfServiceMismatchNotification(
+          {
+            booking_ref,
+            amount_due: txResult.expected_amount,
+            note: `已收到 NT$${txResult.received_amount.toLocaleString()}，還差 NT$${txResult.shortfall.toLocaleString()}`
+          },
+          user
+        );
+      } catch (lineErr) {
+        console.warn('[prepayController] short LINE notify failed:', lineErr.message);
+      }
+
+      return res.json({
+        status: 'mismatch',
+        message: `已記錄實收 NT$${txResult.received_amount}，還差 NT$${txResult.shortfall}`,
+        received_amount: txResult.received_amount,
+        shortfall: txResult.shortfall,
+        prepay: txResult.prepay
+      });
     }
 
     if (!txResult.alreadyVerified) {
@@ -443,8 +597,13 @@ export const verifyAdminPrepayHandler = async (req, res) => {
     }
 
     res.json({
-      message: txResult.alreadyVerified ? '此筆款項已完成對帳' : '確認收款完成並已入帳',
+      message: txResult.alreadyVerified
+        ? '此筆款項已完成對帳'
+        : txResult.overpaid_amount > 0
+        ? `確認收款完成並已入帳（多收 NT$${txResult.overpaid_amount}，請記得退還）`
+        : '確認收款完成並已入帳',
       alreadyVerified: txResult.alreadyVerified,
+      overpaid_amount: txResult.overpaid_amount || 0,
       prepay: txResult.prepay
     });
   } catch (err) {
@@ -457,12 +616,76 @@ export const verifyAdminPrepayHandler = async (req, res) => {
 };
 
 /**
+ * 後台：記錄已退還半自助多收金額
+ */
+export const markOverpaidRefundedHandler = async (req, res) => {
+  const { booking_ref } = req.params;
+  const cleanNote = String(req.body?.note || '').trim();
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  if (!cleanNote) {
+    return res.status(422).json({ error: '請填寫退還說明／備註' });
+  }
+
+  try {
+    const txResult = await prisma.$transaction(async (tx) => {
+      const prepay = await lockPrepay(tx, booking_ref);
+      if (!prepay) {
+        return { errorStatus: 404, errorBody: { error: '找不到這筆預付紀錄' } };
+      }
+      if (!prepay.overpaid_amount || prepay.overpaid_amount <= 0) {
+        return { errorStatus: 409, errorBody: { error: '這筆預約沒有待退還的多收金額' } };
+      }
+      if (prepay.overpaid_refunded_at) {
+        return { errorStatus: 409, errorBody: { error: '這筆多收金額已經標記過已退還' } };
+      }
+
+      const updated = await tx.bookingPrepay.update({
+        where: { booking_ref },
+        data: {
+          overpaid_refunded_at: new Date(),
+          overpaid_refund_note: cleanNote
+        }
+      });
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'prepay_overpaid_refunded',
+        category: 'prepay',
+        amount: -prepay.overpaid_amount,
+        summary: `已退還半自助多收金額 NT$${prepay.overpaid_amount}`,
+        reason: cleanNote,
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id,
+        device_label: deviceInfo?.device_label
+      });
+
+      return { updated };
+    });
+
+    if (txResult.errorStatus) {
+      return res.status(txResult.errorStatus).json(txResult.errorBody);
+    }
+    return res.json({ message: '已記錄退還多收金額', prepay: txResult.updated });
+  } catch (err) {
+    console.error('[prepayController] markOverpaidRefunded error:', err);
+    return res.status(500).json({ error: '記錄退還多收金額失敗' });
+  }
+};
+
+/**
  * 後台：標記匯款金額不符
  */
 export const mismatchAdminPrepayHandler = async (req, res) => {
   const { booking_ref } = req.params;
   const { note = '' } = req.body || {};
   const cleanNote = String(note || '').trim();
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
 
   if (!cleanNote) {
     return res.status(400).json({ error: '請填寫金額不符說明／備註' });
@@ -492,6 +715,19 @@ export const mismatchAdminPrepayHandler = async (req, res) => {
           admin_note: cleanNote
         }
       });
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'prepay_mismatch',
+        category: 'prepay',
+        summary: `標記半自助匯款金額不符：${cleanNote}`,
+        reason: cleanNote,
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo?.device_id,
+        device_label: deviceInfo?.device_label
+      });
+
       return { updated };
     });
 
