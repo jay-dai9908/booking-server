@@ -26,6 +26,7 @@ test('Round 41 Item 1: cancel check-in clears person_id on boards, closes pauses
   const realNow = new Date();
   const todayStr = toTaipeiDateString(realNow);
   const todayDate = dateOnly(todayStr);
+  const fixedNow = new Date(`${todayStr}T15:00:00+08:00`);
 
   let layoutId = null;
   let s1 = null;
@@ -105,7 +106,7 @@ test('Round 41 Item 1: cancel check-in clears person_id on boards, closes pauses
       data: {
         unit_group: eqRow.unit_group,
         source: 'person',
-        started_at: new Date(`${todayStr}T14:10:00+08:00`)
+        started_at: new Date(`${todayStr}T14:55:00+08:00`)
       }
     });
 
@@ -114,7 +115,8 @@ test('Round 41 Item 1: cancel check-in clears person_id on boards, closes pauses
       body: {
         seats: activeSeats.slice(0, 2),
         start_timer: true,
-        board_assignments: [{ unit_group: eqRow.unit_group, person_no: 2 }]
+        board_assignments: [{ unit_group: eqRow.unit_group, person_no: 2 }],
+        now: fixedNow.toISOString()
       }
     });
     await checkIn(ci1.req, ci1.res);
@@ -126,7 +128,7 @@ test('Round 41 Item 1: cancel check-in clears person_id on boards, closes pauses
     // Cancel check-in
     const cancel1 = createMockReqRes({
       params: { id: ref1 },
-      body: { attendance: null }
+      body: { attendance: null, now: fixedNow.toISOString() }
     });
     await updateAttendance(cancel1.req, cancel1.res);
     assert.equal(cancel1.res.getStatusCode(), 200);
@@ -145,13 +147,14 @@ test('Round 41 Item 1: cancel check-in clears person_id on boards, closes pauses
       body: {
         seats: activeSeats.slice(0, 2),
         start_timer: true,
-        board_assignments: [{ unit_group: eqRow.unit_group, person_no: 1 }]
+        board_assignments: [{ unit_group: eqRow.unit_group, person_no: 1 }],
+        now: fixedNow.toISOString()
       }
     });
     await checkIn(ci2.req, ci2.res);
     assert.equal(ci2.res.getStatusCode(), 200);
 
-    const billAfterReCheck = await getBookingBill(ref1);
+    const billAfterReCheck = await getBookingBill(ref1, prisma, fixedNow);
     const bp1 = billAfterReCheck.bill.persons.find(p => p.person_no === 1);
     const bp2 = billAfterReCheck.bill.persons.find(p => p.person_no === 2);
     assert.equal(bp1.board.amount, 100);
@@ -171,7 +174,7 @@ test('Round 41 Item 1: cancel check-in clears person_id on boards, closes pauses
         assigned_seats: [activeSeats[2]]
       }
     });
-    const cancelComp = createMockReqRes({ params: { id: refComp }, body: { attendance: null } });
+    const cancelComp = createMockReqRes({ params: { id: refComp }, body: { attendance: null, now: fixedNow.toISOString() } });
     await updateAttendance(cancelComp.req, cancelComp.res);
     assert.equal(cancelComp.res.getStatusCode(), 409);
     assert.equal((await prisma.reservation.findFirst({ where: { booking_ref: refComp } })).attendance, 'completed');
@@ -190,23 +193,23 @@ test('Round 41 Item 1: cancel check-in clears person_id on boards, closes pauses
         assigned_seats: [activeSeats[3]]
       }
     });
-    const setNs = createMockReqRes({ params: { id: refNs }, body: { attendance: 'no_show' } });
+    const setNs = createMockReqRes({ params: { id: refNs }, body: { attendance: 'no_show', now: fixedNow.toISOString() } });
     await updateAttendance(setNs.req, setNs.res);
     assert.equal(setNs.res.getStatusCode(), 200);
 
-    const revertNs = createMockReqRes({ params: { id: refNs }, body: { attendance: null } });
+    const revertNs = createMockReqRes({ params: { id: refNs }, body: { attendance: null, now: fixedNow.toISOString() } });
     await updateAttendance(revertNs.req, revertNs.res);
     assert.equal(revertNs.res.getStatusCode(), 200);
     assert.equal((await prisma.reservation.findFirst({ where: { booking_ref: refNs } })).attendance, null);
 
     // Checked-in cannot switch directly to no_show
-    const badNs = createMockReqRes({ params: { id: ref1 }, body: { attendance: 'no_show' } });
+    const badNs = createMockReqRes({ params: { id: ref1 }, body: { attendance: 'no_show', now: fixedNow.toISOString() } });
     await updateAttendance(badNs.req, badNs.res);
     assert.equal(badNs.res.getStatusCode(), 409);
 
     // Case 5: Concurrent Promise.all cancel check-in on ref1 -> no errors, consistent state
-    const c1 = createMockReqRes({ params: { id: ref1 }, body: { attendance: null } });
-    const c2 = createMockReqRes({ params: { id: ref1 }, body: { attendance: null } });
+    const c1 = createMockReqRes({ params: { id: ref1 }, body: { attendance: null, now: fixedNow.toISOString() } });
+    const c2 = createMockReqRes({ params: { id: ref1 }, body: { attendance: null, now: fixedNow.toISOString() } });
     await Promise.all([updateAttendance(c1.req, c1.res), updateAttendance(c2.req, c2.res)]);
     const statuses = [c1.res.getStatusCode(), c2.res.getStatusCode()].sort((a, b) => a - b);
     assert.deepEqual(statuses, [200, 409]);
