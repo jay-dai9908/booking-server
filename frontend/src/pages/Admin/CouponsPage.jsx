@@ -629,55 +629,55 @@ export default function CouponsPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-end gap-4">
 
         {/* Tab Switcher & Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="bg-white border border-[#E8DEC8] p-1 rounded-xl flex items-center gap-1 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-2.5 max-w-full">
+          <div className="bg-white border border-[#E8DEC8] p-1 rounded-xl flex items-center gap-1 shadow-2xs max-w-full overflow-x-auto">
             <button
               type="button"
               onClick={() => setActiveTab('coupons')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                 activeTab === 'coupons'
                   ? 'bg-[#8B5B43] text-white shadow-xs'
                   : 'text-[#6D5D52] hover:text-[#3E332B] hover:bg-[#FAF7F2]'
               }`}
             >
-              <Ticket className="w-3.5 h-3.5" />
+              <Ticket className="w-3.5 h-3.5 shrink-0" />
               <span>折扣碼與通用優惠券 ({promoCodes.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('addons')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                 activeTab === 'addons'
                   ? 'bg-[#8B5B43] text-white shadow-xs'
                   : 'text-[#6D5D52] hover:text-[#3E332B] hover:bg-[#FAF7F2]'
               }`}
             >
-              <ShoppingBag className="w-3.5 h-3.5" />
+              <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
               <span>加購品項與周邊 ({addonItems.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('plans')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                 activeTab === 'plans'
                   ? 'bg-[#8B5B43] text-white shadow-xs'
                   : 'text-[#6D5D52] hover:text-[#3E332B] hover:bg-[#FAF7F2]'
               }`}
             >
-              <Layers className="w-3.5 h-3.5" />
+              <Layers className="w-3.5 h-3.5 shrink-0" />
               <span>會員卡券方案 ({passPlans.length})</span>
             </button>
             <button
               type="button"
               data-testid="coupons-tab-all-passes"
               onClick={() => setActiveTab('all_passes')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                 activeTab === 'all_passes'
                   ? 'bg-[#8B5B43] text-white shadow-xs'
                   : 'text-[#6D5D52] hover:text-[#3E332B] hover:bg-[#FAF7F2]'
               }`}
             >
-              <Gift className="w-3.5 h-3.5" />
+              <Gift className="w-3.5 h-3.5 shrink-0" />
               <span>卡券總表</span>
             </button>
           </div>
