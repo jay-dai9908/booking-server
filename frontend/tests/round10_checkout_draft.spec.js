@@ -69,6 +69,7 @@ async function run() {
         session: { connect: { id: sess.id } },
         user: { connect: { id: testUser.id } },
         pax: 2,
+        total_amount: 600,
         status: 'confirmed',
         assigned_seats: ['A1-1', 'A1-2'],
         attendance: 'seated',
