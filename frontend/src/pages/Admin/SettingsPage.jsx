@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Settings,
   ShieldCheck,
@@ -7,7 +8,6 @@ import {
   CreditCard,
   MessageSquare,
   Cpu,
-  Gift,
   Check,
   ExternalLink,
   RotateCcw,
@@ -31,6 +31,7 @@ import ConfirmPanel from '../../components/admin/ConfirmPanel';
 import AdminLoginGuardCard from '../../components/admin/AdminLoginGuardCard';
 import { setPrintGloballyEnabled } from '../../utils/sunmiPrinter';
 import { useAdminPermissions } from '../../hooks/admin/useAdminPermissions';
+import { diffSettings } from '../../utils/admin/settingsDiff';
 
 const DEFAULT_PREVIEW_DISABLED_TEXT = '系統維護中，請點擊下方按鈕使用 LINE 進行預約';
 const DEFAULT_ANNOUNCEMENT_TEXT = '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
@@ -50,6 +51,7 @@ export default function SettingsPage() {
   const [toastMsg, setToastMsg] = useState('');
   const [toastType, setToastType] = useState('success');
   const [fieldErrors, setFieldErrors] = useState({});
+  const [savedSnapshot, setSavedSnapshot] = useState({});
   const [unpairingStation, setUnpairingStation] = useState(null);
   const [renamingStation, setRenamingStation] = useState(null);
   const [renameInput, setRenameInput] = useState('');
@@ -249,12 +251,82 @@ export default function SettingsPage() {
         ]);
       }
 
-      const pe = d.print_enabled !== false;
-      setPrintEnabled(pe);
-      setPrintGloballyEnabled(pe);
-      setAutoPrintReceipt(d.auto_print_receipt !== false);
-      setAutoPrintSummary(d.auto_print_summary !== false);
-      setReceiptFooterText(d.receipt_footer_text ?? '');
+      const nextPrintEnabled = d.print_enabled !== false;
+      setPrintEnabled(nextPrintEnabled);
+      setPrintGloballyEnabled(nextPrintEnabled);
+      const nextAutoReceipt = d.auto_print_receipt !== false;
+      setAutoPrintReceipt(nextAutoReceipt);
+      const nextAutoSummary = d.auto_print_summary !== false;
+      setAutoPrintSummary(nextAutoSummary);
+      const nextFooterText = d.receipt_footer_text ?? '';
+      setReceiptFooterText(nextFooterText);
+
+      const loadedLineUrl = d.official_line_url || d.line_button_url || DEFAULT_LINE_URL;
+      const loadedBusinessHours = d.business_hours_json
+        ? {
+            weekday: {
+              start: d.business_hours_json.weekday?.start || '10:00',
+              end: d.business_hours_json.weekday?.end || '21:00'
+            },
+            saturday: {
+              start: d.business_hours_json.saturday?.start || '09:00',
+              end: d.business_hours_json.saturday?.end || '21:00'
+            },
+            sunday: {
+              start: d.business_hours_json.sunday?.start || '09:00',
+              end: d.business_hours_json.sunday?.end || '21:00'
+            }
+          }
+        : {
+            weekday: { start: '10:00', end: '21:00' },
+            saturday: { start: '09:00', end: '21:00' },
+            sunday: { start: '09:00', end: '21:00' }
+          };
+      const loadedChips = (Array.isArray(d.booking_note_chips) && d.booking_note_chips.length > 0)
+        ? d.booking_note_chips
+        : DEFAULT_BOOKING_NOTE_CHIPS;
+      const loadedMethods = (Array.isArray(d.payment_methods_json) && d.payment_methods_json.length > 0)
+        ? d.payment_methods_json.filter(m => String(m.key || m.code || '').trim().toLowerCase() !== 'pass')
+        : [
+            { key: 'cash', label: '現金', enabled: true },
+            { key: 'linepay', label: 'LINE Pay', enabled: true },
+            { key: 'transfer', label: '銀行轉帳', enabled: true }
+          ];
+
+      setSavedSnapshot({
+        require_line_login_every_time: !!d.require_line_login_every_time,
+        enable_preview_page: d.enable_preview_page !== false,
+        preview_disabled_text: d.preview_disabled_text ?? DEFAULT_PREVIEW_DISABLED_TEXT,
+        show_announcement: d.show_announcement !== false,
+        announcement_text: d.announcement_text ?? DEFAULT_ANNOUNCEMENT_TEXT,
+        show_price_cards: d.show_price_cards !== false,
+        price_notice_text: d.price_notice_text ?? DEFAULT_PRICE_NOTICE_TEXT,
+        show_line_button: d.show_line_button !== false,
+        show_shop_button: d.show_shop_button !== false && d.shop_enabled !== false,
+        line_button_url: loadedLineUrl,
+        official_line_url: loadedLineUrl,
+        guest_line_hint_text: d.guest_line_hint_text ?? DEFAULT_GUEST_LINE_HINT_TEXT,
+        booking_note_chips: loadedChips,
+        weekday_hourly_price: d.weekday_hourly_price ?? 100,
+        weekday_unlimited_price: d.weekday_unlimited_price ?? 550,
+        weekend_hourly_price: d.weekend_hourly_price ?? 150,
+        weekend_unlimited_price: d.weekend_unlimited_price ?? 800,
+        line_auto_notify_booking: !!d.line_auto_notify_booking,
+        line_auto_notify_cancel: !!d.line_auto_notify_cancel,
+        billing_grace_minutes: d.billing_grace_minutes ?? 10,
+        billing_block_minutes: d.billing_block_minutes ?? 30,
+        early_leave_mode: d.early_leave_mode || 'booked',
+        board_swap_grace_minutes: d.board_swap_grace_minutes ?? 10,
+        default_split_mode: d.default_split_mode || 'proportional',
+        cash_float_amount: d.cash_float_amount ?? 2000,
+        payment_methods_json: loadedMethods,
+        print_enabled: nextPrintEnabled,
+        auto_print_receipt: nextAutoReceipt,
+        auto_print_summary: nextAutoSummary,
+        receipt_footer_text: nextFooterText,
+        business_hours_json: loadedBusinessHours,
+        default_session_capacity: d.default_session_capacity ?? 16
+      });
 
       try {
         const stRes = await api.get('/print/stations');
@@ -267,60 +339,65 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveAll = async (overridePatch = {}) => {
+  const handleSaveAll = async (overridePatch = null) => {
     setSaving(true);
     setFieldErrors({});
     try {
-      const payload = {
-        require_line_login_every_time: requireLineLoginEveryTime,
-        enable_preview_page: enablePreviewPage,
-        preview_disabled_text: previewDisabledText || DEFAULT_PREVIEW_DISABLED_TEXT,
-        show_announcement: showAnnouncement,
-        announcement_text: announcementText,
-        show_price_cards: showPriceCards,
-        price_notice_text: priceNoticeText,
-        show_line_button: showLineButton,
-        show_shop_button: showShopButton,
-        line_button_url: lineButtonUrl,
-        official_line_url: lineButtonUrl,
-        guest_line_hint_text: guestLineHintText,
-        booking_note_chips: bookingNoteChips.map(s => String(s || '').trim()).filter(Boolean).map(s => s.slice(0, 12)).slice(0, 8),
-        weekday_hourly_price: toNumericOrRaw(weekdayHourly),
-        weekday_unlimited_price: toNumericOrRaw(weekdayUnlimited),
-        weekend_hourly_price: toNumericOrRaw(weekendHourly),
-        weekend_unlimited_price: toNumericOrRaw(weekendUnlimited),
-        allow_equipment_exceed_pax: allowEquipmentExceedPax,
-        show_equipment_live_stock: showEquipmentLiveStock,
-        equipment_discount_enabled: equipmentDiscountEnabled,
-        equipment_discount_buy_hours: Math.max(1, parseInt(equipmentDiscountBuyHours, 10) || 3),
-        equipment_discount_free_hours: Math.max(1, parseInt(equipmentDiscountFreeHours, 10) || 1),
-        equipment_discount2_enabled: equipmentDiscount2Enabled,
-        equipment_discount2_buy_hours: Math.max(1, parseInt(equipmentDiscount2BuyHours, 10) || 8),
-        equipment_discount2_free_hours: Math.max(1, parseInt(equipmentDiscount2FreeHours, 10) || 4),
-        equipment_discount_stackable: equipmentDiscountStackable,
-        line_auto_notify_booking: lineAutoNotifyBooking,
-        line_auto_notify_cancel: lineAutoNotifyCancel,
-        billing_grace_minutes: toNumericOrRaw(billingGraceMinutes),
-        billing_block_minutes: toNumericOrRaw(billingBlockMinutes),
-        early_leave_mode: earlyLeaveMode,
-        board_swap_grace_minutes: toNumericOrRaw(boardSwapGraceMinutes),
-        default_split_mode: defaultSplitMode,
-        cash_float_amount: toNumericOrRaw(cashFloatAmount),
-        payment_methods_json: paymentMethods,
-        print_enabled: printEnabled,
-        auto_print_receipt: autoPrintReceipt,
-        auto_print_summary: autoPrintSummary,
-        receipt_footer_text: receiptFooterText,
-        business_hours_json: businessHours,
-        default_session_capacity: toNumericOrRaw(defaultSessionCapacity),
-        ...overridePatch
-      };
+      let payloadToSend;
+      let hasNewToken = false;
 
-      if (lineMessagingTokenInput.trim() && !lineMessagingTokenInput.includes('•') && !lineMessagingTokenInput.includes('****')) {
-        payload.line_messaging_token = lineMessagingTokenInput.trim();
+      if (overridePatch && typeof overridePatch === 'object' && Object.keys(overridePatch).length > 0) {
+        payloadToSend = overridePatch;
+      } else {
+        const draft = {
+          require_line_login_every_time: requireLineLoginEveryTime,
+          enable_preview_page: enablePreviewPage,
+          preview_disabled_text: previewDisabledText || DEFAULT_PREVIEW_DISABLED_TEXT,
+          show_announcement: showAnnouncement,
+          announcement_text: announcementText,
+          show_price_cards: showPriceCards,
+          price_notice_text: priceNoticeText,
+          show_line_button: showLineButton,
+          show_shop_button: showShopButton,
+          line_button_url: lineButtonUrl,
+          official_line_url: lineButtonUrl,
+          guest_line_hint_text: guestLineHintText,
+          booking_note_chips: bookingNoteChips.map(s => String(s || '').trim()).filter(Boolean).map(s => s.slice(0, 12)).slice(0, 8),
+          weekday_hourly_price: toNumericOrRaw(weekdayHourly),
+          weekday_unlimited_price: toNumericOrRaw(weekdayUnlimited),
+          weekend_hourly_price: toNumericOrRaw(weekendHourly),
+          weekend_unlimited_price: toNumericOrRaw(weekendUnlimited),
+          line_auto_notify_booking: lineAutoNotifyBooking,
+          line_auto_notify_cancel: lineAutoNotifyCancel,
+          billing_grace_minutes: toNumericOrRaw(billingGraceMinutes),
+          billing_block_minutes: toNumericOrRaw(billingBlockMinutes),
+          early_leave_mode: earlyLeaveMode,
+          board_swap_grace_minutes: toNumericOrRaw(boardSwapGraceMinutes),
+          default_split_mode: defaultSplitMode,
+          cash_float_amount: toNumericOrRaw(cashFloatAmount),
+          payment_methods_json: paymentMethods,
+          print_enabled: printEnabled,
+          auto_print_receipt: autoPrintReceipt,
+          auto_print_summary: autoPrintSummary,
+          receipt_footer_text: receiptFooterText,
+          business_hours_json: businessHours,
+          default_session_capacity: toNumericOrRaw(defaultSessionCapacity)
+        };
+
+        payloadToSend = diffSettings(savedSnapshot, draft);
+        if (lineMessagingTokenInput.trim() && !lineMessagingTokenInput.includes('•') && !lineMessagingTokenInput.includes('****')) {
+          payloadToSend.line_messaging_token = lineMessagingTokenInput.trim();
+          hasNewToken = true;
+        }
+
+        if (Object.keys(payloadToSend).length === 0) {
+          showToast('沒有變更', 'info');
+          setSaving(false);
+          return;
+        }
       }
 
-      await api.put('/daily-settings/global', payload);
+      await api.put('/daily-settings/global', payloadToSend);
       try {
         localStorage.removeItem('shiguang_booking_global_settings_cache');
       } catch (e) {}
@@ -328,7 +405,7 @@ export default function SettingsPage() {
       await fetchGlobalSettings({ silent: true });
       showToast('系統設定已成功儲存並立即生效！', 'success');
 
-      if (payload.line_messaging_token) {
+      if (hasNewToken || payloadToSend.line_messaging_token) {
         setLineMessagingTokenInput('');
       }
     } catch (err) {
@@ -345,7 +422,19 @@ export default function SettingsPage() {
 
   const handleQuickToggle = async (field, nextValue, setter) => {
     setter(nextValue);
-    await handleSaveAll({ [field]: nextValue });
+    setFieldErrors({});
+    try {
+      await api.put('/daily-settings/global', { [field]: nextValue });
+      try {
+        localStorage.removeItem('shiguang_booking_global_settings_cache');
+      } catch (e) {}
+      await fetchGlobalSettings({ silent: true });
+      showToast('系統設定已成功儲存並立即生效！', 'success');
+    } catch (err) {
+      console.error('Quick toggle failed:', err);
+      setter(!nextValue);
+      showToast(err.response?.data?.error || '更新設定失敗', 'error');
+    }
   };
 
   const handleRenameStation = (st) => {
@@ -578,6 +667,7 @@ export default function SettingsPage() {
           </div>
           <button
             type="button"
+            data-testid="save-display-settings-btn"
             onClick={() => handleSaveAll()}
             disabled={saving}
             className="px-5 py-2 bg-[#3E332B] hover:bg-[#2C241E] text-white font-semibold rounded-xl text-xs sm:text-sm shadow-sm transition-all shrink-0 disabled:opacity-50"
@@ -614,6 +704,7 @@ export default function SettingsPage() {
                 <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">公告文字內容</label>
                 <textarea
                   rows="3"
+                  data-testid="settings-announcement-input"
                   value={announcementText}
                   onChange={e => setAnnouncementText(e.target.value)}
                   placeholder="留空將顯示系統預設公告"
@@ -680,6 +771,7 @@ export default function SettingsPage() {
               <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-0.5">
                 <input
                   type="checkbox"
+                  data-testid="settings-line-toggle"
                   checked={showLineButton}
                   onChange={e => handleQuickToggle('show_line_button', e.target.checked, setShowLineButton)}
                   className="sr-only peer"
@@ -692,6 +784,7 @@ export default function SettingsPage() {
                 <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">官方 LINE 連結網址</label>
                 <input
                   type="url"
+                  data-testid="settings-line-url-input"
                   value={lineButtonUrl}
                   onChange={e => setLineButtonUrl(e.target.value)}
                   placeholder="https://lin.ee/..."
@@ -977,142 +1070,82 @@ export default function SettingsPage() {
           </button>
         </fieldset>
 
-        {/* 3B: Smart Board Global Rules */}
-        <fieldset disabled={!canEquipment} className={`bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] flex flex-col justify-between space-y-4 ${!canEquipment ? 'opacity-65' : ''}`}>
+        {/* 3B: Smart Board Global Rules (Read-only; unique editor is EquipmentPage) */}
+        <div
+          data-testid="settings-equipment-rules-card"
+          className="bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] flex flex-col justify-between space-y-4"
+        >
           <div>
-            <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2 mb-1">
-              <Cpu className="w-5 h-5 text-[#8B5B43]" />
-              4. 智能拼豆板全域租借與買送規則
-            </h2>
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
+                <Cpu className="w-5 h-5 text-[#8B5B43]" />
+                4. 智能拼豆板全域租借與買送規則
+              </h2>
+              {canEquipment ? (
+                <Link
+                  to="/admin/equipment"
+                  data-testid="link-to-equipment-settings"
+                  className="text-xs font-bold text-[#8B5B43] hover:underline shrink-0"
+                >
+                  到智能板頁修改 →
+                </Link>
+              ) : (
+                <span
+                  data-testid="equipment-rules-readonly-notice"
+                  className="text-xs font-bold text-gray-400 shrink-0"
+                >
+                  需要智能板權限
+                </span>
+              )}
+            </div>
             <p className="text-xs text-gray-500">
-              設定單筆訂單租借台數上限、即時庫存顯示與滿時數買送方案
+              唯讀檢視目前規則；為避免多處編輯互相覆蓋，請統一於智能板庫存管理頁修改
             </p>
           </div>
 
-          <div className="space-y-3">
-            <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8] flex items-center justify-between gap-3">
-              <div>
-                <div className="text-xs font-bold text-[#3E332B]">允許單筆訂單設備總數超過預約人數</div>
-                <div className="text-[12px] text-[#6D5D52]">
-                  {allowEquipmentExceedPax ? '目前允許自由加購超過人數' : '目前限制總台數不可超過預約人數'}
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={allowEquipmentExceedPax}
-                onChange={e =>
-                  handleQuickToggle('allow_equipment_exceed_pax', e.target.checked, setAllowEquipmentExceedPax)
-                }
-                className="w-4 h-4 accent-[#8B5B43]"
-              />
+          <div className="space-y-2.5 text-xs">
+            <div className="bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8] flex items-center justify-between gap-3">
+              <span className="font-bold text-[#3E332B]">允許單筆訂單設備總數超過預約人數</span>
+              <span className="font-bold text-[#8B5B43]">{allowEquipmentExceedPax ? '允許超過人數' : '不超過人數'}</span>
             </div>
 
-            <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8] flex items-center justify-between gap-3">
-              <div>
-                <div className="text-xs font-bold text-[#3E332B]">於顧客預約頁顯示「即時庫存狀況卡片」</div>
-                <div className="text-[12px] text-[#6D5D52]">
-                  {showEquipmentLiveStock ? '顯示各規格剩餘庫存' : '隱藏即時庫存卡片'}
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={showEquipmentLiveStock}
-                onChange={e =>
-                  handleQuickToggle('show_equipment_live_stock', e.target.checked, setShowEquipmentLiveStock)
-                }
-                className="w-4 h-4 accent-[#8B5B43]"
-              />
+            <div className="bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8] flex items-center justify-between gap-3">
+              <span className="font-bold text-[#3E332B]">於顧客預約頁顯示「即時庫存狀況卡片」</span>
+              <span className="font-bold text-[#8B5B43]">{showEquipmentLiveStock ? '顯示' : '隱藏'}</span>
             </div>
 
-            <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8] space-y-2.5">
+            <div className="bg-[#FAF7F2] p-3 rounded-xl border border-[#E8DEC8] space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#3E332B] flex items-center gap-1.5">
-                  <Gift className="w-4 h-4 text-[#8B5B43]" />
-                  智能板時數優惠方案（買 X 小時送 Y 小時）
-                </span>
-                <input
-                  type="checkbox"
-                  checked={equipmentDiscountEnabled}
-                  onChange={e =>
-                    handleQuickToggle('equipment_discount_enabled', e.target.checked, setEquipmentDiscountEnabled)
-                  }
-                  className="w-4 h-4 accent-[#8B5B43]"
-                />
+                <span className="font-bold text-[#3E332B]">智能板時數買送方案</span>
+                <span className="font-bold text-[#8B5B43]">{equipmentDiscountEnabled ? '已啟用' : '未啟用'}</span>
               </div>
-
               {equipmentDiscountEnabled && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  <div className="bg-white p-2.5 rounded-lg border border-[#E8DEC8] flex items-center gap-1.5 text-xs font-bold text-[#3E332B]">
-                    <span>一階：買</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={equipmentDiscountBuyHours}
-                      onChange={e => setEquipmentDiscountBuyHours(e.target.value)}
-                      className="w-11 px-1.5 py-0.5 text-center border border-[#E8DEC8] rounded"
-                    />
-                    <span>送</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={equipmentDiscountFreeHours}
-                      onChange={e => setEquipmentDiscountFreeHours(e.target.value)}
-                      className="w-11 px-1.5 py-0.5 text-center border border-[#E8DEC8] rounded"
-                    />
-                    <span>hr</span>
+                <div className="text-[12px] text-[#6D5D52] space-y-1 pt-1 border-t border-[#E8DEC8]/70">
+                  <div>一階優惠：買 {equipmentDiscountBuyHours} 小時送 {equipmentDiscountFreeHours} 小時</div>
+                  <div>
+                    二階優惠：{equipmentDiscount2Enabled ? `買 ${equipmentDiscount2BuyHours} 小時送 ${equipmentDiscount2FreeHours} 小時` : '未啟用'}
                   </div>
-
-                  <div className="bg-white p-2.5 rounded-lg border border-[#E8DEC8] flex items-center gap-1.5 text-xs font-bold text-[#3E332B]">
-                    <input
-                      type="checkbox"
-                      checked={equipmentDiscount2Enabled}
-                      onChange={e => setEquipmentDiscount2Enabled(e.target.checked)}
-                      className="accent-[#8B5B43]"
-                    />
-                    <span>二階：買</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={equipmentDiscount2BuyHours}
-                      onChange={e => setEquipmentDiscount2BuyHours(e.target.value)}
-                      className="w-11 px-1.5 py-0.5 text-center border border-[#E8DEC8] rounded"
-                    />
-                    <span>送</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={equipmentDiscount2FreeHours}
-                      onChange={e => setEquipmentDiscount2FreeHours(e.target.value)}
-                      className="w-11 px-1.5 py-0.5 text-center border border-[#E8DEC8] rounded"
-                    />
-                    <span>hr</span>
-                  </div>
-
-                  <div className="sm:col-span-2 bg-white p-2.5 rounded-lg border border-[#E8DEC8] flex items-center justify-between text-xs font-bold text-[#3E332B]">
-                    <span>允許買送優惠連續累贈（如租 8 小時套用 2 次買 3 送 1）</span>
-                    <input
-                      type="checkbox"
-                      checked={equipmentDiscountStackable}
-                      onChange={e =>
-                        handleQuickToggle('equipment_discount_stackable', e.target.checked, setEquipmentDiscountStackable)
-                      }
-                      className="w-4 h-4 accent-[#8B5B43]"
-                    />
-                  </div>
+                  <div>連續累贈：{equipmentDiscountStackable ? '允許疊加' : '不疊加'}</div>
                 </div>
               )}
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => handleSaveAll()}
-            disabled={saving}
-            className="w-full py-2.5 bg-[#8B5B43] hover:bg-[#724a35] text-white font-bold rounded-xl text-xs sm:text-sm transition-all"
-          >
-            儲存智能板全域規則
-          </button>
-        </fieldset>
+          <div className="pt-1">
+            {canEquipment ? (
+              <Link
+                to="/admin/equipment"
+                className="block w-full text-center py-2.5 bg-[#FAF7F2] hover:bg-[#F2ECE4] text-[#8B5B43] border border-[#E8DEC8] font-bold rounded-xl text-xs sm:text-sm transition-all"
+              >
+                到智能板頁修改
+              </Link>
+            ) : (
+              <div className="w-full text-center py-2.5 bg-gray-50 text-gray-400 border border-gray-200 font-bold rounded-xl text-xs sm:text-sm">
+                需要智能板權限
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* SECTION 4.1: 營業時間預設（時段快選範本） */}

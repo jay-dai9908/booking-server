@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   format,
   addDays,
@@ -25,9 +26,6 @@ import {
   Sparkles,
   RotateCcw,
   Sliders,
-  Bell,
-  CreditCard,
-  MessageSquare,
   AlertTriangle
 } from 'lucide-react';
 import api from '../../api/axios';
@@ -67,20 +65,11 @@ export default function SessionsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [allowUnlimited, setAllowUnlimited] = useState(true);
 
-  // Pricing States
+  // Pricing States (read-only display in SessionsPage; unique editor in SettingsPage)
   const [globalWeekdayHourly, setGlobalWeekdayHourly] = useState('');
   const [globalWeekdayUnlimited, setGlobalWeekdayUnlimited] = useState('');
   const [globalWeekendHourly, setGlobalWeekendHourly] = useState('');
   const [globalWeekendUnlimited, setGlobalWeekendUnlimited] = useState('');
-  
-  // Customer Display Settings States
-  const [showPriceCards, setShowPriceCards] = useState(true);
-  const [priceNoticeText, setPriceNoticeText] = useState('');
-  const [showAnnouncement, setShowAnnouncement] = useState(true);
-  const [announcementText, setAnnouncementText] = useState('');
-  const [showLineButton, setShowLineButton] = useState(true);
-  const [lineButtonUrl, setLineButtonUrl] = useState('');
-  const [isSavingDisplay, setIsSavingDisplay] = useState(false);
 
   const [dailyHourly, setDailyHourly] = useState('');
   const [dailyUnlimited, setDailyUnlimited] = useState('');
@@ -105,14 +94,13 @@ export default function SessionsPage() {
   const [savingDailySelf, setSavingDailySelf] = useState(false);
   const [dailySelfError, setDailySelfError] = useState('');
 
-  // Shared Kiosk/Self-Service Settings
+  // Shared Kiosk/Self-Service Settings (read-only display in SessionsPage; unique editor in KioskPage)
   const [kioskSettings, setKioskSettings] = useState({
     prepay_deadline_hour: 12,
     early_minutes: 30,
     after_close_minutes: 60,
     max_unpaid_self_bookings: 2
   });
-  const [savingKioskSettings, setSavingKioskSettings] = useState(false);
   const [anySelfEquipmentEnabled, setAnySelfEquipmentEnabled] = useState(false);
 
   useEffect(() => {
@@ -145,16 +133,10 @@ export default function SessionsPage() {
   const fetchGlobalSetting = async () => {
     try {
       const res = await api.get('/daily-settings/global');
-      setGlobalWeekdayHourly(res.data.weekday_hourly_price || '');
-      setGlobalWeekdayUnlimited(res.data.weekday_unlimited_price || '');
-      setGlobalWeekendHourly(res.data.weekend_hourly_price || '');
-      setGlobalWeekendUnlimited(res.data.weekend_unlimited_price || '');
-      setShowPriceCards(res.data.show_price_cards !== false);
-      setPriceNoticeText(res.data.price_notice_text ?? '費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品');
-      setShowAnnouncement(res.data.show_announcement !== false);
-      setAnnouncementText(res.data.announcement_text ?? '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠');
-      setShowLineButton(res.data.show_line_button !== false);
-      setLineButtonUrl(res.data.official_line_url || res.data.line_button_url || 'https://lin.ee/vsZhRW5');
+      setGlobalWeekdayHourly(res.data.weekday_hourly_price ?? '');
+      setGlobalWeekdayUnlimited(res.data.weekday_unlimited_price ?? '');
+      setGlobalWeekendHourly(res.data.weekend_hourly_price ?? '');
+      setGlobalWeekendUnlimited(res.data.weekend_unlimited_price ?? '');
       if (res.data?.business_hours_json) {
         setBusinessHours({
           weekday: {
@@ -181,33 +163,6 @@ export default function SessionsPage() {
       fetchSeatCount(listDate);
     } catch (err) {
       console.error('Error fetching global setting:', err);
-    }
-  };
-
-  const handleUpdateDisplaySettings = async (e) => {
-    if (e) e.preventDefault();
-    setIsSavingDisplay(true);
-    try {
-      const payload = {
-        show_price_cards: showPriceCards,
-        price_notice_text: priceNoticeText,
-        show_announcement: showAnnouncement,
-        announcement_text: announcementText
-      };
-      if (canSettings) {
-        payload.show_line_button = showLineButton;
-        payload.line_button_url = lineButtonUrl;
-      }
-      await api.put('/daily-settings/global', payload);
-      try {
-        localStorage.removeItem('shiguang_booking_global_settings_cache');
-      } catch (e) {}
-      showToast('顧客端首頁顯示設定已成功更新！');
-    } catch (err) {
-      console.error(err);
-      showToast(err.response?.data?.error || '更新顯示設定失敗');
-    } finally {
-      setIsSavingDisplay(false);
     }
   };
 
@@ -283,27 +238,6 @@ export default function SessionsPage() {
     }
   };
 
-  const handleSaveKioskSettings = async (e) => {
-    e.preventDefault();
-    setSavingKioskSettings(true);
-    try {
-      const res = await api.put('/kiosk/settings', {
-        prepay_deadline_hour: parseInt(kioskSettings.prepay_deadline_hour, 10),
-        early_minutes: parseInt(kioskSettings.early_minutes, 10),
-        after_close_minutes: parseInt(kioskSettings.after_close_minutes, 10),
-        max_unpaid_self_bookings: parseInt(kioskSettings.max_unpaid_self_bookings, 10)
-      });
-      if (res.data?.setting) {
-        setKioskSettings(res.data.setting);
-      }
-      showToast('已儲存半自助日共用設定');
-    } catch (err) {
-      showToast(err.response?.data?.error || '儲存共用設定失敗');
-    } finally {
-      setSavingKioskSettings(false);
-    }
-  };
-
   const fetchMonthSessions = async (monthDate = currentMonth) => {
     try {
       const mStart = format(startOfWeek(startOfMonth(monthDate)), 'yyyy-MM-dd');
@@ -329,24 +263,6 @@ export default function SessionsPage() {
       console.error('Error updating daily setting:', err);
       setAllowUnlimited(!newValue);
       showToast('更新設定失敗');
-    }
-  };
-
-  const handleUpdateGlobalPrice = async (e) => {
-    e.preventDefault();
-    try {
-      await api.put('/daily-settings/global', { 
-        weekday_hourly_price: globalWeekdayHourly || null, 
-        weekday_unlimited_price: globalWeekdayUnlimited || null,
-        weekend_hourly_price: globalWeekendHourly || null,
-        weekend_unlimited_price: globalWeekendUnlimited || null
-      });
-      try {
-        localStorage.removeItem('shiguang_booking_global_settings_cache');
-      } catch (e) {}
-      showToast('全店預設價格更新成功！');
-    } catch (err) {
-      showToast('更新失敗');
     }
   };
 
@@ -1004,34 +920,62 @@ export default function SessionsPage() {
 
       {/* Bottom Grid: Price Settings & Overrides */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mt-8">
-        {/* Global Prices */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-          <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
-            預設全店價格
-          </h2>
-          <form onSubmit={handleUpdateGlobalPrice} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">平日/時</label>
-                <input type="number" value={globalWeekdayHourly} onChange={e => setGlobalWeekdayHourly(e.target.value)} placeholder="100" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">平日/上限</label>
-                <input type="number" value={globalWeekdayUnlimited} onChange={e => setGlobalWeekdayUnlimited(e.target.value)} placeholder="550" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+        {/* Global Prices (Read-only; unique editor is SettingsPage) */}
+        <div
+          data-testid="sessions-global-prices-card"
+          className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 flex flex-col justify-between space-y-5"
+        >
+          <div>
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <h2 className="text-lg font-bold text-gray-900">
+                預設全店價格
+              </h2>
+              <Link
+                to="/admin/settings"
+                data-testid="link-to-global-settings"
+                className="text-xs font-bold text-[#8B5B43] hover:underline shrink-0"
+              >
+                到系統設定修改 →
+              </Link>
+            </div>
+            <p className="text-xs text-gray-500">
+              唯讀顯示；為避免互相覆蓋，全店預設價格統一於「系統設定」修改
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+              <div className="text-xs font-semibold text-gray-500 mb-1">平日 / 時</div>
+              <div className="text-base font-bold text-gray-900" data-testid="readonly-weekday-hourly">
+                NT$ {globalWeekdayHourly !== '' ? globalWeekdayHourly : '—'}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">假日/時</label>
-                <input type="number" value={globalWeekendHourly} onChange={e => setGlobalWeekendHourly(e.target.value)} placeholder="150" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">假日/上限</label>
-                <input type="number" value={globalWeekendUnlimited} onChange={e => setGlobalWeekendUnlimited(e.target.value)} placeholder="800" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"/>
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+              <div className="text-xs font-semibold text-gray-500 mb-1">平日 / 上限</div>
+              <div className="text-base font-bold text-gray-900" data-testid="readonly-weekday-unlimited">
+                NT$ {globalWeekdayUnlimited !== '' ? globalWeekdayUnlimited : '—'}
               </div>
             </div>
-            <button type="submit" className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm">儲存全店預設</button>
-          </form>
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+              <div className="text-xs font-semibold text-gray-500 mb-1">假日 / 時</div>
+              <div className="text-base font-bold text-gray-900" data-testid="readonly-weekend-hourly">
+                NT$ {globalWeekendHourly !== '' ? globalWeekendHourly : '—'}
+              </div>
+            </div>
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+              <div className="text-xs font-semibold text-gray-500 mb-1">假日 / 上限</div>
+              <div className="text-base font-bold text-gray-900" data-testid="readonly-weekend-unlimited">
+                NT$ {globalWeekendUnlimited !== '' ? globalWeekendUnlimited : '—'}
+              </div>
+            </div>
+          </div>
+
+          <Link
+            to="/admin/settings"
+            className="block w-full text-center bg-[#FAF7F2] hover:bg-[#F2ECE4] text-[#8B5B43] border border-[#E8DEC8] font-bold py-3 rounded-xl transition-all text-sm"
+          >
+            到系統設定修改
+          </Link>
         </div>
 
         {/* Daily Prices Overrides */}
@@ -1380,18 +1324,29 @@ export default function SessionsPage() {
           </button>
         </form>
 
-        {/* Shared Kiosk / Self-Service Settings */}
-        <form onSubmit={handleSaveKioskSettings} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4 flex flex-col justify-between" data-testid="sessions-kiosk-settings-card">
+        {/* Shared Kiosk / Self-Service Settings (Read-only; unique editor is KioskPage) */}
+        <div
+          className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 space-y-4 flex flex-col justify-between"
+          data-testid="sessions-kiosk-settings-card"
+        >
           <div className="space-y-4">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <h2 className="text-lg font-bold text-gray-900">半自助日共用設定</h2>
-                <p className="text-xs text-gray-500 mt-0.5">全店共用，不分日期</p>
+                <h2 className="text-lg font-bold text-gray-900">半自助日共用設定（進場規則）</h2>
+                <p className="text-xs text-gray-500 mt-0.5">唯讀顯示；全店共用，統一於「報到機設定」修改</p>
               </div>
-              {!canSettings && (
+              {canSettings ? (
+                <Link
+                  to="/admin/kiosk"
+                  data-testid="link-to-kiosk-settings"
+                  className="text-xs font-bold text-[#8B5B43] hover:underline shrink-0"
+                >
+                  到報到機頁修改 →
+                </Link>
+              ) : (
                 <span
                   data-testid="kiosk-settings-readonly-notice"
-                  className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg shrink-0"
+                  className="text-xs font-bold text-gray-400 shrink-0"
                 >
                   需要系統全域設定權限
                 </span>
@@ -1401,209 +1356,40 @@ export default function SessionsPage() {
             <div className="space-y-3 text-sm">
               <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
                 <span className="font-semibold text-gray-700">付款期限：前一日</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min="0"
-                    max="23"
-                    disabled={!canSettings}
-                    readOnly={!canSettings}
-                    value={kioskSettings.prepay_deadline_hour}
-                    onChange={(e) => setKioskSettings(prev => ({ ...prev, prepay_deadline_hour: e.target.value }))}
-                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right disabled:bg-gray-100 disabled:text-gray-500"
-                  />
-                  <span className="text-gray-600 font-bold">:00</span>
-                </div>
+                <span className="font-bold text-gray-900">{kioskSettings.prepay_deadline_hour}:00</span>
               </div>
 
               <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
                 <span className="font-semibold text-gray-700">最早提前進場</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min="0"
-                    max="120"
-                    disabled={!canSettings}
-                    readOnly={!canSettings}
-                    value={kioskSettings.early_minutes}
-                    onChange={(e) => setKioskSettings(prev => ({ ...prev, early_minutes: e.target.value }))}
-                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right disabled:bg-gray-100 disabled:text-gray-500"
-                  />
-                  <span className="text-gray-600">分鐘進場</span>
-                </div>
+                <span className="font-bold text-gray-900">{kioskSettings.early_minutes} 分鐘進場</span>
               </div>
 
               <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
                 <span className="font-semibold text-gray-700">打烊後仍可進門</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min="0"
-                    max="240"
-                    disabled={!canSettings}
-                    readOnly={!canSettings}
-                    value={kioskSettings.after_close_minutes}
-                    onChange={(e) => setKioskSettings(prev => ({ ...prev, after_close_minutes: e.target.value }))}
-                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right disabled:bg-gray-100 disabled:text-gray-500"
-                  />
-                  <span className="text-gray-600">分鐘內</span>
-                </div>
+                <span className="font-bold text-gray-900">{kioskSettings.after_close_minutes} 分鐘內</span>
               </div>
 
               <div className="flex items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
                 <span className="font-semibold text-gray-700">同一位會員最多同時待付款預約</span>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    disabled={!canSettings}
-                    readOnly={!canSettings}
-                    value={kioskSettings.max_unpaid_self_bookings}
-                    onChange={(e) => setKioskSettings(prev => ({ ...prev, max_unpaid_self_bookings: e.target.value }))}
-                    className="w-20 px-3 py-1.5 bg-white border border-gray-200 rounded-lg font-bold text-right disabled:bg-gray-100 disabled:text-gray-500"
-                  />
-                  <span className="text-gray-600">筆</span>
-                </div>
+                <span className="font-bold text-gray-900">{kioskSettings.max_unpaid_self_bookings} 筆</span>
               </div>
             </div>
           </div>
 
-          {canSettings && (
-            <button
-              type="submit"
-              disabled={savingKioskSettings}
-              data-testid="save-kiosk-settings-btn"
-              className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
+          {canSettings ? (
+            <Link
+              to="/admin/kiosk"
+              className="block w-full text-center bg-[#FAF7F2] hover:bg-[#F2ECE4] text-[#8B5B43] border border-[#E8DEC8] font-bold py-3 rounded-xl transition-all text-sm"
             >
-              {savingKioskSettings ? '儲存中...' : '儲存半自助日共用設定'}
-            </button>
+              到報到機頁修改
+            </Link>
+          ) : (
+            <div className="w-full text-center py-3 bg-gray-50 text-gray-400 border border-gray-200 font-bold rounded-xl text-sm">
+              需要系統全域設定權限
+            </div>
           )}
-        </form>
+        </div>
       </div>
-
-      {/* Customer Home Display Settings Card */}
-      <form
-        onSubmit={handleUpdateDisplaySettings}
-        data-testid="sessions-display-settings-card"
-        className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mt-8 space-y-5"
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-100">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Sliders className="w-5 h-5 text-sg-brown" />
-              顧客端首頁顯示設定
-            </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              設定顧客預約首頁的頂部系統公告欄、入場價格表卡片與官方 LINE 連結按鈕
-            </p>
-          </div>
-          <button
-            type="submit"
-            disabled={isSavingDisplay}
-            data-testid="save-display-settings-btn"
-            className="px-5 py-2.5 bg-sg-brown hover:bg-sg-brown-hover text-white font-bold rounded-xl text-xs sm:text-sm shadow-sm transition-all disabled:opacity-50 shrink-0"
-          >
-            {isSavingDisplay ? '儲存中...' : '儲存顧客端首頁顯示設定'}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {/* Announcement */}
-          <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-                <Bell className="w-4 h-4 text-amber-600" />
-                頂部系統公告欄
-              </span>
-              <input
-                type="checkbox"
-                data-testid="sessions-announcement-toggle"
-                checked={showAnnouncement}
-                onChange={(e) => setShowAnnouncement(e.target.checked)}
-                className="w-4 h-4 accent-[#8B5B43]"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">公告文字內容</label>
-              <textarea
-                rows="3"
-                data-testid="sessions-announcement-input"
-                value={announcementText}
-                onChange={(e) => setAnnouncementText(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:border-sg-brown focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Price Cards */}
-          <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-                <CreditCard className="w-4 h-4 text-sg-brown" />
-                首頁入場價格表雙卡片
-              </span>
-              <input
-                type="checkbox"
-                data-testid="sessions-price-cards-toggle"
-                checked={showPriceCards}
-                onChange={(e) => setShowPriceCards(e.target.checked)}
-                className="w-4 h-4 accent-[#8B5B43]"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">價格卡下方備註提醒文字</label>
-              <textarea
-                rows="3"
-                data-testid="sessions-price-notice-input"
-                value={priceNoticeText}
-                onChange={(e) => setPriceNoticeText(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:border-sg-brown focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Official LINE Button */}
-          <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-                <MessageSquare className="w-4 h-4 text-emerald-600" />
-                官方 LINE 連結與按鈕
-              </span>
-              <input
-                type="checkbox"
-                data-testid="sessions-line-toggle"
-                disabled={!canSettings}
-                checked={showLineButton}
-                onChange={(e) => setShowLineButton(e.target.checked)}
-                className="w-4 h-4 accent-[#8B5B43] disabled:opacity-50"
-              />
-            </div>
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <label className="block text-xs font-semibold text-gray-700">官方 LINE 連結網址</label>
-                {!canSettings && (
-                  <span
-                    data-testid="sessions-line-readonly-notice"
-                    className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md"
-                  >
-                    需要系統全域設定權限
-                  </span>
-                )}
-              </div>
-              <input
-                type="url"
-                data-testid="sessions-line-url-input"
-                disabled={!canSettings}
-                readOnly={!canSettings}
-                value={lineButtonUrl}
-                onChange={(e) => setLineButtonUrl(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-xl focus:border-sg-brown focus:outline-none disabled:bg-gray-100 disabled:text-gray-500"
-              />
-            </div>
-          </div>
-        </div>
-      </form>
 
       {/* Shortcut Banner to Dedicated System Settings Page */}
       <div className="bg-[#FAF7F2] p-5 sm:p-6 rounded-2xl shadow-xs border border-[#E8DEC8] mt-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

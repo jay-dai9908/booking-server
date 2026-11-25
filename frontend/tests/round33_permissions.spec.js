@@ -279,23 +279,24 @@ async function run() {
 
     await page3.goto(`${BASE_URL}/admin/sessions`, { waitUntil: 'networkidle' });
 
-    const displayCard = page3.locator('[data-testid="sessions-display-settings-card"]');
-    await displayCard.waitFor({ state: 'visible', timeout: 10000 });
-    await displayCard.scrollIntoViewIfNeeded();
-
-    // Verify Kiosk card is read-only for sessions-only staff
+    // Verify Kiosk card is read-only for sessions-only staff (no save button, shows permission notice)
     await page3.locator('[data-testid="kiosk-settings-readonly-notice"]').waitFor({ state: 'visible', timeout: 10000 });
     assert.strictEqual(await page3.locator('[data-testid="save-kiosk-settings-btn"]').count(), 0, 'Kiosk save button should be hidden for sessions-only staff');
 
-    // Verify LINE button URL input & toggle are disabled/read-only and show notice
-    await page3.locator('[data-testid="sessions-line-readonly-notice"]').waitFor({ state: 'visible', timeout: 10000 });
-    const lineUrlInput = page3.locator('[data-testid="sessions-line-url-input"]');
+    // Global prices card is read-only on /admin/sessions and links to /admin/settings
+    await page3.locator('[data-testid="sessions-global-prices-card"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page3.locator('[data-testid="link-to-global-settings"]').click();
+    await page3.waitForURL('**/admin/settings', { timeout: 10000 });
+
+    // On /admin/settings, LINE URL input & toggle are disabled for sessions-only staff
+    const lineUrlInput = page3.locator('[data-testid="settings-line-url-input"]');
+    await lineUrlInput.waitFor({ state: 'visible', timeout: 10000 });
     assert.strictEqual(await lineUrlInput.isDisabled(), true, 'LINE URL input should be disabled for sessions-only staff');
-    const lineToggle = page3.locator('[data-testid="sessions-line-toggle"]');
+    const lineToggle = page3.locator('[data-testid="settings-line-toggle"]');
     assert.strictEqual(await lineToggle.isDisabled(), true, 'LINE button toggle should be disabled for sessions-only staff');
 
-    // Verify announcement is editable and saves cleanly (200)
-    const announcementInput = page3.locator('[data-testid="sessions-announcement-input"]');
+    // Verify announcement is editable and saves cleanly (200) on /admin/settings
+    const announcementInput = page3.locator('[data-testid="settings-announcement-input"]');
     assert.strictEqual(await announcementInput.isDisabled(), false, 'Announcement input should be enabled for sessions-only staff');
     const testAnnouncementText = `歡迎來到拾光製所！R33時段人員公告更新_${suffix}`;
     await announcementInput.fill(testAnnouncementText);
@@ -305,7 +306,7 @@ async function run() {
       page3.locator('[data-testid="save-display-settings-btn"]').click()
     ]);
     assert.strictEqual(putGlobalResp.status(), 200, `Expected 200 saving display settings for sessions-only staff, got ${putGlobalResp.status()}`);
-    await page3.locator('text=顧客端首頁顯示設定已成功更新').waitFor({ state: 'visible', timeout: 10000 });
+    await page3.locator('text=系統設定已成功儲存並立即生效').waitFor({ state: 'visible', timeout: 10000 });
 
     const shot3Path = path.join(SCREENSHOT_DIR, 'round33_shot3_sessions_readonly.png');
     await page3.screenshot({ path: shot3Path, fullPage: false });
