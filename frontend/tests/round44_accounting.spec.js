@@ -382,6 +382,7 @@ async function run() {
     // SCENARIO 5 (Item 5): Dedicated Shop Revenue Tab (NT$1,800) vs Overview (NT$1,000)
     // =========================================================================
     console.log('5. Verifying Item 5: Dedicated Shop Revenue tab NT$1,800 vs Overview NT$1,000...');
+    await prisma.productOrder.deleteMany({ where: { user_id: { in: createdUserIds } } }).catch(() => {});
     await cleanOperationalData(prisma);
     const sNov10 = await prisma.session.upsert({
       where: { session_date_start_time: { session_date: dateOnly('2026-11-10'), start_time: '14:00' } },
@@ -430,6 +431,7 @@ async function run() {
     }
     await cleanOperationalData(prisma).catch(() => {});
     if (createdUserIds.length > 0) {
+      await prisma.productOrder.deleteMany({ where: { user_id: { in: createdUserIds } } }).catch(() => {});
       await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } }).catch(() => {});
     }
     await prisma.$disconnect().catch(() => {});
