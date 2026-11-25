@@ -1173,7 +1173,7 @@ export default function ShopAdminPage() {
                       const isReported = order.payment_status === 'reported_pending_verify';
 
                       return (
-                        <tr key={order.id} className="hover:bg-[#FAF7F2]/60 transition">
+                        <tr key={order.id} data-testid={`shop-order-row-${order.id}`} className="hover:bg-[#FAF7F2]/60 transition">
                           <td className="p-3 text-center">
                             <input
                               type="checkbox"
@@ -1507,6 +1507,7 @@ export default function ShopAdminPage() {
                             {order.order_status !== 'picked_up' && order.order_status !== 'cancelled' && (
                               <button
                                 type="button"
+                                data-testid={`shop-cancel-btn-${order.id}`}
                                 onClick={() => handleCancelOrder(order)}
                                 className="px-2 py-1 bg-gray-50 hover:bg-rose-50 text-gray-500 hover:text-rose-700 border border-gray-200 hover:border-rose-200 rounded-lg text-xs font-bold transition inline-flex items-center gap-1"
                                 title="取消此預購訂單並釋放中信帳號"
