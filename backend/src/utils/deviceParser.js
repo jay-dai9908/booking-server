@@ -30,7 +30,8 @@ export const getClientIp = (req, _clientInfo = {}) => {
  * Parse User-Agent and optional clientInfo payload into structured device details
  */
 export const parseDeviceDetails = (req, clientInfo = {}) => {
-  const ua = req.headers['user-agent'] || '';
+  const headers = req?.headers || {};
+  const ua = headers['user-agent'] || '';
   const ip_address = getClientIp(req, clientInfo);
 
   // 1. Parse OS
@@ -232,8 +233,9 @@ export const recordUserLoginLog = async (userId, req, clientInfo = {}, options =
  * Extract admin device ID and label from request headers (spec 5.0 item 2)
  */
 export const getAdminDeviceInfo = (req) => {
-  const deviceId = req.headers['x-device-id'] ? String(req.headers['x-device-id']).trim() : null;
-  const rawLabel = req.headers['x-device-label'];
+  const headers = req?.headers || {};
+  const deviceId = headers['x-device-id'] ? String(headers['x-device-id']).trim() : null;
+  const rawLabel = headers['x-device-label'];
   let deviceLabel = '';
   if (rawLabel) {
     try {
@@ -243,7 +245,7 @@ export const getAdminDeviceInfo = (req) => {
     }
   }
   if (!deviceLabel) {
-    const ua = (req.headers['user-agent'] || '').toLowerCase();
+    const ua = (headers['user-agent'] || '').toLowerCase();
     if (/ipad|tablet|(android(?!.*mobile))/.test(ua)) {
       deviceLabel = '平板';
     } else if (/mobi|iphone|ipod|android.*mobile/.test(ua)) {
