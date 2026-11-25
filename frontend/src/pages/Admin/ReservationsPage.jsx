@@ -361,7 +361,8 @@ export default function ReservationsPage() {
       partial: 0,
       paid: 0,
       refund: 0,
-      cancelled: 0
+      cancelled: 0,
+      archived: 0
     };
     for (const r of reservations) {
       if (r.status === 'cancelled') {
@@ -383,6 +384,8 @@ export default function ReservationsPage() {
 
   const filteredReservations = useMemo(() => {
     return reservations.filter(r => {
+      if (statusFilter === 'archived') return Boolean(r.archived_at);
+      if (r.archived_at) return false;
       if (statusFilter === 'all') return true;
       if (statusFilter === 'cancelled') return r.status === 'cancelled';
       if (r.status === 'cancelled') return false;
@@ -549,11 +552,13 @@ export default function ReservationsPage() {
             { key: 'partial', label: `部分已付 (${filterCounts.partial})` },
             { key: 'paid', label: `已結清 (${filterCounts.paid})` },
             { key: 'refund', label: `有退款 (${filterCounts.refund})` },
-            { key: 'cancelled', label: `已取消 (${filterCounts.cancelled})` }
+            { key: 'cancelled', label: `已取消 (${filterCounts.cancelled})` },
+            { key: 'archived', label: `已封存 (${filterCounts.archived ?? 0})` }
           ].map(tab => (
             <button
               key={tab.key}
               type="button"
+              data-testid={`reservation-filter-${tab.key}`}
               onClick={() => {
                 setStatusFilter(tab.key);
                 setPage(1);

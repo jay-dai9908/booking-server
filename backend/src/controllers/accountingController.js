@@ -164,6 +164,7 @@ export const getLedger = async (req, res) => {
         device_label: p.device_label,
         user_name: passTargetLabel || r?.user?.name || p.breakdown_json?.customer_name || '客人',
         phone: r?.user?.phone || p.breakdown_json?.customer_phone || '',
+        session_date: r?.session?.session_date ? toTaipeiDateString(r.session.session_date) : null,
         person_nos: p.person_nos
       };
     });
@@ -358,18 +359,39 @@ export const getPaymentsList = async (req, res) => {
 
     const hasMore = payments.length > take;
     const rawItems = hasMore ? payments.slice(0, take) : payments;
+    const bookingRefs = [...new Set(rawItems.filter(p => p.source === 'booking' && p.booking_ref).map(p => p.booking_ref))];
+    const bookingResvs = bookingRefs.length > 0
+      ? await prisma.reservation.findMany({
+          where: { booking_ref: { in: bookingRefs } },
+          include: {
+            session: { select: { session_date: true, start_time: true, end_time: true } },
+            user: { select: { name: true } }
+          }
+        })
+      : [];
+    const resMap = new Map();
+    for (const r of bookingResvs) {
+      if (!resMap.has(r.booking_ref)) resMap.set(r.booking_ref, r);
+    }
+
     const nowTs = new Date();
     const shiftLockAt = await getShiftLock(prisma, nowTs);
     const items = rawItems.map(p => {
       const refStr = p.source_ref || p.booking_ref || '';
+      const matchedRes = p.source === 'booking' ? resMap.get(p.booking_ref) : null;
       const target_label = p.source === 'pass_sale'
         ? `卡券販售 · *${String(refStr).slice(-4)}`
         : p.source === 'shop'
           ? `商城訂單 · ${refStr}`
           : null;
+      const sessionDate = matchedRes?.session?.session_date
+        ? toTaipeiDateString(matchedRes.session.session_date)
+        : null;
       return {
         ...p,
         target_label,
+        user_name: matchedRes?.user?.name || p.breakdown_json?.customer_name || null,
+        session_date: sessionDate,
         can_void: canVoidPayment(p, { shiftLockAt, now: nowTs })
       };
     });

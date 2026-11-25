@@ -371,10 +371,27 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
     }
   };
 
+  const handleArchiveRecord = () => {
+    setConfirmAction({
+      title: '封存已取消預約',
+      message: '封存後列表預設不顯示，完整預約與收款／退款紀錄皆會保留。',
+      danger: false,
+      onConfirm: async () => {
+        try {
+          await api.post(`/reservations/${reservation.booking_ref}/archive`);
+          if (onUpdate) onUpdate();
+          onClose();
+        } catch (err) {
+          showToast(err.response?.data?.error || '封存失敗', true);
+        }
+      }
+    });
+  };
+
   const handleDeleteRecord = () => {
     setConfirmAction({
-      title: '刪除訂單紀錄',
-      message: '確定要永久刪除此筆訂單紀錄嗎？此操作無法復原。',
+      title: '永久刪除訂單紀錄',
+      message: '確定要永久刪除此筆沒有收款紀錄的已取消預約嗎？此操作無法復原。',
       danger: true,
       onConfirm: async () => {
         try {
@@ -922,16 +939,33 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
             <div className="pt-6 border-t border-gray-100">
               <h3 className="text-sm font-medium text-gray-500 mb-3">訂單操作</h3>
               {reservation.status === 'cancelled' ? (
-                <div className="flex items-center justify-between">
-                  <p className="text-gray-500 text-sm">此訂單已取消。</p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-gray-500 text-sm">
+                    {reservation.archived_at ? '此訂單已取消並封存。' : '此訂單已取消。'}
+                  </div>
                   {!readOnly && (
-                    <button 
-                      onClick={handleDeleteRecord}
-                      className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl font-medium transition-colors flex items-center gap-2 text-sm border border-red-100"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      刪除紀錄
-                    </button>
+                    <div className="flex flex-wrap items-center gap-3">
+                      {!reservation.archived_at && (
+                        <button
+                          type="button"
+                          data-testid="archive-record-btn"
+                          onClick={handleArchiveRecord}
+                          className="px-4 py-2 bg-gray-100 text-gray-800 hover:bg-gray-200 rounded-xl font-bold transition-colors flex items-center gap-2 text-sm border border-gray-200"
+                        >
+                          封存
+                        </button>
+                      )}
+                      {reservation.can_permanent_delete && (
+                        <button
+                          type="button"
+                          data-testid="permanent-delete-record-btn"
+                          onClick={handleDeleteRecord}
+                          className="text-xs text-red-600 hover:text-red-700 underline font-medium"
+                        >
+                          永久刪除（沒有任何收款紀錄）
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               ) : (

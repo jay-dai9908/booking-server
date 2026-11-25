@@ -373,7 +373,7 @@ export default function SessionsPage() {
   const fetchSessions = async (date = listDate) => {
     setIsLoading(true);
     try {
-      const res = await api.get(`/sessions?date=${date}`);
+      const res = await api.get(`/sessions?date=${date}&include_closed=1`);
       setSessions(res.data);
     } catch (err) {
       console.error(err);
@@ -414,8 +414,8 @@ export default function SessionsPage() {
   const handleConfirmDeleteSession = async () => {
     if (!deleteSessionTargetId) return;
     try {
-      await api.delete(`/sessions/${deleteSessionTargetId}`);
-      showToast('時段已刪除');
+      const res = await api.delete(`/sessions/${deleteSessionTargetId}`);
+      showToast(res.data?.action === 'closed' ? '此時段有已取消的預約紀錄，已改為關閉' : '時段已刪除');
       fetchSessions(listDate);
       fetchMonthSessions(currentMonth);
     } catch (err) {
@@ -433,7 +433,10 @@ export default function SessionsPage() {
   const handleConfirmDeleteAllForDate = async () => {
     try {
       const res = await api.delete(`/sessions/date/${listDate}`);
-      showToast(`成功刪除 ${res.data.deletedCount} 個時段。${res.data.keptCount > 0 ? ` (保留了 ${res.data.keptCount} 個已被預約的時段)` : ''}`);
+      const deletedCount = res.data?.deletedCount ?? 0;
+      const closedCount = res.data?.closedCount ?? 0;
+      const keptCount = res.data?.keptCount ?? 0;
+      showToast(`刪除 ${deletedCount} 個、關閉 ${closedCount} 個（有已取消的預約紀錄）${keptCount > 0 ? `；另有 ${keptCount} 個確認中時段保留` : ''}`);
       fetchSessions(listDate);
       fetchMonthSessions(currentMonth);
     } catch (err) {
@@ -889,18 +892,23 @@ export default function SessionsPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {sessions.map(s => {
+                        const isClosed = Boolean(s.closed_at);
                         const isFull = s.remaining_capacity === 0;
                         return (
-                          <tr key={s.id} className="hover:bg-gray-50 transition-colors group">
+                          <tr key={s.id} className={`transition-colors group ${isClosed ? 'bg-gray-50/70 text-gray-400' : 'hover:bg-gray-50'}`}>
                             <td className="px-6 py-4 font-semibold text-gray-800">{s.start_time} - {s.end_time}</td>
                             <td className="px-6 py-4 text-gray-500">{s.max_capacity} 人</td>
                             <td className="px-6 py-4">
-                              <span className={`font-bold ${isFull ? 'text-gray-300' : 'text-gray-900'}`}>
+                              <span className={`font-bold ${isClosed || isFull ? 'text-gray-300' : 'text-gray-900'}`}>
                                 {s.remaining_capacity}
                               </span>
                             </td>
                             <td className="px-6 py-4">
-                              {isFull ? (
+                              {isClosed ? (
+                                <span className="inline-flex items-center gap-1.5 text-gray-500 text-xs font-bold bg-gray-100 px-2 py-0.5 rounded-lg">
+                                  已關閉
+                                </span>
+                              ) : isFull ? (
                                 <span className="inline-flex items-center gap-1.5 text-gray-400 text-sm">
                                   <XCircle className="w-4 h-4"/>已額滿
                                 </span>
@@ -912,9 +920,10 @@ export default function SessionsPage() {
                             </td>
                             <td className="px-6 py-4 text-right">
                               <button 
+                                disabled={isClosed}
                                 onClick={() => handleDeleteSession(s.id)}
-                                className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors"
-                                title="刪除時段"
+                                className="text-gray-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-30 disabled:pointer-events-none p-2 rounded-lg transition-colors"
+                                title={isClosed ? '已關閉' : '刪除時段'}
                               >
                                 <Trash2 className="w-5 h-5" />
                               </button>
@@ -929,15 +938,20 @@ export default function SessionsPage() {
                 {/* Mobile Card List (< 768px) */}
                 <div className="md:hidden divide-y divide-gray-100">
                   {sessions.map(s => {
+                    const isClosed = Boolean(s.closed_at);
                     const isFull = s.remaining_capacity === 0;
                     return (
-                      <div key={s.id} className="p-4 flex items-center justify-between gap-3">
+                      <div key={s.id} className={`p-4 flex items-center justify-between gap-3 ${isClosed ? 'bg-gray-50/70 opacity-75' : ''}`}>
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-gray-900 text-sm">
                               {s.start_time} - {s.end_time}
                             </span>
-                            {isFull ? (
+                            {isClosed ? (
+                              <span className="inline-flex items-center gap-1 text-gray-500 text-xs font-bold bg-gray-100 px-2 py-0.5 rounded-lg">
+                                已關閉
+                              </span>
+                            ) : isFull ? (
                               <span className="inline-flex items-center gap-1 text-gray-400 text-xs">
                                 <XCircle className="w-3.5 h-3.5" /> 已額滿
                               </span>
@@ -954,9 +968,10 @@ export default function SessionsPage() {
 
                         <button
                           type="button"
+                          disabled={isClosed}
                           onClick={() => handleDeleteSession(s.id)}
-                          className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2.5 rounded-xl transition-colors shrink-0"
-                          title="刪除時段"
+                          className="text-gray-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-30 disabled:pointer-events-none p-2.5 rounded-xl transition-colors shrink-0"
+                          title={isClosed ? '已關閉' : '刪除時段'}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>

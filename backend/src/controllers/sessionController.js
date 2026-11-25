@@ -1,9 +1,29 @@
+import jwt from 'jsonwebtoken';
 import prisma from '../prismaClient.js';
 import { getActiveLayoutForDate } from '../services/seating/layoutService.js';
-import { dateOnly } from '../../../shared/time.js';
+import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
+import { syncAndVerifyAdminUser } from '../middlewares/authMiddleware.js';
+import { bookableSessionWhere } from '../services/calendar/sessionFilters.js';
+import auditService from '../services/audit/auditService.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_SESSION_RANGE_DAYS = 120;
+
+async function isAdminCaller(req) {
+  if (req.user?.isVerifiedAdmin || req.user?.role === 'admin') return true;
+  const authHeader = req.headers?.authorization || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const token = req.cookies?.token || bearerToken;
+  if (!token || !process.env.JWT_SECRET) return false;
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const verified = await syncAndVerifyAdminUser(decoded);
+    return Boolean(verified);
+  } catch {
+    return false;
+  }
+}
 
 function isValidYmd(str) {
   if (typeof str !== 'string' || !ISO_DATE_RE.test(str)) return false;
@@ -47,6 +67,12 @@ export const getSessions = async (req, res) => {
       };
     }
     
+    const callerIsAdmin = await isAdminCaller(req);
+    const includeClosed = callerIsAdmin && (req.query.include_closed === '1' || req.query.include_closed === 'true');
+    if (!includeClosed) {
+      whereClause = { ...whereClause, ...bookableSessionWhere() };
+    }
+
     // Fetch sessions
     const sessions = await prisma.session.findMany({
       where: whereClause,
@@ -88,7 +114,11 @@ export const getSessions = async (req, res) => {
         max_capacity: session.max_capacity,
         remaining_capacity: Math.max(0, session.max_capacity - bookedPax),
         remaining_seats: Math.max(0, totalSeats - bookedPax),
-        total_seats: totalSeats
+        total_seats: totalSeats,
+        ...(includeClosed ? {
+          closed_at: session.closed_at || null,
+          closed_by: session.closed_by || null
+        } : {})
       };
     });
 
@@ -142,24 +172,73 @@ export const createBulkSessions = async (req, res) => {
       }
     }
 
-    // Use transaction with upsert to overwrite old ones if they exist
-    await prisma.$transaction(
-      sessionsToCreate.map(session => 
-        prisma.session.upsert({
+    const staffName = req.user?.name || '管理員';
+    const staffId = req.user?.id || null;
+    const deviceInfo = getAdminDeviceInfo(req);
+
+    // Use transaction to upsert sessions and reopen any closed sessions for those slots
+    await prisma.$transaction(async (tx) => {
+      const reopenedSlots = [];
+      for (const session of sessionsToCreate) {
+        const existing = await tx.session.findUnique({
           where: {
             session_date_start_time: {
               session_date: session.session_date,
               start_time: session.start_time
             }
-          },
-          update: {
-            max_capacity: session.max_capacity,
-            end_time: session.end_time
-          },
-          create: session
-        })
-      )
-    );
+          }
+        });
+
+        if (existing && existing.closed_at) {
+          const updated = await tx.session.update({
+            where: { id: existing.id },
+            data: {
+              max_capacity: session.max_capacity,
+              end_time: session.end_time,
+              closed_at: null,
+              closed_by: null
+            }
+          });
+          reopenedSlots.push({
+            id: updated.id,
+            date: toTaipeiDateString(updated.session_date),
+            start_time: updated.start_time,
+            end_time: updated.end_time
+          });
+        } else {
+          await tx.session.upsert({
+            where: {
+              session_date_start_time: {
+                session_date: session.session_date,
+                start_time: session.start_time
+              }
+            },
+            update: {
+              max_capacity: session.max_capacity,
+              end_time: session.end_time
+            },
+            create: session
+          });
+        }
+      }
+
+      if (reopenedSlots.length > 0) {
+        for (const slot of reopenedSlots) {
+          await auditService.log(tx, {
+            event_type: 'session_reopened',
+            category: 'session',
+            target_type: 'session',
+            target_ref: String(slot.id),
+            summary: `重新開放時段 ${slot.date} ${slot.start_time}-${slot.end_time}`,
+            after_json: { ...slot, max_capacity: capacity },
+            staff_name: staffName,
+            staff_id: staffId,
+            device_id: deviceInfo.device_id,
+            device_label: deviceInfo.device_label
+          });
+        }
+      }
+    });
 
     res.status(201).json({ message: 'Sessions created or updated successfully', count: sessionsToCreate.length });
   } catch (error) {
@@ -170,32 +249,106 @@ export const createBulkSessions = async (req, res) => {
 
 export const deleteSession = async (req, res) => {
   const { id } = req.params;
+  const sessionId = parseInt(id, 10);
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
 
   try {
-    const session = await prisma.session.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        reservations: {
-          where: { status: 'confirmed' }
+    const result = await prisma.$transaction(async (tx) => {
+      const session = await tx.session.findUnique({
+        where: { id: sessionId },
+        include: {
+          reservations: {
+            select: { id: true, status: true }
+          }
         }
+      });
+
+      if (!session) {
+        return { notFound: true };
       }
+
+      const confirmedCount = session.reservations.filter(r => r.status === 'confirmed').length;
+      if (confirmedCount > 0) {
+        return { hasConfirmed: true };
+      }
+
+      const dateStr = toTaipeiDateString(session.session_date);
+
+      if (session.reservations.length > 0) {
+        if (!session.closed_at) {
+          await tx.session.update({
+            where: { id: session.id },
+            data: {
+              closed_at: new Date(),
+              closed_by: staffName
+            }
+          });
+          await auditService.log(tx, {
+            event_type: 'session_closed',
+            category: 'session',
+            target_type: 'session',
+            target_ref: String(session.id),
+            summary: `關閉時段 ${dateStr} ${session.start_time}-${session.end_time}（保留 ${session.reservations.length} 筆已取消預約紀錄）`,
+            after_json: {
+              date: dateStr,
+              start_time: session.start_time,
+              end_time: session.end_time,
+              cancelled_count: session.reservations.length
+            },
+            staff_name: staffName,
+            staff_id: staffId,
+            device_id: deviceInfo.device_id,
+            device_label: deviceInfo.device_label
+          });
+        }
+        return { action: 'closed', deletedCount: 0, closedCount: session.closed_at ? 0 : 1 };
+      }
+
+      await tx.session.delete({ where: { id: session.id } });
+      await auditService.log(tx, {
+        event_type: 'session_deleted',
+        category: 'session',
+        target_type: 'session',
+        target_ref: String(session.id),
+        summary: `刪除空時段 ${dateStr} ${session.start_time}-${session.end_time}`,
+        before_json: {
+          date: dateStr,
+          start_time: session.start_time,
+          end_time: session.end_time,
+          max_capacity: session.max_capacity
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+      return { action: 'deleted', deletedCount: 1, closedCount: 0 };
     });
 
-    if (!session) {
+    if (result.notFound) {
       return res.status(404).json({ error: 'Session not found' });
     }
-
-    if (session.reservations.length > 0) {
+    if (result.hasConfirmed) {
       return res.status(400).json({ error: 'Cannot delete session with confirmed reservations' });
     }
 
-    // Delete session and any cancelled reservations safely
-    await prisma.$transaction([
-      prisma.reservation.deleteMany({ where: { session_id: session.id } }),
-      prisma.session.delete({ where: { id: parseInt(id) } })
-    ]);
+    if (result.action === 'closed') {
+      return res.json({
+        message: '此時段有已取消的預約紀錄，已改為關閉（保留歷史帳務對照）',
+        action: 'closed',
+        deletedCount: 0,
+        closedCount: result.closedCount
+      });
+    }
 
-    res.json({ message: 'Session deleted successfully' });
+    res.json({
+      message: 'Session deleted successfully',
+      action: 'deleted',
+      deletedCount: 1,
+      closedCount: 0
+    });
   } catch (error) {
     console.error('Error deleting session:', error);
     res.status(500).json({ error: 'Failed to delete session' });
@@ -204,50 +357,103 @@ export const deleteSession = async (req, res) => {
 
 export const deleteSessionsByDate = async (req, res) => {
   const { date } = req.params;
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
 
   try {
     const targetDate = dateOnly(date);
+    const dateStr = toTaipeiDateString(targetDate);
 
-    // Find all sessions for this date
-    const sessions = await prisma.session.findMany({
-      where: { session_date: targetDate },
-      include: {
-        reservations: {
-          where: { status: 'confirmed' }
-        }
+    const outcome = await prisma.$transaction(async (tx) => {
+      const sessions = await tx.session.findMany({
+        where: { session_date: targetDate },
+        include: {
+          reservations: {
+            select: { id: true, status: true }
+          }
+        },
+        orderBy: { start_time: 'asc' }
+      });
+
+      if (sessions.length === 0) {
+        return { notFound: true };
       }
+
+      const withConfirmed = sessions.filter(s => s.reservations.some(r => r.status === 'confirmed'));
+      const keptCount = withConfirmed.length;
+      if (keptCount === sessions.length) {
+        return { allConfirmed: true };
+      }
+
+      const toHardDelete = sessions.filter(s => s.reservations.length === 0);
+      const toClose = sessions.filter(
+        s => s.reservations.length > 0 && !s.reservations.some(r => r.status === 'confirmed') && !s.closed_at
+      );
+
+      let deletedCount = 0;
+      if (toHardDelete.length > 0) {
+        const delRes = await tx.session.deleteMany({
+          where: { id: { in: toHardDelete.map(s => s.id) } }
+        });
+        deletedCount = delRes.count;
+        await auditService.log(tx, {
+          event_type: 'session_deleted',
+          category: 'session',
+          target_type: 'session',
+          target_ref: dateStr,
+          summary: `刪除 ${dateStr} 空時段共 ${deletedCount} 個`,
+          before_json: {
+            date: dateStr,
+            sessions: toHardDelete.map(s => ({ id: s.id, start_time: s.start_time, end_time: s.end_time, max_capacity: s.max_capacity }))
+          },
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
+
+      let closedCount = 0;
+      if (toClose.length > 0) {
+        const now = new Date();
+        await tx.session.updateMany({
+          where: { id: { in: toClose.map(s => s.id) } },
+          data: { closed_at: now, closed_by: staffName }
+        });
+        closedCount = toClose.length;
+        await auditService.log(tx, {
+          event_type: 'session_closed',
+          category: 'session',
+          target_type: 'session',
+          target_ref: dateStr,
+          summary: `關閉 ${dateStr} 時段共 ${closedCount} 個（有已取消的預約紀錄）`,
+          after_json: {
+            date: dateStr,
+            sessions: toClose.map(s => ({ id: s.id, start_time: s.start_time, end_time: s.end_time, cancelled_count: s.reservations.length }))
+          },
+          staff_name: staffName,
+          staff_id: staffId,
+          device_id: deviceInfo.device_id,
+          device_label: deviceInfo.device_label
+        });
+      }
+
+      return { deletedCount, closedCount, keptCount };
     });
 
-    if (sessions.length === 0) {
+    if (outcome.notFound) {
       return res.status(404).json({ error: 'No sessions found for this date.' });
     }
-
-    // Filter sessions that can be deleted (no confirmed reservations)
-    const sessionsToDelete = sessions.filter(s => s.reservations.length === 0);
-    const sessionsKept = sessions.length - sessionsToDelete.length;
-
-    if (sessionsToDelete.length === 0) {
+    if (outcome.allConfirmed) {
       return res.status(400).json({ error: 'All sessions on this date have confirmed reservations and cannot be deleted.' });
     }
 
-    // Use a transaction to safely delete child records (reservations) before parent records (sessions)
-    const [_, deleteResult] = await prisma.$transaction([
-      prisma.reservation.deleteMany({
-        where: {
-          session_id: { in: sessionsToDelete.map(s => s.id) }
-        }
-      }),
-      prisma.session.deleteMany({
-        where: {
-          id: { in: sessionsToDelete.map(s => s.id) }
-        }
-      })
-    ]);
-
-    res.json({ 
-      message: 'Sessions cleared successfully', 
-      deletedCount: deleteResult.count,
-      keptCount: sessionsKept
+    res.json({
+      message: `刪除 ${outcome.deletedCount} 個、關閉 ${outcome.closedCount} 個（有已取消的預約紀錄）`,
+      deletedCount: outcome.deletedCount,
+      closedCount: outcome.closedCount,
+      keptCount: outcome.keptCount
     });
   } catch (error) {
     console.error('Error clearing sessions by date:', error);

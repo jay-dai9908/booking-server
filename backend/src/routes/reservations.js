@@ -1,5 +1,5 @@
 import express from 'express';
-import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCancelReservation, adminCreateReservation, updateAttendance, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount, updateReservationNotes, adminUpdateReservationNotes, getAdminNavBadges, adminQuickLookup, getReservationEntryPassHandler } from '../controllers/reservationController.js';
+import { createReservation, getAdminReservations, getAdminReservationDetails, getMyReservations, cancelReservation, adminCancelReservation, adminCreateReservation, updateAttendance, archiveReservationRecord, deleteReservationRecord, moveSeat, swapSeats, getSessionSeats, extendReservation, updatePaymentStatus, updateAmount, updateReservationNotes, adminUpdateReservationNotes, getAdminNavBadges, adminQuickLookup, getReservationEntryPassHandler } from '../controllers/reservationController.js';
 import { verifyToken, requireAdmin, requireAnyPermission, requireRegisteredUser } from '../middlewares/authMiddleware.js';
 
 import { modifyBookingEquipment, adminModifyBookingEquipment } from '../controllers/equipmentController.js';
@@ -38,6 +38,7 @@ router.get('/my', verifyToken, requireRegisteredUser, getMyReservations);
 router.delete('/:id', verifyToken, requireRegisteredUser, cancelReservation);
 router.patch('/:booking_ref/notes', verifyToken, requireRegisteredUser, updateReservationNotes);
 router.patch('/:booking_ref/equipment', verifyToken, requireRegisteredUser, modifyBookingEquipment);
+router.post('/:id/archive', ...reservationStaffAuth, archiveReservationRecord);
 router.delete('/:id/record', ...reservationStaffAuth, deleteReservationRecord);
 router.get('/admin/nav-badges', verifyToken, requireAdmin, getAdminNavBadges);
 router.get('/admin/quick-lookup', verifyToken, requireAnyPermission(['reservations', 'seating', 'shop', 'members', 'coupons', 'accounting', 'weekly']), adminQuickLookup);

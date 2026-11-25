@@ -77,6 +77,8 @@ model Session {
   start_time   String        // 例如: "10:00"
   end_time     String        // 例如: "11:00"
   max_capacity Int
+  closed_at    DateTime?
+  closed_by    String?
   
   reservations Reservation[]
 
@@ -113,6 +115,8 @@ model Reservation {
   admin_note     String?
   cancelled_at   DateTime?
   cancelled_by   String?
+  archived_at    DateTime?
+  archived_by    String?
   
   checked_in_by    String?   // 報到的店員名字
   seat_source      String?   // auto | staff | customer（staff = 店員帶位，排位時固定不動）

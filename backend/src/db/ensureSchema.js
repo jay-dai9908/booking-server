@@ -78,6 +78,10 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "amount_due" INTEGER`,
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "amount_received" INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "pricing_snapshot" JSONB`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "archived_at" TIMESTAMP(3)`,
+    `ALTER TABLE "Reservation" ADD COLUMN IF NOT EXISTS "archived_by" TEXT`,
+    `ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "closed_at" TIMESTAMP(3)`,
+    `ALTER TABLE "Session" ADD COLUMN IF NOT EXISTS "closed_by" TEXT`,
 
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "person_id" INTEGER`,
     `ALTER TABLE "BookingEquipment" ADD COLUMN IF NOT EXISTS "unit_group" TEXT`,

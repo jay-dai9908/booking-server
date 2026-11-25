@@ -69,6 +69,9 @@ export const postPrepayQuoteHandler = async (req, res) => {
     if (sessions.length !== session_ids.length) {
       return res.status(404).json({ error: '找不到指定的時段' });
     }
+    if (sessions.some((s) => Boolean(s.closed_at))) {
+      return res.status(409).json({ error: '這個時段已關閉', code: 'SESSION_CLOSED' });
+    }
 
     const uniqueDates = new Set(sessions.map((s) => toTaipeiDateString(s.session_date)));
     if (uniqueDates.size > 1) {

@@ -1,5 +1,6 @@
 import prisma from '../../prismaClient.js';
 import { getLiveFloorData } from '../floor/liveService.js';
+import { bookableSessionWhere } from '../calendar/sessionFilters.js';
 import { getDayType } from './dayType.js';
 import { decide, DEFAULT_DISPLAY_SCHEDULE } from '../../../../shared/displaySchedule.js';
 import { buildFloorMap } from '../../../../shared/floorMap.js';
@@ -24,7 +25,7 @@ async function resolveDateContext(dateStr, schedule, specialDates, serverNow) {
   const [dayType, sessions] = await Promise.all([
     getDayType(dateStr, prisma),
     prisma.session.findMany({
-      where: { session_date: dateOnly(dateStr) },
+      where: { session_date: dateOnly(dateStr), ...bookableSessionWhere() },
       orderBy: { start_time: 'asc' },
       select: { start_time: true, end_time: true }
     })

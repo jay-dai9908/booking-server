@@ -42,6 +42,7 @@ import { getReservationEntryPass } from '../services/kiosk/entryService.js';
 import { isPlainString } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
 import displayBus from '../services/display/displayBus.js';
+import { bookableSessionWhere } from '../services/calendar/sessionFilters.js';
 
 function mergeCustomerEquipments(rawList = []) {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
@@ -138,7 +139,9 @@ const groupReservations = (reservations, equipmentsMap = {}, options = {}) => {
         admin_note: includeAdminNote ? (r.admin_note || null) : undefined,
         is_self_service: Boolean(r.is_self_service),
         cancelled_at: r.cancelled_at || null,
-        cancelled_by: r.cancelled_by || null
+        cancelled_by: r.cancelled_by || null,
+        archived_at: r.archived_at || null,
+        archived_by: r.archived_by || null
       };
     } else {
       if (r.attendance === 'checked_in') {
@@ -482,11 +485,14 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       // 1. Read requested sessions without row lock first to resolve Taipei date & validate
       const preRequestedSessions = await tx.session.findMany({
         where: { id: { in: session_ids } },
-        select: { id: true, max_capacity: true, session_date: true, start_time: true, end_time: true }
+        select: { id: true, max_capacity: true, session_date: true, start_time: true, end_time: true, closed_at: true }
       });
 
       if (preRequestedSessions.length !== session_ids.length) {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
+      }
+      if (preRequestedSessions.some(s => Boolean(s.closed_at))) {
+        throw { status: 409, code: 'SESSION_CLOSED', message: '這個時段已關閉' };
       }
 
       // 檢查是否跨日期：一筆預約只能包含同一天的時段
@@ -507,6 +513,9 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       const { dateStr, sessions: allSessionsOfDay } = await lockDaySessionsAndSeats(tx, sessionDate);
       const reqSessionIdSet = new Set(session_ids.map(Number));
       const requestedSessions = allSessionsOfDay.filter(s => reqSessionIdSet.has(s.id));
+      if (requestedSessions.some(s => Boolean(s.closed_at))) {
+        throw { status: 409, code: 'SESSION_CLOSED', message: '這個時段已關閉' };
+      }
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
 
       // Fetch all confirmed reservations and active walk-in holds for the day
@@ -1290,6 +1299,20 @@ export const getAdminReservations = async (req, res) => {
       whereClause.OR = orConditions;
     }
 
+    const baseScopeWhere = { ...whereClause };
+    if (statusFilter === 'archived') {
+      whereClause.archived_at = { not: null };
+    } else {
+      whereClause.archived_at = null;
+    }
+
+    // Count archived booking_refs in scope for filter pill
+    const archivedBookingRefs = await prisma.reservation.findMany({
+      where: { ...baseScopeWhere, archived_at: { not: null } },
+      distinct: ['booking_ref'],
+      select: { booking_ref: true }
+    });
+
     // Fetch all reservations matching criteria (for the month)
     const reservations = await prisma.reservation.findMany({
       where: whereClause,
@@ -1358,14 +1381,15 @@ export const getAdminReservations = async (req, res) => {
 
     // Compute status filter counts across the full scope BEFORE status/page slicing
     const counts = {
-      all: grouped.length,
+      all: statusFilter === 'archived' ? 0 : grouped.length,
       pending_checkin: 0,
       checked_in: 0,
       unpaid: 0,
       partial: 0,
       paid: 0,
       refund: 0,
-      cancelled: 0
+      cancelled: 0,
+      archived: archivedBookingRefs.length
     };
     const classifyBillingKey = (r) => {
       if (r.has_refund) return 'refund';
@@ -1376,21 +1400,23 @@ export const getAdminReservations = async (req, res) => {
       return 'unpaid';
     };
 
-    for (const r of grouped) {
-      if (r.status === 'cancelled') {
-        counts.cancelled += 1;
-      } else {
-        if (r.attendance === 'checked_in') counts.checked_in += 1;
-        else counts.pending_checkin += 1;
-        const bk = classifyBillingKey(r);
-        if (bk === 'unpaid') counts.unpaid += 1;
-        else if (bk === 'partial') counts.partial += 1;
-        else if (bk === 'paid') counts.paid += 1;
-        if (bk === 'refund' || r.has_refund) counts.refund += 1;
+    if (statusFilter !== 'archived') {
+      for (const r of grouped) {
+        if (r.status === 'cancelled') {
+          counts.cancelled += 1;
+        } else {
+          if (r.attendance === 'checked_in') counts.checked_in += 1;
+          else counts.pending_checkin += 1;
+          const bk = classifyBillingKey(r);
+          if (bk === 'unpaid') counts.unpaid += 1;
+          else if (bk === 'partial') counts.partial += 1;
+          else if (bk === 'paid') counts.paid += 1;
+          if (bk === 'refund' || r.has_refund) counts.refund += 1;
+        }
       }
     }
 
-    const statusFiltered = statusFilter === 'all'
+    const statusFiltered = (statusFilter === 'all' || statusFilter === 'archived')
       ? grouped
       : grouped.filter((r) => {
           if (statusFilter === 'cancelled') return r.status === 'cancelled';
@@ -1456,14 +1482,22 @@ export const getAdminReservationDetails = async (req, res) => {
     const sessionDate = refreshedReservations[0].session.session_date;
     const pricingInfo = await getEffectiveDailyRates(prisma, sessionDate);
 
-    const prepay = await prisma.bookingPrepay.findUnique({ where: { booking_ref } });
+    const [prepay, paymentCount, prepayCount] = await Promise.all([
+      prisma.bookingPrepay.findUnique({ where: { booking_ref } }),
+      prisma.payment.count({ where: { booking_ref } }),
+      prisma.bookingPrepay.count({ where: { booking_ref } })
+    ]);
 
     const equipmentsMap = { [booking_ref]: eqRecords };
     const grouped = groupReservations(refreshedReservations, equipmentsMap);
     const result = {
       ...grouped[0],
       prepay: prepay || null,
-      pricing_info: pricingInfo
+      pricing_info: pricingInfo,
+      can_permanent_delete:
+        refreshedReservations.every((r) => r.status === 'cancelled') &&
+        paymentCount === 0 &&
+        prepayCount === 0
     };
 
     // If attendance was desynced across session segments in database, auto-heal them
@@ -1788,29 +1822,152 @@ async function cancelReservationCore(req, res, { actor }) {
 export const cancelReservation = (req, res) => cancelReservationCore(req, res, { actor: 'customer' });
 export const adminCancelReservation = (req, res) => cancelReservationCore(req, res, { actor: 'admin' });
 
-export const deleteReservationRecord = async (req, res) => {
+export const archiveReservationRecord = async (req, res) => {
   const { id: booking_ref } = req.params;
-  
-  // This route is protected by requireAdmin middleware, so we know they are admin.
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
   try {
-    const reservations = await prisma.reservation.findMany({
-      where: { booking_ref }
+    const outcome = await prisma.$transaction(async (tx) => {
+      const reservations = await tx.reservation.findMany({
+        where: { booking_ref },
+        include: { session: true }
+      });
+      if (reservations.length === 0) {
+        return { notFound: true };
+      }
+      if (reservations.some((r) => r.status !== 'cancelled')) {
+        return { notCancelled: true };
+      }
+      if (reservations.every((r) => Boolean(r.archived_at))) {
+        return { alreadyArchived: true, count: reservations.length };
+      }
+
+      const now = new Date();
+      const updated = await tx.reservation.updateMany({
+        where: { booking_ref },
+        data: {
+          archived_at: now,
+          archived_by: staffName
+        }
+      });
+
+      const first = reservations[0];
+      const dateStr = first.session ? toTaipeiDateString(first.session.session_date) : null;
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'reservation_archived',
+        category: 'status',
+        target_type: 'reservation',
+        target_ref: booking_ref,
+        summary: `封存已取消預約 ${booking_ref}${dateStr ? `（${dateStr}）` : ''}`,
+        after_json: {
+          archived_at: now.toISOString(),
+          archived_by: staffName,
+          session_date: dateStr,
+          pax: first.pax,
+          user_id: first.user_id
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      return { count: updated.count };
     });
 
-    if (reservations.length === 0) {
+    if (outcome.notFound) {
       return res.status(404).json({ error: 'Reservation not found' });
     }
-
-    if (reservations[0].status !== 'cancelled') {
-      return res.status(400).json({ error: 'Only cancelled reservations can be permanently deleted' });
+    if (outcome.notCancelled) {
+      return res.status(409).json({ error: '只有已取消的預約可以封存' });
     }
 
-    // Hard delete all related rows
-    const deleted = await prisma.reservation.deleteMany({
-      where: { booking_ref }
+    res.json({ message: '預約紀錄已封存', count: outcome.count });
+  } catch (error) {
+    console.error('Error archiving reservation record:', error);
+    res.status(500).json({ error: 'Failed to archive reservation record' });
+  }
+};
+
+export const deleteReservationRecord = async (req, res) => {
+  const { id: booking_ref } = req.params;
+  const staffName = req.user?.name || '管理員';
+  const staffId = req.user?.id || null;
+  const deviceInfo = getAdminDeviceInfo(req);
+
+  try {
+    const outcome = await prisma.$transaction(async (tx) => {
+      const reservations = await tx.reservation.findMany({
+        where: { booking_ref },
+        include: { session: true },
+        orderBy: { id: 'asc' }
+      });
+
+      if (reservations.length === 0) {
+        return { notFound: true };
+      }
+
+      if (reservations.some((r) => r.status !== 'cancelled')) {
+        return { notCancelled: true };
+      }
+
+      const [paymentCount, prepayCount] = await Promise.all([
+        tx.payment.count({ where: { booking_ref } }),
+        tx.bookingPrepay.count({ where: { booking_ref } })
+      ]);
+
+      if (paymentCount > 0 || prepayCount > 0) {
+        return { hasPayments: true };
+      }
+
+      const first = reservations[0];
+      const dateStr = first.session ? toTaipeiDateString(first.session.session_date) : null;
+      const sessionSlots = reservations
+        .filter((r) => r.session)
+        .map((r) => `${r.session.start_time}-${r.session.end_time}`)
+        .sort();
+
+      await tx.bookingEquipment.deleteMany({ where: { booking_ref } });
+      await tx.bookingPerson.deleteMany({ where: { booking_ref } });
+      const deleted = await tx.reservation.deleteMany({ where: { booking_ref } });
+
+      await auditLog(tx, {
+        booking_ref,
+        event_type: 'reservation_deleted',
+        category: 'status',
+        target_type: 'reservation',
+        target_ref: booking_ref,
+        summary: `永久刪除無收款預約紀錄 ${booking_ref}${dateStr ? `（${dateStr}）` : ''}`,
+        before_json: {
+          booking_ref,
+          session_date: dateStr,
+          sessions: sessionSlots,
+          pax: first.pax,
+          user_id: first.user_id
+        },
+        staff_name: staffName,
+        staff_id: staffId,
+        device_id: deviceInfo.device_id,
+        device_label: deviceInfo.device_label
+      });
+
+      return { count: deleted.count };
     });
 
-    res.json({ message: 'Reservation record deleted permanently', count: deleted.count });
+    if (outcome.notFound) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+    if (outcome.notCancelled) {
+      return res.status(400).json({ error: 'Only cancelled reservations can be permanently deleted' });
+    }
+    if (outcome.hasPayments) {
+      return res.status(409).json({ error: '有收款紀錄，只能封存' });
+    }
+
+    res.json({ message: 'Reservation record deleted permanently', count: outcome.count });
   } catch (error) {
     console.error('Error deleting reservation record:', error);
     res.status(500).json({ error: 'Failed to delete reservation record' });
@@ -2374,11 +2531,14 @@ export const adminCreateReservation = async (req, res) => {
       // 1. Read requested sessions without row lock first to resolve Taipei date & validate
       const preRequestedSessions = await tx.session.findMany({
         where: { id: { in: session_ids } },
-        select: { id: true, max_capacity: true, session_date: true, start_time: true, end_time: true }
+        select: { id: true, max_capacity: true, session_date: true, start_time: true, end_time: true, closed_at: true }
       });
 
       if (preRequestedSessions.length !== session_ids.length) {
         throw new Error('SOME_SESSIONS_NOT_FOUND');
+      }
+      if (preRequestedSessions.some(s => Boolean(s.closed_at))) {
+        throw { status: 409, code: 'SESSION_CLOSED', message: '這個時段已關閉' };
       }
 
       // 檢查是否跨日期：一筆預約只能包含同一天的時段
@@ -2399,6 +2559,9 @@ export const adminCreateReservation = async (req, res) => {
       const { dateStr, sessions: allSessionsOfDay } = await lockDaySessionsAndSeats(tx, sessionDate);
       const reqSessionIdSet = new Set(session_ids.map(Number));
       const requestedSessions = allSessionsOfDay.filter(s => reqSessionIdSet.has(s.id));
+      if (requestedSessions.some(s => Boolean(s.closed_at))) {
+        throw { status: 409, code: 'SESSION_CLOSED', message: '這個時段已關閉' };
+      }
       const allSessionIdsOfDay = allSessionsOfDay.map(s => s.id);
 
       // Fetch all confirmed reservations for the day
@@ -2780,10 +2943,13 @@ export const extendReservation = async (req, res) => {
   try {
     const sessionsPre = await prisma.session.findMany({
       where: { id: { in: uniqueSessionIds } },
-      select: { id: true, session_date: true }
+      select: { id: true, session_date: true, closed_at: true }
     });
     if (sessionsPre.length !== uniqueSessionIds.length) {
       return res.status(404).json({ error: '找不到選擇的時段，請重新整理後再試', code: 'SESSION_NOT_FOUND' });
+    }
+    if (sessionsPre.some((s) => Boolean(s.closed_at))) {
+      return res.status(409).json({ error: '這個時段已關閉', code: 'SESSION_CLOSED' });
     }
     const extendDateStr = toTaipeiDateString(sessionsPre[0].session_date);
 
@@ -2826,6 +2992,9 @@ export const extendReservation = async (req, res) => {
       if (sessions.length !== uniqueSessionIds.length) {
         throw { status: 404, code: 'SESSION_NOT_FOUND', message: '找不到選擇的時段，請重新整理後再試' };
       }
+      if (sessions.some(s => Boolean(s.closed_at))) {
+        throw { status: 409, code: 'SESSION_CLOSED', message: '這個時段已關閉' };
+      }
 
       if (sessions.some(s => toTaipeiDateString(s.session_date) !== bookingDateStr)) {
         throw { status: 400, code: 'CROSS_DATE_EXTEND', message: '加時只能加同一天的時段' };
@@ -2843,7 +3012,7 @@ export const extendReservation = async (req, res) => {
 
       // Check contiguity: all new sessions form one block immediately before or after existing sessions
       const allDaySessions = await tx.session.findMany({
-        where: { session_date: baseReservation.session.session_date },
+        where: { session_date: baseReservation.session.session_date, ...bookableSessionWhere() },
         orderBy: { start_time: 'asc' },
         select: { id: true, start_time: true, end_time: true }
       });

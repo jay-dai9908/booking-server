@@ -1125,7 +1125,10 @@ export default function AccountingPage() {
                           {p.source && p.source !== 'booking' ? (p.source_ref || p.booking_ref) : formatBookingRef(p.booking_ref)}
                         </td>
                         <td className="py-3 px-2 font-bold text-sg-ink">
-                          {p.target_label || p.breakdown_json?.customer_name || '現場顧客'}
+                          {p.target_label || p.user_name || p.breakdown_json?.customer_name || '現場顧客'}
+                          {p.session_date && (
+                            <span className="block text-[10px] font-normal text-sg-muted">{p.session_date}</span>
+                          )}
                         </td>
                         <td className="py-3 px-2">
                           <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${

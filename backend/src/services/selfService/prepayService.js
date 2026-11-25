@@ -22,6 +22,7 @@ import { resolveEquipmentWindow } from '../../utils/equipmentWindow.js';
 import { evaluatePromoCode } from '../../controllers/checkoutController.js';
 import { releasePoolAccount } from './poolAccountService.js';
 import { sendSelfServiceExpiredNotification } from '../../utils/lineMessaging.js';
+import { bookableSessionWhere } from '../calendar/sessionFilters.js';
 
 export function makePrepayError(code, message, status = 400, extra = {}) {
   const err = new Error(message);
@@ -248,6 +249,9 @@ export async function computeSelfServiceQuote(
   const sortedSessions = [...requestedSessions].sort((a, b) =>
     a.start_time.localeCompare(b.start_time)
   );
+  if (sortedSessions.some((s) => Boolean(s.closed_at))) {
+    pushOrThrow('SESSION_CLOSED', '這個時段已關閉', 409);
+  }
   const sessionDate = sortedSessions[0].session_date;
   const dateStr = toTaipeiDateString(sessionDate);
   const targetDateForPass = new Date(`${dateStr}T00:00:00+08:00`);
@@ -935,7 +939,7 @@ export async function attachSelfInfoToReservations(groupedReservations = [], txO
     ensureKioskSetting(client),
     dateObjs.length
       ? client.session.findMany({
-          where: { session_date: { in: dateObjs } },
+          where: { session_date: { in: dateObjs }, ...bookableSessionWhere() },
           select: { session_date: true, end_time: true }
         })
       : []
