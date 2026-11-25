@@ -2,6 +2,7 @@ import prisma from '../../prismaClient.js';
 import { dateOnly } from '../../../../shared/time.js';
 import { isRevenuePayment } from '../accounting/revenueScope.js';
 import { getConfiguredPaymentMethods, buildMethodBreakdown } from '../accounting/methodAggregation.js';
+import { getUnpaidBookings } from '../accounting/unpaidQuery.js';
 
 /**
  * Compute authoritative shift closing stats & receipt snapshot for `[start, end]`.
@@ -52,22 +53,13 @@ export async function computeClosingStats({ start, end, businessDate, txOrPrisma
   const passRefundAmount = passRefundsList.reduce((sum, p) => sum + p.amount, 0);
   const voidAmount = voids.reduce((sum, p) => sum + p.amount, 0);
 
-  // Unpaid reservations across the entire business date (as of closing time)
-  const unpaidRes = await txOrPrisma.reservation.findMany({
-    where: {
-      status: { not: 'cancelled' },
-      session: { session_date: dateOnly(businessDate) },
-      billing_status: { in: ['unpaid', 'partial'] }
-    }
+  // Unpaid reservations across the entire business date (unified formula excluding no_show & deducting pass)
+  const unpaidStats = await getUnpaidBookings(txOrPrisma, {
+    dateFrom: businessDate,
+    dateTo: businessDate
   });
-  const unpaidMap = new Map();
-  for (const r of unpaidRes) {
-    if (!unpaidMap.has(r.booking_ref)) {
-      unpaidMap.set(r.booking_ref, (r.amount_due || 0) - (r.amount_received || 0));
-    }
-  }
-  const unpaidCount = unpaidMap.size;
-  const unpaidAmount = Array.from(unpaidMap.values()).reduce((sum, amt) => sum + Math.max(0, amt), 0);
+  const unpaidCount = unpaidStats.count;
+  const unpaidAmount = unpaidStats.amount;
 
   return {
     by_method: byMethod,
@@ -87,7 +79,8 @@ export async function computeClosingStats({ start, end, businessDate, txOrPrisma
     },
     unpaid: {
       count: unpaidCount,
-      amount: unpaidAmount
+      amount: unpaidAmount,
+      no_show_count: unpaidStats.no_show_count
     },
     // Receipt-ready flat summary keys (buildClosingSlip reads strictly from totals_json)
     total_count: charges.length,

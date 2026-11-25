@@ -129,6 +129,7 @@ export default function AccountingPage() {
 
   // Tab 5: Unpaid follow-up state
   const [unpaidList, setUnpaidList] = useState([]);
+  const [unpaidNoShowCount, setUnpaidNoShowCount] = useState(0);
   const [loadingUnpaid, setLoadingUnpaid] = useState(false);
 
   // Void payment modal state
@@ -263,8 +264,11 @@ export default function AccountingPage() {
   const fetchUnpaid = async () => {
     try {
       setLoadingUnpaid(true);
-      const res = await api.get('/accounting/unpaid');
+      const res = await api.get('/accounting/unpaid', {
+        params: { date_from: dateFrom, date_to: dateTo }
+      });
       setUnpaidList(res.data?.unpaid || res.data?.reservations || []);
+      setUnpaidNoShowCount(res.data?.no_show_count ?? res.data?.summary?.no_show_count ?? 0);
     } catch (err) {
       console.error(err);
     } finally {
@@ -750,6 +754,7 @@ export default function AccountingPage() {
               </div>
               <span className="text-[11px] text-sg-muted block">
                 共 {summary?.unpaid?.count || 0} 組預約未結帳
+                {(summary?.unpaid?.no_show_count || 0) > 0 && `（另 ${summary.unpaid.no_show_count} 組未到未列入）`}
               </span>
             </div>
 
@@ -1548,7 +1553,10 @@ export default function AccountingPage() {
                   <span className="font-num">{formatMoney(closingPreview.voids?.amount || 0)}</span>
                 </div>
                 <div className="py-2 flex justify-between text-sg-honey font-bold">
-                  <span>未結（{closingPreview.unpaid?.count || 0} 筆，截至交班當下）</span>
+                  <span>
+                    未結（{closingPreview.unpaid?.count || 0} 筆，截至交班當下
+                    {(closingPreview.unpaid?.no_show_count || 0) > 0 ? `；另 ${closingPreview.unpaid.no_show_count} 筆未到未列入` : ''}）
+                  </span>
                   <span className="font-num">{formatMoney(closingPreview.unpaid?.amount || 0)}</span>
                 </div>
               </div>
@@ -1755,8 +1763,13 @@ export default function AccountingPage() {
       {/* TAB 5: UNPAID FOLLOW-UP (未結追蹤) */}
       {activeTab === 'unpaid' && (
         <div className="space-y-3">
-          <div className="text-[12px] text-sg-muted">
-            下列預約訂單尚未完成全額結帳，點選「結帳」可立即開啟結帳工作台。
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-sg-muted">
+            <span>下列預約訂單尚未完成全額結帳（已扣除卡券折抵價值），點選「結帳」可立即開啟結帳工作台。</span>
+            {unpaidNoShowCount > 0 && (
+              <span className="px-2.5 py-1 rounded-full bg-sg-paper border border-sg-line text-sg-ink font-medium">
+                另有 {unpaidNoShowCount} 組未到預約未列入未結清
+              </span>
+            )}
           </div>
 
           <div className="bg-white rounded-3xl border border-sg-line overflow-hidden shadow-xs">
@@ -1768,6 +1781,7 @@ export default function AccountingPage() {
                   <th className="py-2.5 px-3 font-semibold">顧客</th>
                   <th className="py-2.5 px-2 font-semibold">人數</th>
                   <th className="py-2.5 px-2 font-semibold">狀態</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">卡券折抵</th>
                   <th className="py-2.5 px-3 font-semibold text-right">未收金額</th>
                   <th className="py-2.5 px-3 font-semibold text-right">操作</th>
                 </tr>
@@ -1775,15 +1789,16 @@ export default function AccountingPage() {
               <tbody className="divide-y divide-sg-line">
                 {loadingUnpaid ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-sg-muted">載入未結追蹤中...</td>
+                    <td colSpan={8} className="py-12 text-center text-sg-muted">載入未結追蹤中...</td>
                   </tr>
                 ) : unpaidList.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-sg-muted">太棒了！目前沒有未結款項。</td>
+                    <td colSpan={8} className="py-12 text-center text-sg-muted">太棒了！目前沒有未結款項。</td>
                   </tr>
                 ) : (
                   unpaidList.map((r) => {
-                    const due = (r.amount_due || 0) - (r.amount_received || 0);
+                    const passVal = r.pass_value || 0;
+                    const due = r.unpaid_amount ?? Math.max(0, (r.amount_due || 0) - (r.amount_received || 0) - passVal);
 
                     return (
                       <tr key={r.booking_ref} className="hover:bg-sg-paper/30 transition">
@@ -1799,6 +1814,9 @@ export default function AccountingPage() {
                         <td className="py-3 px-2 text-sg-muted font-num">{r.pax} 位</td>
                         <td className="py-3 px-2">
                           <StatusPill status={r.billing_status || 'unpaid'} />
+                        </td>
+                        <td className="py-3 px-3 text-right font-num text-sg-muted">
+                          {passVal > 0 ? formatMoney(passVal) : '-'}
                         </td>
                         <td className="py-3 px-3 text-right font-bold text-sg-danger font-num">
                           {formatMoney(due)}

@@ -12,6 +12,7 @@ import {
   buildMethodBreakdown,
   resolveRawMethodsMatchingFilter
 } from '../services/accounting/methodAggregation.js';
+import { getUnpaidBookings } from '../services/accounting/unpaidQuery.js';
 
 export const getAccountingSummary = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -74,24 +75,13 @@ export const getAccountingSummary = async (req, res) => {
 
     const passValue = passes.reduce((sum, p) => sum + p.amount, 0);
 
-    // Unpaid reservations today
+    // Unpaid reservations in range (unified formula excluding no_show & deducting pass)
     const sessionStartDate = dateOnly(start_date || toTaipeiDateString(start));
     const sessionEndDate = dateOnly(end_date || toTaipeiDateString(end));
-    const unpaidReservations = await prisma.reservation.findMany({
-      where: {
-        status: { not: 'cancelled' },
-        session: { session_date: { gte: sessionStartDate, lte: sessionEndDate } },
-        billing_status: { in: ['unpaid', 'partial'] }
-      }
+    const unpaidStats = await getUnpaidBookings(prisma, {
+      dateFrom: sessionStartDate,
+      dateTo: sessionEndDate
     });
-    const uniqueUnpaid = new Map();
-    for (const r of unpaidReservations) {
-      if (!uniqueUnpaid.has(r.booking_ref)) {
-        uniqueUnpaid.set(r.booking_ref, (r.amount_due || 0) - (r.amount_received || 0));
-      }
-    }
-    const unpaidCount = uniqueUnpaid.size;
-    const unpaidAmount = Array.from(uniqueUnpaid.values()).reduce((sum, amt) => sum + Math.max(0, amt), 0);
 
     return res.json({
       period: { start_date: toTaipeiDateString(start), end_date: toTaipeiDateString(end) },
@@ -113,8 +103,9 @@ export const getAccountingSummary = async (req, res) => {
         amount: passRefunds.reduce((sum, p) => sum + p.amount, 0)
       },
       unpaid: {
-        count: unpaidCount,
-        amount: unpaidAmount
+        count: unpaidStats.count,
+        amount: unpaidStats.amount,
+        no_show_count: unpaidStats.no_show_count
       },
       shop: {
         count: shopCharges.length,
@@ -784,45 +775,23 @@ export const getClosingsList = async (req, res) => {
 
 export const getUnpaidFollowUp = async (req, res) => {
   try {
-    const today = dateOnly(new Date());
-
-    const unpaidRes = await prisma.reservation.findMany({
-      where: {
-        status: { not: 'cancelled' },
-        session: { session_date: { lte: today } },
-        OR: [
-          { billing_status: { in: ['unpaid', 'partial'] } },
-          { billing_status: null, is_paid: false }
-        ]
-      },
-      include: {
-        user: true,
-        session: true
-      },
-      orderBy: { session: { session_date: 'desc' } }
+    const { date_from, date_to } = req.query;
+    const result = await getUnpaidBookings(prisma, {
+      dateFrom: date_from || null,
+      dateTo: date_to || null
     });
 
-    const map = new Map();
-    for (const r of unpaidRes) {
-      if (!map.has(r.booking_ref)) {
-        map.set(r.booking_ref, {
-          booking_ref: r.booking_ref,
-          ref_display: r.booking_ref,
-          user: r.user,
-          name: r.user?.name || '現場貴賓',
-          pax: r.pax,
-          date: r.session.session_date,
-          session_date: r.session.session_date,
-          status: r.billing_status || 'unpaid',
-          billing_status: r.billing_status || 'unpaid',
-          amount_due: r.amount_due ?? 0,
-          amount_received: r.amount_received ?? 0,
-          unpaid_amount: Math.max(0, (r.amount_due ?? 0) - (r.amount_received ?? 0))
-        });
+    return res.json({
+      unpaid: result.items,
+      count: result.count,
+      amount: result.amount,
+      no_show_count: result.no_show_count,
+      summary: {
+        count: result.count,
+        amount: result.amount,
+        no_show_count: result.no_show_count
       }
-    }
-
-    return res.json({ unpaid: Array.from(map.values()) });
+    });
   } catch (error) {
     console.error('[getUnpaidFollowUp] Error:', error);
     return res.status(500).json({ error: '無法讀取未結清追蹤' });
