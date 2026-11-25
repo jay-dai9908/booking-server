@@ -184,24 +184,15 @@ export async function resolveConfiguredPaymentMethodKey(txOrPrisma, method) {
 
 export async function getNextDailySeq(tx, key, date = new Date()) {
   const client = tx || prisma;
-  const d = dateOnly(date);
-  const counter = await client.dailyCounter.upsert({
-    where: {
-      date_key: {
-        date: d,
-        key
-      }
-    },
-    update: {
-      value: { increment: 1 }
-    },
-    create: {
-      date: d,
-      key,
-      value: 1
-    }
-  });
-  return counter.value;
+  const dateStr = toTaipeiDateString(date);
+  const rows = await client.$queryRaw`
+    INSERT INTO "DailyCounter" ("date", "key", "value")
+    VALUES (${dateStr}::date, ${key}, 1)
+    ON CONFLICT ("date", "key")
+    DO UPDATE SET "value" = "DailyCounter"."value" + 1
+    RETURNING "value"
+  `;
+  return Number(rows?.[0]?.value || 1);
 }
 
 export function resolveBillingDate(payload) {

@@ -475,7 +475,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
     const depositRequired = doneOrder?.deposit_required || 0;
     const deadlineStr = doneOrder?.payment_deadline ? formatDateShort(doneOrder.payment_deadline) : '';
     const assignedAccount = doneOrder?.assigned_pool_account || doneOrder?.assigned_account || '9012 3456 7890 12';
-    const isTransfer = doneOrder?.payment_method !== 'ONSITE';
+    const isTransfer = !(doneOrder?.payment_method === 'ONSITE' || doneOrder?.payment_method_code === 'onsite');
 
     return (
       <CustomerLayout bare>
@@ -550,7 +550,11 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
               </Card>
             ) : (
               <Card gap={8}>
-                <div className="text-[14px] font-bold text-sg-ink">到店付款，不用先匯款</div>
+                <div className="text-[14px] font-bold text-sg-ink">
+                  {deadlineStr
+                    ? `請在 ${deadlineStr} 前到店付款，逾期訂單會自動取消`
+                    : '請在付款期限前到店付款，逾期訂單會自動取消'}
+                </div>
                 <div className="font-num font-extrabold text-[28px] leading-[1.1] text-sg-brown">
                   {formatMoneyBig(depositRequired)}
                 </div>

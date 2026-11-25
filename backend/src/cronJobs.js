@@ -5,6 +5,7 @@ import { releasePoolAccount } from './services/selfService/poolAccountService.js
 import { releaseExpiredPrepays } from './services/selfService/prepayService.js';
 import { checkKioskOfflineAlerts } from './services/kiosk/alertService.js';
 import { solidifyDailyPrices } from './services/pricing/solidify.js';
+import auditService from './services/audit/auditService.js';
 
 export async function markPastCheckedInAsCompleted(now = new Date()) {
   const { dateObject: todayMidnightUtc } = getTaipeiDateParts(now);
@@ -182,29 +183,48 @@ export const startCronJobs = () => {
 };
 
 /**
- * 逾期未付款預購單自動取消並釋放虛擬帳號回帳號池（僅針對 ctbc_pool 且真正佔用帳號之訂單）
+ * 逾期未付款預購單自動取消排程。
+ * 店主已決定：所有付款方式皆適用付款期限（包括到店付款）；
+ * 僅取消 pending_payment 且已過期之訂單（reported_pending_verify 不自動取消），
+ * 新單（auto_expire = true）一律適用，舊單則維持僅取消有佔用 POOL_ACCOUNT 帳號池之訂單。
  */
-export const releaseExpiredPreorders = async () => {
-  const now = new Date();
+export const releaseExpiredPreorders = async (nowOverride = null) => {
+  const now = (process.env.NODE_ENV === 'test' && nowOverride)
+    ? new Date(nowOverride)
+    : new Date();
+
+  const poolMethodConfigs = await prisma.paymentMethodConfig.findMany({
+    where: { method_type: 'POOL_ACCOUNT' },
+    select: { code: true }
+  });
+  const poolMethodCodes = Array.from(
+    new Set(['ctbc_pool', ...poolMethodConfigs.map((m) => m.code).filter(Boolean)])
+  );
+
   const expiredOrders = await prisma.productOrder.findMany({
     where: {
-      payment_method_code: 'ctbc_pool',
-      assigned_pool_account: { not: null },
       order_status: 'preorder_placed',
       payment_status: 'pending_payment',
-      payment_deadline: { lt: now }
+      payment_deadline: { lt: now },
+      OR: [
+        { auto_expire: true },
+        {
+          payment_method_code: { in: poolMethodCodes },
+          assigned_pool_account: { not: null }
+        }
+      ]
     }
   });
 
   if (expiredOrders.length === 0) return 0;
 
-  console.log(`[Cron Job] Found ${expiredOrders.length} expired ctbc_pool preorders to cancel...`);
+  console.log(`[Cron Job] Found ${expiredOrders.length} expired preorders to cancel...`);
   let cancelledCount = 0;
 
   for (const order of expiredOrders) {
     try {
       await prisma.$transaction(async (tx) => {
-        // 原子性 updateMany 確保狀態在交易執行時仍為 preorder_placed 才進行取消
+        // 原子性 updateMany 確保狀態在交易執行時仍為 preorder_placed & pending_payment 才進行取消
         const updateResult = await tx.productOrder.updateMany({
           where: {
             id: order.id,
@@ -214,17 +234,36 @@ export const releaseExpiredPreorders = async () => {
           data: {
             order_status: 'cancelled',
             admin_note: order.admin_note
-              ? `${order.admin_note} (系統自動取消：逾期未繳納訂金)`
-              : '系統自動取消：逾期未繳納訂金'
+              ? `${order.admin_note} (系統自動取消：逾期未付款)`
+              : '系統自動取消：逾期未付款'
           }
         });
 
-        // 僅在訂單成功被更新為 cancelled 且確有佔用帳號時，才釋放帳號回帳號池
-        if (updateResult.count > 0 && order.assigned_pool_account) {
-          await releasePoolAccount(tx, {
-            accountNumber: order.assigned_pool_account,
-            orderRef: order.order_ref
+        if (updateResult.count > 0) {
+          if (order.assigned_pool_account) {
+            await releasePoolAccount(tx, {
+              accountNumber: order.assigned_pool_account,
+              orderRef: order.order_ref
+            });
+          }
+
+          await auditService.log(tx, {
+            booking_ref: order.order_ref,
+            event_type: 'shop_order_expired',
+            category: 'shop',
+            summary: `商城訂單 ${order.order_ref} 逾期未付款系統自動取消`,
+            reason: `超過付款期限未付款（付款方式：${order.payment_method_code}）`,
+            before_json: {
+              order_status: order.order_status,
+              payment_status: order.payment_status
+            },
+            after_json: {
+              order_status: 'cancelled',
+              payment_status: order.payment_status
+            },
+            staff_name: '系統排程'
           });
+
           cancelledCount++;
         }
       });
@@ -233,6 +272,6 @@ export const releaseExpiredPreorders = async () => {
     }
   }
 
-  console.log(`[Cron Job] Successfully processed ${cancelledCount} expired ctbc_pool preorders.`);
+  console.log(`[Cron Job] Successfully processed ${cancelledCount} expired preorders.`);
   return cancelledCount;
 };

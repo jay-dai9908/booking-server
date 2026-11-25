@@ -407,7 +407,8 @@ model ProductOrder {
   remittance_last5       String?
   remittance_reported_at DateTime?
   payment_deadline       DateTime?
-  payment_status         String    @default("pending_payment") // "pending_payment", "reported_pending_verify", "deposit_verified", "fully_paid", "refunded"
+  auto_expire            Boolean   @default(false)
+  payment_status         String    @default("pending_payment") // "pending_payment", "reported_pending_verify", "verified_unpaid", "deposit_verified", "fully_paid", "refunded"
   order_status           String    @default("preorder_placed") // "preorder_placed", "preparing", "arrived", "picked_up", "cancelled"
   delivery_method        String    @default("store_pickup") // "store_pickup", "shipping"
   shipping_info_json     Json?

@@ -323,6 +323,7 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "ProductOrder_order_ref_key" ON "ProductOrder"("order_ref")`,
     `ALTER TABLE "ProductOrder" ADD COLUMN IF NOT EXISTS "paid_before_payments" INTEGER`,
+    `ALTER TABLE "ProductOrder" ADD COLUMN IF NOT EXISTS "auto_expire" BOOLEAN NOT NULL DEFAULT false`,
 
     `CREATE TABLE IF NOT EXISTS "ProductOrderItem" (
       "id" SERIAL NOT NULL,

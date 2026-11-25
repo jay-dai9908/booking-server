@@ -56,6 +56,10 @@ export default function ShopAdminPage() {
   const [orderSearch, setOrderSearch] = useState('');
   const [orderPaymentStatusFilter, setOrderPaymentStatusFilter] = useState('all');
   const [orderStatusFilter, setOrderStatusFilter] = useState('all');
+  const [orderOverdueOnly, setOrderOverdueOnly] = useState(false);
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderTotalCount, setOrderTotalCount] = useState(0);
+  const [orderTotalPages, setOrderTotalPages] = useState(1);
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
 
   // Modals
@@ -132,6 +136,7 @@ export default function ShopAdminPage() {
     if (activeTab === 'orders') {
       fetchAdminOrders();
       fetchStorePaymentMethods();
+      fetchPaymentSettings();
     }
     if (activeTab === 'payments') {
       fetchAccountPool();
@@ -156,20 +161,32 @@ export default function ShopAdminPage() {
     };
     window.addEventListener('admin-data-updated', handleAdminDataUpdated);
     return () => window.removeEventListener('admin-data-updated', handleAdminDataUpdated);
-  }, [activeTab, orderSearch, orderPaymentStatusFilter, orderStatusFilter]);
+  }, [activeTab, orderSearch, orderPaymentStatusFilter, orderStatusFilter, orderOverdueOnly, orderPage]);
 
   // Orders handlers
-  const fetchAdminOrders = async () => {
+  const fetchAdminOrders = async (overrides = {}) => {
     try {
       setLoadingOrders(true);
+      const nextSearch = overrides.search !== undefined ? overrides.search : orderSearch;
+      const nextPayStatus = overrides.payment_status !== undefined ? overrides.payment_status : orderPaymentStatusFilter;
+      const nextOrdStatus = overrides.order_status !== undefined ? overrides.order_status : orderStatusFilter;
+      const nextOverdue = overrides.overdue !== undefined ? overrides.overdue : orderOverdueOnly;
+      const nextPage = overrides.page !== undefined ? overrides.page : orderPage;
+
       const res = await api.get('/shop/admin/orders', {
         params: {
-          search: orderSearch,
-          payment_status: orderPaymentStatusFilter,
-          order_status: orderStatusFilter
+          search: nextSearch,
+          payment_status: nextPayStatus,
+          order_status: nextOrdStatus,
+          overdue: nextOverdue ? '1' : undefined,
+          page: nextPage,
+          limit: 30
         }
       });
       setOrders(res.data.orders || []);
+      setOrderTotalCount(res.data.totalCount ?? (res.data.orders || []).length);
+      setOrderPage(res.data.page ?? nextPage);
+      setOrderTotalPages(res.data.totalPages ?? 1);
       setSelectedOrderIds([]);
     } catch (err) {
       console.error('Failed to fetch admin orders:', err);
@@ -996,6 +1013,9 @@ export default function ShopAdminPage() {
       {/* ========================================================= */}
       {activeTab === 'orders' && (
         <div className="space-y-4">
+          <div className="px-4 py-2 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs text-[#6D5D52]">
+            逾期規則：<strong className="text-[#3E332B]">所有付款方式（含到店付款）</strong>皆套用付款期限（目前設定下單後 {shopSettings.shop_deposit_deadline_days || 2} 天），逾時未付款（待繳訂金）將自動取消；已回報末五碼者不會自動取消，請於對帳後處理。
+          </div>
           <div className="bg-white rounded-2xl p-4 border border-[#E8DEC8] shadow-xs flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 flex-wrap flex-1 min-w-[280px]">
               <div className="relative flex-1 min-w-[200px]">
@@ -1004,7 +1024,12 @@ export default function ShopAdminPage() {
                   type="text"
                   value={orderSearch}
                   onChange={e => setOrderSearch(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && fetchAdminOrders()}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      setOrderPage(1);
+                      fetchAdminOrders({ page: 1 });
+                    }
+                  }}
                   placeholder="搜尋單號、姓名、電話、中信帳號或末五碼..."
                   className="w-full pl-9 pr-3 py-1.5 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-medium outline-none focus:border-[#8B5B43]"
                 />
@@ -1013,8 +1038,10 @@ export default function ShopAdminPage() {
               <select
                 value={orderPaymentStatusFilter}
                 onChange={e => {
-                  setOrderPaymentStatusFilter(e.target.value);
-                  setTimeout(fetchAdminOrders, 50);
+                  const val = e.target.value;
+                  setOrderPaymentStatusFilter(val);
+                  setOrderPage(1);
+                  fetchAdminOrders({ payment_status: val, page: 1 });
                 }}
                 className="px-3 py-1.5 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none"
               >
@@ -1029,8 +1056,10 @@ export default function ShopAdminPage() {
               <select
                 value={orderStatusFilter}
                 onChange={e => {
-                  setOrderStatusFilter(e.target.value);
-                  setTimeout(fetchAdminOrders, 50);
+                  const val = e.target.value;
+                  setOrderStatusFilter(val);
+                  setOrderPage(1);
+                  fetchAdminOrders({ order_status: val, page: 1 });
                 }}
                 className="px-3 py-1.5 bg-[#FAF7F2] border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] outline-none"
               >
@@ -1041,6 +1070,24 @@ export default function ShopAdminPage() {
                 <option value="picked_up">已取貨完成</option>
                 <option value="cancelled">已取消</option>
               </select>
+
+              <button
+                type="button"
+                data-testid="shop-overdue-filter-btn"
+                onClick={() => {
+                  const next = !orderOverdueOnly;
+                  setOrderOverdueOnly(next);
+                  setOrderPage(1);
+                  fetchAdminOrders({ overdue: next, page: 1 });
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition whitespace-nowrap ${
+                  orderOverdueOnly
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                    : 'bg-[#FAF7F2] hover:bg-rose-50 text-[#3E332B] border-[#E8DEC8]'
+                }`}
+              >
+                逾期
+              </button>
 
               <Link
                 to="/admin/accounting?tab=shop"
@@ -1111,6 +1158,7 @@ export default function ShopAdminPage() {
                       <th className="p-3 whitespace-nowrap">預購品項明細</th>
                       <th className="p-3 whitespace-nowrap">顧客款式許願 / 店家回覆</th>
                       <th className="p-3 whitespace-nowrap">付款方式 / 中信帳號 / 末五碼</th>
+                      <th className="p-3 whitespace-nowrap">付款期限</th>
                       <th className="p-3 whitespace-nowrap">金額 (應收/已收/尾款)</th>
                       <th className="p-3 whitespace-nowrap">訂單進度</th>
                       <th className="p-3 text-right whitespace-nowrap">操作</th>
@@ -1210,8 +1258,21 @@ export default function ShopAdminPage() {
 
                           <td className="p-3 whitespace-nowrap">
                             <span className="font-bold text-[#3E332B] block">
-                              {order.payment_method_code === 'ctbc_pool' ? '中信社群收款' : '銀行匯款/其他'}
+                              {order.payment_method_code === 'ctbc_pool'
+                                ? '中信社群收款'
+                                : order.payment_method_code === 'onsite'
+                                  ? '到店付款'
+                                  : order.payment_method_code === 'jkopay'
+                                    ? '街口支付'
+                                    : order.payment_method_code === 'bank_transfer'
+                                      ? '銀行匯款'
+                                      : '銀行匯款/其他'}
                             </span>
+                            {order.payment_method_code === 'onsite' && (
+                              <span className="mt-0.5 inline-block px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 text-[10px] font-bold">
+                                到店付款
+                              </span>
+                            )}
                             {order.assigned_pool_account && (
                               <span className="font-mono text-emerald-800 text-[11px] font-bold block">
                                 中信: {order.assigned_pool_account}
@@ -1221,6 +1282,49 @@ export default function ShopAdminPage() {
                               <span className="font-mono text-blue-800 text-[11px] font-bold block">
                                 末五碼: {order.remittance_last5}
                               </span>
+                            )}
+                          </td>
+
+                          <td className="p-3 whitespace-nowrap">
+                            {order.payment_deadline ? (
+                              <>
+                                <span className="font-mono text-[11px] text-[#3E332B] block">
+                                  {format(new Date(order.payment_deadline), 'MM/dd HH:mm')}
+                                </span>
+                                {order.order_status !== 'cancelled' &&
+                                  ['pending_payment', 'reported_pending_verify'].includes(order.payment_status) && (() => {
+                                    const diffMs = new Date(order.payment_deadline).getTime() - Date.now();
+                                    if (order.is_overdue || diffMs <= 0) {
+                                      if (order.payment_status === 'reported_pending_verify') {
+                                        return (
+                                          <span className="mt-0.5 inline-block px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 border border-orange-200 text-[10px] font-bold">
+                                            已回報，逾期待處理
+                                          </span>
+                                        );
+                                      }
+                                      if (!order.auto_expire && order.payment_method_code !== 'ctbc_pool') {
+                                        return (
+                                          <span className="mt-0.5 inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                                            逾期（舊單，不自動取消）
+                                          </span>
+                                        );
+                                      }
+                                      return (
+                                        <span className="mt-0.5 inline-block px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 text-[10px] font-bold">
+                                          已逾期
+                                        </span>
+                                      );
+                                    }
+                                    const hrsLeft = Math.max(1, Math.ceil(diffMs / 3600000));
+                                    return (
+                                      <span className="text-[11px] text-emerald-700 font-bold block">
+                                        剩 {hrsLeft} 小時
+                                      </span>
+                                    );
+                                  })()}
+                              </>
+                            ) : (
+                              <span className="text-[#A8A19A] text-[11px]">—</span>
                             )}
                           </td>
 
@@ -1434,6 +1538,41 @@ export default function ShopAdminPage() {
               </div>
             )}
           </div>
+
+          {orderTotalCount > 0 && (
+            <div
+              data-testid="shop-orders-pagination"
+              className="flex items-center justify-between text-xs text-[#6D5D52] bg-white rounded-xl border border-[#E8DEC8] px-4 py-2.5"
+            >
+              <span>共 {orderTotalCount} 筆（第 {orderPage} / {orderTotalPages} 頁）</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={orderPage <= 1}
+                  onClick={() => {
+                    const prev = Math.max(1, orderPage - 1);
+                    setOrderPage(prev);
+                    fetchAdminOrders({ page: prev });
+                  }}
+                  className="px-3 py-1 rounded-lg border border-[#E8DEC8] font-bold disabled:opacity-40 hover:bg-[#FAF7F2]"
+                >
+                  上一頁
+                </button>
+                <button
+                  type="button"
+                  disabled={orderPage >= orderTotalPages}
+                  onClick={() => {
+                    const next = Math.min(orderTotalPages, orderPage + 1);
+                    setOrderPage(next);
+                    fetchAdminOrders({ page: next });
+                  }}
+                  className="px-3 py-1 rounded-lg border border-[#E8DEC8] font-bold disabled:opacity-40 hover:bg-[#FAF7F2]"
+                >
+                  下一頁
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

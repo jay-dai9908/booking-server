@@ -1161,7 +1161,7 @@ export default function HistoryPage() {
                   !isCancelledOrder &&
                   (o.payment_status === 'pending_payment' ||
                     o.payment_status === 'reported_pending_verify');
-                const isTransfer = o.payment_method !== 'ONSITE';
+                const isTransfer = !(o.payment_method === 'ONSITE' || o.payment_method_code === 'onsite');
 
                 const deadlineStr = o.payment_deadline ? formatDateShort(o.payment_deadline) : '';
 
@@ -1226,6 +1226,13 @@ export default function HistoryPage() {
                     {isVerifiedOrder && isTransfer && (
                       <div className="rounded-[12px] bg-sg-bg px-3 py-2 text-[12px] font-bold text-sg-sage-ink">
                         已核對{o.remittance_last5 ? `（匯款末五碼 ${o.remittance_last5}）` : ''}
+                      </div>
+                    )}
+                    {isPendingPayment && !isTransfer && (
+                      <div className="rounded-[12px] bg-sg-bg px-3 py-[10px] text-[13px] font-bold text-sg-ink">
+                        {deadlineStr
+                          ? `請在 ${deadlineStr} 前到店付款，逾期訂單會自動取消`
+                          : '請在付款期限前到店付款，逾期訂單會自動取消'}
                       </div>
                     )}
                     {isPendingPayment && isTransfer && (

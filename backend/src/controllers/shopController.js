@@ -16,6 +16,8 @@ import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import { applyShopOrderPayment } from '../services/shop/shopPayment.js';
 import { refundShopOrder } from '../services/shop/shopRefund.js';
+import { getNextDailySeq } from '../services/billing/billService.js';
+import { toTaipeiDateString } from '../../../shared/time.js';
 
 /**
  * Public: Get active products for customer shop
@@ -110,8 +112,12 @@ export const createProductOrder = async (req, res) => {
       return res.status(403).json({ error: '預購商城目前維護暫停中' });
     }
 
+    // 所有付款方式（包含到店付款）皆套用付款期限 = 下單時間 + shop_deposit_deadline_days 天
+    const now = (process.env.NODE_ENV === 'test' && req.body?.now)
+      ? new Date(req.body.now)
+      : new Date();
     const deadlineDays = globalSetting?.shop_deposit_deadline_days ?? 2;
-    const paymentDeadline = new Date(Date.now() + deadlineDays * 24 * 60 * 60 * 1000);
+    const paymentDeadline = new Date(now.getTime() + deadlineDays * 24 * 60 * 60 * 1000);
 
     // 檢查付款方式是否存在且已啟用
     const paymentMethod = await prisma.paymentMethodConfig.findUnique({
@@ -224,14 +230,14 @@ export const createProductOrder = async (req, res) => {
     const grandTotal = totalAmount + shippingFee;
     const finalDeposit = Math.min(depositRequired, grandTotal);
 
-    // Generate unique order_ref: PO-YYYYMMDD-XXXX
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-    const randomHex = crypto.randomBytes(2).toString('hex').toUpperCase();
-    const orderRef = `PO-${dateStr}-${randomHex}`;
+    const taipeiDateCompact = toTaipeiDateString(now).replace(/-/g, '');
 
     // Execute in transaction
     const order = await prisma.$transaction(async (tx) => {
+      // 台北日期流水號 PO-YYYYMMDD-NNNN（於交易內取得）
+      const seq = await getNextDailySeq(tx, 'shop_order', now);
+      const orderRef = `PO-${taipeiDateCompact}-${String(seq).padStart(4, '0')}`;
+
       let assignedPoolAccount = null;
       let assignedPoolUrl = null;
 
@@ -269,8 +275,9 @@ export const createProductOrder = async (req, res) => {
           assigned_pool_account: assignedPoolAccount,
           assigned_pool_url: assignedPoolUrl,
           remittance_last5: cleanLast5,
-          remittance_reported_at: cleanLast5 ? new Date() : null,
+          remittance_reported_at: cleanLast5 ? now : null,
           payment_deadline: paymentDeadline,
+          auto_expire: true,
           payment_status: initialPaymentStatus,
           order_status: 'preorder_placed',
           delivery_method,
@@ -419,31 +426,43 @@ export const getMyProductOrders = async (req, res) => {
  * Admin: Get all preorder orders with filtering & search
  */
 export const getAdminProductOrders = async (req, res) => {
-  const { search, payment_status, order_status, page = 1, limit = 50 } = req.query;
+  const { search, payment_status, order_status, overdue, page = 1, limit = 30 } = req.query;
 
   try {
-    const whereClause = {};
+    const now = new Date();
+    const andConditions = [];
 
     if (payment_status && payment_status !== 'all') {
-      whereClause.payment_status = payment_status;
+      andConditions.push({ payment_status });
     }
     if (order_status && order_status !== 'all') {
-      whereClause.order_status = order_status;
+      andConditions.push({ order_status });
+    }
+    if (overdue === '1' || overdue === 'true') {
+      andConditions.push({
+        order_status: { not: 'cancelled' },
+        payment_status: { in: ['pending_payment', 'reported_pending_verify'] },
+        payment_deadline: { lt: now }
+      });
     }
 
     if (search && search.trim()) {
       const q = search.trim();
-      whereClause.OR = [
-        { order_ref: { contains: q, mode: 'insensitive' } },
-        { assigned_pool_account: { contains: q, mode: 'insensitive' } },
-        { remittance_last5: { contains: q, mode: 'insensitive' } },
-        { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
-        { user: activeUserWhere({ phone: { contains: q, mode: 'insensitive' } }) }
-      ];
+      andConditions.push({
+        OR: [
+          { order_ref: { contains: q, mode: 'insensitive' } },
+          { assigned_pool_account: { contains: q, mode: 'insensitive' } },
+          { remittance_last5: { contains: q, mode: 'insensitive' } },
+          { user: activeUserWhere({ name: { contains: q, mode: 'insensitive' } }) },
+          { user: activeUserWhere({ phone: { contains: q, mode: 'insensitive' } }) }
+        ]
+      });
     }
 
+    const whereClause = andConditions.length > 0 ? { AND: andConditions } : {};
+
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const take = Math.max(1, parseInt(limit, 10) || 50);
+    const take = Math.min(100, Math.max(1, parseInt(limit, 10) || 30));
     const skip = (pageNum - 1) * take;
 
     const [orders, totalCount] = await Promise.all([
@@ -455,7 +474,7 @@ export const getAdminProductOrders = async (req, res) => {
             select: { id: true, name: true, phone: true, line_display_name: true, line_picture_url: true, line_user_id: true }
           }
         },
-        orderBy: { created_at: 'desc' },
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
         skip,
         take
       }),
@@ -470,16 +489,24 @@ export const getAdminProductOrders = async (req, res) => {
         })
       : [];
     const heldOrderRefSet = new Set(heldAccounts.map((a) => a.assigned_order_ref));
-    const ordersWithHold = orders.map((o) => ({
-      ...o,
-      has_held_pool_account: Boolean(o.assigned_pool_account) && heldOrderRefSet.has(o.order_ref)
-    }));
+    const ordersWithHold = orders.map((o) => {
+      const isOverdue =
+        o.order_status !== 'cancelled' &&
+        ['pending_payment', 'reported_pending_verify'].includes(o.payment_status) &&
+        Boolean(o.payment_deadline) &&
+        new Date(o.payment_deadline) < now;
+      return {
+        ...o,
+        has_held_pool_account: Boolean(o.assigned_pool_account) && heldOrderRefSet.has(o.order_ref),
+        is_overdue: isOverdue
+      };
+    });
 
     res.json({
       orders: ordersWithHold,
       totalCount,
       page: pageNum,
-      totalPages: Math.ceil(totalCount / take)
+      totalPages: Math.max(1, Math.ceil(totalCount / take))
     });
   } catch (error) {
     console.error('getAdminProductOrders error:', error);
