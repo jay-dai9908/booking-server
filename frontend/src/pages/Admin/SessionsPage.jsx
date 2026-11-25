@@ -79,6 +79,10 @@ export default function SessionsPage() {
   const [batchEndDate, setBatchEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [batchHourly, setBatchHourly] = useState('');
   const [batchUnlimited, setBatchUnlimited] = useState('');
+  const [batchClearHourly, setBatchClearHourly] = useState(false);
+  const [batchClearUnlimited, setBatchClearUnlimited] = useState(false);
+  const [batchAllowUnlimited, setBatchAllowUnlimited] = useState('unchanged'); // 'unchanged' | 'true' | 'false'
+  const [batchConfirmState, setBatchConfirmState] = useState(null);
   const [batchSetSelfService, setBatchSetSelfService] = useState(false);
   const [batchSelfAllowEquipment, setBatchSelfAllowEquipment] = useState(false);
   const [batchIronMode, setBatchIronMode] = useState('today');
@@ -282,32 +286,80 @@ export default function SessionsPage() {
 
   const handleBatchUpdatePrices = async (e) => {
     e.preventDefault();
+    const payload = {};
+
+    let hourlySummary = '不變';
+    if (batchClearHourly) {
+      payload.clear_hourly_price = true;
+      hourlySummary = '清除特價（改回全店價格）';
+    } else if (String(batchHourly).trim() !== '') {
+      const parsed = /^-?\d+$/.test(String(batchHourly).trim()) ? parseInt(String(batchHourly).trim(), 10) : batchHourly;
+      payload.hourly_price = parsed;
+      hourlySummary = `NT$ ${parsed}`;
+    }
+
+    let unlimitedSummary = '不變';
+    if (batchClearUnlimited) {
+      payload.clear_unlimited_price = true;
+      unlimitedSummary = '清除特價（改回全店價格）';
+    } else if (String(batchUnlimited).trim() !== '') {
+      const parsed = /^-?\d+$/.test(String(batchUnlimited).trim()) ? parseInt(String(batchUnlimited).trim(), 10) : batchUnlimited;
+      payload.unlimited_price = parsed;
+      unlimitedSummary = `NT$ ${parsed}`;
+    }
+
+    let allowUnlimitedSummary = '不變';
+    if (batchAllowUnlimited === 'true') {
+      payload.allow_unlimited = true;
+      allowUnlimitedSummary = '開放';
+    } else if (batchAllowUnlimited === 'false') {
+      payload.allow_unlimited = false;
+      allowUnlimitedSummary = '不開放';
+    }
+
+    if (batchSetSelfService) {
+      payload.is_self_service = true;
+      payload.self_allow_equipment = batchSelfAllowEquipment;
+      payload.iron_mode = batchIronMode;
+      payload.iron_date = batchIronMode === 'date' ? batchIronDate : null;
+    }
+
+    let daysCount = 0;
+    if (batchMode === 'selected') {
+      if (selectedDates.length === 0) {
+        showToast('請先在上方月曆勾選日期');
+        return;
+      }
+      payload.dates = selectedDates;
+      daysCount = selectedDates.length;
+    } else {
+      if (!batchStartDate || !batchEndDate || batchEndDate < batchStartDate) {
+        showToast('請選擇有效的起訖日期');
+        return;
+      }
+      payload.start_date = batchStartDate;
+      payload.end_date = batchEndDate;
+      const startMs = new Date(`${batchStartDate}T00:00:00Z`).getTime();
+      const endMs = new Date(`${batchEndDate}T00:00:00Z`).getTime();
+      daysCount = Math.max(1, Math.round((endMs - startMs) / 86400000) + 1);
+    }
+
+    setBatchConfirmState({
+      payload,
+      daysCount,
+      hourlySummary,
+      unlimitedSummary,
+      allowUnlimitedSummary,
+      selfServiceSummary: batchSetSelfService ? '設成半自助日' : '不變'
+    });
+  };
+
+  const handleConfirmBatchSubmit = async () => {
+    if (!batchConfirmState) return;
+    const { payload } = batchConfirmState;
+    setBatchConfirmState(null);
     setIsBatching(true);
     try {
-      const payload = {
-        hourly_price: batchHourly || null,
-        unlimited_price: batchUnlimited || null
-      };
-
-      if (batchSetSelfService) {
-        payload.is_self_service = true;
-        payload.self_allow_equipment = batchSelfAllowEquipment;
-        payload.iron_mode = batchIronMode;
-        payload.iron_date = batchIronMode === 'date' ? batchIronDate : null;
-      }
-
-      if (batchMode === 'selected') {
-        if (selectedDates.length === 0) {
-          showToast('請先在上方月曆勾選日期');
-          setIsBatching(false);
-          return;
-        }
-        payload.dates = selectedDates;
-      } else {
-        payload.start_date = batchStartDate;
-        payload.end_date = batchEndDate;
-      }
-
       const res = await api.post('/daily-settings/batch', payload);
       showToast(`批次修改成功！${res.data?.message || ''}`);
       fetchDailySetting(listDate);
@@ -1076,26 +1128,87 @@ export default function SessionsPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">每小時價格</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="block text-sm font-semibold text-gray-700">每小時價格</label>
                 <input
                   type="number"
+                  data-testid="batch-hourly-input"
+                  disabled={batchClearHourly}
                   value={batchHourly}
                   onChange={e => setBatchHourly(e.target.value)}
-                  placeholder="留空清除覆蓋"
-                  className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"
+                  placeholder="留空＝不變"
+                  className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm disabled:bg-gray-100 disabled:text-gray-400"
                 />
+                {!batchClearHourly && String(batchHourly).trim() === '' && (
+                  <p className="text-[11px] text-gray-500">留空＝不變</p>
+                )}
+                <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none pt-0.5">
+                  <input
+                    type="checkbox"
+                    data-testid="batch-clear-hourly"
+                    checked={batchClearHourly}
+                    onChange={(e) => {
+                      setBatchClearHourly(e.target.checked);
+                      if (e.target.checked) setBatchHourly('');
+                    }}
+                    className="w-3.5 h-3.5 accent-[#8B5B43]"
+                  />
+                  <span>清除特價（改回全店價格）</span>
+                </label>
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">不限時價格</label>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-semibold text-gray-700">不限時價格</label>
                 <input
                   type="number"
+                  data-testid="batch-unlimited-input"
+                  disabled={batchClearUnlimited}
                   value={batchUnlimited}
                   onChange={e => setBatchUnlimited(e.target.value)}
-                  placeholder="留空清除覆蓋"
-                  className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm"
+                  placeholder="留空＝不變"
+                  className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gray-900 focus:outline-none transition-all text-sm disabled:bg-gray-100 disabled:text-gray-400"
                 />
+                {!batchClearUnlimited && String(batchUnlimited).trim() === '' && (
+                  <p className="text-[11px] text-gray-500">留空＝不變</p>
+                )}
+                <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none pt-0.5">
+                  <input
+                    type="checkbox"
+                    data-testid="batch-clear-unlimited"
+                    checked={batchClearUnlimited}
+                    onChange={(e) => {
+                      setBatchClearUnlimited(e.target.checked);
+                      if (e.target.checked) setBatchUnlimited('');
+                    }}
+                    className="w-3.5 h-3.5 accent-[#8B5B43]"
+                  />
+                  <span>清除特價（改回全店價格）</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="text-sm font-semibold text-gray-700">不限時</div>
+              <div className="flex flex-wrap gap-2" data-testid="batch-allow-unlimited-group">
+                {[
+                  { id: 'unchanged', label: '不變' },
+                  { id: 'true', label: '開放' },
+                  { id: 'false', label: '不開放' }
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    data-testid={`batch-allow-unlimited-${opt.id}`}
+                    onClick={() => setBatchAllowUnlimited(opt.id)}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition ${
+                      batchAllowUnlimited === opt.id
+                        ? 'bg-[#8B5B43] text-white border-[#8B5B43]'
+                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -1157,6 +1270,7 @@ export default function SessionsPage() {
 
             <button
               type="submit"
+              data-testid="batch-submit-btn"
               disabled={isBatching || (batchMode === 'selected' && selectedDates.length === 0)}
               className="w-full bg-sg-brown hover:bg-sg-brown-hover text-white font-medium py-3 rounded-xl transition-all shadow-sm disabled:opacity-50"
             >
@@ -1435,6 +1549,58 @@ export default function SessionsPage() {
         confirmText="確認刪除"
         danger
       />
+
+      {/* Batch Update Confirmation Modal */}
+      {batchConfirmState && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          data-testid="batch-confirm-modal"
+        >
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-xl animate-fade-in">
+            <h3 className="text-lg font-bold text-gray-900">確認批次修改日期設定？</h3>
+            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 space-y-2 text-sm text-gray-800">
+              <div className="flex justify-between">
+                <span className="text-gray-500">套用天數</span>
+                <span className="font-bold">{batchConfirmState.daysCount} 天</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">每小時價格</span>
+                <span className="font-bold">{batchConfirmState.hourlySummary}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">不限時價格</span>
+                <span className="font-bold">{batchConfirmState.unlimitedSummary}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">不限時開放</span>
+                <span className="font-bold">{batchConfirmState.allowUnlimitedSummary}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">半自助日設定</span>
+                <span className="font-bold">{batchConfirmState.selfServiceSummary}</span>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                data-testid="batch-confirm-cancel-btn"
+                onClick={() => setBatchConfirmState(null)}
+                className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-xl"
+              >
+                先不要
+              </button>
+              <button
+                type="button"
+                data-testid="batch-confirm-submit-btn"
+                onClick={handleConfirmBatchSubmit}
+                className="px-5 py-2 text-sm font-bold text-white bg-[#8B5B43] hover:bg-[#724a35] rounded-xl shadow-xs"
+              >
+                確認送出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

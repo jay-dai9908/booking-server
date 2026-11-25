@@ -266,6 +266,8 @@ export const batchUpdateDailySettings = async (req, res) => {
     days_of_week,
     hourly_price,
     unlimited_price,
+    clear_hourly_price,
+    clear_unlimited_price,
     allow_unlimited,
     dates,
     is_self_service,
@@ -322,6 +324,50 @@ export const batchUpdateDailySettings = async (req, res) => {
       }
     }
 
+    const dataToUpdate = {};
+    if (typeof allow_unlimited === 'boolean') {
+      dataToUpdate.allow_unlimited = allow_unlimited;
+    }
+
+    if (clear_hourly_price === true) {
+      dataToUpdate.hourly_price = null;
+    } else if (hourly_price !== undefined && hourly_price !== null && String(hourly_price).trim() !== '') {
+      const parsedHourly = parseStrictInt(hourly_price);
+      if (parsedHourly === null || parsedHourly < 0 || parsedHourly > 10000) {
+        return res.status(422).json({ field: 'hourly_price', error: '每小時價格必須為 0 至 10000 的整數' });
+      }
+      dataToUpdate.hourly_price = parsedHourly;
+    }
+
+    if (clear_unlimited_price === true) {
+      dataToUpdate.unlimited_price = null;
+    } else if (unlimited_price !== undefined && unlimited_price !== null && String(unlimited_price).trim() !== '') {
+      const parsedUnlimited = parseStrictInt(unlimited_price);
+      if (parsedUnlimited === null || parsedUnlimited < 0 || parsedUnlimited > 10000) {
+        return res.status(422).json({ field: 'unlimited_price', error: '不限時價格必須為 0 至 10000 的整數' });
+      }
+      dataToUpdate.unlimited_price = parsedUnlimited;
+    }
+
+    const touchesPricingOrUnlimited =
+      dataToUpdate.hourly_price !== undefined ||
+      dataToUpdate.unlimited_price !== undefined ||
+      dataToUpdate.allow_unlimited !== undefined;
+
+    if (touchesPricingOrUnlimited) {
+      const todayStr = toTaipeiDateString(new Date());
+      const pastDates = datesToUpdate
+        .map(d => toTaipeiDateString(d))
+        .filter(dStr => dStr < todayStr);
+      if (pastDates.length > 0) {
+        return res.status(422).json({
+          field: 'dates',
+          past_dates: pastDates,
+          error: `不可批次修改今天以前日期的價格或不限時設定（${pastDates.join('、')}），整批未修改`
+        });
+      }
+    }
+
     if (typeof is_self_service === 'boolean') {
       const existingRows = await prisma.dailySetting.findMany({
         where: { date: { in: datesToUpdate } },
@@ -364,10 +410,6 @@ export const batchUpdateDailySettings = async (req, res) => {
       }
     }
 
-    const dataToUpdate = {};
-    if (typeof allow_unlimited === 'boolean') dataToUpdate.allow_unlimited = allow_unlimited;
-    if (hourly_price !== undefined) dataToUpdate.hourly_price = (hourly_price === null || hourly_price === '') ? null : parseInt(hourly_price, 10);
-    if (unlimited_price !== undefined) dataToUpdate.unlimited_price = (unlimited_price === null || unlimited_price === '') ? null : parseInt(unlimited_price, 10);
     if (typeof is_self_service === 'boolean') dataToUpdate.is_self_service = is_self_service;
     if (typeof self_allow_hourly === 'boolean') dataToUpdate.self_allow_hourly = self_allow_hourly;
     if (typeof self_allow_equipment === 'boolean') dataToUpdate.self_allow_equipment = self_allow_equipment;
@@ -383,7 +425,7 @@ export const batchUpdateDailySettings = async (req, res) => {
         create: {
           date,
           ...dataToUpdate,
-          allow_unlimited: allow_unlimited !== undefined ? allow_unlimited : true,
+          allow_unlimited: typeof allow_unlimited === 'boolean' ? allow_unlimited : true,
           is_self_service: is_self_service !== undefined ? Boolean(is_self_service) : false,
           self_allow_hourly: self_allow_hourly !== undefined ? Boolean(self_allow_hourly) : false,
           self_allow_equipment: self_allow_equipment !== undefined ? Boolean(self_allow_equipment) : false,
