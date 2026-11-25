@@ -2,6 +2,7 @@ import prisma from '../../prismaClient.js';
 import { dateOnly, toTaipeiDateString } from '../../../../shared/time.js';
 import { sendLinePushMessage } from '../../utils/lineMessaging.js';
 import { ensureKioskSetting } from '../selfService/prepayService.js';
+import { bookableSessionWhere } from '../calendar/sessionFilters.js';
 
 /**
  * 格式化台北時間為 HH:mm
@@ -39,7 +40,16 @@ export function resolveEventTime(rawAt, now = new Date()) {
 /**
  * 發送推播訊息給所有指定的報到機警報收件人 (User.id)
  */
-export async function sendKioskAlertMessage(db = prisma, textMessage, { pushFn = sendLinePushMessage } = {}) {
+export async function sendKioskAlertMessage(
+  db = prisma,
+  textMessage,
+  {
+    pushFn =
+      process.env.NODE_ENV === 'test' && typeof globalThis.__TEST_LINE_PUSH_FN__ === 'function'
+        ? globalThis.__TEST_LINE_PUSH_FN__
+        : sendLinePushMessage
+  } = {}
+) {
   try {
     const kioskSetting = await ensureKioskSetting(db);
     const alertUserIds = Array.isArray(kioskSetting.alert_user_ids)
@@ -91,7 +101,7 @@ export async function isWithinSelfServiceBusinessHours(db = prisma, now = new Da
       select: { is_self_service: true }
     }),
     db.session.findMany({
-      where: { session_date: todayDateObj },
+      where: { session_date: todayDateObj, ...bookableSessionWhere() },
       select: { start_time: true, end_time: true }
     })
   ]);
@@ -130,7 +140,7 @@ export async function isWithinSelfServiceBusinessHours(db = prisma, now = new Da
 /**
  * 報到機離線定期巡檢（cronJobs 呼叫）
  */
-export async function checkKioskOfflineAlerts(db = prisma, now = new Date()) {
+export async function checkKioskOfflineAlerts(db = prisma, now = new Date(), { pushFn } = {}) {
   const inHours = await isWithinSelfServiceBusinessHours(db, now);
   if (!inHours) {
     return { checked: false, reason: 'NOT_SELF_SERVICE_OR_OUTSIDE_HOURS' };
@@ -152,7 +162,7 @@ export async function checkKioskOfflineAlerts(db = prisma, now = new Date()) {
     if (!device.offline_alerted_at) {
       const lastSeenStr = device.last_seen_at ? formatTaipeiTime(new Date(device.last_seen_at)) : '未知';
       const msg = `門口報到機離線超過 10 分鐘，顧客目前只能用備用開門密碼進門。最後一次連線：${lastSeenStr}`;
-      await sendKioskAlertMessage(db, msg);
+      await sendKioskAlertMessage(db, msg, pushFn ? { pushFn } : undefined);
       await db.kioskDevice.update({
         where: { id: device.id },
         data: { offline_alerted_at: now }
@@ -165,7 +175,7 @@ export async function checkKioskOfflineAlerts(db = prisma, now = new Date()) {
   // 機台在線上：若之前有發過離線警報，發送恢復通知並重置
   if (device.offline_alerted_at) {
     const recoveryMsg = '門口報到機已恢復連線';
-    await sendKioskAlertMessage(db, recoveryMsg);
+    await sendKioskAlertMessage(db, recoveryMsg, pushFn ? { pushFn } : undefined);
     await db.kioskDevice.update({
       where: { id: device.id },
       data: { offline_alerted_at: null }

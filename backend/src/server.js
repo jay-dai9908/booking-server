@@ -30,6 +30,7 @@ import { resolveTrustProxy } from './utils/trustProxy.js';
 import { applyBodyParsers } from './middlewares/bodyParsers.js';
 import { startCronJobs } from './cronJobs.js';
 import { solidifyDailyPrices } from './services/pricing/solidify.js';
+import { runCronOnce } from './services/cron/cronLock.js';
 import { toTaipeiDateString } from '../../shared/time.js';
 import { ensureDatabaseSchema } from './db/ensureSchema.js';
 import { isAccountingGuardInstalled, setStartupAccountingGuardMissing } from './db/accountingGuard.js';
@@ -111,7 +112,9 @@ app.use((err, req, res, next) => {
   try {
     const todayStr = toTaipeiDateString(new Date());
     const yesterdayMid = new Date(new Date(`${todayStr}T00:00:00.000Z`).getTime() - 86400000);
-    await solidifyDailyPrices({ through: yesterdayMid });
+    await runCronOnce('solidify_prices', `startup-${todayStr}`, () =>
+      solidifyDailyPrices({ through: yesterdayMid })
+    );
   } catch (err) {
     console.error('[Startup] solidifyDailyPrices notice:', err?.message || err);
   }

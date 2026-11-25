@@ -5,6 +5,8 @@ import { releasePoolAccount } from './services/selfService/poolAccountService.js
 import { releaseExpiredPrepays } from './services/selfService/prepayService.js';
 import { checkKioskOfflineAlerts } from './services/kiosk/alertService.js';
 import { solidifyDailyPrices } from './services/pricing/solidify.js';
+import { expireOverduePasses } from './services/billing/passExpiry.js';
+import { runCronOnce, taipeiCronRunKeys } from './services/cron/cronLock.js';
 import auditService from './services/audit/auditService.js';
 
 export async function markPastCheckedInAsCompleted(now = new Date()) {
@@ -59,30 +61,71 @@ export async function markPastCheckedInAsCompleted(now = new Date()) {
   });
 }
 
-export const startCronJobs = () => {
-  // 1. Run every day at midnight (00:00) Taipei time
-  cron.schedule('0 0 * * *', async () => {
-    console.log('[Cron Job] Running midnight attendance check & expired preorder cleanup...');
-    try {
-      // Find all sessions from yesterday or earlier using precise Taipei midnight
-      const { dateObject: todayMidnightUtc } = getTaipeiDateParts(new Date());
+export async function runMidnightJob(now = new Date(), client = prisma) {
+  const { dateObject: todayMidnightUtc } = getTaipeiDateParts(now);
 
-      const pastSessions = await prisma.session.findMany({
+  const pastSessions = await client.session.findMany({
+    where: {
+      session_date: {
+        lt: todayMidnightUtc
+      }
+    },
+    select: { id: true }
+  });
+
+  const pastSessionIds = pastSessions.map((s) => s.id);
+  let noShowCount = 0;
+  let skippedPaidCount = 0;
+
+  if (pastSessionIds.length > 0) {
+    const candidates = await client.reservation.findMany({
+      where: {
+        session_id: { in: pastSessionIds },
+        status: 'confirmed',
+        attendance: null
+      },
+      select: {
+        id: true,
+        booking_ref: true,
+        billing_status: true,
+        is_paid: true
+      }
+    });
+
+    if (candidates.length > 0) {
+      const candidateRefs = [...new Set(candidates.map((c) => c.booking_ref).filter(Boolean))];
+      const verifiedPrepays = await client.bookingPrepay.findMany({
         where: {
-          session_date: {
-            lt: todayMidnightUtc
-          }
+          booking_ref: { in: candidateRefs },
+          status: 'verified'
         },
-        select: { id: true }
+        select: { booking_ref: true }
       });
+      const verifiedRefSet = new Set(verifiedPrepays.map((p) => p.booking_ref));
 
-      const pastSessionIds = pastSessions.map(s => s.id);
+      const grouped = new Map();
+      for (const row of candidates) {
+        if (!grouped.has(row.booking_ref)) grouped.set(row.booking_ref, []);
+        grouped.get(row.booking_ref).push(row);
+      }
 
-      if (pastSessionIds.length > 0) {
-        // Update all reservations for these sessions that are confirmed and attendance is null
-        const result = await prisma.reservation.updateMany({
+      const paidProtectedRefs = [];
+      const unpaidRefs = [];
+      for (const [ref, rows] of grouped.entries()) {
+        const hasPaidStatus =
+          rows.some((r) => Boolean(r.is_paid) || ['paid', 'partial', 'waived'].includes(r.billing_status)) ||
+          verifiedRefSet.has(ref);
+        if (hasPaidStatus) {
+          paidProtectedRefs.push(ref);
+        } else {
+          unpaidRefs.push(ref);
+        }
+      }
+
+      if (unpaidRefs.length > 0) {
+        const result = await client.reservation.updateMany({
           where: {
-            session_id: { in: pastSessionIds },
+            booking_ref: { in: unpaidRefs },
             status: 'confirmed',
             attendance: null
           },
@@ -90,38 +133,100 @@ export const startCronJobs = () => {
             attendance: 'no_show'
           }
         });
-
-        console.log(`[Cron Job] Successfully marked ${result.count} reservations as no_show.`);
-      } else {
-        console.log('[Cron Job] No past sessions found.');
+        noShowCount = result.count;
+        console.log(`[Cron Job] Successfully marked ${noShowCount} reservations as no_show.`);
       }
 
-      // 2026-11-22 店主定案：前一天以前仍為 checked_in 的預約在 00:00 自動改成 completed，left_at 補為 timer_ended_at 或執行時間
-      const completedPast = await markPastCheckedInAsCompleted(new Date());
-      if (completedPast.bookingCount > 0 || completedPast.personCount > 0) {
-        console.log(`[Cron Job] Auto-completed ${completedPast.bookingCount} past checked-in bookings (${completedPast.personCount} persons left_at filled).`);
+      if (paidProtectedRefs.length > 0) {
+        await client.$transaction(async (tx) => {
+          for (const ref of paidProtectedRefs) {
+            await auditService.log(tx, {
+              booking_ref: ref,
+              event_type: 'no_show_skipped_paid',
+              category: 'status',
+              target_type: 'reservation',
+              target_ref: ref,
+              summary: `午夜排程跳過未到標記（已付款保留待補報到）：${ref}`,
+              staff_name: '系統',
+              staff_id: null,
+              device_label: '系統排程'
+            });
+          }
+        });
+        skippedPaidCount = paidProtectedRefs.length;
+        console.log(`[Cron Job] Skipped no_show for ${skippedPaidCount} paid/partial/verified reservations.`);
       }
+    }
+  } else {
+    console.log('[Cron Job] No past sessions found.');
+  }
 
-      // 自動釋放逾期未繳費預購單與虛擬帳號
-      await releaseExpiredPreorders();
+  // 2026-11-22 店主定案：前一天以前仍為 checked_in 的預約在 00:00 自動改成 completed，left_at 補為 timer_ended_at 或執行時間
+  const completedPast = await markPastCheckedInAsCompleted(now);
+  if (completedPast.bookingCount > 0 || completedPast.personCount > 0) {
+    console.log(`[Cron Job] Auto-completed ${completedPast.bookingCount} past checked-in bookings (${completedPast.personCount} persons left_at filled).`);
+  }
 
-      // Clean up UserLoginLog records older than 60 days (2 months)
-      const sixtyDaysAgo = new Date();
-      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-      const deletedLogs = await prisma.userLoginLog.deleteMany({
-        where: {
-          created_at: { lt: sixtyDaysAgo }
-        }
-      });
-      if (deletedLogs.count > 0) {
-        console.log(`[Cron Job] Cleaned up ${deletedLogs.count} user login logs older than 60 days.`);
-      }
+  // 自動釋放逾期未繳費預購單與虛擬帳號
+  const expiredPreorders = await releaseExpiredPreorders(now);
+
+  // Clean up UserLoginLog records older than 60 days (2 months)
+  const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+  const deletedLogs = await client.userLoginLog.deleteMany({
+    where: {
+      created_at: { lt: sixtyDaysAgo }
+    }
+  });
+  if (deletedLogs.count > 0) {
+    console.log(`[Cron Job] Cleaned up ${deletedLogs.count} user login logs older than 60 days.`);
+  }
+
+  // Clean up CronRun records older than 90 days
+  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+  const deletedCronRuns = await client.cronRun.deleteMany({
+    where: {
+      started_at: { lt: ninetyDaysAgo }
+    }
+  });
+
+  return {
+    noShowCount,
+    skippedPaidCount,
+    completedBookings: completedPast.bookingCount,
+    completedPersons: completedPast.personCount,
+    expiredPreorders,
+    deletedLoginLogs: deletedLogs.count,
+    deletedCronRuns: deletedCronRuns.count
+  };
+}
+
+export const startCronJobs = () => {
+  // 1. Run every day at midnight (00:00) Taipei time
+  cron.schedule('0 0 * * *', async () => {
+    const now = new Date();
+    const { daily } = taipeiCronRunKeys(now);
+    console.log('[Cron Job] Running midnight attendance check & expired preorder cleanup...');
+    try {
+      await runCronOnce('midnight', daily, () => runMidnightJob(now));
     } catch (error) {
       console.error('[Cron Job] Error during midnight attendance check:', error);
     }
   }, { timezone: 'Asia/Taipei' });
 
+  // 1b. Every day at 00:10 Taipei time: mark overdue ACTIVE passes as EXPIRED
+  cron.schedule('10 0 * * *', async () => {
+    const now = new Date();
+    const { daily } = taipeiCronRunKeys(now);
+    try {
+      await runCronOnce('pass_expiry', daily, () => expireOverduePasses(now));
+    } catch (error) {
+      console.error('[Cron Job] Error marking overdue passes as EXPIRED:', error);
+    }
+  }, { timezone: 'Asia/Taipei' });
+
   // Print lease timeout checker: every 30 seconds (spec 5.7)
+  // 列印租約超時檢查為冪等的 updateMany (WHERE status = 'claimed' AND lease_until < now)，
+  // 多行程同時執行結果一致且每 30 秒執行一次，不需使用 CronRun 資料庫鎖。
   setInterval(async () => {
     try {
       const now = new Date();
@@ -143,8 +248,10 @@ export const startCronJobs = () => {
 
   // 2. 每小時檢查並自動釋放逾期未付款之預購虛擬帳號
   cron.schedule('0 * * * *', async () => {
+    const now = new Date();
+    const { hourly } = taipeiCronRunKeys(now);
     try {
-      await releaseExpiredPreorders();
+      await runCronOnce('shop_expiry', hourly, () => releaseExpiredPreorders(now));
     } catch (err) {
       console.error('[Cron Job] Error checking expired preorders hourly:', err);
     }
@@ -152,8 +259,10 @@ export const startCronJobs = () => {
 
   // 2b. 每小時第 5 分鐘檢查並自動取消逾期未付款之半自助日預約
   cron.schedule('5 * * * *', async () => {
+    const now = new Date();
+    const { hourly } = taipeiCronRunKeys(now);
     try {
-      await releaseExpiredPrepays();
+      await runCronOnce('prepay_expiry', hourly, () => releaseExpiredPrepays());
     } catch (err) {
       console.error('[Cron Job] Error releasing expired self-service prepays:', err);
     }
@@ -161,25 +270,29 @@ export const startCronJobs = () => {
 
   // 3. Run every day at 23:59 to solidify daily prices through today (Taipei time)
   cron.schedule('59 23 * * *', async () => {
+    const now = new Date();
+    const { daily } = taipeiCronRunKeys(now);
     console.log('[Cron Job] Solidifying daily settings through today...');
     try {
-      const { dateObject: todayDateUtc } = getTaipeiDateParts(new Date());
-      await solidifyDailyPrices({ through: todayDateUtc });
+      const { dateObject: todayDateUtc } = getTaipeiDateParts(now);
+      await runCronOnce('solidify_prices', daily, () => solidifyDailyPrices({ through: todayDateUtc }));
     } catch (error) {
       console.error('[Cron Job] Error solidifying daily settings:', error);
     }
   }, { timezone: 'Asia/Taipei' });
 
-  // 4. Kiosk Offline Alert Check (every 5 minutes)
+  // 4. Kiosk Offline Alert Check (every 5 minutes, Taipei timezone)
   cron.schedule('*/5 * * * *', async () => {
+    const now = new Date();
+    const { fiveMin } = taipeiCronRunKeys(now);
     try {
-      await checkKioskOfflineAlerts(prisma);
+      await runCronOnce('kiosk_offline_alert', fiveMin, () => checkKioskOfflineAlerts(prisma, now));
     } catch (err) {
       console.error('[Cron Job] checkKioskOfflineAlerts error:', err);
     }
-  });
+  }, { timezone: 'Asia/Taipei' });
 
-  console.log('[Cron Job] Scheduled midnight attendance check, hourly preorder pool cleaner, price solidification, and kiosk offline monitor.');
+  console.log('[Cron Job] Scheduled midnight attendance check, 00:10 pass expiry, hourly preorder/prepay cleaners, price solidification, and kiosk offline monitor.');
 };
 
 /**

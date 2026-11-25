@@ -919,7 +919,19 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
       "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "AdminLoginGuardEvent_pkey" PRIMARY KEY ("id")
     )`,
-    `CREATE INDEX IF NOT EXISTS "AdminLoginGuardEvent_created_at_idx" ON "AdminLoginGuardEvent"("created_at")`
+    `CREATE INDEX IF NOT EXISTS "AdminLoginGuardEvent_created_at_idx" ON "AdminLoginGuardEvent"("created_at")`,
+    `CREATE TABLE IF NOT EXISTS "CronRun" (
+      "id" SERIAL NOT NULL,
+      "job" TEXT NOT NULL,
+      "run_key" TEXT NOT NULL,
+      "started_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "finished_at" TIMESTAMP(3),
+      "status" TEXT NOT NULL DEFAULT 'running',
+      "result_json" JSONB,
+      "host" TEXT,
+      CONSTRAINT "CronRun_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "CronRun_job_run_key_key" ON "CronRun"("job", "run_key")`
   ];
 
   for (const sql of statements) {

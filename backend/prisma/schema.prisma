@@ -1016,6 +1016,19 @@ model SeatHold {
   @@index([booking_ref])
 }
 
+model CronRun {
+  id          Int       @id @default(autoincrement())
+  job         String
+  run_key     String
+  started_at  DateTime  @default(now())
+  finished_at DateTime?
+  status      String    @default("running") // running | done | failed
+  result_json Json?
+  host        String?
+
+  @@unique([job, run_key])
+}
+
 
 
 
