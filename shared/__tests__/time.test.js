@@ -62,4 +62,11 @@ test('swapBoundaryOptions (Section 4.2.2)', () => {
   assert.equal(res3.suggested, new Date('2026-11-04T14:00:00+08:00').getTime());
   assert.equal(res3.options[0], new Date('2026-11-04T14:00:00+08:00').getTime());
   assert.equal(res3.options[1], new Date('2026-11-04T14:30:00+08:00').getTime());
+
+  // 14:37 換板（37 分鐘）：grace=5 建議 60 分鐘（15:00），grace=10 建議 30 分鐘（14:30）
+  const at37 = start + 37 * 60000;
+  const resGrace5 = swapBoundaryOptions(start, at37, { grace: 5 });
+  assert.equal(resGrace5.suggested, start + 60 * 60000);
+  const resGrace10 = swapBoundaryOptions(start, at37, { grace: 10 });
+  assert.equal(resGrace10.suggested, start + 30 * 60000);
 });

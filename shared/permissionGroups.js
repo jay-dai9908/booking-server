@@ -45,6 +45,15 @@ export const GLOBAL_SETTING_FIELD_GROUPS = {
     'default_session_capacity',
     'booking_note_chips',
     'guest_line_hint_text',
+    'billing_grace_minutes',
+    'billing_block_minutes',
+    'board_swap_grace_minutes',
+    'early_leave_mode',
+    'default_split_mode',
+    'cash_float_amount',
+    'auto_print_receipt',
+    'auto_print_summary',
+    'receipt_footer_text',
   ],
 };
 

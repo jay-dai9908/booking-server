@@ -71,11 +71,12 @@ test('Round 9 Section 2: Configurable booking note chips in backend', async (t) 
 
     // Verify audit log
     const event = await prisma.accountingEvent.findFirst({
-      where: { event_type: '設定變更', summary: '更新預約備註快速選項' },
+      where: { event_type: 'setting_changed', category: 'setting' },
       orderBy: { id: 'desc' }
     });
     assert.ok(event, 'Audit log event must be recorded');
     assert.equal(event.category, 'setting');
+    assert.ok(Array.isArray(event.after_json?.booking_note_chips), 'after_json should include booking_note_chips');
   });
 
   await t.test('3. updateGlobalSetting syncs official_line_url and line_button_url', async () => {

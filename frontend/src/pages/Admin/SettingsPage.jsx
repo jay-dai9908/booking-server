@@ -48,6 +48,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+  const [toastType, setToastType] = useState('success');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [unpairingStation, setUnpairingStation] = useState(null);
   const [renamingStation, setRenamingStation] = useState(null);
   const [renameInput, setRenameInput] = useState('');
@@ -128,9 +130,17 @@ export default function SettingsPage() {
     fetchGlobalSettings();
   }, []);
 
-  const showToast = (msg) => {
+  const showToast = (msg, type = 'success') => {
+    setToastType(type);
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 3000);
+  };
+
+  const toNumericOrRaw = (val) => {
+    if (typeof val === 'number') return val;
+    const str = String(val ?? '').trim();
+    if (/^-?\d+$/.test(str)) return parseInt(str, 10);
+    return str;
   };
 
   const handleTogglePrintEnabled = async (checked) => {
@@ -155,8 +165,8 @@ export default function SettingsPage() {
     }
   };
 
-  const fetchGlobalSettings = async () => {
-    setLoading(true);
+  const fetchGlobalSettings = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const res = await api.get('/daily-settings/global');
       const d = res.data || {};
@@ -244,7 +254,7 @@ export default function SettingsPage() {
       setPrintGloballyEnabled(pe);
       setAutoPrintReceipt(d.auto_print_receipt !== false);
       setAutoPrintSummary(d.auto_print_summary !== false);
-      setReceiptFooterText(d.receipt_footer_text ?? '謝謝光臨，作品記得帶回家');
+      setReceiptFooterText(d.receipt_footer_text ?? '');
 
       try {
         const stRes = await api.get('/print/stations');
@@ -253,12 +263,13 @@ export default function SettingsPage() {
     } catch (err) {
       console.error('Failed to fetch global settings:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   const handleSaveAll = async (overridePatch = {}) => {
     setSaving(true);
+    setFieldErrors({});
     try {
       const payload = {
         require_line_login_every_time: requireLineLoginEveryTime,
@@ -274,10 +285,10 @@ export default function SettingsPage() {
         official_line_url: lineButtonUrl,
         guest_line_hint_text: guestLineHintText,
         booking_note_chips: bookingNoteChips.map(s => String(s || '').trim()).filter(Boolean).map(s => s.slice(0, 12)).slice(0, 8),
-        weekday_hourly_price: parseInt(weekdayHourly, 10) || 100,
-        weekday_unlimited_price: parseInt(weekdayUnlimited, 10) || 550,
-        weekend_hourly_price: parseInt(weekendHourly, 10) || 150,
-        weekend_unlimited_price: parseInt(weekendUnlimited, 10) || 800,
+        weekday_hourly_price: toNumericOrRaw(weekdayHourly),
+        weekday_unlimited_price: toNumericOrRaw(weekdayUnlimited),
+        weekend_hourly_price: toNumericOrRaw(weekendHourly),
+        weekend_unlimited_price: toNumericOrRaw(weekendUnlimited),
         allow_equipment_exceed_pax: allowEquipmentExceedPax,
         show_equipment_live_stock: showEquipmentLiveStock,
         equipment_discount_enabled: equipmentDiscountEnabled,
@@ -289,19 +300,19 @@ export default function SettingsPage() {
         equipment_discount_stackable: equipmentDiscountStackable,
         line_auto_notify_booking: lineAutoNotifyBooking,
         line_auto_notify_cancel: lineAutoNotifyCancel,
-        billing_grace_minutes: parseInt(billingGraceMinutes, 10) || 10,
-        billing_block_minutes: parseInt(billingBlockMinutes, 10) || 30,
+        billing_grace_minutes: toNumericOrRaw(billingGraceMinutes),
+        billing_block_minutes: toNumericOrRaw(billingBlockMinutes),
         early_leave_mode: earlyLeaveMode,
-        board_swap_grace_minutes: parseInt(boardSwapGraceMinutes, 10) || 10,
+        board_swap_grace_minutes: toNumericOrRaw(boardSwapGraceMinutes),
         default_split_mode: defaultSplitMode,
-        cash_float_amount: parseInt(cashFloatAmount, 10) || 2000,
+        cash_float_amount: toNumericOrRaw(cashFloatAmount),
         payment_methods_json: paymentMethods,
         print_enabled: printEnabled,
         auto_print_receipt: autoPrintReceipt,
         auto_print_summary: autoPrintSummary,
         receipt_footer_text: receiptFooterText,
         business_hours_json: businessHours,
-        default_session_capacity: parseInt(defaultSessionCapacity, 10) || 16,
+        default_session_capacity: toNumericOrRaw(defaultSessionCapacity),
         ...overridePatch
       };
 
@@ -313,17 +324,20 @@ export default function SettingsPage() {
       try {
         localStorage.removeItem('shiguang_booking_global_settings_cache');
       } catch (e) {}
-      showToast('系統設定已成功儲存並立即生效！');
+
+      await fetchGlobalSettings({ silent: true });
+      showToast('系統設定已成功儲存並立即生效！', 'success');
 
       if (payload.line_messaging_token) {
-        setHasLineMessagingToken(true);
-        const t = payload.line_messaging_token;
-        setLineMessagingTokenMasked(`••••••••${t.slice(-4)}`);
         setLineMessagingTokenInput('');
       }
     } catch (err) {
       console.error('Failed to save global settings:', err);
-      showToast(err.response?.data?.error || '儲存系統設定失敗');
+      const resData = err.response?.data;
+      if (err.response?.status === 422 && resData?.field) {
+        setFieldErrors({ [resData.field]: resData.error || '設定值不合法' });
+      }
+      showToast(resData?.error || '儲存系統設定失敗', 'error');
     } finally {
       setSaving(false);
     }
@@ -388,8 +402,13 @@ export default function SettingsPage() {
     <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
       {/* Toast Notification */}
       {toastMsg && (
-        <div className="fixed top-6 right-6 z-50 bg-emerald-700 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-sm font-bold">
-          <Check className="w-4 h-4" />
+        <div
+          data-testid="settings-toast"
+          className={`fixed top-6 right-6 z-50 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-sm font-bold ${
+            toastType === 'error' ? 'bg-red-600' : 'bg-emerald-700'
+          }`}
+        >
+          {toastType === 'error' ? <AlertTriangle className="w-4 h-4" /> : <Check className="w-4 h-4" />}
           <span>{toastMsg}</span>
         </div>
       )}
@@ -906,6 +925,9 @@ export default function SettingsPage() {
                 onChange={e => setWeekdayHourly(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43] focus:outline-none focus:border-[#8B5B43]"
               />
+              {fieldErrors.weekday_hourly_price && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-weekday_hourly_price">{fieldErrors.weekday_hourly_price}</p>
+              )}
             </div>
             <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8]">
               <label className="block text-xs font-bold text-[#3E332B] mb-1">平日不限時封頂 ($/人)</label>
@@ -915,6 +937,9 @@ export default function SettingsPage() {
                 onChange={e => setWeekdayUnlimited(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43] focus:outline-none focus:border-[#8B5B43]"
               />
+              {fieldErrors.weekday_unlimited_price && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-weekday_unlimited_price">{fieldErrors.weekday_unlimited_price}</p>
+              )}
             </div>
             <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8]">
               <label className="block text-xs font-bold text-[#3E332B] mb-1">假日每小時 ($/hr)</label>
@@ -924,6 +949,9 @@ export default function SettingsPage() {
                 onChange={e => setWeekendHourly(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43] focus:outline-none focus:border-[#8B5B43]"
               />
+              {fieldErrors.weekend_hourly_price && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-weekend_hourly_price">{fieldErrors.weekend_hourly_price}</p>
+              )}
             </div>
             <div className="bg-[#FAF7F2] p-3.5 rounded-xl border border-[#E8DEC8]">
               <label className="block text-xs font-bold text-[#3E332B] mb-1">假日不限時封頂 ($/人)</label>
@@ -933,6 +961,9 @@ export default function SettingsPage() {
                 onChange={e => setWeekendUnlimited(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43] focus:outline-none focus:border-[#8B5B43]"
               />
+              {fieldErrors.weekend_unlimited_price && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-weekend_unlimited_price">{fieldErrors.weekend_unlimited_price}</p>
+              )}
             </div>
           </div>
 
@@ -1375,14 +1406,14 @@ export default function SettingsPage() {
       </fieldset>
 
       {/* 6. Checkout & Timer Settings (Spec 6.25) */}
-      <fieldset disabled={!canSettings} className={`bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden ${!canSettings ? 'opacity-65' : ''}`}>
+      <fieldset disabled={!canSettings} data-testid="checkout-timer-settings-card" className={`bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden ${!canSettings ? 'opacity-65' : ''}`}>
         <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-gray-200">
           <div className="flex items-center gap-2 text-[#8B5B43] font-bold text-base mb-1">
             <Clock className="w-5 h-5" />
             <h2>結帳與計時設定</h2>
           </div>
           <p className="text-xs text-gray-500">
-            設定現場計時寬限期、超時加收單位、提早離開計費規則、分攤方式與收銀機預設零用金。
+            設定現場計時寬限期、超時加收單位、提早離開計費規則、分攤方式與收銀機預設零用金。只影響還沒付款的人，已付款的帳單不會變。
           </p>
         </div>
 
@@ -1393,10 +1424,14 @@ export default function SettingsPage() {
               <label className="block text-xs font-bold text-gray-700 mb-1">超時寬限（分鐘）</label>
               <input
                 type="number"
+                data-testid="billing-grace-input"
                 value={billingGraceMinutes}
-                onChange={(e) => setBillingGraceMinutes(parseInt(e.target.value, 10) || 0)}
+                onChange={(e) => setBillingGraceMinutes(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
               />
+              {fieldErrors.billing_grace_minutes && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-billing_grace_minutes">{fieldErrors.billing_grace_minutes}</p>
+              )}
               <span className="text-[12px] text-gray-400 mt-0.5 block">超過預約在此分鐘內不加收，預設 10 分</span>
             </div>
 
@@ -1404,6 +1439,7 @@ export default function SettingsPage() {
             <div>
               <label className="block text-xs font-bold text-gray-700 mb-1">計費單位（分鐘）</label>
               <select
+                data-testid="billing-block-select"
                 value={billingBlockMinutes}
                 onChange={(e) => setBillingBlockMinutes(parseInt(e.target.value, 10) || 30)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white"
@@ -1412,6 +1448,9 @@ export default function SettingsPage() {
                 <option value={30}>30 分鐘（預設）</option>
                 <option value={60}>60 分鐘</option>
               </select>
+              {fieldErrors.billing_block_minutes && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-billing_block_minutes">{fieldErrors.billing_block_minutes}</p>
+              )}
               <span className="text-[12px] text-gray-400 mt-0.5 block">每達到此區間加收 0.5 小時</span>
             </div>
 
@@ -1420,10 +1459,14 @@ export default function SettingsPage() {
               <label className="block text-xs font-bold text-gray-700 mb-1">換板寬限（分鐘）</label>
               <input
                 type="number"
+                data-testid="board-swap-grace-input"
                 value={boardSwapGraceMinutes}
-                onChange={(e) => setBoardSwapGraceMinutes(parseInt(e.target.value, 10) || 0)}
+                onChange={(e) => setBoardSwapGraceMinutes(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
               />
+              {fieldErrors.board_swap_grace_minutes && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-board_swap_grace_minutes">{fieldErrors.board_swap_grace_minutes}</p>
+              )}
               <span className="text-[12px] text-gray-400 mt-0.5 block">10/30 換板時間取整寬限，預設 10 分</span>
             </div>
 
@@ -1452,6 +1495,9 @@ export default function SettingsPage() {
                   <span>照實際時數收（最少 1 小時）</span>
                 </label>
               </div>
+              {fieldErrors.early_leave_mode && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-early_leave_mode">{fieldErrors.early_leave_mode}</p>
+              )}
             </div>
 
             {/* Split mode */}
@@ -1466,6 +1512,9 @@ export default function SettingsPage() {
                 <option value="even">平均分攤</option>
                 <option value="first">全算第 1 位</option>
               </select>
+              {fieldErrors.default_split_mode && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-default_split_mode">{fieldErrors.default_split_mode}</p>
+              )}
             </div>
 
             {/* Cash Float */}
@@ -1473,10 +1522,14 @@ export default function SettingsPage() {
               <label className="block text-xs font-bold text-gray-700 mb-1">收銀機起始零用金（元）</label>
               <input
                 type="number"
+                data-testid="cash-float-input"
                 value={cashFloatAmount}
-                onChange={(e) => setCashFloatAmount(parseInt(e.target.value, 10) || 0)}
+                onChange={(e) => setCashFloatAmount(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
               />
+              {fieldErrors.cash_float_amount && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-cash_float_amount">{fieldErrors.cash_float_amount}</p>
+              )}
               <span className="text-[12px] text-gray-400 mt-0.5 block">每日交班基準零用金額，預設 NT$2,000</span>
             </div>
           </div>
@@ -1657,12 +1710,16 @@ export default function SettingsPage() {
               <label className="block text-xs font-bold text-gray-700 mb-1">收據底部文字</label>
               <input
                 type="text"
+                data-testid="receipt-footer-input"
                 disabled={!printEnabled}
                 value={receiptFooterText}
                 onChange={(e) => setReceiptFooterText(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm disabled:bg-gray-100"
                 placeholder="預設：謝謝光臨，作品記得帶回家"
               />
+              {fieldErrors.receipt_footer_text && (
+                <p className="text-xs text-red-600 font-bold mt-1" data-testid="error-receipt_footer_text">{fieldErrors.receipt_footer_text}</p>
+              )}
             </div>
 
           {/* Station list */}

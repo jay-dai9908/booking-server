@@ -1,10 +1,12 @@
 import prisma from '../prismaClient.js';
 import auditService from '../services/audit/auditService.js';
+import { logSettingChange } from '../services/audit/settingAudit.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
 import { prepayDeadline, ironText } from '../../../shared/selfService.js';
 import displayBus from '../services/display/displayBus.js';
 import { isSafeHttpUrl, safeHttpUrl } from '../../../shared/safeUrl.js';
 import { sanitizeGlobalSetting } from '../utils/sanitizeGlobalSetting.js';
+import { getAdminDeviceInfo } from '../utils/deviceParser.js';
 import {
   PERMISSION_LABELS,
   findSettingGroupForField,
@@ -429,7 +431,16 @@ export const getGlobalSetting = async (req, res) => {
       shop_enabled: setting.shop_enabled ?? true,
       show_shop_button: setting.show_shop_button ?? setting.shop_enabled ?? true,
       default_session_capacity: setting.default_session_capacity ?? 16,
-      print_enabled: setting.print_enabled ?? true
+      print_enabled: setting.print_enabled ?? true,
+      billing_grace_minutes: setting.billing_grace_minutes ?? 10,
+      billing_block_minutes: setting.billing_block_minutes ?? 30,
+      board_swap_grace_minutes: setting.board_swap_grace_minutes ?? 10,
+      early_leave_mode: setting.early_leave_mode || 'booked',
+      default_split_mode: setting.default_split_mode || 'proportional',
+      cash_float_amount: setting.cash_float_amount ?? 2000,
+      auto_print_receipt: setting.auto_print_receipt ?? true,
+      auto_print_summary: setting.auto_print_summary ?? true,
+      receipt_footer_text: setting.receipt_footer_text ?? null
     };
 
     res.json(safeSetting);
@@ -463,6 +474,8 @@ const GLOBAL_BOOLEAN_FIELDS = new Set([
   'show_shop_button',
   'shop_enabled',
   'print_enabled',
+  'auto_print_receipt',
+  'auto_print_summary',
 ]);
 
 const GLOBAL_INT_FIELDS = new Set([
@@ -471,7 +484,30 @@ const GLOBAL_INT_FIELDS = new Set([
   'weekend_hourly_price',
   'weekend_unlimited_price',
   'default_session_capacity',
+  'billing_grace_minutes',
+  'billing_block_minutes',
+  'board_swap_grace_minutes',
+  'cash_float_amount',
 ]);
+
+const HH_MM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function parseStrictInt(val) {
+  if (typeof val === 'number') {
+    return Number.isInteger(val) ? val : null;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!/^-?\d+$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+const VALID_BILLING_BLOCKS = new Set([15, 30, 60]);
+const VALID_EARLY_LEAVE_MODES = new Set(['booked', 'actual']);
+const VALID_DEFAULT_SPLIT_MODES = new Set(['proportional', 'even', 'first']);
 
 const EQUIPMENT_HOUR_FALLBACKS = {
   equipment_discount_buy_hours: 3,
@@ -550,6 +586,16 @@ function getEffectiveOldSetting(oldSetting) {
     default_session_capacity: oldSetting?.default_session_capacity ?? 16,
     payment_methods_json: normalizePaymentMethods(rawMethods),
     print_enabled: oldSetting?.print_enabled ?? true,
+    billing_grace_minutes: oldSetting?.billing_grace_minutes ?? 10,
+    billing_block_minutes: oldSetting?.billing_block_minutes ?? 30,
+    board_swap_grace_minutes: oldSetting?.board_swap_grace_minutes ?? 10,
+    early_leave_mode: oldSetting?.early_leave_mode ?? 'booked',
+    default_split_mode: oldSetting?.default_split_mode ?? 'proportional',
+    cash_float_amount: oldSetting?.cash_float_amount ?? 2000,
+    auto_print_receipt: oldSetting?.auto_print_receipt ?? true,
+    auto_print_summary: oldSetting?.auto_print_summary ?? true,
+    receipt_footer_text: oldSetting?.receipt_footer_text ?? '謝謝光臨，作品記得帶回家',
+    has_line_messaging_token: Boolean(oldSetting?.line_messaging_token && String(oldSetting.line_messaging_token).trim()),
   };
 }
 
@@ -592,11 +638,17 @@ function didGlobalSettingFieldChange(field, incoming, oldSetting, effectiveOld) 
     return normalizedIn !== normalizedOld;
   }
   if (GLOBAL_INT_FIELDS.has(field)) {
-    if (incoming === null || incoming === '') return false;
-    const parsed = parseInt(incoming, 10);
-    if (isNaN(parsed)) return false;
-    if (field === 'default_session_capacity' && parsed <= 0) return false;
+    if (incoming === null || incoming === '') return true;
+    const parsed = parseStrictInt(incoming);
+    if (parsed === null) return true;
     return parsed !== effectiveOld[field];
+  }
+  if (field === 'receipt_footer_text') {
+    const normalizedIn = typeof incoming === 'string' ? (incoming.trim() || null) : null;
+    const normalizedOld = typeof effectiveOld.receipt_footer_text === 'string'
+      ? (effectiveOld.receipt_footer_text.trim() || null)
+      : null;
+    return normalizedIn !== normalizedOld;
   }
   if (Object.prototype.hasOwnProperty.call(EQUIPMENT_HOUR_FALLBACKS, field)) {
     const parsed = Math.max(1, parseInt(incoming, 10) || EQUIPMENT_HOUR_FALLBACKS[field]);
@@ -651,14 +703,23 @@ export const updateGlobalSetting = async (req, res) => {
     payment_methods_json,
     print_enabled,
     cancel_pending_jobs,
-    cancel_unprinted_jobs
+    cancel_unprinted_jobs,
+    billing_grace_minutes,
+    billing_block_minutes,
+    board_swap_grace_minutes,
+    early_leave_mode,
+    default_split_mode,
+    cash_float_amount,
+    auto_print_receipt,
+    auto_print_summary,
+    receipt_footer_text
   } = req.body;
 
   try {
     const oldSetting = await prisma.globalSetting.findUnique({ where: { id: 1 } });
+    const effectiveOld = getEffectiveOldSetting(oldSetting);
 
     if (!canAdminPermission(req.user, 'settings')) {
-      const effectiveOld = getEffectiveOldSetting(oldSetting);
       const disallowedFields = [];
       const missingGroups = [];
 
@@ -687,6 +748,150 @@ export const updateGlobalSetting = async (req, res) => {
     }
 
     const dataToUpdate = {};
+
+    // Strict range & format validations (any error returns 422 { error, field } before writing anything)
+    if (billing_grace_minutes !== undefined) {
+      const parsed = parseStrictInt(billing_grace_minutes);
+      if (parsed === null || parsed < 0 || parsed > 30) {
+        return res.status(422).json({ field: 'billing_grace_minutes', error: '超時寬限必須為 0 至 30 的整數' });
+      }
+      dataToUpdate.billing_grace_minutes = parsed;
+    }
+    if (billing_block_minutes !== undefined) {
+      const parsed = parseStrictInt(billing_block_minutes);
+      if (parsed === null || !VALID_BILLING_BLOCKS.has(parsed)) {
+        return res.status(422).json({ field: 'billing_block_minutes', error: '計費單位只能是 15、30 或 60 分鐘' });
+      }
+      dataToUpdate.billing_block_minutes = parsed;
+    }
+    if (board_swap_grace_minutes !== undefined) {
+      const parsed = parseStrictInt(board_swap_grace_minutes);
+      if (parsed === null || parsed < 0 || parsed > 30) {
+        return res.status(422).json({ field: 'board_swap_grace_minutes', error: '換板寬限必須為 0 至 30 的整數' });
+      }
+      dataToUpdate.board_swap_grace_minutes = parsed;
+    }
+    if (early_leave_mode !== undefined) {
+      if (typeof early_leave_mode !== 'string' || !VALID_EARLY_LEAVE_MODES.has(early_leave_mode)) {
+        return res.status(422).json({ field: 'early_leave_mode', error: '提早離開計費模式必須為 booked 或 actual' });
+      }
+      dataToUpdate.early_leave_mode = early_leave_mode;
+    }
+    if (default_split_mode !== undefined) {
+      if (typeof default_split_mode !== 'string' || !VALID_DEFAULT_SPLIT_MODES.has(default_split_mode)) {
+        return res.status(422).json({ field: 'default_split_mode', error: '預設分攤方式必須為 proportional、even 或 first' });
+      }
+      dataToUpdate.default_split_mode = default_split_mode;
+    }
+    if (cash_float_amount !== undefined) {
+      const parsed = parseStrictInt(cash_float_amount);
+      if (parsed === null || parsed < 0 || parsed > 100000) {
+        return res.status(422).json({ field: 'cash_float_amount', error: '收銀機起始零用金必須為 0 至 100000 的整數' });
+      }
+      dataToUpdate.cash_float_amount = parsed;
+    }
+    if (auto_print_receipt !== undefined) {
+      if (typeof auto_print_receipt !== 'boolean') {
+        return res.status(422).json({ field: 'auto_print_receipt', error: '完成結帳就列印必須為布林值' });
+      }
+      dataToUpdate.auto_print_receipt = auto_print_receipt;
+    }
+    if (auto_print_summary !== undefined) {
+      if (typeof auto_print_summary !== 'boolean') {
+        return res.status(422).json({ field: 'auto_print_summary', error: '整組結清時自動印總表必須為布林值' });
+      }
+      dataToUpdate.auto_print_summary = auto_print_summary;
+    }
+    if (receipt_footer_text !== undefined) {
+      if (receipt_footer_text === null) {
+        dataToUpdate.receipt_footer_text = null;
+      } else if (typeof receipt_footer_text !== 'string') {
+        return res.status(422).json({ field: 'receipt_footer_text', error: '收據頁尾文字必須為字串' });
+      } else {
+        const trimmed = receipt_footer_text.trim();
+        if (trimmed === '') {
+          dataToUpdate.receipt_footer_text = null;
+        } else {
+          if (trimmed.length > 60) {
+            return res.status(422).json({ field: 'receipt_footer_text', error: '收據頁尾文字不可超過 60 字' });
+          }
+          const newlineCount = (trimmed.match(/\r?\n/g) || []).length;
+          if (newlineCount > 2) {
+            return res.status(422).json({ field: 'receipt_footer_text', error: '收據頁尾文字最多只能有 2 個換行' });
+          }
+          dataToUpdate.receipt_footer_text = trimmed;
+        }
+      }
+    }
+
+    const priceFields = [
+      ['weekday_hourly_price', weekday_hourly_price, '平日每小時價格'],
+      ['weekday_unlimited_price', weekday_unlimited_price, '平日不限時價格'],
+      ['weekend_hourly_price', weekend_hourly_price, '假日每小時價格'],
+      ['weekend_unlimited_price', weekend_unlimited_price, '假日不限時價格']
+    ];
+    for (const [pKey, pVal, pLabel] of priceFields) {
+      if (pVal !== undefined) {
+        const parsed = parseStrictInt(pVal);
+        if (parsed === null || parsed < 0 || parsed > 10000) {
+          return res.status(422).json({ field: pKey, error: `${pLabel}必須為 0 至 10000 的整數` });
+        }
+        dataToUpdate[pKey] = parsed;
+      }
+    }
+
+    if (default_session_capacity !== undefined) {
+      const parsed = parseStrictInt(default_session_capacity);
+      if (parsed === null || parsed < 1 || parsed > 200) {
+        return res.status(422).json({ field: 'default_session_capacity', error: '預設時段人數上限必須為 1 至 200 的整數' });
+      }
+      dataToUpdate.default_session_capacity = parsed;
+    }
+
+    if (business_hours_json !== undefined && didGlobalSettingFieldChange('business_hours_json', business_hours_json, oldSetting, effectiveOld)) {
+      if (!business_hours_json || typeof business_hours_json !== 'object' || Array.isArray(business_hours_json)) {
+        return res.status(422).json({ field: 'business_hours_json', error: '營業時間格式無效' });
+      }
+      for (const [, dayHours] of Object.entries(business_hours_json)) {
+        if (
+          !dayHours ||
+          typeof dayHours !== 'object' ||
+          typeof dayHours.start !== 'string' ||
+          typeof dayHours.end !== 'string' ||
+          !HH_MM_RE.test(dayHours.start) ||
+          !HH_MM_RE.test(dayHours.end) ||
+          dayHours.start >= dayHours.end
+        ) {
+          return res.status(422).json({
+            field: 'business_hours_json',
+            error: '每天的營業時間須為 HH:MM，且開始時間必須早於結束時間'
+          });
+        }
+      }
+      dataToUpdate.business_hours_json = business_hours_json;
+    }
+
+    if (official_line_url !== undefined) {
+      if (official_line_url !== null && (typeof official_line_url !== 'string' || (official_line_url.trim() && !isSafeHttpUrl(official_line_url)))) {
+        return res.status(422).json({ field: 'official_line_url', code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
+      }
+      const cleanOfficialUrl = safeHttpUrl(official_line_url, null);
+      dataToUpdate.official_line_url = cleanOfficialUrl;
+      if (line_button_url === undefined) {
+        dataToUpdate.line_button_url = cleanOfficialUrl;
+      }
+    }
+    if (line_button_url !== undefined) {
+      if (line_button_url !== null && (typeof line_button_url !== 'string' || (line_button_url.trim() && !isSafeHttpUrl(line_button_url)))) {
+        return res.status(422).json({ field: 'line_button_url', code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
+      }
+      const cleanBtnUrl = safeHttpUrl(line_button_url, null);
+      dataToUpdate.line_button_url = cleanBtnUrl;
+      if (dataToUpdate.official_line_url === undefined) {
+        dataToUpdate.official_line_url = cleanBtnUrl;
+      }
+    }
+
     if (print_enabled !== undefined) {
       dataToUpdate.print_enabled = Boolean(print_enabled);
       if (dataToUpdate.print_enabled === false && (cancel_pending_jobs || cancel_unprinted_jobs)) {
@@ -728,15 +933,6 @@ export const updateGlobalSetting = async (req, res) => {
         dataToUpdate.payment_methods_json = methods;
       }
     }
-    if (default_session_capacity !== undefined && default_session_capacity !== null && default_session_capacity !== '') {
-      const parsed = parseInt(default_session_capacity, 10);
-      if (!isNaN(parsed) && parsed > 0) {
-        dataToUpdate.default_session_capacity = parsed;
-      }
-    }
-    if (business_hours_json !== undefined) {
-      dataToUpdate.business_hours_json = business_hours_json;
-    }
     if (booking_note_chips !== undefined) {
       if (Array.isArray(booking_note_chips)) {
         const cleaned = booking_note_chips
@@ -749,38 +945,6 @@ export const updateGlobalSetting = async (req, res) => {
     }
     if (guest_line_hint_text !== undefined) {
       dataToUpdate.guest_line_hint_text = typeof guest_line_hint_text === 'string' ? guest_line_hint_text.trim() : null;
-    }
-    if (official_line_url !== undefined) {
-      if (official_line_url !== null && (typeof official_line_url !== 'string' || (official_line_url.trim() && !isSafeHttpUrl(official_line_url)))) {
-        return res.status(422).json({ code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
-      }
-      const cleanOfficialUrl = safeHttpUrl(official_line_url, null);
-      dataToUpdate.official_line_url = cleanOfficialUrl;
-      if (line_button_url === undefined) {
-        dataToUpdate.line_button_url = cleanOfficialUrl;
-      }
-    }
-    if (line_button_url !== undefined) {
-      if (line_button_url !== null && (typeof line_button_url !== 'string' || (line_button_url.trim() && !isSafeHttpUrl(line_button_url)))) {
-        return res.status(422).json({ code: 'INVALID_URL', error: '網址必須以 http:// 或 https:// 開頭' });
-      }
-      const cleanBtnUrl = safeHttpUrl(line_button_url, null);
-      dataToUpdate.line_button_url = cleanBtnUrl;
-      if (dataToUpdate.official_line_url === undefined) {
-        dataToUpdate.official_line_url = cleanBtnUrl;
-      }
-    }
-    if (weekday_hourly_price !== undefined && weekday_hourly_price !== null && weekday_hourly_price !== '') {
-      dataToUpdate.weekday_hourly_price = parseInt(weekday_hourly_price, 10);
-    }
-    if (weekday_unlimited_price !== undefined && weekday_unlimited_price !== null && weekday_unlimited_price !== '') {
-      dataToUpdate.weekday_unlimited_price = parseInt(weekday_unlimited_price, 10);
-    }
-    if (weekend_hourly_price !== undefined && weekend_hourly_price !== null && weekend_hourly_price !== '') {
-      dataToUpdate.weekend_hourly_price = parseInt(weekend_hourly_price, 10);
-    }
-    if (weekend_unlimited_price !== undefined && weekend_unlimited_price !== null && weekend_unlimited_price !== '') {
-      dataToUpdate.weekend_unlimited_price = parseInt(weekend_unlimited_price, 10);
     }
     if (show_price_cards !== undefined) dataToUpdate.show_price_cards = Boolean(show_price_cards);
     if (price_notice_text !== undefined) dataToUpdate.price_notice_text = price_notice_text;
@@ -812,40 +976,62 @@ export const updateGlobalSetting = async (req, res) => {
     if (show_shop_button !== undefined) dataToUpdate.show_shop_button = Boolean(show_shop_button);
     if (shop_enabled !== undefined) dataToUpdate.shop_enabled = Boolean(shop_enabled);
 
-    const setting = await prisma.globalSetting.upsert({
-      where: { id: 1 },
-      update: dataToUpdate,
-      create: {
-        id: 1,
-        weekday_hourly_price: dataToUpdate.weekday_hourly_price ?? 100,
-        weekday_unlimited_price: dataToUpdate.weekday_unlimited_price ?? 550,
-        weekend_hourly_price: dataToUpdate.weekend_hourly_price ?? 150,
-        weekend_unlimited_price: dataToUpdate.weekend_unlimited_price ?? 800,
-        show_price_cards: dataToUpdate.show_price_cards ?? true,
-        price_notice_text: dataToUpdate.price_notice_text ?? "費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品",
-        show_announcement: dataToUpdate.show_announcement ?? true,
-        announcement_text: dataToUpdate.announcement_text ?? "✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠",
-        show_line_button: dataToUpdate.show_line_button ?? true,
-        line_button_url: dataToUpdate.line_button_url ?? "https://lin.ee/vsZhRW5",
-        require_line_login_every_time: dataToUpdate.require_line_login_every_time ?? false,
-        enable_preview_page: dataToUpdate.enable_preview_page ?? true,
-        preview_disabled_text: dataToUpdate.preview_disabled_text ?? "系統維護中，請點擊下方按鈕使用 LINE 進行預約",
-        business_hours_json: dataToUpdate.business_hours_json ?? DEFAULT_BUSINESS_HOURS,
-        default_session_capacity: dataToUpdate.default_session_capacity ?? 16
-      }
-    });
+    const deviceInfo = req?.headers
+      ? getAdminDeviceInfo(req)
+      : { device_id: null, device_label: '後台' };
+    const auditBefore = {
+      ...effectiveOld,
+      line_messaging_token: oldSetting?.line_messaging_token || null,
+      has_line_messaging_token: Boolean(oldSetting?.line_messaging_token && String(oldSetting.line_messaging_token).trim())
+    };
 
-    if (dataToUpdate.booking_note_chips !== undefined) {
-      await auditService.log(prisma, {
-        event_type: '設定變更',
-        category: 'setting',
-        summary: '更新預約備註快速選項',
-        before_json: oldSetting?.booking_note_chips ? JSON.stringify(oldSetting.booking_note_chips) : null,
-        after_json: JSON.stringify(dataToUpdate.booking_note_chips),
-        staff_name: req.user?.name || '管理員',
-        device_label: '後台'
-      }).catch(err => console.error('Failed to log audit event for booking_note_chips:', err));
-    }
+    const setting = await prisma.$transaction(async (tx) => {
+      const saved = await tx.globalSetting.upsert({
+        where: { id: 1 },
+        update: dataToUpdate,
+        create: {
+          id: 1,
+          weekday_hourly_price: dataToUpdate.weekday_hourly_price ?? 100,
+          weekday_unlimited_price: dataToUpdate.weekday_unlimited_price ?? 550,
+          weekend_hourly_price: dataToUpdate.weekend_hourly_price ?? 150,
+          weekend_unlimited_price: dataToUpdate.weekend_unlimited_price ?? 800,
+          show_price_cards: dataToUpdate.show_price_cards ?? true,
+          price_notice_text: dataToUpdate.price_notice_text ?? "費用皆含基礎傳統拼豆板與豆子無限使用．預約現場保留 15 分鐘．離場前請預留 10 分鐘壓平作品",
+          show_announcement: dataToUpdate.show_announcement ?? true,
+          announcement_text: dataToUpdate.announcement_text ?? "✨ 歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠",
+          show_line_button: dataToUpdate.show_line_button ?? true,
+          line_button_url: dataToUpdate.line_button_url ?? "https://lin.ee/vsZhRW5",
+          require_line_login_every_time: dataToUpdate.require_line_login_every_time ?? false,
+          enable_preview_page: dataToUpdate.enable_preview_page ?? true,
+          preview_disabled_text: dataToUpdate.preview_disabled_text ?? "系統維護中，請點擊下方按鈕使用 LINE 進行預約",
+          business_hours_json: dataToUpdate.business_hours_json ?? DEFAULT_BUSINESS_HOURS,
+          default_session_capacity: dataToUpdate.default_session_capacity ?? 16,
+          billing_grace_minutes: dataToUpdate.billing_grace_minutes ?? 10,
+          billing_block_minutes: dataToUpdate.billing_block_minutes ?? 30,
+          board_swap_grace_minutes: dataToUpdate.board_swap_grace_minutes ?? 10,
+          early_leave_mode: dataToUpdate.early_leave_mode ?? 'booked',
+          default_split_mode: dataToUpdate.default_split_mode ?? 'proportional',
+          cash_float_amount: dataToUpdate.cash_float_amount ?? 2000,
+          auto_print_receipt: dataToUpdate.auto_print_receipt ?? true,
+          auto_print_summary: dataToUpdate.auto_print_summary ?? true,
+          receipt_footer_text: dataToUpdate.receipt_footer_text !== undefined ? dataToUpdate.receipt_footer_text : '謝謝光臨，作品記得帶回家'
+        }
+      });
+
+      await logSettingChange(tx, {
+        before: auditBefore,
+        after: dataToUpdate,
+        staff: {
+          id: req.user?.id || null,
+          name: req.user?.name || '管理員',
+          device_id: deviceInfo?.device_id || null,
+          device_label: deviceInfo?.device_label || '後台'
+        },
+        scope: 'global'
+      });
+
+      return saved;
+    });
 
     if (dataToUpdate.payment_methods_json !== undefined) {
       displayBus.settingsChanged();
