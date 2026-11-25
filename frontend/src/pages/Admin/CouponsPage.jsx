@@ -1390,8 +1390,8 @@ export default function CouponsPage() {
                               : '無限制'}
                           </td>
                           <td className="py-3 px-4 text-[#6D5D52]">{expStr}</td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${statusMeta.cls}`}>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className={`inline-block whitespace-nowrap px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusMeta.cls}`}>
                               {statusMeta.label}
                             </span>
                           </td>
@@ -1404,14 +1404,14 @@ export default function CouponsPage() {
                               <span className="block text-[11px] text-[#8C8279]">{p.gift_reason}</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-[#8C8279]">{createdStr}</td>
-                          <td className="py-3 px-4 text-right space-x-1.5" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-3 px-4 text-[#8C8279] whitespace-nowrap">{createdStr}</td>
+                          <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             {p.status === 'ACTIVE' && (
                               <button
                                 type="button"
                                 data-testid={`revoke-pass-btn-${p.pass_code}`}
                                 onClick={() => setPassStatusTarget({ pass: p, nextStatus: 'REVOKED' })}
-                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold"
+                                className="whitespace-nowrap px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold"
                               >
                                 作廢
                               </button>
@@ -1420,7 +1420,7 @@ export default function CouponsPage() {
                               <button
                                 type="button"
                                 onClick={() => setPassStatusTarget({ pass: p, nextStatus: 'ACTIVE' })}
-                                className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8] font-bold"
+                                className="whitespace-nowrap px-2.5 py-1 rounded-lg bg-white hover:bg-[#FAF7F2] text-[#8B5B43] border border-[#E8DEC8] font-bold"
                               >
                                 恢復
                               </button>
@@ -1429,7 +1429,7 @@ export default function CouponsPage() {
                               <button
                                 type="button"
                                 onClick={() => setPassRefundTarget(p)}
-                                className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold"
+                                className="whitespace-nowrap px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold"
                               >
                                 退費
                               </button>
