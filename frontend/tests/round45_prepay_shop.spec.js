@@ -30,7 +30,11 @@ if (!process.env.ADMIN_PASSWORD?.trim()) {
   process.exit(1);
 }
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD.trim();
-const JWT_SECRET = (process.env.JWT_SECRET || '').trim();
+if (!process.env.JWT_SECRET?.trim()) {
+  console.error('請設定 JWT_SECRET 環境變數');
+  process.exit(1);
+}
+const JWT_SECRET = process.env.JWT_SECRET.trim();
 
 const SCREENSHOT_DIR = process.env.SCREENSHOT_DIR
   ? path.resolve(process.env.SCREENSHOT_DIR)
