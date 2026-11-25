@@ -1216,31 +1216,48 @@ export const createReservation = createReservationHandler();
 
 export const getAdminReservations = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
     const search = (req.query.search || '').trim();
+    const scopeParam = req.query.scope; // 'day' | 'month' | 'all'
     const month = req.query.month; // format: 'YYYY-MM'
     const date = req.query.date;   // format: 'YYYY-MM-DD'
-    const sort = req.query.sort;   // format: 'start_time_asc'
+    const statusFilter = (req.query.status || 'all').trim();
+
+    const resolvedScope = ['day', 'month', 'all'].includes(scopeParam)
+      ? scopeParam
+      : (date ? 'day' : 'month');
 
     let whereClause = {};
+    let rangeNote = null;
 
-    if (date) {
-      const startDate = new Date(`${date}T00:00:00.000Z`);
+    if (resolvedScope === 'day') {
+      const targetDay = date || toTaipeiDateString(new Date());
+      const startDate = new Date(`${targetDay}T00:00:00.000Z`);
       const endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + 1);
-      
       whereClause.session = {
         session_date: {
           gte: startDate,
           lt: endDate
         }
       };
-    } else if (month) {
-      const startDate = new Date(`${month}-01T00:00:00.000Z`);
+    } else if (resolvedScope === 'all') {
+      if (!search) {
+        // 全部但沒有搜尋字時，限制最近 12 個月避免載入過多歷史資料
+        const todayStr = toTaipeiDateString(new Date());
+        const cutoff = new Date(`${todayStr}T00:00:00.000Z`);
+        cutoff.setUTCMonth(cutoff.getUTCMonth() - 12);
+        whereClause.session = {
+          session_date: { gte: cutoff }
+        };
+        rangeNote = '最近 12 個月';
+      }
+    } else {
+      const targetMonth = month || toTaipeiDateString(new Date()).slice(0, 7);
+      const startDate = new Date(`${targetMonth}-01T00:00:00.000Z`);
       const endDate = new Date(startDate);
       endDate.setMonth(endDate.getMonth() + 1);
-      
       whereClause.session = {
         session_date: {
           gte: startDate,
@@ -1339,16 +1356,65 @@ export const getAdminReservations = async (req, res) => {
       }, 0);
     }
 
-    const total = grouped.length;
+    // Compute status filter counts across the full scope BEFORE status/page slicing
+    const counts = {
+      all: grouped.length,
+      pending_checkin: 0,
+      checked_in: 0,
+      unpaid: 0,
+      partial: 0,
+      paid: 0,
+      refund: 0,
+      cancelled: 0
+    };
+    const classifyBillingKey = (r) => {
+      if (r.has_refund) return 'refund';
+      if (r.billing_status === 'waived') return 'waived';
+      if (r.billing_status === 'paid' || r.is_paid) return 'paid';
+      if (r.billing_status === 'partial' || (r.paid_persons > 0 && r.paid_persons < (r.pax || 1))) return 'partial';
+      if (r.billing_status === 'pending') return 'pending';
+      return 'unpaid';
+    };
+
+    for (const r of grouped) {
+      if (r.status === 'cancelled') {
+        counts.cancelled += 1;
+      } else {
+        if (r.attendance === 'checked_in') counts.checked_in += 1;
+        else counts.pending_checkin += 1;
+        const bk = classifyBillingKey(r);
+        if (bk === 'unpaid') counts.unpaid += 1;
+        else if (bk === 'partial') counts.partial += 1;
+        else if (bk === 'paid') counts.paid += 1;
+        if (bk === 'refund' || r.has_refund) counts.refund += 1;
+      }
+    }
+
+    const statusFiltered = statusFilter === 'all'
+      ? grouped
+      : grouped.filter((r) => {
+          if (statusFilter === 'cancelled') return r.status === 'cancelled';
+          if (r.status === 'cancelled') return false;
+          if (statusFilter === 'pending_checkin') return r.attendance !== 'checked_in';
+          if (statusFilter === 'checked_in') return r.attendance === 'checked_in';
+          const bk = classifyBillingKey(r);
+          if (statusFilter === 'refund') return bk === 'refund' || Boolean(r.has_refund);
+          return bk === statusFilter;
+        });
+
+    const total = statusFiltered.length;
     const totalPages = Math.ceil(total / limit);
-    const paginatedData = grouped.slice((page - 1) * limit, page * limit);
+    const paginatedData = statusFiltered.slice((page - 1) * limit, page * limit);
 
     res.json({
       data: paginatedData,
       total,
       page,
       totalPages,
-      total_daily_revenue
+      total_daily_revenue,
+      scope: resolvedScope,
+      range_note: rangeNote,
+      counts
     });
   } catch (error) {
     console.error('Error fetching reservations:', error);

@@ -3,6 +3,8 @@ import {
   getUsers,
   getUserById,
   getUserReservations,
+  getUserShopOrders,
+  getUserPayments,
   getUserLoginLogs,
   updateUser,
   sendLineMessageToUser,
@@ -30,6 +32,8 @@ router.post('/bind-requests/:id/reject', rejectBindRequest);
 router.get('/:id', getUserById);
 router.get('/:id/bind-requests', getUserBindRequests);
 router.get('/:id/reservations', getUserReservations);
+router.get('/:id/shop-orders', getUserShopOrders);
+router.get('/:id/payments', getUserPayments);
 router.get('/:id/login-logs', getUserLoginLogs);
 router.put('/:id', updateUser);
 

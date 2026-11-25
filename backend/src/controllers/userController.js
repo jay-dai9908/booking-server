@@ -4,6 +4,112 @@ import { isPlainString } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
 import auditService from '../services/audit/auditService.js';
 import { dateOnly, toTaipeiDateString } from '../../../shared/time.js';
+import { methodLabel } from '../../../shared/paymentMethods.js';
+import { getConfiguredPaymentMethods } from '../services/accounting/methodAggregation.js';
+
+/**
+ * 依有效收款紀錄批次計算多位會員的實付統計（與帳務營收同口徑，商城分開計算）
+ * - total_paid: source IN ('booking', 'pass_sale') 且排除 pass 的 (charge + supplement - refund)
+ * - total_paid_shop: source = 'shop' 且排除 pass 的 (charge + supplement - refund)
+ * - pass_used_value: source = 'booking' 且 method = 'pass' 的 (charge + supplement - refund)
+ */
+async function computeMemberPaymentStatsMap(client, users = []) {
+  const resultMap = new Map();
+  if (!Array.isArray(users) || users.length === 0) return resultMap;
+
+  const userIds = users.map((u) => u.id);
+  const bookingRefOwner = new Map();
+  const orderRefOwner = new Map();
+  const passCodeOwner = new Map();
+
+  for (const u of users) {
+    resultMap.set(u.id, { total_paid: 0, total_paid_shop: 0, pass_used_value: 0 });
+    for (const r of u.reservations || []) {
+      if (r.booking_ref) bookingRefOwner.set(r.booking_ref, u.id);
+    }
+  }
+
+  const [shopOrders, userPasses] = await Promise.all([
+    client.productOrder.findMany({
+      where: { user_id: { in: userIds } },
+      select: { user_id: true, order_ref: true }
+    }),
+    client.userPass.findMany({
+      where: { user_id: { in: userIds } },
+      select: { user_id: true, pass_code: true }
+    })
+  ]);
+
+  for (const o of shopOrders) {
+    if (o.order_ref) orderRefOwner.set(o.order_ref, o.user_id);
+  }
+  for (const p of userPasses) {
+    if (p.pass_code) passCodeOwner.set(p.pass_code, p.user_id);
+  }
+
+  const allBookingRefs = Array.from(bookingRefOwner.keys());
+  const allOrderRefs = Array.from(orderRefOwner.keys());
+  const allPassCodes = Array.from(passCodeOwner.keys());
+
+  const orClauses = [];
+  if (allBookingRefs.length > 0) {
+    orClauses.push({ source: 'booking', booking_ref: { in: allBookingRefs } });
+    orClauses.push({ source: 'booking', source_ref: { in: allBookingRefs } });
+  }
+  if (allOrderRefs.length > 0) {
+    orClauses.push({ source: 'shop', source_ref: { in: allOrderRefs } });
+    orClauses.push({ source: 'shop', booking_ref: { in: allOrderRefs } });
+  }
+  if (allPassCodes.length > 0) {
+    orClauses.push({ source: 'pass_sale', source_ref: { in: allPassCodes } });
+    orClauses.push({ source: 'pass_sale', booking_ref: { in: allPassCodes } });
+  }
+
+  if (orClauses.length === 0) return resultMap;
+
+  const payments = await client.payment.findMany({
+    where: {
+      status: 'valid',
+      OR: orClauses
+    },
+    select: {
+      source: true,
+      source_ref: true,
+      booking_ref: true,
+      kind: true,
+      method: true,
+      amount: true
+    }
+  });
+
+  for (const p of payments) {
+    let ownerId = null;
+    if (p.source === 'shop') {
+      ownerId = orderRefOwner.get(p.source_ref) ?? orderRefOwner.get(p.booking_ref) ?? null;
+    } else if (p.source === 'pass_sale') {
+      ownerId = passCodeOwner.get(p.source_ref) ?? passCodeOwner.get(p.booking_ref) ?? null;
+    } else {
+      ownerId = bookingRefOwner.get(p.booking_ref) ?? bookingRefOwner.get(p.source_ref) ?? null;
+    }
+    if (!ownerId) continue;
+    const stats = resultMap.get(ownerId);
+    if (!stats) continue;
+
+    const sign = p.kind === 'refund' ? -1 : (p.kind === 'charge' || p.kind === 'supplement' ? 1 : 0);
+    if (sign === 0) continue;
+    const delta = sign * (p.amount || 0);
+
+    if (p.method === 'pass') {
+      if (p.source === 'booking') stats.pass_used_value += delta;
+    } else if (p.source === 'shop') {
+      stats.total_paid_shop += delta;
+    } else if (p.source === 'booking' || p.source === 'pass_sale') {
+      stats.total_paid += delta;
+    }
+  }
+
+  return resultMap;
+}
 
 /**
  * Compute dual-track member statistics from a user's raw reservation rows.
@@ -207,12 +313,23 @@ export const getUsers = async (req, res) => {
       pendingUserSet.add(r.manual_user_id);
     }
 
+    const paymentStatsMap = await computeMemberPaymentStatsMap(prisma, users);
+
     const enrichedUsers = users.map(u => {
       const stats = computeUserDualStats(u.reservations);
+      const payStats = paymentStatsMap.get(u.id) || { total_paid: 0, total_paid_shop: 0, pass_used_value: 0 };
+      // 保留舊欄位 total_spent 避免現有畫面與外部整合損壞，值改為等於實付金額 total_paid
+      stats.total_paid = payStats.total_paid;
+      stats.total_paid_shop = payStats.total_paid_shop;
+      stats.pass_used_value = payStats.pass_used_value;
+      stats.total_spent = payStats.total_paid;
       const { reservations, ...userWithoutReservations } = u;
       return {
         ...userWithoutReservations,
         has_pending_bind: pendingUserSet.has(u.id),
+        total_paid: payStats.total_paid,
+        total_paid_shop: payStats.total_paid_shop,
+        pass_used_value: payStats.pass_used_value,
         stats
       };
     });
@@ -273,15 +390,172 @@ export const getUserById = async (req, res) => {
     }
 
     const stats = computeUserDualStats(user.reservations);
+    const paymentStatsMap = await computeMemberPaymentStatsMap(prisma, [user]);
+    const payStats = paymentStatsMap.get(user.id) || { total_paid: 0, total_paid_shop: 0, pass_used_value: 0 };
+    // 保留舊欄位 total_spent 避免現有畫面壞掉，值改為等於實付金額 total_paid
+    stats.total_paid = payStats.total_paid;
+    stats.total_paid_shop = payStats.total_paid_shop;
+    stats.pass_used_value = payStats.pass_used_value;
+    stats.total_spent = payStats.total_paid;
     const { reservations, ...userWithoutReservations } = user;
 
     res.json({
       ...userWithoutReservations,
+      total_paid: payStats.total_paid,
+      total_paid_shop: payStats.total_paid_shop,
+      pass_used_value: payStats.pass_used_value,
       stats
     });
   } catch (error) {
     console.error('Error fetching user:', error);
     res.status(500).json({ error: 'Failed to fetch user' });
+  }
+};
+
+export const getUserShopOrders = async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: '無效的會員 ID' });
+    }
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const [orders, total] = await Promise.all([
+      prisma.productOrder.findMany({
+        where: { user_id: userId },
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          order_ref: true,
+          created_at: true,
+          total_amount: true,
+          shipping_fee: true,
+          deposit_required: true,
+          paid_amount: true,
+          balance_amount: true,
+          payment_status: true,
+          order_status: true,
+          delivery_method: true
+        }
+      }),
+      prisma.productOrder.count({ where: { user_id: userId } })
+    ]);
+
+    return res.json({
+      orders,
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / limit))
+    });
+  } catch (error) {
+    console.error('Error fetching user shop orders:', error);
+    return res.status(500).json({ error: '無法讀取會員商城訂單' });
+  }
+};
+
+export const getUserPayments = async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: '無效的會員 ID' });
+    }
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+    const kind = req.query.kind;
+
+    const [resRows, orderRows, passRows, configuredMethods] = await Promise.all([
+      prisma.reservation.findMany({
+        where: { user_id: userId },
+        select: { booking_ref: true }
+      }),
+      prisma.productOrder.findMany({
+        where: { user_id: userId },
+        select: { order_ref: true }
+      }),
+      prisma.userPass.findMany({
+        where: { user_id: userId },
+        select: { pass_code: true }
+      }),
+      getConfiguredPaymentMethods(prisma)
+    ]);
+
+    const bookingRefs = Array.from(new Set(resRows.map((r) => r.booking_ref).filter(Boolean)));
+    const orderRefs = Array.from(new Set(orderRows.map((o) => o.order_ref).filter(Boolean)));
+    const passCodes = Array.from(new Set(passRows.map((p) => p.pass_code).filter(Boolean)));
+
+    const orClauses = [];
+    if (bookingRefs.length > 0) {
+      orClauses.push({ source: 'booking', booking_ref: { in: bookingRefs } });
+      orClauses.push({ source: 'booking', source_ref: { in: bookingRefs } });
+    }
+    if (orderRefs.length > 0) {
+      orClauses.push({ source: 'shop', source_ref: { in: orderRefs } });
+      orClauses.push({ source: 'shop', booking_ref: { in: orderRefs } });
+    }
+    if (passCodes.length > 0) {
+      orClauses.push({ source: 'pass_sale', source_ref: { in: passCodes } });
+      orClauses.push({ source: 'pass_sale', booking_ref: { in: passCodes } });
+    }
+
+    if (orClauses.length === 0) {
+      return res.json({ payments: [], total: 0, page, totalPages: 1 });
+    }
+
+    const whereClause = { OR: orClauses };
+    if (kind === 'charge') {
+      whereClause.kind = { in: ['charge', 'supplement'] };
+    } else if (kind === 'refund') {
+      whereClause.kind = 'refund';
+    }
+
+    const [rows, total] = await Promise.all([
+      prisma.payment.findMany({
+        where: whereClause,
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit
+      }),
+      prisma.payment.count({ where: whereClause })
+    ]);
+
+    const payments = rows.map((p) => {
+      const sourceLabel = p.source === 'shop' ? '商城' : p.source === 'pass_sale' ? '卡券販售' : '預約';
+      const sourceRef = p.source && p.source !== 'booking' ? (p.source_ref || p.booking_ref) : p.booking_ref;
+      return {
+        id: p.id,
+        payment_no: p.payment_no,
+        created_at: p.created_at,
+        kind: p.kind,
+        kind_label: p.kind === 'refund' ? '退款' : p.kind === 'supplement' ? '補收' : p.kind === 'waive' ? '免收' : '收款',
+        method: p.method,
+        method_label: methodLabel(p.method, configuredMethods),
+        amount: p.amount,
+        status: p.status,
+        status_label: p.status === 'voided' ? '作廢' : '有效',
+        source: p.source,
+        source_label: sourceLabel,
+        source_ref: sourceRef,
+        booking_ref: p.booking_ref,
+        reason: p.reason,
+        note: p.note,
+        staff_name: p.staff_name
+      };
+    });
+
+    return res.json({
+      payments,
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / limit))
+    });
+  } catch (error) {
+    console.error('Error fetching user payments:', error);
+    return res.status(500).json({ error: '無法讀取會員收付款紀錄' });
   }
 };
 

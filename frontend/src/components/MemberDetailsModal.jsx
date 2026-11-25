@@ -36,7 +36,26 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState(null);
-  const [activeTab, setActiveTab] = useState('reservations'); // 'reservations' | 'login_logs' | 'passes'
+  const [activeTab, setActiveTab] = useState('reservations'); // 'reservations' | 'shop_orders' | 'payments_charge' | 'payments_refund' | 'passes' | 'login_logs'
+
+  // Shop orders & payment tabs state
+  const [shopOrders, setShopOrders] = useState([]);
+  const [shopOrdersTotal, setShopOrdersTotal] = useState(0);
+  const [shopOrdersPage, setShopOrdersPage] = useState(1);
+  const [shopOrdersTotalPages, setShopOrdersTotalPages] = useState(1);
+  const [isShopOrdersLoading, setIsShopOrdersLoading] = useState(false);
+
+  const [chargePayments, setChargePayments] = useState([]);
+  const [chargeTotal, setChargeTotal] = useState(0);
+  const [chargePage, setChargePage] = useState(1);
+  const [chargeTotalPages, setChargeTotalPages] = useState(1);
+  const [isChargeLoading, setIsChargeLoading] = useState(false);
+
+  const [refundPayments, setRefundPayments] = useState([]);
+  const [refundTotal, setRefundTotal] = useState(0);
+  const [refundPage, setRefundPage] = useState(1);
+  const [refundTotalPages, setRefundTotalPages] = useState(1);
+  const [isRefundLoading, setIsRefundLoading] = useState(false);
 
   // Pass Management State
   const [userPasses, setUserPasses] = useState([]);
@@ -98,6 +117,9 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
       fetchMemberReservations(member.id);
       fetchMemberLoginLogs(member.id);
       fetchUserPasses(member.id);
+      fetchUserShopOrders(member.id, 1);
+      fetchUserPayments(member.id, 'charge', 1);
+      fetchUserPayments(member.id, 'refund', 1);
       fetchBindRequests(member.id);
       fetchPassPlans();
       fetchPaymentMethods();
@@ -225,6 +247,48 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
       console.error(err);
     } finally {
       setIsLogsLoading(false);
+    }
+  };
+
+  const fetchUserShopOrders = async (userId, targetPage = 1) => {
+    const targetId = userId || localMember?.id;
+    if (!targetId) return;
+    setIsShopOrdersLoading(true);
+    try {
+      const res = await api.get(`/users/${targetId}/shop-orders`, { params: { page: targetPage, limit: 20 } });
+      setShopOrders(res.data?.orders || []);
+      setShopOrdersTotal(res.data?.total || 0);
+      setShopOrdersPage(res.data?.page || targetPage);
+      setShopOrdersTotalPages(res.data?.totalPages || 1);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsShopOrdersLoading(false);
+    }
+  };
+
+  const fetchUserPayments = async (userId, kind = 'charge', targetPage = 1) => {
+    const targetId = userId || localMember?.id;
+    if (!targetId) return;
+    const setLoading = kind === 'refund' ? setIsRefundLoading : setIsChargeLoading;
+    setLoading(true);
+    try {
+      const res = await api.get(`/users/${targetId}/payments`, { params: { kind, page: targetPage, limit: 20 } });
+      if (kind === 'refund') {
+        setRefundPayments(res.data?.payments || []);
+        setRefundTotal(res.data?.total || 0);
+        setRefundPage(res.data?.page || targetPage);
+        setRefundTotalPages(res.data?.totalPages || 1);
+      } else {
+        setChargePayments(res.data?.payments || []);
+        setChargeTotal(res.data?.total || 0);
+        setChargePage(res.data?.page || targetPage);
+        setChargeTotalPages(res.data?.totalPages || 1);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -764,16 +828,19 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
                   </div>
                 </div>
 
-                {/* Card 3: Total Spent */}
+                {/* Card 3: Total Paid (excluding pass, separate shop total) */}
                 <div className="bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4 shadow-2xs">
-                  <div className="flex items-center justify-between text-[#8B5B43] mb-1">
-                    <span className="text-xs font-bold">歷史累計結帳總額</span>
+                  <div className="flex items-center justify-between text-[#8B5B43] mb-1 gap-2">
+                    <span className="text-xs font-bold">累計實付</span>
+                    <span className="text-[11px] font-bold text-[#6D5D52]">
+                      商城另計 NT${(stats.total_paid_shop ?? localMember.total_paid_shop ?? 0).toLocaleString()}
+                    </span>
                   </div>
                   <div className="text-2xl font-black text-[#8B5B43]">
-                    NT$ {(stats.total_spent || 0).toLocaleString()}
+                    累計實付 NT${(stats.total_paid ?? localMember.total_paid ?? stats.total_spent ?? 0).toLocaleString()}
                   </div>
                   <div className="text-[11px] text-[#8C8279] mt-1 font-bold">
-                    實際到訪完成 {stats.completed_visits_count} 次預約
+                    卡券折抵 NT${(stats.pass_used_value ?? localMember.pass_used_value ?? 0).toLocaleString()} 未計入
                   </div>
                 </div>
 
@@ -798,44 +865,77 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
               </div>
             </div>
 
-            {/* Section 3: Tabs for Reservation History & 2-Month Login Logs */}
+            {/* Section 3: Tabs for Reservations, Shop Orders, Charges, Refunds, Passes, Login Logs */}
             <div>
-              <div className="flex items-center gap-2 border-b border-[#E8DEC8] mb-4">
+              <div className="flex flex-wrap items-center gap-1.5 border-b border-[#E8DEC8] mb-4">
                 <button
                   type="button"
                   onClick={() => setActiveTab('reservations')}
-                  className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                  className={`px-3.5 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
                     activeTab === 'reservations'
                       ? 'border-[#8B5B43] text-[#8B5B43]'
                       : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
                   }`}
                 >
                   <Calendar className="w-4 h-4" />
-                  歷史預約紀錄 ({groupedReservations.length})
+                  預約 ({groupedReservations.length})
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('login_logs')}
-                  className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
-                    activeTab === 'login_logs'
+                  onClick={() => setActiveTab('shop_orders')}
+                  className={`px-3.5 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'shop_orders'
                       ? 'border-[#8B5B43] text-[#8B5B43]'
                       : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
                   }`}
                 >
-                  <Smartphone className="w-4 h-4" />
-                  近 2 個月登入與裝置紀錄 ({loginLogs.length})
+                  商城訂單 ({shopOrdersTotal})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('payments_charge')}
+                  className={`px-3.5 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'payments_charge'
+                      ? 'border-[#8B5B43] text-[#8B5B43]'
+                      : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
+                  }`}
+                >
+                  收款 ({chargeTotal})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('payments_refund')}
+                  className={`px-3.5 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'payments_refund'
+                      ? 'border-[#8B5B43] text-[#8B5B43]'
+                      : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
+                  }`}
+                >
+                  退款 ({refundTotal})
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab('passes')}
-                  className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${
+                  className={`px-3.5 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
                     activeTab === 'passes'
                       ? 'border-[#8B5B43] text-[#8B5B43]'
                       : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
                   }`}
                 >
                   <Ticket className="w-4 h-4" />
-                  卡券與集次卡 ({userPasses.length})
+                  卡券 ({userPasses.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('login_logs')}
+                  className={`px-3.5 py-2.5 text-sm font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'login_logs'
+                      ? 'border-[#8B5B43] text-[#8B5B43]'
+                      : 'border-transparent text-[#8C8279] hover:text-[#3E332B]'
+                  }`}
+                >
+                  <Smartphone className="w-4 h-4" />
+                  登入紀錄 ({loginLogs.length})
                 </button>
               </div>
 
@@ -918,7 +1018,162 @@ export default function MemberDetailsModal({ member, onClose, onMemberUpdated, o
 
 
 
-              {/* Tab 2: 2-Month Login & Device Logs */}
+              {/* Tab 2: Shop Orders */}
+              {activeTab === 'shop_orders' && (
+                <div className="space-y-3">
+                  {isShopOrdersLoading ? (
+                    <div className="py-8 flex justify-center">
+                      <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-800 rounded-full animate-spin" />
+                    </div>
+                  ) : shopOrders.length === 0 ? (
+                    <div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-gray-100">
+                      尚無商城訂單紀錄
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-2xl border border-[#E8DEC8] overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-[#FAF7F2] border-b border-[#E8DEC8] text-[#6D5D52]">
+                            <th className="py-2.5 px-3 font-bold">單號</th>
+                            <th className="py-2.5 px-3 font-bold">日期</th>
+                            <th className="py-2.5 px-3 font-bold text-right">金額</th>
+                            <th className="py-2.5 px-3 font-bold text-right">已付</th>
+                            <th className="py-2.5 px-3 font-bold text-right">尾款</th>
+                            <th className="py-2.5 px-3 font-bold">付款狀態</th>
+                            <th className="py-2.5 px-3 font-bold">訂單狀態</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {shopOrders.map((ord) => (
+                            <tr key={ord.id} className="hover:bg-[#FAF7F2]/50">
+                              <td className="py-2.5 px-3 font-mono font-bold text-[#8B5B43]">{ord.order_ref}</td>
+                              <td className="py-2.5 px-3 text-gray-600">
+                                {ord.created_at ? format(new Date(ord.created_at), 'yyyy/MM/dd HH:mm') : '-'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-bold">NT${(ord.total_amount || 0).toLocaleString()}</td>
+                              <td className="py-2.5 px-3 text-right font-bold text-emerald-700">NT${(ord.paid_amount || 0).toLocaleString()}</td>
+                              <td className="py-2.5 px-3 text-right font-bold text-gray-700">NT${(ord.balance_amount || 0).toLocaleString()}</td>
+                              <td className="py-2.5 px-3">
+                                {ord.payment_status === 'fully_paid' ? '已結清' : ord.payment_status === 'deposit_verified' ? '已付訂金' : ord.payment_status === 'reported_pending_verify' ? '待對帳' : ord.payment_status === 'refunded' ? '已退款' : '待付款'}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                {ord.order_status === 'picked_up' ? '已取貨' : ord.order_status === 'arrived' ? '已到貨' : ord.order_status === 'preparing' ? '備貨中' : ord.order_status === 'cancelled' ? '已取消' : '預購成立'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {shopOrdersTotalPages > 1 && (
+                        <div className="flex items-center justify-between px-3 py-2 border-t border-[#E8DEC8] text-xs">
+                          <button
+                            type="button"
+                            disabled={shopOrdersPage <= 1}
+                            onClick={() => fetchUserShopOrders(localMember?.id, shopOrdersPage - 1)}
+                            className="px-2.5 py-1 rounded border border-[#E8DEC8] disabled:opacity-40"
+                          >
+                            上一頁
+                          </button>
+                          <span>第 {shopOrdersPage} / {shopOrdersTotalPages} 頁</span>
+                          <button
+                            type="button"
+                            disabled={shopOrdersPage >= shopOrdersTotalPages}
+                            onClick={() => fetchUserShopOrders(localMember?.id, shopOrdersPage + 1)}
+                            className="px-2.5 py-1 rounded border border-[#E8DEC8] disabled:opacity-40"
+                          >
+                            下一頁
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 3 & 4: Member Payments (Charge / Refund) */}
+              {(activeTab === 'payments_charge' || activeTab === 'payments_refund') && (() => {
+                const isRefundTab = activeTab === 'payments_refund';
+                const rows = isRefundTab ? refundPayments : chargePayments;
+                const loadingRows = isRefundTab ? isRefundLoading : isChargeLoading;
+                const curPage = isRefundTab ? refundPage : chargePage;
+                const totPages = isRefundTab ? refundTotalPages : chargeTotalPages;
+                const kindKey = isRefundTab ? 'refund' : 'charge';
+
+                return (
+                  <div className="space-y-3">
+                    {loadingRows ? (
+                      <div className="py-8 flex justify-center">
+                        <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-800 rounded-full animate-spin" />
+                      </div>
+                    ) : rows.length === 0 ? (
+                      <div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-gray-100">
+                        {isRefundTab ? '尚無退款紀錄' : '尚無收款紀錄'}
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-2xl border border-[#E8DEC8] overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-[#FAF7F2] border-b border-[#E8DEC8] text-[#6D5D52]">
+                              <th className="py-2.5 px-3 font-bold">收款編號</th>
+                              <th className="py-2.5 px-3 font-bold">日期</th>
+                              <th className="py-2.5 px-3 font-bold">種類</th>
+                              <th className="py-2.5 px-3 font-bold">方式</th>
+                              <th className="py-2.5 px-3 font-bold text-right">金額</th>
+                              <th className="py-2.5 px-3 font-bold">狀態</th>
+                              <th className="py-2.5 px-3 font-bold">來源</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {rows.map((pay) => (
+                              <tr key={pay.id} className={`hover:bg-[#FAF7F2]/50 ${pay.status === 'voided' ? 'opacity-60' : ''}`}>
+                                <td className="py-2.5 px-3 font-mono font-bold text-[#3E332B]">{pay.payment_no}</td>
+                                <td className="py-2.5 px-3 text-gray-600">
+                                  {pay.created_at ? format(new Date(pay.created_at), 'yyyy/MM/dd HH:mm') : '-'}
+                                </td>
+                                <td className="py-2.5 px-3">{pay.kind_label}</td>
+                                <td className="py-2.5 px-3 font-medium">{pay.method_label}</td>
+                                <td className={`py-2.5 px-3 text-right font-bold ${isRefundTab ? 'text-rose-700' : 'text-emerald-700'}`}>
+                                  NT${(pay.amount || 0).toLocaleString()}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${pay.status === 'voided' ? 'bg-gray-200 text-gray-600' : 'bg-emerald-50 text-emerald-700'}`}>
+                                    {pay.status_label}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-[11px] text-gray-600">
+                                  {pay.source_label} · {pay.source_ref}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {totPages > 1 && (
+                          <div className="flex items-center justify-between px-3 py-2 border-t border-[#E8DEC8] text-xs">
+                            <button
+                              type="button"
+                              disabled={curPage <= 1}
+                              onClick={() => fetchUserPayments(localMember?.id, kindKey, curPage - 1)}
+                              className="px-2.5 py-1 rounded border border-[#E8DEC8] disabled:opacity-40"
+                            >
+                              上一頁
+                            </button>
+                            <span>第 {curPage} / {totPages} 頁</span>
+                            <button
+                              type="button"
+                              disabled={curPage >= totPages}
+                              onClick={() => fetchUserPayments(localMember?.id, kindKey, curPage + 1)}
+                              className="px-2.5 py-1 rounded border border-[#E8DEC8] disabled:opacity-40"
+                            >
+                              下一頁
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Tab 5: 2-Month Login & Device Logs */}
               {activeTab === 'login_logs' && (
                 isLogsLoading ? (
                   <div className="py-8 flex justify-center">

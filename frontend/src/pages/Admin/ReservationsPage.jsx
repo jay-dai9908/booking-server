@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Search, Plus, XCircle, CheckCircle2, Cpu, Minus, CreditCard } from 'lucide-react';
@@ -107,11 +107,16 @@ export default function ReservationsPage() {
     setTimeout(() => setToastMsg(null), 3000);
   };
   
-  // Pagination & Month filter
+  // Pagination & Scope / Date / Month filter (Round 44 Item 4)
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [scope, setScope] = useState('month'); // 'day' | 'month' | 'all'
+  const [currentDate, setCurrentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [currentMonth, setCurrentMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [rangeNote, setRangeNote] = useState('');
+  const [serverCounts, setServerCounts] = useState(null);
+  const scopeBeforeSearchRef = useRef(null);
 
   // Manual Booking State
   const [showManualBooking, setShowManualBooking] = useState(false);
@@ -166,13 +171,13 @@ export default function ReservationsPage() {
       fetchReservations();
     }, 220);
     return () => clearTimeout(delayDebounceFn);
-  }, [page, currentMonth, searchQuery]);
+  }, [page, scope, currentDate, currentMonth, searchQuery, statusFilter]);
 
   useEffect(() => {
     const handleAdminDataUpdated = () => fetchReservations();
     window.addEventListener('admin-data-updated', handleAdminDataUpdated);
     return () => window.removeEventListener('admin-data-updated', handleAdminDataUpdated);
-  }, [page, currentMonth, searchQuery]);
+  }, [page, scope, currentDate, currentMonth, searchQuery, statusFilter]);
 
   useEffect(() => {
     if (showManualBooking) {
@@ -183,10 +188,22 @@ export default function ReservationsPage() {
   const fetchReservations = async () => {
     setIsLoading(true);
     try {
-      const res = await api.get(`/reservations/admin?page=${page}&limit=20&search=${encodeURIComponent(searchQuery)}&month=${currentMonth}`);
+      const params = {
+        page,
+        limit: 20,
+        scope,
+        search: searchQuery,
+        status: statusFilter
+      };
+      if (scope === 'day') params.date = currentDate;
+      else if (scope === 'month') params.month = currentMonth;
+
+      const res = await api.get('/reservations/admin', { params });
       setReservations(res.data?.data || (Array.isArray(res.data) ? res.data : []));
       setTotalPages(res.data?.totalPages || 1);
       setTotalRecords(res.data?.total || (Array.isArray(res.data) ? res.data.length : 0));
+      setServerCounts(res.data?.counts || null);
+      setRangeNote(res.data?.range_note || '');
     } catch (err) {
       console.error(err);
     } finally {
@@ -335,6 +352,7 @@ export default function ReservationsPage() {
   };
 
   const filterCounts = useMemo(() => {
+    if (serverCounts) return serverCounts;
     const counts = {
       all: reservations.length,
       pending_checkin: 0,
@@ -361,7 +379,7 @@ export default function ReservationsPage() {
       }
     }
     return counts;
-  }, [reservations]);
+  }, [reservations, serverCounts]);
 
   const filteredReservations = useMemo(() => {
     return reservations.filter(r => {
@@ -437,25 +455,79 @@ export default function ReservationsPage() {
             </div>
             <input
               type="text"
-              placeholder="搜尋訂單編號或姓名..."
+              placeholder="搜尋訂單編號、姓名或電話..."
               value={searchQuery}
               onChange={(e) => {
-                setSearchQuery(e.target.value);
+                const val = e.target.value;
+                setSearchQuery(val);
                 setPage(1);
+                if (val.trim()) {
+                  if (scope !== 'all') {
+                    if (!scopeBeforeSearchRef.current) scopeBeforeSearchRef.current = scope;
+                    setScope('all');
+                  }
+                } else if (scopeBeforeSearchRef.current) {
+                  setScope(scopeBeforeSearchRef.current);
+                  scopeBeforeSearchRef.current = null;
+                }
               }}
               className="pl-10 pr-4 py-2 border border-gray-200 bg-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 w-full md:w-64 transition-shadow"
             />
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <input
-              type="month"
-              value={currentMonth}
-              onChange={(e) => {
-                setCurrentMonth(e.target.value);
-                setPage(1);
-              }}
-              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 bg-white"
-            />
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Scope Toggle: 當日 / 本月 / 全部 */}
+            <div className="inline-flex bg-gray-100 p-1 rounded-xl border border-gray-200 text-xs font-bold">
+              {[
+                { key: 'day', label: '當日' },
+                { key: 'month', label: '本月' },
+                { key: 'all', label: '全部' }
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  data-testid={`scope-btn-${opt.key}`}
+                  onClick={() => {
+                    scopeBeforeSearchRef.current = null;
+                    setScope(opt.key);
+                    setPage(1);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg transition ${
+                    scope === opt.key
+                      ? 'bg-sg-brown text-white shadow-xs'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {scope === 'day' && (
+              <input
+                type="date"
+                value={currentDate}
+                onChange={(e) => {
+                  setCurrentDate(e.target.value);
+                  setPage(1);
+                }}
+                className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 bg-white"
+              />
+            )}
+            {scope === 'month' && (
+              <input
+                type="month"
+                value={currentMonth}
+                onChange={(e) => {
+                  setCurrentMonth(e.target.value);
+                  setPage(1);
+                }}
+                className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 bg-white"
+              />
+            )}
+            {scope === 'all' && rangeNote && (
+              <span className="px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold">
+                {rangeNote}
+              </span>
+            )}
             <button 
               onClick={() => setShowManualBooking(true)}
               className="bg-sg-brown hover:bg-sg-brown-hover text-white px-3 sm:px-4 py-2 flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl text-sm font-medium transition-colors shadow-sm whitespace-nowrap"
@@ -470,7 +542,7 @@ export default function ReservationsPage() {
       <div className="w-full max-w-full overflow-x-auto pb-1 text-xs font-bold">
         <div className="inline-flex items-center gap-1.5 min-w-max">
           {[
-            { key: 'all', label: `本頁全部 (${filterCounts.all})` },
+            { key: 'all', label: `全部 (${filterCounts.all})` },
             { key: 'pending_checkin', label: `待報到 (${filterCounts.pending_checkin})` },
             { key: 'checked_in', label: `已報到 (${filterCounts.checked_in})` },
             { key: 'unpaid', label: `未結帳 (${filterCounts.unpaid})` },
@@ -482,7 +554,10 @@ export default function ReservationsPage() {
             <button
               key={tab.key}
               type="button"
-              onClick={() => setStatusFilter(tab.key)}
+              onClick={() => {
+                setStatusFilter(tab.key);
+                setPage(1);
+              }}
               className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition ${
                 statusFilter === tab.key
                   ? 'bg-sg-brown text-white shadow-xs'
