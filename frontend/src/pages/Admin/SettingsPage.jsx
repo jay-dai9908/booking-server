@@ -1480,7 +1480,7 @@ export default function SettingsPage() {
       </fieldset>
 
       {/* 6. Checkout & Timer Settings (Spec 6.25) */}
-      <fieldset disabled={!canSettings} data-testid="checkout-timer-settings-card" className={`bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden ${!canSettings ? 'opacity-65' : ''}`}>
+      <fieldset disabled={!canSettings} data-testid="checkout-timer-settings-card" className={`min-w-0 w-full bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden ${!canSettings ? 'opacity-65' : ''}`}>
         <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-gray-200">
           <div className="flex items-center gap-2 text-[#8B5B43] font-bold text-base mb-1">
             <Clock className="w-5 h-5" />
@@ -1642,9 +1642,9 @@ export default function SettingsPage() {
                       setDraggedMethodIdx(null);
                     }}
                     data-testid={`payment-method-row-${pm.key}`}
-                    className="flex items-center justify-between p-3 bg-[#FAF7F2] rounded-xl border border-[#E8DEC8] hover:border-[#8B5B43] transition gap-3"
+                    className="flex flex-wrap sm:flex-nowrap items-center justify-between p-3 bg-[#FAF7F2] rounded-xl border border-[#E8DEC8] hover:border-[#8B5B43] transition gap-2 sm:gap-3"
                   >
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
                       <span className="cursor-grab text-gray-400 hover:text-gray-600 shrink-0" title="拖曳排序">
                         <GripVertical className="w-4 h-4" />
                       </span>
@@ -1698,7 +1698,7 @@ export default function SettingsPage() {
                             updated[idx] = { ...updated[idx], label: e.target.value };
                             setPaymentMethods(updated);
                           }}
-                          className="w-32 sm:w-40 px-2.5 py-1 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                          className="min-w-0 flex-1 max-w-[160px] px-2.5 py-1 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
                         />
                       )}
                       <span className="text-[11px] font-mono text-gray-400 shrink-0">{pm.key}</span>
@@ -1746,7 +1746,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="max-w-xl pt-1 space-y-1.5">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                 <input
                   type="text"
                   maxLength={12}
@@ -1763,14 +1763,14 @@ export default function SettingsPage() {
                   }}
                   placeholder="輸入新付款方式名稱（1～12 字，如：街口）"
                   data-testid="new-payment-method-input"
-                  className="flex-1 px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
+                  className="min-w-0 flex-1 px-3 py-2 bg-white border border-[#E8DEC8] rounded-xl text-xs font-bold text-[#3E332B] focus:outline-none focus:border-[#8B5B43]"
                 />
                 <button
                   type="button"
                   data-testid="add-payment-method-btn"
                   onClick={handleAddPaymentMethod}
                   disabled={paymentMethods.length >= 12}
-                  className="px-3.5 py-2 bg-[#FAF7F2] hover:bg-[#F2EAE0] border border-[#E8DEC8] text-[#8B5B43] font-bold rounded-xl text-xs flex items-center gap-1 transition disabled:opacity-50"
+                  className="shrink-0 px-3.5 py-2 bg-[#FAF7F2] hover:bg-[#F2EAE0] border border-[#E8DEC8] text-[#8B5B43] font-bold rounded-xl text-xs flex items-center gap-1 transition disabled:opacity-50"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>新增付款方式</span>
