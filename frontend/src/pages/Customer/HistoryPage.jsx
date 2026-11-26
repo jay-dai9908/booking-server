@@ -46,22 +46,16 @@ import {
 } from '../../utils/customer/format';
 import { shortBoardName, buildDiscountConfig } from '../../utils/customer/pricing';
 import { boardDiscountNote } from '../../utils/customer/discountText';
+import { taipeiToday } from '../../utils/customer/taipeiTime';
+import { reservationStatusPill, resolveReservationWindow } from '../../utils/customer/reservationStatus';
 
 const QUICK_TAGS = ['第一次玩', '有小孩同行', '生日慶祝', '希望坐一起'];
 
-// Helper to parse datePart safely handling ISO strings and Date objects
-function parseReservationDate(datePart) {
-  if (!datePart) return [new Date().getFullYear(), 1, 1];
-  const d = toDateObj(datePart);
-  return [d.getFullYear(), d.getMonth() + 1, d.getDate()];
-}
-
-function isTodayReservation(res) {
+function isTodayReservation(res, now = new Date()) {
   if (!res) return false;
   const rawDate = res.session_date || res.session?.session_date;
   if (!rawDate) return false;
-  const taipeiToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-  return formatYMD(rawDate) === taipeiToday;
+  return formatYMD(rawDate) === taipeiToday(now);
 }
 
 function formatBoardDetails(e, resStartTime, discountConfig = null) {
@@ -93,51 +87,6 @@ function formatBoardDetails(e, resStartTime, discountConfig = null) {
 
 function formatBoardTimeRange(e, resStartTime) {
   return formatBoardDetails(e, resStartTime).timeStr;
-}
-
-// Pill status helper for reservations (Section 6.13)
-function getReservationStatusPill(r) {
-  if (r.status === 'cancelled') {
-    return { variant: 'full', text: '已取消' };
-  }
-
-  const now = new Date();
-  const datePart = r.session_date || r.session?.session_date || '';
-  const [y, m, d] = parseReservationDate(datePart);
-  const [eH, eM] = (r.end_time || r.session?.end_time || '23:59').split(':').map(Number);
-  const [sH, sM] = (r.start_time || r.session?.start_time || '00:00').split(':').map(Number);
-  const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
-  const startDt = new Date(y, m - 1, d, sH, sM, 0, 0);
-
-  const isCheckedIn = r.attendance === 'checked_in';
-  const hasEnded = now.getTime() >= endDt.getTime();
-
-  if (isCheckedIn && hasEnded) {
-    return { variant: 'full', text: '已完成' };
-  }
-  if (isCheckedIn && !hasEnded) {
-    return { variant: 'ok', text: '已報到' };
-  }
-
-  // Not checked in, and 15 mins past start or ended
-  const startPlus15 = new Date(startDt.getTime() + 15 * 60 * 1000);
-  if (!isCheckedIn && (now.getTime() >= startPlus15.getTime() || hasEnded)) {
-    return { variant: 'full', text: '預約未到' };
-  }
-
-  // Check days difference
-  const today = new Date();
-  const todayMid = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const resMid = new Date(y, m - 1, d);
-  const diffDays = Math.round((resMid.getTime() - todayMid.getTime()) / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) {
-    return { variant: 'brand', text: '已預約 · 今天' };
-  }
-  if (diffDays === 1) {
-    return { variant: 'brand', text: '已預約 · 明天' };
-  }
-  return { variant: 'brand', text: `已預約 · 還有 ${diffDays} 天` };
 }
 
 // Order status helper (Section 6.15)
@@ -188,6 +137,8 @@ export default function HistoryPage() {
 
   // Reservations state
   const [reservations, setReservations] = useState([]);
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
+  const serverNow = new Date(Date.now() + clockOffsetMs);
   const [loadingReservations, setLoadingReservations] = useState(true);
   const [resSearch, setResSearch] = useState('');
   const [pastLimit, setPastLimit] = useState(10);
@@ -220,7 +171,15 @@ export default function HistoryPage() {
     try {
       setLoadingReservations(true);
       const res = await api.get('/reservations/my');
-      setReservations(Object.values(res.data || {}));
+      const list = Object.values(res.data || {});
+      const refItem = list.find((x) => x && x.server_now);
+      if (refItem?.server_now) {
+        const parsed = Date.parse(refItem.server_now);
+        if (!Number.isNaN(parsed)) {
+          setClockOffsetMs(parsed - Date.now());
+        }
+      }
+      setReservations(list);
     } catch (err) {
       console.error('Failed to fetch reservations', err);
     } finally {
@@ -297,7 +256,7 @@ export default function HistoryPage() {
 
   // Filter reservations into upcoming and past
   const { upcomingList, pastList } = useMemo(() => {
-    const now = new Date();
+    const nowMs = Date.now() + clockOffsetMs;
     const up = [];
     const past = [];
 
@@ -306,12 +265,9 @@ export default function HistoryPage() {
         past.push(r);
         continue;
       }
-      const datePart = r.session_date || r.session?.session_date || '';
-      const [y, m, d] = parseReservationDate(datePart);
-      const [eH, eM] = (r.end_time || r.session?.end_time || '23:59').split(':').map(Number);
-      const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
+      const { endDt } = resolveReservationWindow(r);
 
-      if (now.getTime() < endDt.getTime()) {
+      if (nowMs < endDt.getTime()) {
         up.push(r);
       } else {
         past.push(r);
@@ -337,7 +293,7 @@ export default function HistoryPage() {
     });
 
     return { upcomingList: up, pastList: past };
-  }, [reservations]);
+  }, [reservations, clockOffsetMs]);
 
   // Filter past list by search query if > 10 items
   const filteredPastList = useMemo(() => {
@@ -356,25 +312,19 @@ export default function HistoryPage() {
     if (!currentDetailRes) return false;
     if (currentDetailRes.status === 'cancelled') return false;
     if (currentDetailRes.is_self_service) return false;
-    const now = new Date();
-    const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
-    const [y, m, d] = parseReservationDate(datePart);
-    const [eH, eM] = (currentDetailRes.end_time || currentDetailRes.session?.end_time || '23:59').split(':').map(Number);
-    const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
-    const twoHoursBeforeEnd = new Date(endDt.getTime() - 120 * 60 * 1000);
-    return now.getTime() < twoHoursBeforeEnd.getTime();
-  }, [currentDetailRes]);
+    const nowMs = Date.now() + clockOffsetMs;
+    const { endDt } = resolveReservationWindow(currentDetailRes);
+    const twoHoursBeforeEnd = endDt.getTime() - 120 * 60 * 1000;
+    return nowMs < twoHoursBeforeEnd;
+  }, [currentDetailRes, clockOffsetMs]);
 
   // Check if reservation is ended
   const isDetailEnded = useMemo(() => {
     if (!currentDetailRes) return false;
-    const now = new Date();
-    const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
-    const [y, m, d] = parseReservationDate(datePart);
-    const [eH, eM] = (currentDetailRes.end_time || currentDetailRes.session?.end_time || '23:59').split(':').map(Number);
-    const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
-    return now.getTime() >= endDt.getTime();
-  }, [currentDetailRes]);
+    const nowMs = Date.now() + clockOffsetMs;
+    const { endDt } = resolveReservationWindow(currentDetailRes);
+    return nowMs >= endDt.getTime();
+  }, [currentDetailRes, clockOffsetMs]);
 
   // Check cancellation eligibility
   const canCancel = useMemo(() => {
@@ -388,13 +338,10 @@ export default function HistoryPage() {
     } else if (currentDetailRes.is_paid) {
       return false;
     }
-    const now = new Date();
-    const datePart = currentDetailRes.session_date || currentDetailRes.session?.session_date || '';
-    const [y, m, d] = parseReservationDate(datePart);
-    const [sH, sM] = (currentDetailRes.start_time || currentDetailRes.session?.start_time || '00:00').split(':').map(Number);
-    const startDt = new Date(y, m - 1, d, sH, sM, 0, 0);
-    return now.getTime() < startDt.getTime();
-  }, [currentDetailRes]);
+    const nowMs = Date.now() + clockOffsetMs;
+    const { startDt } = resolveReservationWindow(currentDetailRes);
+    return nowMs < startDt.getTime();
+  }, [currentDetailRes, clockOffsetMs]);
 
   // Save Note in Detail View
   const handleSaveNote = async () => {
@@ -488,13 +435,18 @@ export default function HistoryPage() {
   // -------------------------------------------------------------
   if (detailRef && currentDetailRes) {
     const r = currentDetailRes;
-    const pill = getReservationStatusPill(r);
+    const pill = reservationStatusPill(r, serverNow);
     const cleanDateStr = formatYMD(r.session_date || r.session?.session_date);
     const dateParts = cleanDateStr ? cleanDateStr.split('-') : [];
     const monthDay = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : cleanDateStr;
     const weekday = cleanDateStr ? `週${weekdayChar(cleanDateStr)}` : '';
     const timeRange = `${r.start_time} 到 ${r.end_time}${r.is_unlimited ? '（不限時）' : ''}`;
     const amountLabel = r.is_paid ? '金額（已付款）' : '預估金額';
+    const isSelfPrepay = Boolean(r.is_self_service && r.prepay);
+    const prepayTotal = Number(r.prepay?.total_amount ?? r.total_amount ?? 0);
+    const prepayDue = Number(r.prepay?.amount_due ?? r.total_amount ?? 0);
+    const prepayPassDiscount = Math.max(0, prepayTotal - prepayDue);
+    const isNormalLate = !r.is_self_service && r.status !== 'cancelled' && pill.text === '已過開始時間';
     const contactInfo = `${r.customer_name || user?.name || ''} · ${formatPhone(r.customer_phone || user?.phone || '')}`;
 
     // Equipment lines
@@ -554,14 +506,42 @@ export default function HistoryPage() {
                 )
               }
             />
-            <KV label={amountLabel} value={<b className="font-num">{formatMoney(r.total_amount)}</b>} />
+            {isSelfPrepay ? (
+              <>
+                <KV label="預約總額" value={<span className="font-num">{formatMoney(prepayTotal)}</span>} />
+                <KV
+                  label="計次卡折抵"
+                  value={
+                    <span className={`font-num ${prepayPassDiscount > 0 ? 'text-sg-sage-ink font-bold' : 'text-sg-muted'}`}>
+                      {prepayPassDiscount > 0
+                        ? `-${formatMoney(prepayPassDiscount)}${r.prepay?.pass_persons ? `（${r.prepay.pass_persons} 位）` : ''}`
+                        : formatMoney(0)}
+                    </span>
+                  }
+                />
+                <KV
+                  label={r.prepay.status === 'verified' ? '已匯款' : '需匯款'}
+                  value={<b className="font-num">{formatMoney(prepayDue)}</b>}
+                />
+              </>
+            ) : (
+              <KV label={amountLabel} value={<b className="font-num">{formatMoney(r.total_amount)}</b>} />
+            )}
             <KV label="聯絡人" value={contactInfo} />
           </Card>
+
+          {isNormalLate && (
+            <StoreContactCard
+              title="已經到店了？請告訴櫃檯人員"
+              message="來不及到請傳 LINE 告訴我們"
+              globalSettings={globalSettings}
+            />
+          )}
 
           {/* 1b. Self-service prepay state */}
           {r.is_self_service && r.status !== 'cancelled' && r.prepay && (
             <>
-              {isTodayReservation(r) &&
+              {isTodayReservation(r, serverNow) &&
                 (r.prepay.status === 'reported_pending_verify' || r.prepay.status === 'mismatch') && (
                   <StoreContactCard
                     urgent
@@ -610,7 +590,7 @@ export default function HistoryPage() {
               {r.prepay.status === 'mismatch' && (
                 <div className="grid gap-2" data-testid="history-prepay-mismatch">
                   <PrepayTransferCard mode="edit" reservation={r} onReported={fetchReservations} />
-                  {!isTodayReservation(r) && (
+                  {!isTodayReservation(r, serverNow) && (
                     <StoreContactCard
                       title="匯款金額和預約金額不同"
                       message="請用 LINE 或電話聯絡我們確認"
@@ -620,7 +600,7 @@ export default function HistoryPage() {
                 </div>
               )}
               {r.prepay.status === 'verified' && (
-                isTodayReservation(r) ? (
+                isTodayReservation(r, serverNow) ? (
                   <EntryPassCard
                     bookingRef={r.booking_ref}
                     reservation={r}
@@ -901,7 +881,7 @@ export default function HistoryPage() {
               <>
                 {/* Upcoming bookings */}
                 {upcomingList.map((r, idx) => {
-                  const pill = getReservationStatusPill(r);
+                  const pill = reservationStatusPill(r, serverNow);
                   const cleanResDate = formatYMD(r.session_date || r.session?.session_date);
                   const resParts = cleanResDate ? cleanResDate.split('-') : [];
                   const monthDay = resParts.length === 3 ? `${resParts[1]}/${resParts[2]}` : cleanResDate;
@@ -912,11 +892,8 @@ export default function HistoryPage() {
                   const hasBoards = boards.some((e) => e.equipment_id !== 'bring_own');
 
                   // Check if can add/modify smart board
-                  const now = new Date();
-                  const [y, m, d] = parseReservationDate(r.session_date || r.session?.session_date);
-                  const [eH, eM] = (r.end_time || '23:59').split(':').map(Number);
-                  const endDt = new Date(y, m - 1, d, eH, eM, 0, 0);
-                  const canAddon = !r.is_self_service && now.getTime() < endDt.getTime() - 120 * 60 * 1000;
+                  const { endDt } = resolveReservationWindow(r);
+                  const canAddon = !r.is_self_service && serverNow.getTime() < endDt.getTime() - 120 * 60 * 1000;
 
                   const isNearest = idx === 0;
 
@@ -999,7 +976,7 @@ export default function HistoryPage() {
                       )}
 
                       {/* Self-service for today: EntryPassCard */}
-                      {r.is_self_service && isTodayReservation(r) && r.status !== 'cancelled' ? (
+                      {r.is_self_service && isTodayReservation(r, serverNow) && r.status !== 'cancelled' ? (
                         <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
                           {(r.prepay?.status === 'reported_pending_verify' || r.prepay?.status === 'mismatch') && (
                             <StoreContactCard
@@ -1184,7 +1161,7 @@ export default function HistoryPage() {
                     )}
 
                     {filteredPastList.slice(0, pastLimit).map((r) => {
-                      const pill = getReservationStatusPill(r);
+                      const pill = reservationStatusPill(r, serverNow);
                       const cleanPastDate = formatYMD(r.session_date || r.session?.session_date);
                       const dateShort = formatDateShort(cleanPastDate);
                       const timeDesc = `${r.start_time} 到 ${r.end_time} · ${r.pax} 位`;

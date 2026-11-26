@@ -1691,7 +1691,8 @@ export const getMyReservations = async (req, res) => {
     // 顧客端不回傳 admin_note 與敏感資料，並合併未換板的設備
     const grouped = groupReservations(reservations, equipmentsMap, { includeAdminNote: false, mergeEquipments: true });
     const enriched = await attachSelfInfoToReservations(grouped, prisma);
-    res.json(enriched);
+    const serverNowIso = new Date().toISOString();
+    res.json(enriched.map((item) => ({ ...item, server_now: serverNowIso })));
   } catch (error) {
     console.error('Error fetching my reservations:', error);
     res.status(500).json({ error: 'Failed to fetch your reservations' });
