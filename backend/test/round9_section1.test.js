@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import prisma from '../src/prismaClient.js';
 import { createReservation, getMyReservations } from '../src/controllers/reservationController.js';
 import { modifyBookingEquipment } from '../src/controllers/equipmentController.js';
-import { dateOnly } from '../../shared/time.js';
+import { dateOnly, toTaipeiDateString } from '../../shared/time.js';
 
 function createMockReqRes({ body = {}, params = {}, query = {}, user = { name: '測試客', id: 1 } }) {
   const req = { body, params, query, user, headers: {} };
@@ -30,7 +30,7 @@ function createMockReqRes({ body = {}, params = {}, query = {}, user = { name: '
 }
 
 test('Round 9 Section 1: Smart board consecutive rental of different sizes', async (t) => {
-  const testDate = dateOnly('2026-11-26');
+  const testDate = dateOnly(toTaipeiDateString(new Date(Date.now() + 5 * 86400000)));
 
   const testUser = await prisma.user.upsert({
     where: { line_user_id: 'test_round9_user' },

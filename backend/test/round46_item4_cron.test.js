@@ -170,12 +170,13 @@ test('Round 46 Item 4: midnight no_show skips paid/partial/verified bookings and
 
     // Clear other active devices temporarily or reuse unique active device
     await prisma.kioskDevice.updateMany({ where: { is_active: true }, data: { is_active: false } });
+    const fixedNow = new Date(`${todayStr}T12:00:00+08:00`);
     const dev = await prisma.kioskDevice.create({
       data: {
         name: 'R46測試報到機',
         key_wrapped: `wrapped-${ts}`,
         is_active: true,
-        last_seen_at: new Date(Date.now() - 25 * 60 * 1000), // 25 min ago -> offline
+        last_seen_at: new Date(fixedNow.getTime() - 25 * 60 * 1000), // 25 min before fixedNow -> offline
         offline_alerted_at: null
       }
     });
@@ -185,7 +186,6 @@ test('Round 46 Item 4: midnight no_show skips paid/partial/verified bookings and
     const mockPush = async () => { pushCalls++; };
     const alertJob = `r46_kiosk_alert_${ts}`;
     createdCronJobs.push(alertJob);
-    const fixedNow = new Date(`${todayStr}T12:00:00+08:00`);
 
     await runCronOnce(alertJob, `${todayStr}T12:00`, () => checkKioskOfflineAlerts(prisma, fixedNow, { pushFn: mockPush }));
     await runCronOnce(alertJob, `${todayStr}T12:00`, () => checkKioskOfflineAlerts(prisma, fixedNow, { pushFn: mockPush }));
