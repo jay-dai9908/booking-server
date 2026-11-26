@@ -48,9 +48,12 @@ async function adminLogin(page) {
 async function setAccountingDateRange(page, fromStr, toStr) {
   const dateInputs = page.locator('input[type="date"]');
   await dateInputs.nth(0).fill(fromStr);
-  await dateInputs.nth(1).fill(toStr);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/accounting/summary') && r.url().includes(toStr) && r.status() === 200).catch(() => null),
+    dateInputs.nth(1).fill(toStr),
+  ]);
   await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(450);
+  await page.waitForTimeout(300);
 }
 
 async function run() {
