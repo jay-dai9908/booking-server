@@ -187,6 +187,11 @@ model GlobalSetting {
   shop_shipping_fee           Int      @default(60)
   official_line_url           String?  @default("https://lin.ee/vsZhRW5")
   store_phone                 String?
+  store_address               String?
+  store_map_url               String?
+  store_hours_text            String?
+  cancel_policy_text          String?
+  privacy_notice_text         String?
   bead_colors_json            Json?
   business_hours_json         Json?
 

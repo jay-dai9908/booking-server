@@ -1011,6 +1011,11 @@ export const getGlobalSetting = async (req, res) => {
       auto_print_summary: setting.auto_print_summary ?? true,
       receipt_footer_text: setting.receipt_footer_text ?? null,
       store_phone: setting.store_phone ?? null,
+      store_address: setting.store_address ?? null,
+      store_map_url: setting.store_map_url ?? null,
+      store_hours_text: setting.store_hours_text ?? null,
+      cancel_policy_text: setting.cancel_policy_text ?? null,
+      privacy_notice_text: setting.privacy_notice_text ?? null,
       max_active_bookings_per_user: setting.max_active_bookings_per_user ?? 3,
       max_pax_per_booking: setting.max_pax_per_booking ?? 8
     };
@@ -1029,6 +1034,15 @@ const READONLY_GLOBAL_META_FIELDS = new Set([
   'has_line_messaging_token',
   'line_messaging_token_masked',
 ]);
+
+const STORE_TEXT_FIELD_SPECS = [
+  { key: 'store_address', label: '店面地址', maxLen: 100 },
+  { key: 'store_map_url', label: '地圖連結', maxLen: 300, requireHttps: true },
+  { key: 'store_hours_text', label: '營業時間說明', maxLen: 100 },
+  { key: 'cancel_policy_text', label: '取消與退款規則', maxLen: 1000 },
+  { key: 'privacy_notice_text', label: '電話與資料使用說明', maxLen: 2000 },
+];
+const STORE_TEXT_FIELD_MAP = Object.fromEntries(STORE_TEXT_FIELD_SPECS.map((s) => [s.key, s]));
 
 const GLOBAL_BOOLEAN_FIELDS = new Set([
   'show_price_cards',
@@ -1137,6 +1151,11 @@ function getEffectiveOldSetting(oldSetting) {
     line_button_url: lineButtonUrl,
     official_line_url: oldSetting?.official_line_url ?? lineButtonUrl,
     store_phone: oldSetting?.store_phone ?? null,
+    store_address: oldSetting?.store_address ?? null,
+    store_map_url: oldSetting?.store_map_url ?? null,
+    store_hours_text: oldSetting?.store_hours_text ?? null,
+    cancel_policy_text: oldSetting?.cancel_policy_text ?? null,
+    privacy_notice_text: oldSetting?.privacy_notice_text ?? null,
     require_line_login_every_time: oldSetting?.require_line_login_every_time ?? false,
     enable_preview_page: oldSetting?.enable_preview_page ?? true,
     preview_disabled_text: oldSetting?.preview_disabled_text ?? '系統維護中，請點擊下方按鈕使用 LINE 進行預約',
@@ -1207,9 +1226,9 @@ function didGlobalSettingFieldChange(field, incoming, oldSetting, effectiveOld) 
     const normalizedOld = effectiveOld[field] === null ? null : String(effectiveOld[field]).trim();
     return normalizedIn !== normalizedOld;
   }
-  if (field === 'store_phone') {
+  if (field === 'store_phone' || STORE_TEXT_FIELD_MAP[field]) {
     const normalizedIn = typeof incoming === 'string' ? (incoming.trim() || null) : (incoming === null ? null : String(incoming).trim());
-    const normalizedOld = effectiveOld.store_phone ?? null;
+    const normalizedOld = effectiveOld[field] ?? null;
     return normalizedIn !== normalizedOld;
   }
   if (field === 'guest_line_hint_text') {
@@ -1504,6 +1523,26 @@ export const updateGlobalSetting = async (req, res) => {
       }
     }
 
+    for (const spec of STORE_TEXT_FIELD_SPECS) {
+      const rawVal = req.body[spec.key];
+      if (rawVal === undefined) continue;
+      if (rawVal === null) {
+        dataToUpdate[spec.key] = null;
+        continue;
+      }
+      if (typeof rawVal !== 'string') {
+        return res.status(422).json({ field: spec.key, error: `${spec.label}必須為字串` });
+      }
+      const trimmed = rawVal.trim();
+      if (trimmed.length > spec.maxLen) {
+        return res.status(422).json({ field: spec.key, error: `${spec.label}不可超過 ${spec.maxLen} 字` });
+      }
+      if (spec.requireHttps && trimmed && !/^https:\/\/\S+$/i.test(trimmed)) {
+        return res.status(422).json({ field: spec.key, error: `${spec.label}須以 https:// 開頭，且不可包含空白` });
+      }
+      dataToUpdate[spec.key] = trimmed || null;
+    }
+
     if (print_enabled !== undefined) {
       dataToUpdate.print_enabled = Boolean(print_enabled);
       if (dataToUpdate.print_enabled === false && (cancel_pending_jobs || cancel_unprinted_jobs)) {
@@ -1696,6 +1735,12 @@ export const updateGlobalSetting = async (req, res) => {
           default_session_capacity: dataToUpdate.default_session_capacity ?? 16,
           max_active_bookings_per_user: dataToUpdate.max_active_bookings_per_user ?? 3,
           max_pax_per_booking: dataToUpdate.max_pax_per_booking ?? 8,
+          store_phone: dataToUpdate.store_phone ?? null,
+          store_address: dataToUpdate.store_address ?? null,
+          store_map_url: dataToUpdate.store_map_url ?? null,
+          store_hours_text: dataToUpdate.store_hours_text ?? null,
+          cancel_policy_text: dataToUpdate.cancel_policy_text ?? null,
+          privacy_notice_text: dataToUpdate.privacy_notice_text ?? null,
           billing_grace_minutes: dataToUpdate.billing_grace_minutes ?? 10,
           billing_block_minutes: dataToUpdate.billing_block_minutes ?? 30,
           board_swap_grace_minutes: dataToUpdate.board_swap_grace_minutes ?? 10,

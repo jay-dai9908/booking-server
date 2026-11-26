@@ -30,6 +30,8 @@ import ConfirmSheet from '../../components/customer/sheets/ConfirmSheet';
 import PrepayTransferCard from '../../components/customer/PrepayTransferCard';
 import EntryPassCard from '../../components/customer/EntryPassCard';
 import StoreContactCard from '../../components/customer/StoreContactCard';
+import CancelPolicyNote from '../../components/customer/CancelPolicyNote';
+import BottomSheet from '../../components/customer/BottomSheet';
 import { useToast } from '../../components/customer/Toast';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
@@ -153,6 +155,7 @@ export default function HistoryPage() {
   const [cancelling, setCancelling] = useState(false);
   const [editingPrepayLast5, setEditingPrepayLast5] = useState({});
   const [expandedPassUsage, setExpandedPassUsage] = useState({});
+  const [showCancelPolicy, setShowCancelPolicy] = useState(false);
 
   // Sheet states
   const [activeBarcodeData, setActiveBarcodeData] = useState(null);
@@ -752,8 +755,32 @@ export default function HistoryPage() {
                 預約已開始，如需協助請洽門市
               </div>
             )}
+            <button
+              type="button"
+              data-testid="open-cancel-policy-btn"
+              onClick={() => setShowCancelPolicy(true)}
+              className="text-[12.5px] font-bold text-sg-brown underline justify-self-center mt-1 py-1"
+            >
+              看取消與退款規則
+            </button>
           </div>
         </div>
+
+        {/* Cancellation Policy Sheet */}
+        <BottomSheet
+          isOpen={showCancelPolicy}
+          onClose={() => setShowCancelPolicy(false)}
+          title="取消與退款規則"
+        >
+          <div className="grid gap-3 pb-2">
+            <CancelPolicyNote globalSettings={globalSettings} showHeading={false} />
+            <StoreContactCard
+              title="需要協助退改嗎？"
+              message="隨時可用 LINE 或電話聯絡我們"
+              globalSettings={globalSettings}
+            />
+          </div>
+        </BottomSheet>
 
         {/* Cancellation Confirm Sheet */}
         <ConfirmSheet

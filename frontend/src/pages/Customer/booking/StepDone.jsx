@@ -6,6 +6,7 @@ import Button from '../../../components/customer/Button';
 import BarcodeSheet from '../../../components/customer/sheets/BarcodeSheet';
 import PrepayTransferCard from '../../../components/customer/PrepayTransferCard';
 import SelfServiceInfoCard from '../../../components/customer/SelfServiceInfoCard';
+import StoreInfoCard from '../../../components/customer/StoreInfoCard';
 import { BeadLoader } from '../../../components/customer/Bead';
 import { useToast } from '../../../components/customer/Toast';
 import { useGlobalSettings } from '../../../hooks/customer/useGlobalSettings';
@@ -340,8 +341,10 @@ export default function StepDone({ result }) {
             ? isPrepayVerified
               ? `當天 ${openAt} 起，打開「我的預約」會出現進場 QR，對準門口報到機掃碼。QR 每 5 分鐘換一組，截圖無效；也可以在報到機輸入手機號碼報到。`
               : '對帳沒完成前，報到機不會開門。'
-            : '到店時出示條碼就能報到。要改時間的話，先取消再重新預約。'}
+            : '到店時出示 QR 就能報到。要改時間的話，先取消再重新預約。'}
         </div>
+
+        <StoreInfoCard globalSettings={globalSettings} data-testid="stepdone-store-info" />
 
         {/* Add to Calendar */}
         <div className="flex items-center justify-center gap-1 sg-small text-sg-muted mt-1">
@@ -375,7 +378,7 @@ export default function StepDone({ result }) {
             onClick={() => setShowBarcode(true)}
             className="w-full"
           >
-            查看到店條碼
+            查看到店 QR
           </Button>
         )}
         <Button

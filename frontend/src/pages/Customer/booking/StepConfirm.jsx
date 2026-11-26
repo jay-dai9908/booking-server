@@ -9,6 +9,7 @@ import EmptyState from '../../../components/customer/EmptyState';
 import { ErrorBanner } from '../../../components/customer/Banners';
 import BottomActionBar from '../../../components/customer/BottomActionBar';
 import StoreContactCard from '../../../components/customer/StoreContactCard';
+import CancelPolicyNote from '../../../components/customer/CancelPolicyNote';
 import SplitSeatSheet from '../../../components/customer/sheets/SplitSeatSheet';
 import Stepper from '../../../components/customer/Stepper';
 import { BeadLoader } from '../../../components/customer/Bead';
@@ -62,12 +63,11 @@ export default function StepConfirm({
   const [promoInput, setPromoInput] = useState('');
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState('');
+  const isSelfService = Boolean(daily?.is_self_service);
   const [submitting, setSubmitting] = useState(false);
   const [bookingLimitError, setBookingLimitError] = useState('');
   const [showSplitSheet, setShowSplitSheet] = useState(false);
   const [splitContext, setSplitContext] = useState({ split_kind: 'split', pax, is_self_service: isSelfService });
-
-  const isSelfService = Boolean(daily?.is_self_service);
   const [prepayOptions, setPrepayOptions] = useState(null);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [prepayQuote, setPrepayQuote] = useState(null);
@@ -892,6 +892,7 @@ export default function StepConfirm({
           <StoreContactCard globalSettings={globalSettings} showPhone={false} showLine={true} />
         </div>
       )}
+      <CancelPolicyNote globalSettings={globalSettings} />
       <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
         <BottomActionBar
           summary={summaryNode}

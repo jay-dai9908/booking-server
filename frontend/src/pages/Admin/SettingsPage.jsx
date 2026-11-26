@@ -24,7 +24,8 @@ import {
   GripVertical,
   ArrowUp,
   ArrowDown,
-  AlertTriangle
+  AlertTriangle,
+  MapPin
 } from 'lucide-react';
 import api from '../../api/axios';
 import ConfirmPanel from '../../components/admin/ConfirmPanel';
@@ -33,6 +34,8 @@ import { setPrintGloballyEnabled } from '../../utils/sunmiPrinter';
 import { useAdminPermissions } from '../../hooks/admin/useAdminPermissions';
 import { diffSettings } from '../../utils/admin/settingsDiff';
 import { normalizeMethodKey } from '@shared/paymentMethods.js';
+import { DEFAULT_PRIVACY_NOTICE } from '../Customer/Register';
+import { DEFAULT_CANCEL_POLICY } from '../../components/customer/CancelPolicyNote';
 
 const DEFAULT_PREVIEW_DISABLED_TEXT = '系統維護中，請點擊下方按鈕使用 LINE 進行預約';
 const DEFAULT_ANNOUNCEMENT_TEXT = '歡迎來到拾光製所！線上預約享即時選位，智能拼豆板租借滿時數再享買送折抵優惠';
@@ -71,6 +74,11 @@ export default function SettingsPage() {
   const [showShopButton, setShowShopButton] = useState(true);
   const [lineButtonUrl, setLineButtonUrl] = useState(DEFAULT_LINE_URL);
   const [storePhone, setStorePhone] = useState('');
+  const [storeAddress, setStoreAddress] = useState('');
+  const [storeMapUrl, setStoreMapUrl] = useState('');
+  const [storeHoursText, setStoreHoursText] = useState('');
+  const [cancelPolicyText, setCancelPolicyText] = useState('');
+  const [privacyNoticeText, setPrivacyNoticeText] = useState('');
   const [guestLineHintText, setGuestLineHintText] = useState(DEFAULT_GUEST_LINE_HINT_TEXT);
   const [bookingNoteChips, setBookingNoteChips] = useState(DEFAULT_BOOKING_NOTE_CHIPS);
   const [draggedChipIdx, setDraggedChipIdx] = useState(null);
@@ -194,6 +202,11 @@ export default function SettingsPage() {
         : DEFAULT_LINE_URL;
       setLineButtonUrl(nextLineUrl);
       setStorePhone(d.store_phone ?? '');
+      setStoreAddress(d.store_address ?? '');
+      setStoreMapUrl(d.store_map_url ?? '');
+      setStoreHoursText(d.store_hours_text ?? '');
+      setCancelPolicyText(d.cancel_policy_text ?? '');
+      setPrivacyNoticeText(d.privacy_notice_text ?? '');
       setGuestLineHintText(d.guest_line_hint_text ?? DEFAULT_GUEST_LINE_HINT_TEXT);
       if (Array.isArray(d.booking_note_chips) && d.booking_note_chips.length > 0) {
         setBookingNoteChips(d.booking_note_chips);
@@ -325,6 +338,11 @@ export default function SettingsPage() {
         line_button_url: loadedLineUrl,
         official_line_url: loadedLineUrl,
         store_phone: d.store_phone ?? '',
+        store_address: d.store_address ?? '',
+        store_map_url: d.store_map_url ?? '',
+        store_hours_text: d.store_hours_text ?? '',
+        cancel_policy_text: d.cancel_policy_text ?? '',
+        privacy_notice_text: d.privacy_notice_text ?? '',
         guest_line_hint_text: d.guest_line_hint_text ?? DEFAULT_GUEST_LINE_HINT_TEXT,
         booking_note_chips: loadedChips,
         weekday_hourly_price: d.weekday_hourly_price ?? 100,
@@ -384,6 +402,11 @@ export default function SettingsPage() {
           line_button_url: lineButtonUrl,
           official_line_url: lineButtonUrl,
           store_phone: storePhone,
+          store_address: storeAddress,
+          store_map_url: storeMapUrl,
+          store_hours_text: storeHoursText,
+          cancel_policy_text: cancelPolicyText,
+          privacy_notice_text: privacyNoticeText,
           guest_line_hint_text: guestLineHintText,
           booking_note_chips: bookingNoteChips.map(s => String(s || '').trim()).filter(Boolean).map(s => s.slice(0, 12)).slice(0, 8),
           weekday_hourly_price: toNumericOrRaw(weekdayHourly),
@@ -850,17 +873,6 @@ export default function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">店家電話</label>
-                <input
-                  type="text"
-                  data-testid="settings-store-phone-input"
-                  value={storePhone}
-                  onChange={e => setStorePhone(e.target.value)}
-                  placeholder="02-XXXX-XXXX"
-                  className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
-                />
-              </div>
-              <div>
                 <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">未登入按鈕下方提示小字</label>
                 <input
                   type="text"
@@ -904,6 +916,146 @@ export default function SettingsPage() {
           </fieldset>
         </div>
       </div>
+
+      {/* SECTION 2.6: 店家資訊 (Round 50 Item 5) */}
+      <fieldset
+        disabled={!canSettings}
+        data-testid="settings-store-info-section"
+        className={`bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] ${!canSettings ? 'opacity-65' : ''}`}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-[#8B5B43]" />
+              店家資訊
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              顧客端首頁、預約完成頁、匯款提醒與註冊頁顯示的門市聯絡方式、地址與政策說明
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleSaveAll()}
+            disabled={saving}
+            data-testid="save-store-info-btn"
+            className="px-5 py-2 bg-[#8B5B43] hover:bg-[#724a35] text-white font-semibold rounded-xl text-xs sm:text-sm shadow-sm transition-all shrink-0 disabled:opacity-50"
+          >
+            {saving ? '儲存中...' : '儲存店家資訊'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">店家電話</label>
+            <input
+              type="text"
+              data-testid="settings-store-phone-input"
+              maxLength={30}
+              value={storePhone}
+              onChange={e => setStorePhone(e.target.value)}
+              placeholder="02-XXXX-XXXX"
+              className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+            />
+            {fieldErrors.store_phone && (
+              <p className="text-xs text-red-600 mt-1">{fieldErrors.store_phone}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">營業時間說明（最多 100 字）</label>
+            <input
+              type="text"
+              data-testid="settings-store-hours-input"
+              maxLength={100}
+              value={storeHoursText}
+              onChange={e => setStoreHoursText(e.target.value)}
+              placeholder="例如：週二～週日 12:00–21:00"
+              className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+            />
+            {fieldErrors.store_hours_text && (
+              <p className="text-xs text-red-600 mt-1">{fieldErrors.store_hours_text}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">店面地址（最多 100 字）</label>
+            <input
+              type="text"
+              data-testid="settings-store-address-input"
+              maxLength={100}
+              value={storeAddress}
+              onChange={e => setStoreAddress(e.target.value)}
+              placeholder="例如：測試市測試路 1 號"
+              className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+            />
+            {fieldErrors.store_address && (
+              <p className="text-xs text-red-600 mt-1">{fieldErrors.store_address}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">Google 地圖連結（須以 https:// 開頭，最多 300 字）</label>
+            <input
+              type="url"
+              data-testid="settings-store-map-url-input"
+              maxLength={300}
+              value={storeMapUrl}
+              onChange={e => setStoreMapUrl(e.target.value)}
+              placeholder="https://maps.google.com/..."
+              className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+            />
+            {fieldErrors.store_map_url && (
+              <p className="text-xs text-red-600 mt-1">{fieldErrors.store_map_url}</p>
+            )}
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">
+              取消與退款規則（最多 1000 字；留白時顯示預設說明）
+            </label>
+            <textarea
+              rows={3}
+              data-testid="settings-cancel-policy-input"
+              maxLength={1000}
+              value={cancelPolicyText}
+              onChange={e => setCancelPolicyText(e.target.value)}
+              placeholder={DEFAULT_CANCEL_POLICY}
+              className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+            />
+            {!cancelPolicyText.trim() && (
+              <p className="text-[11px] text-[#6D5D52] mt-1 whitespace-pre-line">
+                未填寫時的顧客端預設文字：{DEFAULT_CANCEL_POLICY}
+              </p>
+            )}
+            {fieldErrors.cancel_policy_text && (
+              <p className="text-xs text-red-600 mt-1">{fieldErrors.cancel_policy_text}</p>
+            )}
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">
+              電話與資料使用說明（最多 2000 字；留白時顧客註冊頁顯示預設說明）
+            </label>
+            <textarea
+              rows={4}
+              data-testid="settings-privacy-notice-input"
+              maxLength={2000}
+              value={privacyNoticeText}
+              onChange={e => setPrivacyNoticeText(e.target.value)}
+              placeholder={DEFAULT_PRIVACY_NOTICE}
+              className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+            />
+            {!privacyNoticeText.trim() && (
+              <p className="text-[11px] text-[#6D5D52] mt-1 whitespace-pre-line">
+                未填寫時的顧客註冊頁預設文字：{DEFAULT_PRIVACY_NOTICE}
+              </p>
+            )}
+            {fieldErrors.privacy_notice_text && (
+              <p className="text-xs text-red-600 mt-1">{fieldErrors.privacy_notice_text}</p>
+            )}
+          </div>
+        </div>
+      </fieldset>
 
       {/* SECTION 2.5: 預約備註快速選項 (Round 9 Section 2) */}
       <fieldset disabled={!canSettings} className={`bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] ${!canSettings ? 'opacity-65' : ''}`}>

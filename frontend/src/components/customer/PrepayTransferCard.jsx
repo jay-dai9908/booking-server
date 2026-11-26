@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Copy } from 'lucide-react';
 import Button from './Button';
 import { useToast } from './Toast';
+import CancelPolicyNote from './CancelPolicyNote';
+import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { formatDateTime, formatMoneyBig, weekdayChar } from '../../utils/customer/format';
 import api from '../../api/axios';
 import { safeHttpUrl } from '@shared/safeUrl.js';
@@ -19,6 +21,7 @@ function formatDeadlineDisplay(deadlineAt) {
 
 export default function PrepayTransferCard({ reservation, onReported, mode = 'create', onCancelEdit }) {
   const toast = useToast();
+  const { settings: globalSettings } = useGlobalSettings();
   const prepay = reservation?.prepay;
   const bookingRef = reservation?.booking_ref;
   const [last5, setLast5] = useState(prepay?.remittance_last5 || '');
@@ -178,6 +181,7 @@ export default function PrepayTransferCard({ reservation, onReported, mode = 'cr
           </Button>
         )}
       </div>
+      <CancelPolicyNote globalSettings={globalSettings} showHeading={false} />
     </div>
   );
 }

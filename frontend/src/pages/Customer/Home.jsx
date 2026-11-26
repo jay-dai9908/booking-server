@@ -12,6 +12,7 @@ import EmptyState from '../../components/customer/EmptyState';
 import { AnnouncementBar, ErrorBanner } from '../../components/customer/Banners';
 import { BeadLoader } from '../../components/customer/Bead';
 import GuestLineLoginButton from '../../components/customer/GuestLineLoginButton';
+import StoreInfoCard from '../../components/customer/StoreInfoCard';
 import PriceInfoSheet from '../../components/customer/sheets/PriceInfoSheet';
 import api from '../../api/axios';
 import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
@@ -50,10 +51,6 @@ export default function Home({ userRole }) {
   const { sessions } = useSessions(todayStr, { autoRefresh: true });
 
   // 1. 已登入顧客自動導向目標頁面
-  useEffect(() => {
-    const queryParams = new URLSearchParams(location.search);
-    if (queryParams.has('code')) return;
-
   const safeNext = useMemo(() => {
     const rawNext = new URLSearchParams(location.search).get('next');
     return safeNextPath(rawNext);
@@ -383,6 +380,8 @@ export default function Home({ userRole }) {
               </div>
             </div>
           </Card>
+
+          <StoreInfoCard globalSettings={globalSettings} />
 
           {/* Today status pill */}
           <div className="flex justify-center my-1">
