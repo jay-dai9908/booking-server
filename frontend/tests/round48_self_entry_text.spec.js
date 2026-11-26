@@ -183,7 +183,7 @@ async function run() {
     await page.locator('button:has-text("送出預約")').click();
     await page.waitForURL('**/booking?step=done**', { timeout: 12000 });
     await page.locator('text=截圖無效').first().waitFor({ state: 'visible', timeout: 8000 });
-    assert.equal(await page.locator('button:has-text("查看到店條碼")').count(), 0, 'Self-service done page must NOT have 查看到店條碼');
+    assert.equal(await page.locator('button:has-text("查看到店 QR")').count(), 0, 'Self-service done page must NOT have 查看到店 QR');
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'round48_shot4_self_done_no_barcode.png'), fullPage: true });
     console.log('Shot 4 saved: StepDone self-service without barcode button.');
 
@@ -192,9 +192,9 @@ async function run() {
     await page.waitForURL('**/history?tab=bookings', { timeout: 10000 });
     await page.locator('text=當天這裡會出現動態進場 QR').first().waitFor({ state: 'visible', timeout: 8000 });
 
-    // Self-service non-today card has NO 出示到店條碼, while normal booking HAS 出示到店條碼
-    const normalBtnCount = await page.locator('button:has-text("出示到店條碼")').count();
-    assert.equal(normalBtnCount, 1, 'Exactly the 1 normal booking should show 出示到店條碼');
+    // Self-service non-today card has NO 出示到店 QR, while normal booking HAS 出示到店 QR
+    const normalBtnCount = await page.locator('button:has-text("出示到店 QR")').count();
+    assert.equal(normalBtnCount, 1, 'Exactly the 1 normal booking should show 出示到店 QR');
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'round48_shot5_history_self_qr_note.png'), fullPage: true });
     console.log('Shot 5 saved: HistoryPage self-service QR note + normal barcode button.');
     console.log('Round 48 Item 2 Self-Service QR Text E2E PASSED!');
