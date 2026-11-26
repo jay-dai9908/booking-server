@@ -154,6 +154,8 @@ async function run() {
     await admPage.locator('input[type="password"]').fill(adminPass);
     await admPage.locator('button[type="submit"]').click();
     await admPage.waitForURL((url) => url.pathname.includes('/admin/') && !url.pathname.includes('/admin/login'), { timeout: 15000 });
+    await admPage.waitForLoadState('networkidle');
+    await admPage.waitForTimeout(350);
     await admPage.goto(`${BASE_URL}/admin/settings`, { waitUntil: 'networkidle' });
 
     const maxActInput = admPage.locator('[data-testid="max-active-bookings-input"]');
