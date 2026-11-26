@@ -11,6 +11,8 @@ import {
   Clock,
   Copy,
   MessageCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import CustomerLayout from '../../components/customer/CustomerLayout';
 import AppBar from '../../components/customer/AppBar';
@@ -150,6 +152,7 @@ export default function HistoryPage() {
   const [showPoolCancelConfirm, setShowPoolCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [editingPrepayLast5, setEditingPrepayLast5] = useState({});
+  const [expandedPassUsage, setExpandedPassUsage] = useState({});
 
   // Sheet states
   const [activeBarcodeData, setActiveBarcodeData] = useState(null);
@@ -1479,125 +1482,195 @@ export default function HistoryPage() {
                 <BeadLoader />
               </div>
             ) : passes.length === 0 ? (
-              <EmptyState
-                title="還沒有卡券"
-                description="購買套裝或參加活動送的卡券會出現在這裡"
-              />
+              <>
+                <EmptyState
+                  title="還沒有卡券"
+                  description="購買套裝或參加活動送的卡券會出現在這裡"
+                />
+                <StoreContactCard
+                  title="怎麼購買卡券"
+                  message="計次卡與套裝卡券採門市購買或官方 LINE 開通，歡迎到店詢問或傳 LINE 聯絡我們"
+                  globalSettings={globalSettings}
+                />
+              </>
             ) : (
-              passes.map((p) => {
-                const isActive = p.status === 'ACTIVE';
-                const isPunchCard = p.pass_type === 'PUNCH_CARD';
-                const totalQuota = p.total_quota || 0;
-                const remainingQuota = p.remaining_quota || 0;
+              <>
+                {passes.map((p) => {
+                  const displayStatus =
+                    p.display_status ||
+                    (p.status === 'REVOKED'
+                      ? 'revoked'
+                      : p.payment_status === 'pending_payment'
+                      ? 'unpaid'
+                      : p.status === 'EXPIRED'
+                      ? 'expired'
+                      : p.status === 'EXHAUSTED'
+                      ? 'used_up'
+                      : 'usable');
+                  const isUsable = displayStatus === 'usable';
+                  const isPunchCard = p.pass_type === 'PUNCH_CARD';
+                  const totalQuota = p.total_quota || 0;
+                  const remainingQuota = p.remaining_quota || 0;
 
-                // Status pill calculation (Section 6.16)
-                let pillVariant = 'full';
-                let pillText = '已用完';
-                if (isActive) {
-                  const now = new Date();
-                  if (p.expires_at) {
-                    const expDt = new Date(p.expires_at);
-                    const diffDays = Math.ceil((expDt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-                    if (diffDays <= 14 && diffDays >= 0) {
-                      pillVariant = 'low';
-                      pillText = `剩 ${diffDays} 天`;
+                  // Status pill calculation (Round 50 Item 4)
+                  let pillVariant = 'full';
+                  let pillText = '已用完';
+                  if (displayStatus === 'usable') {
+                    if (p.expires_at) {
+                      const expDt = new Date(p.expires_at);
+                      const diffDays = Math.ceil((expDt.getTime() - serverNow.getTime()) / (1000 * 60 * 60 * 24));
+                      if (diffDays <= 14 && diffDays >= 0) {
+                        pillVariant = 'low';
+                        pillText = `剩 ${diffDays} 天`;
+                      } else {
+                        pillVariant = 'ok';
+                        pillText = '可使用';
+                      }
                     } else {
                       pillVariant = 'ok';
                       pillText = '可使用';
                     }
-                  } else {
-                    pillVariant = 'ok';
-                    pillText = '可使用';
+                  } else if (displayStatus === 'unpaid') {
+                    pillVariant = 'low';
+                    pillText = '待付款';
+                  } else if (displayStatus === 'expired') {
+                    pillText = '已過期';
+                  } else if (displayStatus === 'revoked') {
+                    pillText = '已停用';
                   }
-                } else if (p.status === 'EXPIRED') {
-                  pillText = '已過期';
-                } else if (p.status === 'REVOKED') {
-                  pillText = '已停用';
-                }
 
-                // Details string joined by ·
-                const details = [];
-                if (!p.expires_at) {
-                  details.push('無使用期限');
-                } else if (p.pass_type === 'MONTHLY_PASS' || p.pass_type === 'TIME_PASS') {
-                  details.push(`${formatDateTime(p.created_at, 'yyyy/MM/dd')} 到 ${formatDateTime(p.expires_at, 'yyyy/MM/dd')}`);
-                } else {
-                  details.push(`有效至 ${formatDateTime(p.expires_at, 'yyyy/MM/dd')}`);
-                }
+                  // Details string joined by ·
+                  const details = [];
+                  if (!p.expires_at) {
+                    details.push('無使用期限');
+                  } else if (p.pass_type === 'MONTHLY_PASS' || p.pass_type === 'TIME_PASS') {
+                    details.push(`${formatDateTime(p.created_at, 'yyyy/MM/dd')} 到 ${formatDateTime(p.expires_at, 'yyyy/MM/dd')}`);
+                  } else {
+                    details.push(`有效至 ${formatDateTime(p.expires_at, 'yyyy/MM/dd')}`);
+                  }
 
-                if (p.order_product_name) {
-                  const prefix = /^[0-9A-Za-z]/.test(p.order_product_name) ? '購買 ' : '購買';
-                  details.push(`${prefix}${p.order_product_name}贈送`);
-                } else if (p.order_ref) {
-                  details.push('購買商品贈送');
-                }
+                  if (p.order_product_name) {
+                    const prefix = /^[0-9A-Za-z]/.test(p.order_product_name) ? '購買 ' : '購買';
+                    details.push(`${prefix}${p.order_product_name}贈送`);
+                  } else if (p.order_ref) {
+                    details.push('購買商品贈送');
+                  }
 
-                if (p.day_restriction === 'WEEKDAY_ONLY') details.push('僅限平日');
-                if (p.day_restriction === 'WEEKEND_ONLY') details.push('僅限假日');
-                if (p.pass_type === 'DISCOUNT_VOUCHER') details.push('結帳時出示條碼使用');
+                  if (p.day_restriction === 'WEEKDAY_ONLY') details.push('僅限平日');
+                  if (p.day_restriction === 'WEEKEND_ONLY') details.push('僅限假日');
+                  if (p.pass_type === 'DISCOUNT_VOUCHER') details.push('結帳時出示條碼使用');
 
-                const detailsText = details.join(' · ');
+                  const detailsText = details.join(' · ');
+                  const usageList = Array.isArray(p.usage) ? p.usage : [];
+                  const isUsageExpanded = Boolean(expandedPassUsage[p.id]);
 
-                return (
-                  <Card key={p.id} gap={8} className={!isActive ? 'gap-1 opacity-75' : ''}>
-                    {/* Top row */}
-                    <div className="flex justify-between items-center">
-                      <b className="text-[15px] text-sg-ink">{p.plan_name_snapshot || p.name || '卡券'}</b>
-                      <Pill variant={pillVariant}>{pillText}</Pill>
-                    </div>
+                  return (
+                    <Card key={p.id} gap={8} data-testid={`pass-card-${p.id}`} className={!isUsable ? 'gap-1 opacity-75' : ''}>
+                      {/* Top row */}
+                      <div className="flex justify-between items-center">
+                        <b className="text-[15px] text-sg-ink">{p.plan_name_snapshot || p.name || '卡券'}</b>
+                        <Pill variant={pillVariant}>{pillText}</Pill>
+                      </div>
 
-                    {/* Punch card beads row */}
-                    {isPunchCard && totalQuota <= 20 && totalQuota > 0 && (
-                      <div className="flex items-center gap-[6px] my-1 flex-wrap">
-                        {Array.from({ length: totalQuota }).map((_, i) => (
-                          <span
-                            key={i}
-                            className={`sg-bead ${i < remainingQuota ? '' : 'sg-bead-empty'}`}
-                            style={{
-                              '--sg-bead-size': '18px',
-                              '--sg-bead-bw': '5px',
-                              '--sg-bead-color': i < remainingQuota ? '#8B5B43' : '#E6DDD2',
-                            }}
-                          />
-                        ))}
-                        <span className="sg-small ml-[6px]">
+                      {/* Punch card beads row */}
+                      {isPunchCard && totalQuota <= 20 && totalQuota > 0 && (
+                        <div className="flex items-center gap-[6px] my-1 flex-wrap">
+                          {Array.from({ length: totalQuota }).map((_, i) => (
+                            <span
+                              key={i}
+                              className={`sg-bead ${i < remainingQuota ? '' : 'sg-bead-empty'}`}
+                              style={{
+                                '--sg-bead-size': '18px',
+                                '--sg-bead-bw': '5px',
+                                '--sg-bead-color': i < remainingQuota ? '#8B5B43' : '#E6DDD2',
+                              }}
+                            />
+                          ))}
+                          <span className="sg-small ml-[6px]">
+                            剩 <b className="font-num text-[15px] text-sg-ink">{remainingQuota}</b> / {totalQuota} 次
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Punch card text fallback */}
+                      {isPunchCard && totalQuota > 20 && (
+                        <div className="sg-small">
                           剩 <b className="font-num text-[15px] text-sg-ink">{remainingQuota}</b> / {totalQuota} 次
-                        </span>
-                      </div>
-                    )}
+                        </div>
+                      )}
 
-                    {/* Punch card text fallback */}
-                    {isPunchCard && totalQuota > 20 && (
-                      <div className="sg-small">
-                        剩 <b className="font-num text-[15px] text-sg-ink">{remainingQuota}</b> / {totalQuota} 次
-                      </div>
-                    )}
+                      {/* Details line */}
+                      <div className="sg-small">{detailsText}</div>
 
-                    {/* Details line */}
-                    <div className="sg-small">{detailsText}</div>
+                      {/* Usable barcode button */}
+                      {isUsable && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            setActiveBarcodeData({
+                              ref: p.pass_code,
+                              isPass: true,
+                              passCode: p.pass_code,
+                              passName: p.plan_name_snapshot || '卡券',
+                            })
+                          }
+                          className="w-full mt-1"
+                        >
+                          <QrCode className="w-4 h-4 mr-1" />
+                          出示卡券條碼
+                        </Button>
+                      )}
 
-                    {/* Active barcode button */}
-                    {isActive && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() =>
-                          setActiveBarcodeData({
-                            ref: p.pass_code,
-                            isPass: true,
-                            passCode: p.pass_code,
-                            passName: p.plan_name_snapshot || '卡券',
-                          })
-                        }
-                        className="w-full mt-1"
-                      >
-                        <QrCode className="w-4 h-4 mr-1" />
-                        出示卡券條碼
-                      </Button>
-                    )}
-                  </Card>
-                );
-              })
+                      {/* Expandable usage logs */}
+                      {usageList.length > 0 && (
+                        <div className="pt-1 border-t border-sg-line/60">
+                          <button
+                            type="button"
+                            data-testid={`pass-usage-toggle-${p.id}`}
+                            onClick={() =>
+                              setExpandedPassUsage((prev) => ({
+                                ...prev,
+                                [p.id]: !prev[p.id],
+                              }))
+                            }
+                            className="w-full flex items-center justify-between text-[12.5px] font-bold text-sg-brown py-1"
+                          >
+                            <span>使用紀錄（{usageList.length}）</span>
+                            {isUsageExpanded ? (
+                              <ChevronUp className="w-4 h-4" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4" />
+                            )}
+                          </button>
+                          {isUsageExpanded && (
+                            <div data-testid={`pass-usage-list-${p.id}`} className="grid gap-1.5 pt-1 text-[12px]">
+                              {usageList.map((u, idx) => (
+                                <div key={idx} className="flex items-center justify-between gap-2 text-sg-ink">
+                                  <span>
+                                    <span className={u.type === 'restore' ? 'font-bold text-sg-sage-ink' : 'font-bold'}>
+                                      {u.type === 'restore' ? `退回 ${u.units} 次` : `扣 ${u.units} 次`}
+                                    </span>
+                                    {u.booking_ref ? ` · ${formatBookingRef(u.booking_ref)}` : ''}
+                                  </span>
+                                  <span className="font-num text-sg-muted shrink-0">
+                                    {u.at ? formatDateTime(u.at, 'MM/dd HH:mm') : (u.use_date || '')}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })}
+                <StoreContactCard
+                  title="怎麼購買卡券"
+                  message="計次卡與套裝卡券採門市購買或官方 LINE 開通，歡迎到店詢問或傳 LINE 聯絡我們"
+                  globalSettings={globalSettings}
+                />
+              </>
             )}
           </div>
         )}

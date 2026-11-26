@@ -6,6 +6,7 @@ import { assertEnabledPaymentMethod, getNextDailySeq, nextSerialNo, resolveBilli
 import { queuePrintJob } from '../services/print/printService.js';
 import { log as auditLog } from '../services/audit/auditService.js';
 import { getAdminDeviceInfo } from '../utils/deviceParser.js';
+import { formatBookingRef } from '../utils/lineMessaging.js';
 import { toTaipeiDateString } from '../../../shared/time.js';
 
 /**
@@ -731,8 +732,48 @@ export const getPassesSummaryAdmin = async (_req, res) => {
   }
 };
 
+export function computePassDisplayStatus(pass, now = new Date()) {
+  if (!pass) return 'revoked';
+  if (pass.status === 'REVOKED') return 'revoked';
+  if (pass.payment_status === 'pending_payment') return 'unpaid';
+  const expMs = pass.expires_at ? new Date(pass.expires_at).getTime() : NaN;
+  if (pass.status === 'EXPIRED' || (Number.isFinite(expMs) && expMs < now.getTime())) {
+    return 'expired';
+  }
+  if (
+    pass.status === 'EXHAUSTED' ||
+    (pass.remaining_quota !== null && pass.remaining_quota !== undefined && pass.remaining_quota <= 0)
+  ) {
+    return 'used_up';
+  }
+  return 'usable';
+}
+
+export function sanitizePassUsageLogs(rawLogs) {
+  if (!Array.isArray(rawLogs)) return [];
+  const indexed = rawLogs
+    .map((entry, idx) => ({ entry, idx }))
+    .filter(({ entry }) => entry && typeof entry === 'object');
+  indexed.sort((a, b) => {
+    const aMs = a.entry.at ? Date.parse(a.entry.at) : NaN;
+    const bMs = b.entry.at ? Date.parse(b.entry.at) : NaN;
+    if (Number.isFinite(bMs) && Number.isFinite(aMs) && bMs !== aMs) {
+      return bMs - aMs;
+    }
+    return b.idx - a.idx;
+  });
+  return indexed.slice(0, 20).map(({ entry }) => ({
+    at: entry.at || null,
+    use_date: entry.use_date || entry.date || null,
+    type: entry.type === 'restore' ? 'restore' : 'deduct',
+    units: Number(entry.units) || 1,
+    booking_ref: entry.booking_ref ? formatBookingRef(entry.booking_ref) : null,
+    source: entry.source || null
+  }));
+}
+
 /**
- * Customer: Get my passes
+ * Customer: Get my passes (display-only status computation; never mutates DB)
  */
 export const getMyPasses = async (req, res) => {
   const userId = req.user?.id;
@@ -741,13 +782,20 @@ export const getMyPasses = async (req, res) => {
   }
 
   try {
+    const now = new Date();
     const passes = await prisma.userPass.findMany({
       where: { user_id: userId },
       include: { plan: true },
       orderBy: [{ status: 'asc' }, { created_at: 'desc' }]
     });
 
-    res.json(passes);
+    const sanitized = passes.map(({ usage_logs_json, ...rest }) => ({
+      ...rest,
+      display_status: computePassDisplayStatus(rest, now),
+      usage: sanitizePassUsageLogs(usage_logs_json)
+    }));
+
+    res.json(sanitized);
   } catch (error) {
     console.error('getMyPasses error:', error);
     res.status(500).json({ error: '獲取我的卡券失敗' });
