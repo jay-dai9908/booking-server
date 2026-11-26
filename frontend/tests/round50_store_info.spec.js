@@ -71,6 +71,8 @@ async function run() {
     await adminPage.locator('input[type="password"]').fill(adminPass);
     await adminPage.locator('button[type="submit"]').click();
     await adminPage.waitForURL((url) => url.pathname.includes('/admin/') && !url.pathname.includes('/admin/login'), { timeout: 15000 });
+    await adminPage.waitForLoadState('networkidle');
+    await adminPage.waitForTimeout(350);
     await adminPage.goto(`${BASE_URL}/admin/settings`, { waitUntil: 'networkidle' });
     await adminPage.getByTestId('settings-store-info-section').waitFor({ state: 'visible', timeout: 8000 });
 
