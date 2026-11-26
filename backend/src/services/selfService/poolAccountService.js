@@ -11,14 +11,14 @@ export async function countActivePoolHolds(tx, userId) {
       where: {
         user_id: uid,
         order_status: { not: 'cancelled' },
-        payment_status: 'pending_payment',
+        payment_status: { in: ['pending_payment', 'reported_pending_verify'] },
         assigned_pool_account: { not: null }
       }
     }),
     client.bookingPrepay.count({
       where: {
         user_id: uid,
-        status: 'pending_payment',
+        status: { in: ['pending_payment', 'reported_pending_verify', 'mismatch'] },
         assigned_pool_account: { not: null }
       }
     })

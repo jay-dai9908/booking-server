@@ -638,11 +638,29 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
           await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
 
           const maxUnpaid = kioskSetting.max_unpaid_self_bookings ?? 2;
-          const unpaidCount = await tx.bookingPrepay.count({
-            where: { user_id: userId, status: 'pending_payment' }
+          const todayDateObj = new Date(`${toTaipeiDateString(new Date())}T00:00:00.000Z`);
+          const candidatePrepays = await tx.bookingPrepay.findMany({
+            where: {
+              user_id: userId,
+              status: { in: ['pending_payment', 'reported_pending_verify', 'mismatch'] }
+            },
+            select: { booking_ref: true }
           });
+          let unpaidCount = 0;
+          if (candidatePrepays.length > 0) {
+            const activeUnpaidRefs = await tx.reservation.findMany({
+              where: {
+                booking_ref: { in: candidatePrepays.map((p) => p.booking_ref) },
+                status: 'confirmed',
+                session: { session_date: { gte: todayDateObj } }
+              },
+              distinct: ['booking_ref'],
+              select: { booking_ref: true }
+            });
+            unpaidCount = activeUnpaidRefs.length;
+          }
           if (unpaidCount >= maxUnpaid) {
-            throw makePrepayError('TOO_MANY_UNPAID', `待付款的半自助預約已達上限（${maxUnpaid} 筆）`, 409);
+            throw makePrepayError('TOO_MANY_UNPAID', `待付款或待對帳的半自助預約已達上限（${maxUnpaid} 筆）`, 409);
           }
 
           const transferInput = prepayPayload.transfer || {};

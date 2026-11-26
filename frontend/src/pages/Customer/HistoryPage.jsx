@@ -204,6 +204,7 @@ export default function HistoryPage() {
   const [savingNote, setSavingNote] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [editingPrepayLast5, setEditingPrepayLast5] = useState({});
 
   // Sheet states
   const [activeBarcodeData, setActiveBarcodeData] = useState(null);
@@ -453,7 +454,7 @@ export default function HistoryPage() {
       fetchOrders();
     } catch (err) {
       console.error('Failed to report remittance', err);
-      toast.show('回報失敗，請稍後再試', { type: 'error' });
+      toast.show(err.response?.data?.error || '回報失敗，請稍後再試', { type: 'error' });
     } finally {
       setReportingRemittance((prev) => ({ ...prev, [orderId]: false }));
     }
@@ -555,21 +556,42 @@ export default function HistoryPage() {
                 <PrepayTransferCard reservation={r} onReported={fetchReservations} />
               )}
               {r.prepay.status === 'reported_pending_verify' && (
-                <Card data-testid="history-prepay-reported" className="bg-sg-honey-soft border border-sg-honey" gap={6}>
-                  <div className="text-[15px] font-bold text-sg-ink">已回報，等店員對帳</div>
-                  <div className="text-[13.5px] text-sg-ink">
-                    帳號末五碼：<span className="font-num font-bold">{r.prepay.remittance_last5 || '—'}</span>
-                  </div>
-                  <div className="text-[12.5px] text-sg-muted">
-                    對帳完成後會變成「已確認」，也會用 LINE 通知你。
-                  </div>
-                </Card>
+                editingPrepayLast5[r.booking_ref] ? (
+                  <PrepayTransferCard
+                    mode="edit"
+                    reservation={r}
+                    onReported={async () => {
+                      setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: false }));
+                      await fetchReservations();
+                    }}
+                    onCancelEdit={() => setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: false }))}
+                  />
+                ) : (
+                  <Card data-testid="history-prepay-reported" className="bg-sg-honey-soft border border-sg-honey" gap={6}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[15px] font-bold text-sg-ink">已回報，等店員對帳</div>
+                      <Button
+                        variant="text"
+                        size="sm"
+                        data-testid={`edit-prepay-last5-${r.booking_ref}`}
+                        onClick={() => setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: true }))}
+                        className="text-sg-brown font-bold shrink-0"
+                      >
+                        修改末五碼
+                      </Button>
+                    </div>
+                    <div className="text-[13.5px] text-sg-ink">
+                      帳號末五碼：<span className="font-num font-bold">{r.prepay.remittance_last5 || '—'}</span>
+                    </div>
+                    <div className="text-[12.5px] text-sg-muted">
+                      對帳完成後會變成「已確認」，也會用 LINE 通知你。
+                    </div>
+                  </Card>
+                )
               )}
               {r.prepay.status === 'mismatch' && (
-                <Card data-testid="history-prepay-mismatch" className="bg-sg-danger-soft border border-sg-danger/40" gap={8}>
-                  <div className="text-[15px] font-bold text-sg-danger">
-                    匯款金額和預約金額不同，請用 LINE 聯絡我們
-                  </div>
+                <div className="grid gap-2" data-testid="history-prepay-mismatch">
+                  <PrepayTransferCard mode="edit" reservation={r} onReported={fetchReservations} />
                   <a
                     href={safeMismatchLineUrl}
                     target="_blank"
@@ -579,7 +601,7 @@ export default function HistoryPage() {
                     <MessageCircle className="w-4 h-4" />
                     透過 LINE 聯絡我們
                   </a>
-                </Card>
+                </div>
               )}
               {r.prepay.status === 'verified' && (
                 isTodayReservation(r) ? (
@@ -949,22 +971,44 @@ export default function HistoryPage() {
                             <PrepayTransferCard reservation={r} onReported={fetchReservations} />
                           )}
                           {r.prepay?.status === 'reported_pending_verify' && (
-                            <div
-                              data-testid={`list-prepay-reported-${r.booking_ref}`}
-                              className="rounded-[12px] border border-sg-honey bg-sg-honey-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-0.5"
-                            >
-                              <div className="font-bold">已回報，等店員對帳</div>
-                              <div className="text-[12px] text-sg-muted">
-                                帳號末五碼 <span className="font-num font-bold text-sg-ink">{r.prepay.remittance_last5}</span> · 對帳沒完成前，報到機不會開門
+                            editingPrepayLast5[r.booking_ref] ? (
+                              <PrepayTransferCard
+                                mode="edit"
+                                reservation={r}
+                                onReported={async () => {
+                                  setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: false }));
+                                  await fetchReservations();
+                                }}
+                                onCancelEdit={() => setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: false }))}
+                              />
+                            ) : (
+                              <div
+                                data-testid={`list-prepay-reported-${r.booking_ref}`}
+                                className="rounded-[12px] border border-sg-honey bg-sg-honey-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-1"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="font-bold">已回報，等店員對帳</div>
+                                  <button
+                                    type="button"
+                                    data-testid={`edit-prepay-last5-${r.booking_ref}`}
+                                    onClick={() => setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: true }))}
+                                    className="text-[12px] font-bold text-sg-brown underline shrink-0"
+                                  >
+                                    修改末五碼
+                                  </button>
+                                </div>
+                                <div className="text-[12px] text-sg-muted">
+                                  帳號末五碼 <span className="font-num font-bold text-sg-ink">{r.prepay.remittance_last5}</span> · 對帳沒完成前，報到機不會開門
+                                </div>
                               </div>
-                            </div>
+                            )
                           )}
                           {r.prepay?.status === 'mismatch' && (
                             <div
                               data-testid={`list-prepay-mismatch-${r.booking_ref}`}
-                              className="rounded-[12px] border border-sg-danger/40 bg-sg-danger-soft px-3 py-2.5 text-[13px] text-sg-danger grid gap-2"
+                              className="grid gap-2"
                             >
-                              <div className="font-bold">匯款金額和預約金額不同，請用 LINE 聯絡我們</div>
+                              <PrepayTransferCard mode="edit" reservation={r} onReported={fetchReservations} />
                               <a
                                 href={safeMismatchLineUrl}
                                 target="_blank"
@@ -994,22 +1038,44 @@ export default function HistoryPage() {
                                 <PrepayTransferCard reservation={r} onReported={fetchReservations} />
                               )}
                               {r.prepay.status === 'reported_pending_verify' && (
-                                <div
-                                  data-testid={`list-prepay-reported-${r.booking_ref}`}
-                                  className="rounded-[12px] border border-sg-honey bg-sg-honey-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-0.5"
-                                >
-                                  <div className="font-bold">已回報，等店員對帳</div>
-                                  <div className="text-[12px] text-sg-muted">
-                                    帳號末五碼 <span className="font-num font-bold text-sg-ink">{r.prepay.remittance_last5}</span> · 對帳沒完成前，報到機不會開門
+                                editingPrepayLast5[r.booking_ref] ? (
+                                  <PrepayTransferCard
+                                    mode="edit"
+                                    reservation={r}
+                                    onReported={async () => {
+                                      setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: false }));
+                                      await fetchReservations();
+                                    }}
+                                    onCancelEdit={() => setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: false }))}
+                                  />
+                                ) : (
+                                  <div
+                                    data-testid={`list-prepay-reported-${r.booking_ref}`}
+                                    className="rounded-[12px] border border-sg-honey bg-sg-honey-soft px-3 py-2.5 text-[13px] text-sg-ink grid gap-1"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="font-bold">已回報，等店員對帳</div>
+                                      <button
+                                        type="button"
+                                        data-testid={`edit-prepay-last5-${r.booking_ref}`}
+                                        onClick={() => setEditingPrepayLast5((prev) => ({ ...prev, [r.booking_ref]: true }))}
+                                        className="text-[12px] font-bold text-sg-brown underline shrink-0"
+                                      >
+                                        修改末五碼
+                                      </button>
+                                    </div>
+                                    <div className="text-[12px] text-sg-muted">
+                                      帳號末五碼 <span className="font-num font-bold text-sg-ink">{r.prepay.remittance_last5}</span> · 對帳沒完成前，報到機不會開門
+                                    </div>
                                   </div>
-                                </div>
+                                )
                               )}
                               {r.prepay.status === 'mismatch' && (
                                 <div
                                   data-testid={`list-prepay-mismatch-${r.booking_ref}`}
-                                  className="rounded-[12px] border border-sg-danger/40 bg-sg-danger-soft px-3 py-2.5 text-[13px] text-sg-danger grid gap-2"
+                                  className="grid gap-2"
                                 >
-                                  <div className="font-bold">匯款金額和預約金額不同，請用 LINE 聯絡我們</div>
+                                  <PrepayTransferCard mode="edit" reservation={r} onReported={fetchReservations} />
                                   <a
                                     href={safeMismatchLineUrl}
                                     target="_blank"

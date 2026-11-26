@@ -909,6 +909,18 @@ export async function submitRemittanceLast5(prismaClient, { bookingRef, userId, 
     }
 
     const now = new Date();
+    if (
+      prepay.status === 'pending_payment' &&
+      prepay.deadline_at &&
+      new Date(prepay.deadline_at).getTime() < now.getTime()
+    ) {
+      throw makePrepayError(
+        'PREPAY_DEADLINE_PASSED',
+        '已超過付款期限，無法線上回報。如果已經匯款，請用 LINE 聯絡我們',
+        409
+      );
+    }
+
     return tx.bookingPrepay.update({
       where: { booking_ref: bookingRef },
       data: {

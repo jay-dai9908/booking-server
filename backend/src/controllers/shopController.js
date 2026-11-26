@@ -403,18 +403,35 @@ async function updateRemittanceLast5Core(req, res, { actor }) {
       return res.status(403).json({ error: '無權限修改此訂單' });
     }
 
+    const cleanLast5 = String(remittance_last5).trim();
+    if (!isAdmin && !/^\d{5}$/.test(cleanLast5)) {
+      return res.status(400).json({ error: '帳號末五碼必須是 5 位數字' });
+    }
+
     if (!isAdmin && order.order_status === 'cancelled') {
-      return res.status(409).json({ error: '這張訂單已取消' });
+      return res.status(409).json({ error: '這筆訂單已取消' });
+    }
+
+    if (!isAdmin && ['deposit_verified', 'fully_paid', 'refunded'].includes(order.payment_status)) {
+      return res.status(409).json({ error: '這筆已對帳完成，不能修改末五碼' });
     }
 
     if (!isAdmin && !['pending_payment', 'reported_pending_verify'].includes(order.payment_status)) {
       return res.status(409).json({ error: '已核對的訂單不能修改末五碼' });
     }
 
-    const cleanLast5 = String(remittance_last5).trim();
-    if (!isAdmin && !/^\d{5}$/.test(cleanLast5)) {
-      return res.status(400).json({ error: '匯款末五碼須為 5 位數字' });
+    if (
+      !isAdmin &&
+      order.payment_status === 'pending_payment' &&
+      order.payment_deadline &&
+      new Date(order.payment_deadline).getTime() < Date.now()
+    ) {
+      return res.status(409).json({
+        code: 'PREPAY_DEADLINE_PASSED',
+        error: '已超過付款期限，無法線上回報。如果已經匯款，請用 LINE 聯絡我們'
+      });
     }
+
     const updated = await prisma.productOrder.update({
       where: { id: order.id },
       data: {

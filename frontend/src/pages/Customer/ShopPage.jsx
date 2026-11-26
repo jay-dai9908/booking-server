@@ -472,7 +472,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
       setReportedSuccess(true);
     } catch (err) {
       console.error('Failed to report remittance', err);
-      toast.show('回報失敗，請稍後再試', { type: 'error' });
+      toast.show(err.response?.data?.error || '回報失敗，請稍後再試', { type: 'error' });
     } finally {
       setReportingLast5(false);
     }

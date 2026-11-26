@@ -17,7 +17,7 @@ function formatDeadlineDisplay(deadlineAt) {
   return `${datePart}（${wk}）${timePart}`;
 }
 
-export default function PrepayTransferCard({ reservation, onReported }) {
+export default function PrepayTransferCard({ reservation, onReported, mode = 'create', onCancelEdit }) {
   const toast = useToast();
   const prepay = reservation?.prepay;
   const bookingRef = reservation?.booking_ref;
@@ -26,6 +26,7 @@ export default function PrepayTransferCard({ reservation, onReported }) {
 
   if (!prepay) return null;
 
+  const isEdit = mode === 'edit';
   const isMismatch = prepay.status === 'mismatch';
   const deadlineText = formatDeadlineDisplay(prepay.deadline_at);
   const safeAssignedPoolUrl = safeHttpUrl(prepay.assigned_pool_url);
@@ -86,15 +87,19 @@ export default function PrepayTransferCard({ reservation, onReported }) {
         <div className="text-[15px] font-bold">
           {isMismatch
             ? '匯款金額與預約金額不符'
+            : isEdit
+            ? '修改匯款末五碼'
             : deadlineText
             ? `請在 ${deadlineText} 前完成匯款`
             : '請於付款期限前完成匯款'}
         </div>
-        <div className="text-[12.5px] text-sg-muted mt-0.5">
-          {isMismatch
-            ? '請重新核對匯款金額或透過 LINE 聯絡我們確認，亦可更新正確末五碼。'
-            : '超過時間沒付款，預約會自動取消。'}
-        </div>
+        {(isMismatch || !isEdit) && (
+          <div className="text-[12.5px] text-sg-muted mt-0.5">
+            {isMismatch
+              ? '請重新核對匯款金額或透過 LINE 聯絡我們確認，亦可更新正確末五碼。'
+              : '超過時間沒付款，預約會自動取消。'}
+          </div>
+        )}
       </div>
 
       {prepay.pass_persons > 0 && (
@@ -160,8 +165,18 @@ export default function PrepayTransferCard({ reservation, onReported }) {
           data-testid="prepay-report-btn"
           className="w-full"
         >
-          回報已匯款
+          {isEdit ? '更新末五碼' : '回報已匯款'}
         </Button>
+        {isEdit && onCancelEdit && (
+          <Button
+            variant="text"
+            size="sm"
+            onClick={onCancelEdit}
+            className="w-full text-sg-muted"
+          >
+            先不修改
+          </Button>
+        )}
       </div>
     </div>
   );
