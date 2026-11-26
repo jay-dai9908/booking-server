@@ -796,7 +796,7 @@ export default function EquipmentPage() {
               <Calendar className="w-5 h-5 text-[#8B5B43]" /> 各時段設備佔用狀況
             </h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              檢視指定日期中，各營業時段的智能拼豆板租借比例與剩餘數量。
+              檢視指定日期中，各營業時段的智能板租借比例與剩餘數量。
             </p>
           </div>
 
@@ -937,7 +937,7 @@ export default function EquipmentPage() {
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)} />
           <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-md overflow-hidden relative z-10 p-6 animate-in zoom-in-95 duration-200 space-y-4">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="font-bold text-lg text-gray-900">新增自訂智能拼豆板規格</h3>
+              <h3 className="font-bold text-lg text-gray-900">新增自訂智能板規格</h3>
               <button onClick={() => setShowAddModal(false)} className="p-1 text-gray-400 hover:text-gray-700 rounded-full">
                 <X className="w-5 h-5" />
               </button>

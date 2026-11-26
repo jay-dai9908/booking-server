@@ -2,6 +2,28 @@ import { cnNum } from './format.js';
 import { calculateEquipmentChargeableHours } from '../equipmentPricing.js';
 export { buildDiscountConfig } from './pricing.js';
 
+function resolveDiscountDealName(hours, cfg) {
+  const only1 = { ...cfg, tier2_enabled: false };
+  const only2 = { ...cfg, enabled: false };
+  const dealText1 = `買${cnNum(cfg.buy_hours)}送${cnNum(cfg.free_hours)}`;
+  const dealText2 = `買${cnNum(cfg.tier2_buy_hours)}送${cnNum(cfg.tier2_free_hours)}`;
+  const both = calculateEquipmentChargeableHours(hours, cfg);
+  const c1 = cfg.enabled ? calculateEquipmentChargeableHours(hours, only1) : Infinity;
+  const c2 = cfg.tier2_enabled ? calculateEquipmentChargeableHours(hours, only2) : Infinity;
+  if (c1 === both) return dealText1;
+  if (c2 === both) return dealText2;
+  return `${dealText1}＋${dealText2}`;
+}
+
+export function boardDiscountNote(hours, cfg) {
+  const h = Number(hours) || 0;
+  if (h <= 0 || !cfg || (!cfg.enabled && !cfg.tier2_enabled)) return null;
+  const chargeable = calculateEquipmentChargeableHours(h, cfg);
+  if (chargeable >= h) return null;
+  const dealName = resolveDiscountDealName(h, cfg);
+  return `${dealName}，以 ${chargeable} 小時計`;
+}
+
 export function boardDiscountTexts(cfg) {
   const t1 = Boolean(cfg && cfg.enabled);
   const t2 = Boolean(cfg && cfg.tier2_enabled);
@@ -26,24 +48,13 @@ export function boardDiscountTexts(cfg) {
   }
   if (!cfg.stackable) rule += '（每台限折一次）';
 
-  const only1 = { ...cfg, tier2_enabled: false };
-  const only2 = { ...cfg, enabled: false };
-
   return {
     deal: deals,
     deals,
     home: `租借時段${deals}`,
     rule,
     lineLabel: (hours, freeHours) => {
-      const dealText1 = `買${cnNum(cfg.buy_hours)}送${cnNum(cfg.free_hours)}`;
-      const dealText2 = `買${cnNum(cfg.tier2_buy_hours)}送${cnNum(cfg.tier2_free_hours)}`;
-      const both = calculateEquipmentChargeableHours(hours, cfg);
-      const c1 = cfg.enabled ? calculateEquipmentChargeableHours(hours, only1) : Infinity;
-      const c2 = cfg.tier2_enabled ? calculateEquipmentChargeableHours(hours, only2) : Infinity;
-      let name;
-      if (c1 === both) name = dealText1;
-      else if (c2 === both) name = dealText2;
-      else name = `${dealText1}＋${dealText2}`;
+      const name = resolveDiscountDealName(hours, cfg);
       return `智能板${name}（折抵 ${freeHours} 小時）`;
     },
   };

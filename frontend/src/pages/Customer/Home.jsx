@@ -22,15 +22,8 @@ import { useSessions } from '../../hooks/customer/useSessions';
 import { buildDiscountConfig } from '../../utils/customer/pricing';
 import { boardDiscountTexts } from '../../utils/customer/discountText';
 import { dayState } from '../../utils/customer/availability';
+import { taipeiToday } from '../../utils/customer/taipeiTime';
 import { formatMoney } from '../../utils/customer/format';
-
-function getTodayString() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
 
 export default function Home({ userRole }) {
   const navigate = useNavigate();
@@ -44,7 +37,7 @@ export default function Home({ userRole }) {
   const [equipmentsLoaded, setEquipmentsLoaded] = useState(false);
   const hasProcessedRef = useRef(false);
 
-  const todayStr = useMemo(() => getTodayString(), []);
+  const todayStr = useMemo(() => taipeiToday(), []);
   const {
     settings: globalSettings,
     loading: globalLoading,
@@ -368,7 +361,7 @@ export default function Home({ userRole }) {
               <Sparkles className="w-[18px] h-[18px] text-sg-brown shrink-0" />
               <div>
                 <div className="text-[14px] font-bold text-sg-ink">
-                  智能拼豆板可加租
+                  智能板可加租
                 </div>
                 {smartBoardSubtext && (
                   <div className="sg-small">

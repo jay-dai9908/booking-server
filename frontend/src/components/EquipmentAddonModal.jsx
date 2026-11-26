@@ -177,7 +177,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
     } catch (err) {
       console.error(err);
       if (err.response?.status === 409) {
-        setErrorMessage('抱歉！您選擇的「智能拼豆板」在該時段剛被其他預約佔用，系統已為您更新最新可用數量，請重新調整數量。');
+        setErrorMessage('抱歉！您選擇的「智能板」在該時段剛被其他預約佔用，系統已為您更新最新可用數量，請重新調整數量。');
         fetchAvailability();
       } else {
         setErrorMessage(err.response?.data?.error || '更新設備失敗，請稍後再試');
@@ -200,7 +200,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-[#2C241E]">
-                  {oldTotalBoards > 0 ? '追加/修改智能拼豆板' : '補預約智能拼豆板'}
+                  {oldTotalBoards > 0 ? '追加/修改智能板' : '補預約智能板'}
                 </h2>
                 {isAdmin && (
                   <span className="text-[11px] bg-sg-brown-soft text-sg-brown border border-sg-line font-bold px-2 py-0.5 rounded-md">
@@ -278,7 +278,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
             </div>
           ) : visibleConfigs.length === 0 ? (
             <div className="text-center py-8 text-[#8C8279] text-sm">
-              目前暫無開放租借的智能拼豆板設備。
+              目前暫無開放租借的智能板設備。
             </div>
           ) : (
             <div className="space-y-3">
@@ -345,7 +345,7 @@ export default function EquipmentAddonModal({ reservation, isOpen, onClose, onSu
                         </div>
                       ) : (
                         <div className="text-xs text-[#8C8279] mt-0.5">
-                          自備智能拼豆板充電與場地設備費
+                          自備智能板充電與場地設備費
                         </div>
                       )}
                     </div>

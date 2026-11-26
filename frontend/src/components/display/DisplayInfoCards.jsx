@@ -200,7 +200,7 @@ export default function DisplayInfoCards({
 
             {boards.map((b, i) => (
               <React.Fragment key={b.id || b.name || i}>
-                <span>{String(b.name || '').startsWith('智能') ? b.name : `智能拼豆板 ${b.name}`}</span>
+                <span>{String(b.name || '').startsWith('智能') ? b.name : `智能板 ${b.name}`}</span>
                 <b className="font-num font-extrabold" style={{ fontSize: 36 }}>
                   NT${b.hourly_rate ?? b.price ?? 0}
                   <small className="font-body font-normal text-sg-muted" style={{ fontSize: 24 }}>

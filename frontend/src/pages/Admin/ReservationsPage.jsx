@@ -959,7 +959,7 @@ export default function ReservationsPage() {
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
                       <Cpu className="w-4 h-4 text-gray-800" />
-                      加租智能拼豆板 <span className="text-gray-400 font-normal">(選填)</span>
+                      加租智能板 <span className="text-gray-400 font-normal">(選填)</span>
                     </label>
                     {(() => {
                       const totalHours = manualSelectedSessions.length;

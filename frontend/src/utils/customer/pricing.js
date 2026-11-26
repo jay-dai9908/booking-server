@@ -187,7 +187,7 @@ export function buildPriceLines({ pax, hours, startTime, endTime, day, mode, uni
     const p = equipmentUnitPrice(cfg, group.hours, discountCfg);
     const discountNote = p.freeHours > 0 ? getBoardDiscountNote(group.hours, discountCfg) : null;
     lines.push({
-      label: `智能拼豆板 ${shortBoardName(cfg.name)} ×${group.qty} · ${group.start} 到 ${group.end} · ${group.hours} 小時`,
+      label: `智能板 ${shortBoardName(cfg.name)} ×${group.qty} · ${group.start} 到 ${group.end} · ${group.hours} 小時`,
       amount: p.price * group.qty,
       note: discountNote
     });

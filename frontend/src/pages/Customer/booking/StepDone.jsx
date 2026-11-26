@@ -8,8 +8,10 @@ import PrepayTransferCard from '../../../components/customer/PrepayTransferCard'
 import SelfServiceInfoCard from '../../../components/customer/SelfServiceInfoCard';
 import { BeadLoader } from '../../../components/customer/Bead';
 import { useToast } from '../../../components/customer/Toast';
+import { useGlobalSettings } from '../../../hooks/customer/useGlobalSettings';
 import { formatBookingRef, formatDateShort, weekdayChar, formatYMD } from '../../../utils/customer/format';
-import { shortBoardName } from '../../../utils/customer/pricing';
+import { shortBoardName, buildDiscountConfig } from '../../../utils/customer/pricing';
+import { boardDiscountNote } from '../../../utils/customer/discountText';
 import { getGoogleCalendarUrl, downloadIcsFile } from '../../../utils/calendarHelper';
 import { earliestEntry } from '../../../../../shared/selfService.js';
 import api from '../../../api/axios';
@@ -18,6 +20,8 @@ export default function StepDone({ result }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const toast = useToast();
+  const { settings: globalSettings } = useGlobalSettings();
+  const discountConfig = useMemo(() => buildDiscountConfig(globalSettings || {}), [globalSettings]);
   const [showBarcode, setShowBarcode] = useState(false);
 
   const refParam = searchParams.get('ref') || result?.reservation?.booking_ref || result?.booking_ref || '';
@@ -147,12 +151,8 @@ export default function StepDone({ result }) {
         const eh = sh + e.rental_hours;
         timeSpan = `${startTime} 到 ${String(eh).padStart(2, '0')}:${String(sm || 0).padStart(2, '0')}`;
       }
-      let discountNote = '';
-      if (hours >= 4) {
-        const freeH = Math.floor(hours / 4);
-        const chargeable = hours - freeH;
-        discountNote = `，買三送一，以 ${chargeable} 小時計`;
-      }
+      const rawNote = boardDiscountNote(hours, discountConfig);
+      const discountNote = rawNote ? `，${rawNote}` : '';
       const timePart = timeSpan ? ` · ${timeSpan} · ${hours} 小時` : ` · ${hours} 小時`;
       return `${name} ×${e.quantity || 1}${timePart}${discountNote ? `（${discountNote.replace(/^，/, '')}）` : ''}`;
     })

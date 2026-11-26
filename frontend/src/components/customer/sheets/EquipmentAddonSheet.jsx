@@ -399,7 +399,7 @@ export default function EquipmentAddonSheet({
         equipments: payloadEquipments,
       });
 
-      toast.show('已更新智能拼豆板', { type: 'success' });
+      toast.show('已更新智能板', { type: 'success' });
       handleClose();
       if (onSuccess) onSuccess();
     } catch (err) {
@@ -411,7 +411,7 @@ export default function EquipmentAddonSheet({
     }
   };
 
-  const sheetTitle = hasOriginalBoards ? '修改智能拼豆板' : '加租智能拼豆板';
+  const sheetTitle = hasOriginalBoards ? '修改智能板' : '加租智能板';
   const submitBtnText = hasOriginalBoards ? '確認修改' : '確認加租';
 
   // Subtitle

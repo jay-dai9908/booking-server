@@ -339,7 +339,7 @@ export async function computeSelfServiceQuote(
 
   if (requestedEqList.length > 0) {
     if (!meta.allow_equipment) {
-      pushOrThrow('SELF_EQUIPMENT_NOT_OPEN', '這天半自助時段不開放租借智能拼豆板', 400);
+      pushOrThrow('SELF_EQUIPMENT_NOT_OPEN', '這天半自助時段不開放租借智能板', 400);
     } else {
       const allConfigs = await client.equipmentConfig.findMany();
       const configMap = new Map(allConfigs.map((c) => [c.id, c]));
@@ -368,7 +368,7 @@ export async function computeSelfServiceQuote(
             }
           }
           if (concurrentBoards > pax) {
-            pushOrThrow('EQUIPMENT_EXCEED_PAX', '預約之智能拼豆板總數不得超過同行人數上限。', 400);
+            pushOrThrow('EQUIPMENT_EXCEED_PAX', '預約之智能板總數不得超過同行人數上限。', 400);
             break;
           }
         }
@@ -446,7 +446,7 @@ export async function computeSelfServiceQuote(
               const remain = Math.max(0, maxStock - bookedInThisSession - (requestUsage[usageKey] || 0));
               pushOrThrow(
                 'EQUIPMENT_OUT_OF_STOCK',
-                `智能拼豆板「${config.name}」在 ${sess.start_time} 時段庫存不足（僅剩 ${remain} 台）`,
+                `智能板「${config.name}」在 ${sess.start_time} 時段庫存不足（僅剩 ${remain} 台）`,
                 409
               );
               break;

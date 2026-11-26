@@ -1,9 +1,7 @@
-import { parseYMD } from './pricing.js';
+import { sessionStartAt } from './taipeiTime.js';
 
 export function isSessionPast(dateStr, session, now = new Date()) {
-  const [h, m] = session.start_time.split(':').map(Number);
-  const start = parseYMD(dateStr);
-  start.setHours(h, m, 0, 0);
+  const start = sessionStartAt(dateStr, session?.start_time);
   return now >= start;
 }
 

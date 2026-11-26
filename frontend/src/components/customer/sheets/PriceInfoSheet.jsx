@@ -59,7 +59,7 @@ export default function PriceInfoSheet({
   if (!hasPricing) {
     smartBoardNode = <Skeleton className="h-4 w-4/5 rounded inline-block" />;
   } else {
-    let line = activeBoards ? `智能拼豆板：${activeBoards} / 小時` : '智能拼豆板可現場選租';
+    let line = activeBoards ? `智能板：${activeBoards} / 小時` : '智能板可現場選租';
     if (discountTexts && discountTexts.deals) {
       line += `，${discountTexts.deals}`;
     }

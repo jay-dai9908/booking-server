@@ -1050,7 +1050,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
           if (!config) continue;
 
           if (eq.equipment_id !== 'bring_own' && config.visibility_status !== 'ACTIVE') {
-            throw new Error(`EQUIPMENT_UNAVAILABLE:智能拼豆板「${config.name}」目前維護中，暫停借用。`);
+            throw new Error(`EQUIPMENT_UNAVAILABLE:智能板「${config.name}」目前維護中，暫停借用。`);
           }
 
           const minHours = config.min_contiguous_hours || 2;
@@ -1079,7 +1079,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
               }
 
               if (bookedInThisSession + (requestUsage[usageKey] || 0) + qty > totalStock) {
-                throw new Error(`EQUIPMENT_OUT_OF_STOCK:智能拼豆板「${config.name}」在 ${sess.start_time} 時段庫存不足（僅剩 ${Math.max(0, totalStock - bookedInThisSession - (requestUsage[usageKey] || 0))} 台）`);
+                throw new Error(`EQUIPMENT_OUT_OF_STOCK:智能板「${config.name}」在 ${sess.start_time} 時段庫存不足（僅剩 ${Math.max(0, totalStock - bookedInThisSession - (requestUsage[usageKey] || 0))} 台）`);
               }
             }
             for (const sess of windowSessions) {
@@ -1336,7 +1336,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       return res.status(400).json({ error: error.message.replace('EQUIPMENT_UNAVAILABLE:', '') });
     }
     if (error.message === 'EQUIPMENT_EXCEED_PAX') {
-      return res.status(400).json({ error: '預約之智能拼豆板總數不得超過同行人數上限。' });
+      return res.status(400).json({ error: '預約之智能板總數不得超過同行人數上限。' });
     }
     if (error.message && error.message.startsWith('PROMO_ERROR:')) {
       return res.status(400).json({ error: error.message.replace('PROMO_ERROR:', '') });

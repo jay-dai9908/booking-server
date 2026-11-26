@@ -13,25 +13,9 @@ import { useDayPricing } from '../../hooks/customer/useDayPricing';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
 import api from '../../api/axios';
 import { parseYMD } from '../../utils/customer/pricing';
+import { taipeiToday, taipeiAddDays } from '../../utils/customer/taipeiTime';
 
 const DRAFT_KEY = 'shiguang_booking_draft';
-
-function getTodayString() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function getEndDateString(daysAhead) {
-  const target = new Date();
-  target.setDate(target.getDate() + daysAhead);
-  const y = target.getFullYear();
-  const m = String(target.getMonth() + 1).padStart(2, '0');
-  const d = String(target.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
 
 function loadInitialDraft() {
   try {
@@ -66,8 +50,8 @@ export default function Booking() {
   const userRole = user?.role || 'customer';
 
   // Range dates for DateStrip / Calendar
-  const todayStr = useMemo(() => getTodayString(), []);
-  const lookaheadEndStr = useMemo(() => getEndDateString(BOOKING_LOOKAHEAD_DAYS - 1), []);
+  const todayStr = useMemo(() => taipeiToday(), []);
+  const lookaheadEndStr = useMemo(() => taipeiAddDays(todayStr, BOOKING_LOOKAHEAD_DAYS - 1), [todayStr]);
   const { sessionsByDate } = useSessionRange(todayStr, lookaheadEndStr);
   const { selfServiceDates, dayInfoByDate } = useSelfServiceRange(todayStr, lookaheadEndStr);
 

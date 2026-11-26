@@ -44,7 +44,8 @@ import {
   formatYMD,
   toDateObj,
 } from '../../utils/customer/format';
-import { shortBoardName } from '../../utils/customer/pricing';
+import { shortBoardName, buildDiscountConfig } from '../../utils/customer/pricing';
+import { boardDiscountNote } from '../../utils/customer/discountText';
 
 const QUICK_TAGS = ['第一次玩', '有小孩同行', '生日慶祝', '希望坐一起'];
 
@@ -63,7 +64,7 @@ function isTodayReservation(res) {
   return formatYMD(rawDate) === taipeiToday;
 }
 
-function formatBoardDetails(e, resStartTime) {
+function formatBoardDetails(e, resStartTime, discountConfig = null) {
   let startT = '';
   let endT = '';
   let hours = e.rental_hours || 0;
@@ -86,12 +87,7 @@ function formatBoardDetails(e, resStartTime) {
   } else if (hours) {
     timeStr = `${hours} 小時`;
   }
-  let discountNote = '';
-  if (hours >= 4) {
-    const freeH = Math.floor(hours / 4);
-    const chargeable = hours - freeH;
-    discountNote = `買三送一，以 ${chargeable} 小時計`;
-  }
+  const discountNote = discountConfig ? (boardDiscountNote(hours, discountConfig) || '') : '';
   return { timeStr, hours, discountNote };
 }
 
@@ -179,6 +175,7 @@ export default function HistoryPage() {
   const detailRef = searchParams.get('ref') || null;
 
   const { settings: globalSettings } = useGlobalSettings();
+  const discountConfig = useMemo(() => buildDiscountConfig(globalSettings || {}), [globalSettings]);
   const { user } = useCustomerProfile();
   const safeOfficialLineUrl = safeHttpUrl(globalSettings?.official_line_url);
 
@@ -536,7 +533,7 @@ export default function HistoryPage() {
             <KV label="時段" value={<b>{timeRange}</b>} />
             <KV label="人數" value={<b>{r.pax} 位</b>} />
             <KV
-              label="智能拼豆板"
+              label="智能板"
               value={
                 !hasBoards ? (
                   '尚未加租'
@@ -546,7 +543,7 @@ export default function HistoryPage() {
                       .filter((e) => e.equipment_id !== 'bring_own')
                       .map((e, idx) => {
                         const name = shortBoardName(e.equipment_name_snapshot || e.name || '智能板');
-                        const { timeStr, discountNote } = formatBoardDetails(e, r.start_time || r.session?.start_time);
+                        const { timeStr, discountNote } = formatBoardDetails(e, r.start_time || r.session?.start_time, discountConfig);
                         return (
                           <div key={idx}>
                             {name} ×{e.quantity || 1}（{timeStr}）{discountNote ? <span className="text-xs text-sg-muted ml-1">（{discountNote}）</span> : null}
@@ -738,7 +735,7 @@ export default function HistoryPage() {
               onClick={() => setActiveAddonRes(r)}
               className="w-full"
             >
-              {hasBoards ? '修改智能拼豆板' : '加租智能拼豆板'}
+              {hasBoards ? '修改智能板' : '加租智能板'}
             </Button>
           )}
           {!isDetailEnded && !canModifyAddon && !r.is_self_service && (
@@ -967,7 +964,7 @@ export default function HistoryPage() {
                           <Grid className="w-[18px] h-[18px] text-sg-muted shrink-0" />
                           <div className="text-[13px] flex-1 text-sg-ink">
                             {!hasBoards ? (
-                              '尚未加租智能拼豆板'
+                              '尚未加租智能板'
                             ) : (() => {
                               const filteredBoards = boards.filter((e) => e.equipment_id !== 'bring_own');
                               const totalCount = filteredBoards.reduce((sum, e) => sum + (e.quantity || 1), 0);
@@ -979,7 +976,7 @@ export default function HistoryPage() {
                                   {filteredBoards
                                     .map((e) => {
                                       const name = shortBoardName(e.equipment_name_snapshot || e.name || '智能板');
-                                      const { timeStr, discountNote } = formatBoardDetails(e, r.start_time || r.session?.start_time);
+                                      const { timeStr, discountNote } = formatBoardDetails(e, r.start_time || r.session?.start_time, discountConfig);
                                       return `${name} ×${e.quantity || 1} · ${timeStr}${discountNote ? `（${discountNote}）` : ''}`;
                                     })
                                     .join('、')}

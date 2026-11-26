@@ -1064,7 +1064,7 @@ export default function SettingsPage() {
         </div>
       </fieldset>
 
-      {/* SECTION 3: 全店預設入場收費與智能拼豆板全域規則 */}
+      {/* SECTION 3: 全店預設入場收費與智能板全域規則 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 3A: Store Default Pricing */}
         <fieldset disabled={!canSessions} className={`bg-white p-6 rounded-2xl shadow-sm border border-[#E8DEC8] flex flex-col justify-between space-y-5 ${!canSessions ? 'opacity-65' : ''}`}>
@@ -1148,7 +1148,7 @@ export default function SettingsPage() {
             <div className="flex items-start justify-between gap-2 mb-1">
               <h2 className="text-lg font-bold text-[#3E332B] flex items-center gap-2">
                 <Cpu className="w-5 h-5 text-[#8B5B43]" />
-                4. 智能拼豆板全域租借與買送規則
+                4. 智能板全域租借與買送規則
               </h2>
               {canEquipment ? (
                 <Link

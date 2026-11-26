@@ -177,7 +177,7 @@ export default function Preview() {
                 />
               )}
 
-              {/* 3. 特色卡片：「不限板，不限量…」「智能拼豆板可加租」 */}
+              {/* 3. 特色卡片：「不限板，不限量…」「智能板可加租」 */}
               <Card gap={12}>
                 <div className="flex items-center gap-2">
                   <Grid className="w-[18px] h-[18px] text-sg-brown shrink-0" />
@@ -190,7 +190,7 @@ export default function Preview() {
                   <Sparkles className="w-[18px] h-[18px] text-sg-brown shrink-0" />
                   <div>
                     <div className="text-[14px] font-bold text-sg-ink">
-                      智能拼豆板可加租
+                      智能板可加租
                     </div>
                     {smartBoardSubtext && (
                       <div className="sg-small">

@@ -1134,7 +1134,7 @@ async function modifyBookingEquipmentCore(req, res, { actor }) {
     });
 
     res.json({
-      message: '智能拼豆板配置已更新',
+      message: '智能板配置已更新',
       total_amount: newGrandTotal,
       equipments: newEquipmentRecords
     });
@@ -1144,7 +1144,7 @@ async function modifyBookingEquipmentCore(req, res, { actor }) {
     if (error.message && error.message.startsWith('EQUIPMENT_WINDOW_INVALID:')) {
       return res.status(400).json({ error: error.message.replace('EQUIPMENT_WINDOW_INVALID:', '') });
     }
-    res.status(500).json({ error: '更新智能拼豆板失敗' });
+    res.status(500).json({ error: '更新智能板失敗' });
   }
 }
 

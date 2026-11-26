@@ -312,7 +312,7 @@ export const sendBookingConfirmationNotification = async (reservation, user) => 
   ];
 
   if (reservation.equipment_summary) {
-    infoRows.push({ label: '智能拼豆板', value: reservation.equipment_summary });
+    infoRows.push({ label: '智能板', value: reservation.equipment_summary });
   }
 
   if (reservation.total_amount != null) {
@@ -621,7 +621,7 @@ export const sendSelfServiceFirstCheckinNotification = async (info, user) => {
   const flexMessage = buildBrandFlexMessage({
     title: '報到成功',
     subtitle: `今天可使用到 ${info.until || ''}`,
-    bodyText: `${info.iron_text || '店員會在今天下午到店協助熨燙'}。作品完成後請放在熨燙區的托盤上。`,
+    bodyText: `${info.iron_text || '店員會在今天下午到店協助熨燙'}。作品完成後請放在燙豆區的托盤上。`,
     infoRows,
     buttonLabel: '查看我的預約',
     buttonUrl: `${frontendUrl}/history?tab=bookings`,

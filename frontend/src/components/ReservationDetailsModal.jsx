@@ -750,7 +750,7 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
           <div className="mb-8 bg-[#FAF7F2] border border-[#E8DEC8] rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2.5">
               <h3 className="text-sm font-bold text-[#8B5B43] flex items-center gap-1.5 whitespace-nowrap">
-                智能拼豆板租賃明細
+                智能板租賃明細
               </h3>
               {!readOnly && reservation.status !== 'cancelled' && (
                 <button
@@ -801,7 +801,7 @@ export default function ReservationDetailsModal({ bookingRef, reservation: reser
               </div>
             ) : (
               <div className="flex items-center justify-between bg-white/80 px-3.5 py-2.5 rounded-xl border border-dashed border-[#DED7CE] text-xs sm:text-sm text-gray-600">
-                <span>此訂單尚未租賃智能拼豆板（全員使用免費基本拼豆板）</span>
+                <span>此訂單尚未租賃智能板（全員使用免費基本拼豆板）</span>
                 {!readOnly && reservation.status !== 'cancelled' && (
                   <button
                     type="button"

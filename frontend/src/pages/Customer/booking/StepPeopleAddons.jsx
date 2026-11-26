@@ -387,7 +387,7 @@ export default function StepPeopleAddons({
       {sortedEquipmentConfigs.length > 0 ? (
         <Card gap={12}>
           <div>
-            <div className="text-[15px] font-bold">智能拼豆板（選租）</div>
+            <div className="text-[15px] font-bold">智能板（選租）</div>
             <div className="sg-small">
               {allowExceedPax
                 ? '只有需要的人租就好，可以分段租不同尺寸'
@@ -516,7 +516,7 @@ export default function StepPeopleAddons({
         </Card>
       ) : daily?.is_self_service ? (
         <Card data-testid="self-no-equipment-notice" gap={4}>
-          <div className="text-[15px] font-bold">智能拼豆板（選租）</div>
+          <div className="text-[15px] font-bold">智能板（選租）</div>
           <div className="sg-small text-sg-muted">半自助時段這天不提供智能板租借</div>
         </Card>
       ) : null}

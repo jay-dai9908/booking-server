@@ -31,6 +31,7 @@ import {
 } from '../../../utils/customer/availability';
 import { tapSlot, buildUnlimitedOptions, transitionMode } from '../../../utils/customer/selection';
 import { formatDateShort, formatMoney, formatTimeRange } from '../../../utils/customer/format';
+import { taipeiToday } from '../../../utils/customer/taipeiTime';
 
 export default function StepSelectTime({
   date,
@@ -95,14 +96,8 @@ export default function StepSelectTime({
     }
   }, [allowUnlimited, isSelfService, allowHourly, mode, onChangeMode, onChangeSel, toast]);
 
-  // Today string
-  const todayStr = useMemo(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }, []);
+  // Today string (Taipei timezone)
+  const todayStr = useMemo(() => taipeiToday(), []);
 
   const isSelectedDateToday = date === todayStr;
 
