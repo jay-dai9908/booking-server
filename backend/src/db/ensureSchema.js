@@ -243,6 +243,7 @@ export async function ensureDatabaseSchema(prismaClient = defaultPrisma) {
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_enable_shipping" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "shop_shipping_fee" INTEGER NOT NULL DEFAULT 60`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "official_line_url" TEXT DEFAULT 'https://lin.ee/vsZhRW5'`,
+    `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "store_phone" TEXT`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "bead_colors_json" JSONB`,
     `ALTER TABLE "GlobalSetting" ADD COLUMN IF NOT EXISTS "print_enabled" BOOLEAN NOT NULL DEFAULT true`,
 

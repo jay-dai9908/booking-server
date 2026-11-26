@@ -186,6 +186,7 @@ model GlobalSetting {
   shop_enable_shipping        Boolean  @default(false)
   shop_shipping_fee           Int      @default(60)
   official_line_url           String?  @default("https://lin.ee/vsZhRW5")
+  store_phone                 String?
   bead_colors_json            Json?
   business_hours_json         Json?
 

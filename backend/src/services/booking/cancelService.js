@@ -40,6 +40,7 @@ export async function cancelBooking(
     reason = null,
     isAdmin = actor === 'admin',
     confirmPaidCancel = false,
+    confirmNoTransfer = false,
     suppressAutoNotify = false
   }
 ) {
@@ -74,6 +75,22 @@ export async function cancelBooking(
 
   if (!isAdmin && lockedPrepay && lockedPrepay.status !== 'pending_payment' && !isSelfCustomerAllPassVerified) {
     return { errorStatus: 400, errorBody: { error: '這筆預約已經付款或正在對帳，如需取消請用 LINE 聯絡我們' } };
+  }
+
+  if (
+    !isAdmin &&
+    lockedPrepay &&
+    lockedPrepay.status === 'pending_payment' &&
+    lockedPrepay.assigned_pool_account &&
+    !confirmNoTransfer
+  ) {
+    return {
+      errorStatus: 409,
+      errorBody: {
+        code: 'CONFIRM_NO_TRANSFER',
+        error: '這筆有專屬匯款帳號，請確認還沒有匯款再取消'
+      }
+    };
   }
 
   const isCollected =

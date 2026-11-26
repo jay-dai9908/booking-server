@@ -29,6 +29,7 @@ export const GLOBAL_SETTING_FIELD_GROUPS = {
     'show_line_button',
     'line_button_url',
     'official_line_url',
+    'store_phone',
     'line_messaging_token',
     'line_auto_notify_booking',
     'line_auto_notify_cancel',

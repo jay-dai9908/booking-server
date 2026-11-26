@@ -70,6 +70,7 @@ export default function SettingsPage() {
   const [showLineButton, setShowLineButton] = useState(true);
   const [showShopButton, setShowShopButton] = useState(true);
   const [lineButtonUrl, setLineButtonUrl] = useState(DEFAULT_LINE_URL);
+  const [storePhone, setStorePhone] = useState('');
   const [guestLineHintText, setGuestLineHintText] = useState(DEFAULT_GUEST_LINE_HINT_TEXT);
   const [bookingNoteChips, setBookingNoteChips] = useState(DEFAULT_BOOKING_NOTE_CHIPS);
   const [draggedChipIdx, setDraggedChipIdx] = useState(null);
@@ -186,7 +187,11 @@ export default function SettingsPage() {
       setPriceNoticeText(d.price_notice_text ?? DEFAULT_PRICE_NOTICE_TEXT);
       setShowLineButton(d.show_line_button !== false);
       setShowShopButton(d.show_shop_button !== false && d.shop_enabled !== false);
-      setLineButtonUrl(d.official_line_url || d.line_button_url || DEFAULT_LINE_URL);
+      const nextLineUrl = d.official_line_url !== undefined || d.line_button_url !== undefined
+        ? (d.official_line_url || d.line_button_url || '')
+        : DEFAULT_LINE_URL;
+      setLineButtonUrl(nextLineUrl);
+      setStorePhone(d.store_phone ?? '');
       setGuestLineHintText(d.guest_line_hint_text ?? DEFAULT_GUEST_LINE_HINT_TEXT);
       if (Array.isArray(d.booking_note_chips) && d.booking_note_chips.length > 0) {
         setBookingNoteChips(d.booking_note_chips);
@@ -276,7 +281,9 @@ export default function SettingsPage() {
       const nextFooterText = d.receipt_footer_text ?? '';
       setReceiptFooterText(nextFooterText);
 
-      const loadedLineUrl = d.official_line_url || d.line_button_url || DEFAULT_LINE_URL;
+      const loadedLineUrl = d.official_line_url !== undefined || d.line_button_url !== undefined
+        ? (d.official_line_url || d.line_button_url || '')
+        : DEFAULT_LINE_URL;
       const loadedBusinessHours = d.business_hours_json
         ? {
             weekday: {
@@ -313,6 +320,7 @@ export default function SettingsPage() {
         show_shop_button: d.show_shop_button !== false && d.shop_enabled !== false,
         line_button_url: loadedLineUrl,
         official_line_url: loadedLineUrl,
+        store_phone: d.store_phone ?? '',
         guest_line_hint_text: d.guest_line_hint_text ?? DEFAULT_GUEST_LINE_HINT_TEXT,
         booking_note_chips: loadedChips,
         weekday_hourly_price: d.weekday_hourly_price ?? 100,
@@ -369,6 +377,7 @@ export default function SettingsPage() {
           show_shop_button: showShopButton,
           line_button_url: lineButtonUrl,
           official_line_url: lineButtonUrl,
+          store_phone: storePhone,
           guest_line_hint_text: guestLineHintText,
           booking_note_chips: bookingNoteChips.map(s => String(s || '').trim()).filter(Boolean).map(s => s.slice(0, 12)).slice(0, 8),
           weekday_hourly_price: toNumericOrRaw(weekdayHourly),
@@ -829,6 +838,17 @@ export default function SettingsPage() {
                   value={lineButtonUrl}
                   onChange={e => setLineButtonUrl(e.target.value)}
                   placeholder="https://lin.ee/..."
+                  className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-[#3E332B] mb-1.5">店家電話</label>
+                <input
+                  type="text"
+                  data-testid="settings-store-phone-input"
+                  value={storePhone}
+                  onChange={e => setStorePhone(e.target.value)}
+                  placeholder="02-XXXX-XXXX"
                   className="w-full px-3 py-2 text-xs bg-white border border-[#E8DEC8] rounded-xl focus:border-[#8B5B43] focus:outline-none"
                 />
               </div>

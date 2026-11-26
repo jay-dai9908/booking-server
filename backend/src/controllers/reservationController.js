@@ -1598,6 +1598,7 @@ async function cancelReservationCore(req, res, { actor }) {
   const booking_ref = isAdmin ? req.params.booking_ref : req.params.id;
   const userId = req.user?.id;
   const confirmPaidCancel = isAdmin ? Boolean(req.body?.confirmPaidCancel || req.query?.confirmPaidCancel === 'true') : false;
+  const confirmNoTransfer = Boolean(req.body?.confirm_no_transfer);
   const operatorName = isAdmin ? (req.user?.name || '管理員') : 'customer';
 
   try {
@@ -1609,6 +1610,7 @@ async function cancelReservationCore(req, res, { actor }) {
         operatorName,
         isAdmin,
         confirmPaidCancel,
+        confirmNoTransfer,
         suppressAutoNotify: false
       })
     );

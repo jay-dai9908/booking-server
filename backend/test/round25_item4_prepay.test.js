@@ -426,12 +426,12 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
       });
     }
 
-    // Cancel Case 2 (pending_payment) -> releases pool account back to AVAILABLE
+    // Cancel Case 2 (pending_payment with assigned_pool_account) -> requires confirm_no_transfer: true (R48-4) and releases pool account back to AVAILABLE
     {
       const prepayBefore = await prisma.bookingPrepay.findUnique({ where: { booking_ref: allTransferRef } });
       const poolAcc = prepayBefore.assigned_pool_account;
       const r = createMockRes();
-      await cancelReservation(makeReq(testUser, { params: { id: allTransferRef } }), r);
+      await cancelReservation(makeReq(testUser, { params: { id: allTransferRef }, body: { confirm_no_transfer: true } }), r);
       assert.equal(r.statusCode, 200, JSON.stringify(r.body));
 
       const poolRow = await prisma.oneTimeAccountPool.findFirst({ where: { account_number: poolAcc } });

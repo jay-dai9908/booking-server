@@ -27,6 +27,7 @@ import EquipmentAddonSheet from '../../components/customer/sheets/EquipmentAddon
 import ConfirmSheet from '../../components/customer/sheets/ConfirmSheet';
 import PrepayTransferCard from '../../components/customer/PrepayTransferCard';
 import EntryPassCard from '../../components/customer/EntryPassCard';
+import StoreContactCard from '../../components/customer/StoreContactCard';
 import { useToast } from '../../components/customer/Toast';
 import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
 import { useCustomerProfile } from '../../hooks/customer/useCustomerProfile';
@@ -180,10 +181,6 @@ export default function HistoryPage() {
   const { settings: globalSettings } = useGlobalSettings();
   const { user } = useCustomerProfile();
   const safeOfficialLineUrl = safeHttpUrl(globalSettings?.official_line_url);
-  const safeMismatchLineUrl =
-    safeHttpUrl(globalSettings?.line_button_url) ||
-    safeOfficialLineUrl ||
-    'https://lin.ee/vsZhRW5';
 
   const noteChips = useMemo(() => {
     if (Array.isArray(globalSettings?.booking_note_chips) && globalSettings.booking_note_chips.length > 0) {
@@ -203,6 +200,7 @@ export default function HistoryPage() {
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showPoolCancelConfirm, setShowPoolCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [editingPrepayLast5, setEditingPrepayLast5] = useState({});
 
@@ -421,13 +419,27 @@ export default function HistoryPage() {
   };
 
   // Cancel Reservation
-  const handleCancelBooking = async () => {
+  const handleCancelBooking = async ({ confirmNoTransfer = false } = {}) => {
     if (!currentDetailRes) return;
+    const needsPoolWarning =
+      currentDetailRes.is_self_service &&
+      currentDetailRes.prepay?.status === 'pending_payment' &&
+      Boolean(currentDetailRes.prepay?.assigned_pool_account);
+
+    if (needsPoolWarning && !confirmNoTransfer) {
+      setShowCancelConfirm(false);
+      setShowPoolCancelConfirm(true);
+      return;
+    }
+
     setCancelling(true);
     try {
-      await api.delete(`/reservations/${currentDetailRes.booking_ref}`);
+      await api.delete(`/reservations/${currentDetailRes.booking_ref}`, {
+        data: confirmNoTransfer ? { confirm_no_transfer: true } : undefined,
+      });
       toast.show('已取消預約', { type: 'success' });
       setShowCancelConfirm(false);
+      setShowPoolCancelConfirm(false);
       fetchReservations();
       navigate('/history?tab=bookings', { replace: true });
     } catch (err) {
@@ -552,6 +564,15 @@ export default function HistoryPage() {
           {/* 1b. Self-service prepay state */}
           {r.is_self_service && r.status !== 'cancelled' && r.prepay && (
             <>
+              {isTodayReservation(r) &&
+                (r.prepay.status === 'reported_pending_verify' || r.prepay.status === 'mismatch') && (
+                  <StoreContactCard
+                    urgent
+                    title="今天還沒完成對帳，報到機不會開門"
+                    message="請先用 LINE 或電話聯絡我們"
+                    globalSettings={globalSettings}
+                  />
+                )}
               {r.prepay.status === 'pending_payment' && (
                 <PrepayTransferCard reservation={r} onReported={fetchReservations} />
               )}
@@ -592,15 +613,13 @@ export default function HistoryPage() {
               {r.prepay.status === 'mismatch' && (
                 <div className="grid gap-2" data-testid="history-prepay-mismatch">
                   <PrepayTransferCard mode="edit" reservation={r} onReported={fetchReservations} />
-                  <a
-                    href={safeMismatchLineUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 rounded-[12px] bg-[#06C755] text-white font-bold text-[14px] py-2.5 px-4"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    透過 LINE 聯絡我們
-                  </a>
+                  {!isTodayReservation(r) && (
+                    <StoreContactCard
+                      title="匯款金額和預約金額不同"
+                      message="請用 LINE 或電話聯絡我們確認"
+                      globalSettings={globalSettings}
+                    />
+                  )}
                 </div>
               )}
               {r.prepay.status === 'verified' && (
@@ -761,12 +780,30 @@ export default function HistoryPage() {
         <ConfirmSheet
           isOpen={showCancelConfirm}
           onClose={() => setShowCancelConfirm(false)}
-          onConfirm={handleCancelBooking}
+          onConfirm={() => handleCancelBooking()}
           loading={cancelling}
           title="確定取消這筆預約？"
           summary={cancelSummary}
-          description="取消後名額會釋出，需要的話請重新預約。"
+          description={
+            r.is_self_service && r.prepay?.status === 'pending_payment'
+              ? '如果已經匯款，請先回報末五碼，不要取消；取消後匯款會對不到預約。'
+              : '取消後名額會釋出，需要的話請重新預約。'
+          }
           confirmText="確定取消"
+          cancelText="先不要"
+          confirmVariant="danger"
+        />
+
+        {/* Second Cancel Confirm Sheet when pending_payment has an assigned pool account */}
+        <ConfirmSheet
+          isOpen={showPoolCancelConfirm}
+          onClose={() => setShowPoolCancelConfirm(false)}
+          onConfirm={() => handleCancelBooking({ confirmNoTransfer: true })}
+          loading={cancelling}
+          title="確定還沒有匯款？"
+          summary={cancelSummary}
+          description={`這筆有專屬匯款帳號（末五碼 ${String(r.prepay?.assigned_pool_account || '').slice(-5)}）。取消後帳號會收回，之後匯進來的錢無法自動對帳。確定還沒有匯款？`}
+          confirmText="我確定還沒匯款"
           cancelText="先不要"
           confirmVariant="danger"
         />
@@ -967,6 +1004,14 @@ export default function HistoryPage() {
                       {/* Self-service for today: EntryPassCard */}
                       {r.is_self_service && isTodayReservation(r) && r.status !== 'cancelled' ? (
                         <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
+                          {(r.prepay?.status === 'reported_pending_verify' || r.prepay?.status === 'mismatch') && (
+                            <StoreContactCard
+                              urgent
+                              title="今天還沒完成對帳，報到機不會開門"
+                              message="請先用 LINE 或電話聯絡我們"
+                              globalSettings={globalSettings}
+                            />
+                          )}
                           {r.prepay?.status === 'pending_payment' && (
                             <PrepayTransferCard reservation={r} onReported={fetchReservations} />
                           )}
@@ -1009,15 +1054,6 @@ export default function HistoryPage() {
                               className="grid gap-2"
                             >
                               <PrepayTransferCard mode="edit" reservation={r} onReported={fetchReservations} />
-                              <a
-                                href={safeMismatchLineUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#06C755] text-white font-bold text-[13px] py-2 px-3"
-                              >
-                                <MessageCircle className="w-4 h-4" />
-                                透過 LINE 聯絡我們
-                              </a>
                             </div>
                           )}
                           {(r.prepay?.status === 'verified' || r.billing_status === 'paid' || r.billing_status === 'waived') && (
@@ -1076,15 +1112,11 @@ export default function HistoryPage() {
                                   className="grid gap-2"
                                 >
                                   <PrepayTransferCard mode="edit" reservation={r} onReported={fetchReservations} />
-                                  <a
-                                    href={safeMismatchLineUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#06C755] text-white font-bold text-[13px] py-2 px-3"
-                                  >
-                                    <MessageCircle className="w-4 h-4" />
-                                    透過 LINE 聯絡我們
-                                  </a>
+                                  <StoreContactCard
+                                    title="匯款金額和預約金額不同"
+                                    message="請用 LINE 或電話聯絡我們確認"
+                                    globalSettings={globalSettings}
+                                  />
                                 </div>
                               )}
                               {r.prepay.status === 'verified' && (

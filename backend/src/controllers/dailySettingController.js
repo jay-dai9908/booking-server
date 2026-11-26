@@ -1009,7 +1009,8 @@ export const getGlobalSetting = async (req, res) => {
       cash_float_amount: setting.cash_float_amount ?? 2000,
       auto_print_receipt: setting.auto_print_receipt ?? true,
       auto_print_summary: setting.auto_print_summary ?? true,
-      receipt_footer_text: setting.receipt_footer_text ?? null
+      receipt_footer_text: setting.receipt_footer_text ?? null,
+      store_phone: setting.store_phone ?? null
     };
 
     res.json(safeSetting);
@@ -1131,6 +1132,7 @@ function getEffectiveOldSetting(oldSetting) {
     show_line_button: oldSetting?.show_line_button ?? true,
     line_button_url: lineButtonUrl,
     official_line_url: oldSetting?.official_line_url ?? lineButtonUrl,
+    store_phone: oldSetting?.store_phone ?? null,
     require_line_login_every_time: oldSetting?.require_line_login_every_time ?? false,
     enable_preview_page: oldSetting?.enable_preview_page ?? true,
     preview_disabled_text: oldSetting?.preview_disabled_text ?? '系統維護中，請點擊下方按鈕使用 LINE 進行預約',
@@ -1199,6 +1201,11 @@ function didGlobalSettingFieldChange(field, incoming, oldSetting, effectiveOld) 
     const normalizedOld = effectiveOld[field] === null ? null : String(effectiveOld[field]).trim();
     return normalizedIn !== normalizedOld;
   }
+  if (field === 'store_phone') {
+    const normalizedIn = typeof incoming === 'string' ? (incoming.trim() || null) : (incoming === null ? null : String(incoming).trim());
+    const normalizedOld = effectiveOld.store_phone ?? null;
+    return normalizedIn !== normalizedOld;
+  }
   if (field === 'guest_line_hint_text') {
     const normalizedIn = typeof incoming === 'string' ? incoming.trim() : null;
     const normalizedOld = typeof effectiveOld.guest_line_hint_text === 'string'
@@ -1248,6 +1255,7 @@ export const updateGlobalSetting = async (req, res) => {
     show_line_button,
     line_button_url,
     official_line_url,
+    store_phone,
     require_line_login_every_time,
     enable_preview_page,
     preview_disabled_text,
@@ -1458,6 +1466,19 @@ export const updateGlobalSetting = async (req, res) => {
       dataToUpdate.line_button_url = cleanBtnUrl;
       if (dataToUpdate.official_line_url === undefined) {
         dataToUpdate.official_line_url = cleanBtnUrl;
+      }
+    }
+    if (store_phone !== undefined) {
+      if (store_phone === null) {
+        dataToUpdate.store_phone = null;
+      } else if (typeof store_phone !== 'string') {
+        return res.status(422).json({ field: 'store_phone', error: '店家電話必須為字串' });
+      } else {
+        const trimmed = store_phone.trim();
+        if (trimmed.length > 30) {
+          return res.status(422).json({ field: 'store_phone', error: '店家電話不可超過 30 字' });
+        }
+        dataToUpdate.store_phone = trimmed || null;
       }
     }
 
