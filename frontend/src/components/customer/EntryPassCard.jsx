@@ -39,8 +39,9 @@ function SelfServiceReminderList({ ironText, earlyMinutes = 30 }) {
       <div className="font-bold text-sg-ink text-[13px] mb-0.5">半自助時段提醒</div>
       <div>• <b>對象：</b>僅限已經會玩拼豆的朋友</div>
       <div>• <b>教學：</b>當天部分時段沒有店員，無法現場教學</div>
-      <div>• <b>熨燙：</b>{ironText || '店員會在今天下午到店協助熨燙'}。完成後請放在熨燙區托盤上</div>
+      <div>• <b>燙豆區／取豆：</b>{ironText || '店員會在今天下午到店協助熨燙'}。完成後請放在燙豆區托盤上</div>
       <div>• <b>進場：</b>當天在「我的預約」打開進場 QR，或輸入手機號碼，在門口報到機報到；最早可提前 {earlyMinutes ?? 30} 分鐘進場</div>
+      <div>• <b>同行進門：</b>同行的人分開到時，請用預約人的手機號碼在報到機報到。</div>
     </div>
   );
 }
@@ -239,12 +240,12 @@ export default function EntryPassCard({
 
   if (!entryData) return null;
 
-  const phoneDisplay = formatPhone(
-    customerPhone || reservation?.customer_phone || reservation?.user?.phone || '0912-345-678' // check-secrets: fake-data
-  );
+  const rawPhone = customerPhone || reservation?.customer_phone || reservation?.user?.phone || '';
+  const phoneDisplay = rawPhone ? formatPhone(rawPhone) : '';
 
   // 狀態渲染
   if (entryData.state === 'confirmed') {
+    const earlyMins = entryData.early_minutes ?? 30;
     return (
       <div
         data-testid={`entry-pass-confirmed-${bookingRef}`}
@@ -255,24 +256,25 @@ export default function EntryPassCard({
         </div>
         <div>
           <div className="text-[20px] font-bold font-num text-sg-ink">
-            當天 {entryData.open_at || '12:30'} 起可進場
+            當天 {entryData.open_at || '—'} 起可進場
           </div>
           <div className="text-[13px] text-sg-muted mt-1 leading-relaxed">
-            預約 {entryData.start || reservation?.start_time} 開始，最早可提前 30 分鐘。進場條碼到時候會出現在這裡。
+            預約 {entryData.start || reservation?.start_time} 開始，最早可提前 {earlyMins} 分鐘。進場 QR 到時候會出現在這裡。
           </div>
         </div>
-        <SelfServiceReminderList ironText={entryData.iron_text} />
+        <SelfServiceReminderList ironText={entryData.iron_text} earlyMinutes={earlyMins} />
       </div>
     );
   }
 
   if (entryData.state === 'open') {
+    const earlyMins = entryData.early_minutes ?? 30;
     return (
       <div
         data-testid={`entry-pass-open-${bookingRef}`}
         className="rounded-[16px] border border-sg-line bg-white p-5 grid gap-3.5 text-center justify-items-center text-sg-ink shadow-sm"
       >
-        <div className="text-[18px] font-bold tracking-wide text-sg-ink">進場條碼</div>
+        <div className="text-[18px] font-bold tracking-wide text-sg-ink">進場 QR</div>
 
         <div className="p-2.5 bg-white rounded-[14px] border border-sg-line shadow-inner flex flex-col items-center">
           <canvas
@@ -290,15 +292,17 @@ export default function EntryPassCard({
         </div>
 
         <div className="text-[13px] text-sg-muted leading-relaxed max-w-[320px]">
-          把條碼對準門口報到機下方的掃碼口。條碼每 5 分鐘換一組，截圖會失效。
+          把進場 QR 對準門口報到機下方的掃碼口。QR 每 5 分鐘換一組，截圖會失效。
         </div>
 
-        <div className="text-[12.5px] text-sg-muted">
-          沒辦法掃碼？在報到機按「電話報到」，輸入{' '}
-          <span className="font-num font-bold text-sg-ink">{phoneDisplay}</span>
-        </div>
+        {phoneDisplay && (
+          <div className="text-[12.5px] text-sg-muted">
+            沒辦法掃碼？在報到機按「電話報到」，輸入{' '}
+            <span className="font-num font-bold text-sg-ink">{phoneDisplay}</span>
+          </div>
+        )}
 
-        <SelfServiceReminderList ironText={entryData.iron_text} />
+        <SelfServiceReminderList ironText={entryData.iron_text} earlyMinutes={earlyMins} />
       </div>
     );
   }
@@ -363,14 +367,17 @@ export default function EntryPassCard({
           <div className="flex items-baseline gap-2">
             <span className="text-sg-muted">今天可使用到</span>
             <span className="font-num font-bold text-[18px] text-sg-ink">
-              {entryData.until || '21:00'}
+              {entryData.until || '—'}
             </span>
           </div>
           <div className="text-[12.5px] text-sg-muted leading-relaxed">
-            <b>進出：</b>期間憑條碼或電話可自由進出
+            <b>進出：</b>期間憑進場 QR{phoneDisplay ? ' 或電話' : ''}可自由進出
           </div>
           <div className="text-[12.5px] text-sg-muted leading-relaxed">
-            <b>熨燙：</b>{entryData.iron_text || '店員會在今天下午到店協助熨燙'}。完成後請放在熨燙區的托盤上
+            <b>同行進門：</b>同行的人分開到時，請用預約人的手機號碼在報到機報到。
+          </div>
+          <div className="text-[12.5px] text-sg-muted leading-relaxed">
+            <b>熨燙：</b>{entryData.iron_text || '店員會在今天下午到店協助熨燙'}。完成後請放在燙豆區的托盤上
           </div>
           {Array.isArray(entryData.boards) && entryData.boards.length > 0 && (
             <div className="text-[12.5px] text-sg-muted">
@@ -384,7 +391,7 @@ export default function EntryPassCard({
 
         {showQr && (
           <div className="pt-3 border-t border-sg-sage/40 grid gap-3 text-center justify-items-center">
-            <div className="text-[14px] font-bold text-sg-ink">再次進門的條碼</div>
+            <div className="text-[14px] font-bold text-sg-ink">再次進門的 QR</div>
             <div className="p-2.5 bg-white rounded-[14px] border border-sg-line flex flex-col items-center">
               <canvas
                 ref={canvasRef}
@@ -395,9 +402,11 @@ export default function EntryPassCard({
             <div className="text-[12px] font-num text-sg-muted">
               <span className="font-bold text-sg-brown">{formatCountdown(countdownSec)}</span> 後自動更新
             </div>
-            <div className="text-[12px] text-sg-muted">
-              在報到機也可以用電話報到：{phoneDisplay}
-            </div>
+            {phoneDisplay && (
+              <div className="text-[12px] text-sg-muted">
+                在報到機也可以用電話報到：{phoneDisplay}
+              </div>
+            )}
           </div>
         )}
 

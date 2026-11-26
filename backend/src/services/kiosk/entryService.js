@@ -78,9 +78,9 @@ export async function getReservationEntryPass(db = prisma, {
 
   const until = allDaySessions.length > 0
     ? allDaySessions.reduce((mx, s) => (s.end_time > mx ? s.end_time : mx), '')
-    : '21:00';
-  const untilDt = new Date(`${sessionDateStr}T${until}:00+08:00`);
-  const closeWindowEndDt = new Date(untilDt.getTime() + afterCloseMinutes * 60000);
+    : null;
+  const untilDt = until ? new Date(`${sessionDateStr}T${until}:00+08:00`) : null;
+  const closeWindowEndDt = untilDt ? new Date(untilDt.getTime() + afterCloseMinutes * 60000) : null;
 
   const isCancelled = rows.every((r) => r.status === 'cancelled');
   const cleared = isBookingClearedForEntry(firstRes, prepay);
@@ -102,7 +102,7 @@ export async function getReservationEntryPass(db = prisma, {
     }
   } else {
     // 已付清
-    if (now > closeWindowEndDt) {
+    if (closeWindowEndDt && now > closeWindowEndDt) {
       state = 'ended';
     } else if (firstRes.checked_in_at) {
       state = 'in';
@@ -158,6 +158,7 @@ export async function getReservationEntryPass(db = prisma, {
     start,
     open_at: openAt,
     until,
+    early_minutes: earlyMinutes,
     first_checkin_at: firstRes.checked_in_at ? firstRes.checked_in_at.toISOString() : null,
     seats: activeSeats,
     zone: zone || '',
