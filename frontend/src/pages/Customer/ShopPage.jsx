@@ -82,6 +82,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
   // Products and config state
   const [products, setProducts] = useState([]);
   const [paymentConfig, setPaymentConfig] = useState(null);
+  const [paymentLoadError, setPaymentLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Cart draft state
@@ -125,6 +126,56 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
     } catch (e) {}
   }, [cart, beadColorSelections, wishNote, customerNote]);
 
+  const applyPaymentConfig = (data) => {
+    setPaymentConfig(data);
+    setPaymentLoadError(false);
+    const methods = data?.payment_methods || [];
+    const getAvailCount = (m) => {
+      if (m.method_type !== 'POOL_ACCOUNT') return 1;
+      if (data?.pool_available_counts && typeof data.pool_available_counts[m.code] === 'number') {
+        return data.pool_available_counts[m.code];
+      }
+      return m.code === 'ctbc_pool' ? (data?.ctbc_pool_available_count ?? 0) : 0;
+    };
+    const availableMethods = methods.filter((m) => getAvailCount(m) > 0);
+    const currentValid = availableMethods.find((m) => m.code === selectedPaymentCode);
+    const defaultMethod = currentValid || availableMethods[0] || methods[0];
+    if (defaultMethod) {
+      setSelectedPaymentCode(defaultMethod.code);
+      const rawAccounts = defaultMethod.bank_accounts_json;
+      const bankAccounts = Array.isArray(rawAccounts)
+        ? rawAccounts
+        : typeof rawAccounts === 'string'
+        ? JSON.parse(rawAccounts || '[]')
+        : [];
+      if (bankAccounts.length > 0) {
+        const b = bankAccounts[0];
+        setSelectedBankInfo(`${b.bank_name} (${b.bank_code}) ${b.account}`);
+      } else {
+        setSelectedBankInfo('');
+      }
+    } else {
+      setSelectedPaymentCode('');
+      setSelectedBankInfo('');
+    }
+  };
+
+  const fetchPaymentMethods = async () => {
+    try {
+      const payRes = await api.get('/shop/payment-methods');
+      if (payRes.data) {
+        applyPaymentConfig(payRes.data);
+        return true;
+      }
+      setPaymentLoadError(true);
+      return false;
+    } catch (err) {
+      console.error('Failed to reload payment methods', err);
+      setPaymentLoadError(true);
+      return false;
+    }
+  };
+
   // Fetch products and payment methods
   const fetchShopData = async () => {
     try {
@@ -135,29 +186,9 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
       ]);
       setProducts(Array.isArray(prodRes.data) ? prodRes.data : []);
       if (payRes.data) {
-        setPaymentConfig(payRes.data);
-        const methods = payRes.data.payment_methods || [];
-        const isCtbcAvailable = (payRes.data.ctbc_pool_available_count || 0) > 0;
-        const availableMethods = methods.filter((m) => {
-          if (m.code === 'ctbc_pool') return isCtbcAvailable;
-          return true;
-        });
-        const defaultMethod = availableMethods[0] || methods[0];
-        if (defaultMethod) {
-          setSelectedPaymentCode(defaultMethod.code);
-          const rawAccounts = defaultMethod.bank_accounts_json;
-          const bankAccounts = Array.isArray(rawAccounts)
-            ? rawAccounts
-            : typeof rawAccounts === 'string'
-            ? JSON.parse(rawAccounts || '[]')
-            : [];
-          if (bankAccounts.length > 0) {
-            const b = bankAccounts[0];
-            setSelectedBankInfo(`${b.bank_name} (${b.bank_code}) ${b.account}`);
-          } else {
-            setSelectedBankInfo('');
-          }
-        }
+        applyPaymentConfig(payRes.data);
+      } else {
+        setPaymentLoadError(true);
       }
     } catch (err) {
       console.error('Failed to load shop data', err);
@@ -415,8 +446,12 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
       navigate(`${location.pathname}?view=done&order=${createdOrder.id || createdOrder.order_number}`, { replace: true });
     } catch (err) {
       console.error('Failed to submit order', err);
-      const msg = err.response?.data?.message || err.response?.data?.error || '送出失敗，請重試';
+      const errData = err.response?.data;
+      const msg = errData?.message || errData?.error || '送出失敗，請重試';
       toast.show(msg, { type: 'error' });
+      if (err.response?.status === 409 && errData?.code === 'NO_POOL_ACCOUNT') {
+        await fetchPaymentMethods();
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -474,8 +509,23 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
     const orderNumber = doneOrder?.order_number || doneOrder?.id || doneOrderId;
     const depositRequired = doneOrder?.deposit_required || 0;
     const deadlineStr = doneOrder?.payment_deadline ? formatDateShort(doneOrder.payment_deadline) : '';
-    const assignedAccount = doneOrder?.assigned_pool_account || doneOrder?.assigned_account || '9012 3456 7890 12';
-    const isTransfer = !(doneOrder?.payment_method === 'ONSITE' || doneOrder?.payment_method_code === 'onsite');
+    const paymentInfo = doneOrder?.payment_info || {
+      needs_payment: doneOrder?.payment_method_code !== 'onsite',
+      method_type: null,
+      bank_label: '',
+      account: doneOrder?.assigned_pool_account || doneOrder?.selected_bank_info || null,
+      payment_url: doneOrder?.assigned_pool_url || null,
+      instructions: null,
+      require_last5: doneOrder?.payment_method_code !== 'onsite',
+      account_missing: false,
+    };
+    const isTransfer = Boolean(paymentInfo.needs_payment);
+    const safeDonePaymentUrl = safeHttpUrl(paymentInfo.payment_url);
+    const safeShopLineUrl =
+      safeHttpUrl(globalSettings?.line_button_url) ||
+      safeOfficialLineUrl ||
+      safeHttpUrl(paymentConfig?.line_button_url) ||
+      safeHttpUrl(paymentConfig?.official_line_url);
 
     return (
       <CustomerLayout bare>
@@ -496,64 +546,102 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
             {isTransfer ? (
               <Card gap={8}>
                 <div className="text-[14px] font-bold text-sg-ink">
-                  {deadlineStr ? `請在 ${deadlineStr} 前匯款訂金` : '請盡快匯款訂金'}
+                  {deadlineStr ? `請在 ${deadlineStr} 前完成付款` : '請盡快完成付款'}
                 </div>
                 <div className="font-num font-extrabold text-[28px] leading-[1.1] text-sg-brown">
                   {formatMoneyBig(depositRequired)}
                 </div>
 
-                <div className="grid gap-[2px] rounded-[12px] bg-sg-bg px-3 py-[10px]">
-                  <div className="sg-small">中國信託 822 · 這筆訂單專用</div>
-                  <div className="flex justify-between items-center">
-                    <span className="font-num font-extrabold text-[16px] text-sg-ink">
-                      {assignedAccount}
-                    </span>
-                    <Button
-                      variant="text"
-                      size="sm"
-                      icon={<Copy className="w-4 h-4" />}
-                      onClick={() => handleCopyAccount(assignedAccount)}
-                      className="text-sg-brown font-bold"
-                    >
-                      複製
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Remittance report */}
-                {reportedSuccess ? (
-                  <div className="text-sg-sage-ink text-[12px] font-bold">
-                    已回報末五碼 {remittanceLast5Input || doneOrder?.remittance_last5}，店家確認後會更新狀態
+                {paymentInfo.account_missing ? (
+                  <div className="rounded-[12px] bg-sg-danger-soft border border-sg-danger/30 px-3 py-2.5 text-[13px] font-bold text-sg-danger grid gap-2">
+                    <div>這筆訂單還沒有收款帳號，請先不要匯款，傳 LINE 給我們</div>
+                    {safeShopLineUrl && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<MessageCircle className="w-4 h-4" />}
+                        onClick={() => window.open(safeShopLineUrl, '_blank', 'noopener,noreferrer')}
+                        className="w-full"
+                      >
+                        傳 LINE 給我們
+                      </Button>
+                    )}
                   </div>
                 ) : (
-                  <div className="flex gap-[6px]">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={5}
-                      value={remittanceLast5Input}
-                      onChange={(e) => setRemittanceLast5Input(e.target.value.replace(/\D/g, '').slice(0, 5))}
-                      placeholder="匯款後輸入帳號末五碼"
-                      className="flex-1 min-w-0 rounded-[10px] border-[1.5px] border-sg-line bg-sg-paper px-3 py-[6px] text-[16px] text-sg-ink placeholder:text-sg-full focus:border-sg-brown focus:outline-none"
-                    />
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      loading={reportingLast5}
-                      onClick={handleReportRemittance}
-                      className="min-h-[44px] px-4"
-                    >
-                      回報
-                    </Button>
-                  </div>
+                  <>
+                    {paymentInfo.account && (
+                      <div className="grid gap-[2px] rounded-[12px] bg-sg-bg px-3 py-[10px]">
+                        {paymentInfo.bank_label && (
+                          <div className="sg-small">{paymentInfo.bank_label}</div>
+                        )}
+                        <div className="flex justify-between items-center gap-2">
+                          <span className="font-num font-extrabold text-[16px] text-sg-ink break-all">
+                            {paymentInfo.account}
+                          </span>
+                          <Button
+                            variant="text"
+                            size="sm"
+                            icon={<Copy className="w-4 h-4" />}
+                            onClick={() => handleCopyAccount(paymentInfo.account)}
+                            className="text-sg-brown font-bold shrink-0"
+                          >
+                            複製
+                          </Button>
+                        </div>
+                        {safeDonePaymentUrl && (
+                          <a
+                            href={safeDonePaymentUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[12.5px] font-bold text-sg-brown underline mt-1"
+                          >
+                            開啟付款連結 →
+                          </a>
+                        )}
+                      </div>
+                    )}
+                    {paymentInfo.instructions && (
+                      <div className="rounded-[12px] bg-sg-bg px-3 py-[10px] text-[13px] text-sg-ink whitespace-pre-line">
+                        {paymentInfo.instructions}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Remittance report */}
+                {!paymentInfo.account_missing && paymentInfo.require_last5 && (
+                  reportedSuccess ? (
+                    <div className="text-sg-sage-ink text-[12px] font-bold">
+                      已回報末五碼 {remittanceLast5Input || doneOrder?.remittance_last5}，店家確認後會更新狀態
+                    </div>
+                  ) : (
+                    <div className="flex gap-[6px]">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={5}
+                        value={remittanceLast5Input}
+                        onChange={(e) => setRemittanceLast5Input(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                        placeholder="匯款後輸入帳號末五碼"
+                        className="flex-1 min-w-0 rounded-[10px] border-[1.5px] border-sg-line bg-sg-paper px-3 py-[6px] text-[16px] text-sg-ink placeholder:text-sg-full focus:border-sg-brown focus:outline-none"
+                      />
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        loading={reportingLast5}
+                        onClick={handleReportRemittance}
+                        className="min-h-[44px] px-4"
+                      >
+                        回報
+                      </Button>
+                    </div>
+                  )
                 )}
               </Card>
             ) : (
               <Card gap={8}>
-                <div className="text-[14px] font-bold text-sg-ink">
-                  {deadlineStr
-                    ? `請在 ${deadlineStr} 前到店付款，逾期訂單會自動取消`
-                    : '請在付款期限前到店付款，逾期訂單會自動取消'}
+                <div className="text-[15px] font-bold text-sg-ink">
+                  到店付款，不用先匯款
                 </div>
                 <div className="font-num font-extrabold text-[28px] leading-[1.1] text-sg-brown">
                   {formatMoneyBig(depositRequired)}
@@ -568,12 +656,12 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
 
           {/* 3. Fixed Bottom Area */}
           <div className="sticky bottom-0 z-40 bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))] grid gap-2">
-            {safeOfficialLineUrl && (
+            {isTransfer && !paymentInfo.account_missing && safeShopLineUrl && (
               <Button
                 variant="secondary"
                 size="sm"
                 icon={<MessageCircle className="w-4 h-4" />}
-                onClick={() => window.open(safeOfficialLineUrl, '_blank', 'noopener,noreferrer')}
+                onClick={() => window.open(safeShopLineUrl, '_blank', 'noopener,noreferrer')}
                 className="w-full"
               >
                 傳 LINE 給我們對帳
@@ -602,9 +690,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
       ? `總額 ${formatMoney(finalTotalAmount)} · 一次付清`
       : `總額 ${formatMoney(finalTotalAmount)} · 先付訂金`;
 
-    const paymentMethods = paymentConfig?.payment_methods || [
-      { code: 'ctbc_pool', name: '中信專屬轉帳帳號' },
-    ];
+    const paymentMethods = paymentConfig?.payment_methods || [];
 
     const isShippingOpen = paymentConfig?.enable_shipping;
 
@@ -623,7 +709,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
             price={finalDepositAmount}
             actionLabel="送出預購"
             loading={isSubmitting}
-            disabled={isSubmitting || totalItemsCount === 0}
+            disabled={isSubmitting || totalItemsCount === 0 || paymentLoadError || !selectedPaymentCode}
             onAction={handleSubmitOrder}
             hasTabBarBelow={false}
           />
@@ -736,10 +822,28 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
           {/* 3. Payment Method */}
           <div className="grid gap-[6px]">
             <div className="text-[14px] font-bold text-sg-ink">付款方式</div>
+            {paymentLoadError ? (
+              <div className="rounded-[14px] border border-sg-danger/40 bg-sg-danger-soft px-3.5 py-3 grid gap-2">
+                <div className="text-[13px] font-bold text-sg-danger">付款方式載入失敗</div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={fetchPaymentMethods}
+                  className="justify-self-start"
+                >
+                  重新整理
+                </Button>
+              </div>
+            ) : (
             <div className="grid gap-2">
               {paymentMethods.map((m) => {
-                const isPool = m.code === 'ctbc_pool';
-                const isPoolExhausted = isPool && paymentConfig?.ctbc_pool_available_count === 0;
+                const isPool = m.method_type === 'POOL_ACCOUNT';
+                const poolCount = isPool
+                  ? (paymentConfig?.pool_available_counts && typeof paymentConfig.pool_available_counts[m.code] === 'number'
+                      ? paymentConfig.pool_available_counts[m.code]
+                      : (m.code === 'ctbc_pool' ? paymentConfig?.ctbc_pool_available_count ?? 0 : 0))
+                  : null;
+                const isPoolExhausted = isPool && poolCount === 0;
                 const isSelected = selectedPaymentCode === m.code;
                 const rawAccounts = m.bank_accounts_json;
                 const bankAccounts = Array.isArray(rawAccounts)
@@ -775,12 +879,12 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                         }`}
                       />
                       <div className="flex-1 text-[13px] leading-[1.4]">
-                        <b>{isPool ? '中信專屬轉帳帳號' : m.name}</b>
+                        <b>{m.name}</b>
                         {isPool && (
                           <div className="sg-small">
                             {isPoolExhausted
                               ? '目前帳號已發完，請選其他方式'
-                              : '送出後給你一組中信專用轉帳帳號，對帳最快'}
+                              : '送出後給你一組專屬轉帳帳號，對帳最快'}
                           </div>
                         )}
                       </div>
@@ -826,6 +930,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
                 );
               })}
             </div>
+            )}
           </div>
 
           {/* 4. Wish note if bundle allows it */}

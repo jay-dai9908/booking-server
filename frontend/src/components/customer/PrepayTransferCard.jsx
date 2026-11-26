@@ -31,7 +31,7 @@ export default function PrepayTransferCard({ reservation, onReported }) {
   const safeAssignedPoolUrl = safeHttpUrl(prepay.assigned_pool_url);
 
   const bankLabel = prepay.assigned_pool_account
-    ? '822 中國信託（專屬帳號）'
+    ? (prepay.bank_label || '專屬帳號')
     : prepay.selected_bank_info
     ? String(prepay.selected_bank_info).split(/\s+/)[0]
     : prepay.payment_method_code || '銀行匯款';

@@ -68,14 +68,16 @@ export async function assignPoolAccount(
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )
-    RETURNING "id", "account_number", "payment_url";
+    RETURNING "id", "account_number", "payment_url", "bank_code", "bank_name";
   `;
 
   if (Array.isArray(allocated) && allocated.length > 0) {
     return {
       id: allocated[0].id,
       accountNumber: allocated[0].account_number,
-      paymentUrl: allocated[0].payment_url || null
+      paymentUrl: allocated[0].payment_url || null,
+      bankCode: allocated[0].bank_code || null,
+      bankName: allocated[0].bank_name || null
     };
   }
   return null;

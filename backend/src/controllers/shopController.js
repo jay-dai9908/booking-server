@@ -19,6 +19,7 @@ import { refundShopOrder } from '../services/shop/shopRefund.js';
 import { getNextDailySeq } from '../services/billing/billService.js';
 import { toTaipeiDateString } from '../../../shared/time.js';
 import { diffFields, maskBankAccountsForAudit } from '../services/audit/settingAudit.js';
+import { buildOrderPaymentInfo, formatMultiBankChoice } from '../services/shop/orderPaymentInfo.js';
 
 function normalizeBankAccountsForAudit(val) {
   if (typeof val === 'string') {
@@ -55,31 +56,35 @@ export const getPublicProducts = async (req, res) => {
  */
 export const getPublicPaymentMethods = async (req, res) => {
   try {
-    const methods = await prisma.paymentMethodConfig.findMany({
-      where: { is_enabled: true },
-      orderBy: [{ sort_order: 'asc' }, { id: 'asc' }]
-    });
+    const [methods, poolCountsRaw, globalSetting] = await Promise.all([
+      prisma.paymentMethodConfig.findMany({
+        where: { is_enabled: true },
+        orderBy: [{ sort_order: 'asc' }, { id: 'asc' }]
+      }),
+      prisma.oneTimeAccountPool.groupBy({
+        by: ['payment_method_code'],
+        where: { status: 'AVAILABLE' },
+        _count: { _all: true }
+      }),
+      prisma.globalSetting.findUnique({ where: { id: 1 } })
+    ]);
 
-    const ctbcPoolAvailableCount = await prisma.oneTimeAccountPool.count({
-      where: { payment_method_code: 'ctbc_pool', status: 'AVAILABLE' }
-    });
-
-    const globalSetting = await prisma.globalSetting.findUnique({
-      where: { id: 1 }
-    });
+    const countByCode = new Map(poolCountsRaw.map((row) => [row.payment_method_code, row._count._all]));
+    const pool_available_counts = {};
+    for (const m of methods) {
+      if (m.method_type === 'POOL_ACCOUNT') {
+        pool_available_counts[m.code] = countByCode.get(m.code) || 0;
+      }
+    }
+    const ctbcPoolAvailableCount = countByCode.get('ctbc_pool') || 0;
 
     res.json({
       payment_methods: methods,
+      pool_available_counts,
       ctbc_pool_available_count: ctbcPoolAvailableCount,
       deposit_deadline_days: globalSetting?.shop_deposit_deadline_days ?? 2,
-      official_line_url:
-        globalSetting?.official_line_url ||
-        globalSetting?.line_button_url ||
-        'https://lin.ee/vsZhRW5',
-      line_button_url:
-        globalSetting?.line_button_url ||
-        globalSetting?.official_line_url ||
-        'https://lin.ee/vsZhRW5',
+      official_line_url: safeHttpUrl(globalSetting?.official_line_url || globalSetting?.line_button_url, null),
+      line_button_url: safeHttpUrl(globalSetting?.line_button_url || globalSetting?.official_line_url, null),
       enable_shipping: !!globalSetting?.shop_enable_shipping,
       shipping_fee: globalSetting?.shop_shipping_fee ?? 60,
       default_arrival_note: globalSetting?.shop_default_arrival_note || '',
@@ -138,6 +143,34 @@ export const createProductOrder = async (req, res) => {
     });
     if (!paymentMethod || !paymentMethod.is_enabled) {
       return res.status(400).json({ error: '選擇的付款方式不存在或未啟用' });
+    }
+
+    let resolvedSelectedBankInfo = null;
+    if (paymentMethod.method_type === 'MULTI_BANK') {
+      const rawAccounts = paymentMethod.bank_accounts_json;
+      let bankAccounts = [];
+      if (Array.isArray(rawAccounts)) {
+        bankAccounts = rawAccounts;
+      } else if (typeof rawAccounts === 'string') {
+        try {
+          const parsed = JSON.parse(rawAccounts);
+          bankAccounts = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          bankAccounts = [];
+        }
+      }
+      if (bankAccounts.length === 0) {
+        return res.status(400).json({ code: 'NO_BANK_ACCOUNTS', error: '這個付款方式還沒設定帳號' });
+      }
+      const allowedChoices = bankAccounts.map((b) => formatMultiBankChoice(b).trim());
+      const cleanBankInfo = selected_bank_info ? String(selected_bank_info).trim() : '';
+      if (!cleanBankInfo && allowedChoices.length === 1) {
+        resolvedSelectedBankInfo = allowedChoices[0];
+      } else if (cleanBankInfo && allowedChoices.includes(cleanBankInfo)) {
+        resolvedSelectedBankInfo = cleanBankInfo;
+      } else {
+        return res.status(400).json({ code: 'INVALID_BANK_INFO', error: '請重新選擇匯款帳號' });
+      }
     }
 
     const productIds = items.map(i => parseInt(i.product_id, 10)).filter(Boolean);
@@ -246,6 +279,7 @@ export const createProductOrder = async (req, res) => {
     const taipeiDateCompact = toTaipeiDateString(now).replace(/-/g, '');
 
     // Execute in transaction
+    let allocatedPoolRow = null;
     const order = await prisma.$transaction(async (tx) => {
       // 台北日期流水號 PO-YYYYMMDD-NNNN（於交易內取得）
       const seq = await getNextDailySeq(tx, 'shop_order', now);
@@ -254,21 +288,31 @@ export const createProductOrder = async (req, res) => {
       let assignedPoolAccount = null;
       let assignedPoolUrl = null;
 
-      // 防洗單機制：若選擇社群收款 (ctbc_pool)，在交易內鎖定狀態下檢查顧客尚未完成付款且佔用虛擬帳號的筆數上限 (商城＋半自助預約合計最多 2 筆)
-      if (payment_method_code === 'ctbc_pool') {
+      // 防洗單機制：若選擇專屬帳號池 (POOL_ACCOUNT)，在交易內鎖定檢查上限並取帳號
+      if (paymentMethod.method_type === 'POOL_ACCOUNT') {
         const allocated = await assignPoolAccount(tx, {
           userId,
           orderRef,
-          paymentMethodCode: 'ctbc_pool',
+          paymentMethodCode: paymentMethod.code,
           maxHolds: 2,
           checkHoldLimit: true,
           holdLimitMessage: '您目前已有 2 筆待繳納訂金並佔用專屬收款帳號的訂單／預約，請先完成現有款項之匯款與回報，或聯繫門市人員協助！'
         });
 
-        if (allocated) {
-          assignedPoolAccount = allocated.accountNumber;
-          assignedPoolUrl = allocated.paymentUrl;
+        if (!allocated) {
+          const err = new Error('專屬收款帳號剛好發完了，請改選其他付款方式');
+          err.isBusinessError = true;
+          err.code = 'NO_POOL_ACCOUNT';
+          err.status = 409;
+          throw err;
         }
+        assignedPoolAccount = allocated.accountNumber;
+        assignedPoolUrl = allocated.paymentUrl;
+        allocatedPoolRow = {
+          bank_code: allocated.bankCode,
+          bank_name: allocated.bankName,
+          payment_url: allocated.paymentUrl
+        };
       }
 
       const cleanLast5 = remittance_last5 ? String(remittance_last5).trim() : null;
@@ -284,7 +328,7 @@ export const createProductOrder = async (req, res) => {
           paid_amount: 0,
           balance_amount: grandTotal,
           payment_method_code,
-          selected_bank_info,
+          selected_bank_info: resolvedSelectedBankInfo,
           assigned_pool_account: assignedPoolAccount,
           assigned_pool_url: assignedPoolUrl,
           remittance_last5: cleanLast5,
@@ -310,7 +354,14 @@ export const createProductOrder = async (req, res) => {
       return newOrder;
     });
 
-    const sanitizedOrder = { ...order };
+    const sanitizedOrder = {
+      ...order,
+      payment_info: buildOrderPaymentInfo({
+        order,
+        method: paymentMethod,
+        poolRow: allocatedPoolRow
+      })
+    };
     delete sanitizedOrder.admin_note;
 
     res.json({
@@ -319,7 +370,10 @@ export const createProductOrder = async (req, res) => {
     });
   } catch (error) {
     if (error.isBusinessError) {
-      return res.status(400).json({ error: error.message });
+      return res.status(error.status || 400).json({
+        error: error.message,
+        ...(error.code ? { code: error.code } : {})
+      });
     }
     console.error('createProductOrder error:', error);
     return res.status(500).json({ error: '建立訂單失敗，請稍後再試' });
@@ -422,8 +476,30 @@ export const getMyProductOrders = async (req, res) => {
       orderBy: { created_at: 'desc' }
     });
 
+    const poolAccountNumbers = [
+      ...new Set(orders.map((o) => o.assigned_pool_account).filter(Boolean))
+    ];
+    const [allMethods, poolRows] = await Promise.all([
+      prisma.paymentMethodConfig.findMany({ orderBy: [{ sort_order: 'asc' }, { id: 'asc' }] }),
+      poolAccountNumbers.length > 0
+        ? prisma.oneTimeAccountPool.findMany({
+            where: { account_number: { in: poolAccountNumbers } },
+            select: { account_number: true, bank_code: true, bank_name: true, payment_url: true }
+          })
+        : []
+    ]);
+    const methodByCode = new Map(allMethods.map((m) => [m.code, m]));
+    const poolByAccount = new Map(poolRows.map((p) => [p.account_number, p]));
+
     const sanitizedOrders = orders.map(ord => {
-      const copy = { ...ord };
+      const copy = {
+        ...ord,
+        payment_info: buildOrderPaymentInfo({
+          order: ord,
+          method: methodByCode.get(ord.payment_method_code) || null,
+          poolRow: ord.assigned_pool_account ? poolByAccount.get(ord.assigned_pool_account) || null : null
+        })
+      };
       delete copy.admin_note;
       return copy;
     });

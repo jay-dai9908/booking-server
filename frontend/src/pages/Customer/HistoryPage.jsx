@@ -1151,6 +1151,16 @@ export default function HistoryPage() {
                 const paidAmount = o.paid_amount || 0;
                 const depositRemain = Math.max(0, depositRequired - paidAmount);
 
+                const paymentInfo = o.payment_info || {
+                  needs_payment: o.payment_method_code !== 'onsite',
+                  method_type: null,
+                  bank_label: '',
+                  account: o.assigned_pool_account || o.selected_bank_info || null,
+                  payment_url: o.assigned_pool_url || null,
+                  instructions: null,
+                  require_last5: o.payment_method_code !== 'onsite',
+                  account_missing: false,
+                };
                 const isCancelledOrder = o.order_status === 'cancelled';
                 const isVerifiedUnpaidOrder = !isCancelledOrder && o.payment_status === 'verified_unpaid';
                 const isVerifiedOrder =
@@ -1161,12 +1171,12 @@ export default function HistoryPage() {
                   !isCancelledOrder &&
                   (o.payment_status === 'pending_payment' ||
                     o.payment_status === 'reported_pending_verify');
-                const isTransfer = !(o.payment_method === 'ONSITE' || o.payment_method_code === 'onsite');
+                const isTransfer = Boolean(paymentInfo.needs_payment);
+                const safeOrderPaymentUrl = safeHttpUrl(paymentInfo.payment_url);
+                const safeOrderLineUrl = safeOfficialLineUrl || safeHttpUrl(globalSettings?.line_button_url);
 
                 const deadlineStr = o.payment_deadline ? formatDateShort(o.payment_deadline) : '';
 
-                // Account info
-                const assignedAccount = o.assigned_pool_account || o.assigned_account || '9012 3456 7890 12';
                 const hasReportedLast5 = !!o.remittance_last5;
                 const isEditingLast5 = editingRemittance[o.id];
 
@@ -1230,84 +1240,123 @@ export default function HistoryPage() {
                     )}
                     {isPendingPayment && !isTransfer && (
                       <div className="rounded-[12px] bg-sg-bg px-3 py-[10px] text-[13px] font-bold text-sg-ink">
-                        {deadlineStr
-                          ? `請在 ${deadlineStr} 前到店付款，逾期訂單會自動取消`
-                          : '請在付款期限前到店付款，逾期訂單會自動取消'}
+                        到店付款，不用先匯款
                       </div>
                     )}
                     {isPendingPayment && isTransfer && (
                       <div className="grid gap-[6px] rounded-[12px] bg-sg-bg px-3 py-[10px]">
                         <div className="text-[13px] font-bold text-sg-ink">
-                          {deadlineStr ? `請在 ${deadlineStr} 前匯款 ${formatMoney(depositRemain)}` : `請盡快匯款 ${formatMoney(depositRemain)}`}
+                          {deadlineStr ? `請在 ${deadlineStr} 前完成付款 ${formatMoney(depositRemain)}` : `請盡快完成付款 ${formatMoney(depositRemain)}`}
                         </div>
 
-                        {/* Account row */}
-                        <div className="flex justify-between items-center">
-                          <div>
-                            <div className="sg-small">中國信託 822</div>
-                            <div className="font-num text-[14px] font-bold text-sg-ink tracking-wide">
-                              {assignedAccount}
-                            </div>
-                          </div>
-                          <Button
-                            variant="text"
-                            size="sm"
-                            icon={<Copy className="w-4 h-4" />}
-                            onClick={() => handleCopyAccount(assignedAccount)}
-                            className="text-sg-brown font-bold"
-                          >
-                            複製
-                          </Button>
-                        </div>
-
-                        {/* Last 5 digits row */}
-                        {hasReportedLast5 && !isEditingLast5 ? (
-                          <div className="flex items-center justify-between text-[12px] text-sg-sage-ink font-bold pt-1">
-                            <span>已回報末五碼 {o.remittance_last5}，等待店家確認</span>
-                            <Button
-                              variant="text"
-                              size="sm"
-                              onClick={() => setEditingRemittance((prev) => ({ ...prev, [o.id]: true }))}
-                              className="text-[12px] text-sg-muted"
-                            >
-                              修改
-                            </Button>
+                        {paymentInfo.account_missing ? (
+                          <div className="rounded-[10px] bg-sg-danger-soft border border-sg-danger/30 px-3 py-2 text-[12px] font-bold text-sg-danger grid gap-2">
+                            <div>這筆訂單還沒有收款帳號，請先不要匯款，傳 LINE 給我們</div>
+                            {safeOrderLineUrl && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<MessageCircle className="w-4 h-4" />}
+                                onClick={() => window.open(safeOrderLineUrl, '_blank', 'noopener,noreferrer')}
+                                className="w-full"
+                              >
+                                傳 LINE 給我們
+                              </Button>
+                            )}
                           </div>
                         ) : (
-                          <div className="flex gap-[6px] pt-1">
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              maxLength={5}
-                              value={remittanceInputs[o.id] || ''}
-                              onChange={(e) =>
-                                setRemittanceInputs((prev) => ({
-                                  ...prev,
-                                  [o.id]: e.target.value.replace(/\D/g, '').slice(0, 5),
-                                }))
-                              }
-                              placeholder="匯款帳號末五碼"
-                              className="flex-1 min-w-0 rounded-[10px] border-[1.5px] border-sg-line bg-sg-paper px-3 py-[6px] text-[16px] text-sg-ink placeholder:text-sg-full focus:border-sg-brown focus:outline-none"
-                            />
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              loading={reportingRemittance[o.id]}
-                              onClick={() => handleReportRemittance(o.id)}
-                              className="min-h-[44px] px-4"
-                            >
-                              回報
-                            </Button>
-                          </div>
+                          <>
+                            {paymentInfo.account && (
+                              <div className="grid gap-1">
+                                <div className="flex justify-between items-center gap-2">
+                                  <div className="min-w-0">
+                                    {paymentInfo.bank_label && (
+                                      <div className="sg-small">{paymentInfo.bank_label}</div>
+                                    )}
+                                    <div className="font-num text-[14px] font-bold text-sg-ink tracking-wide break-all">
+                                      {paymentInfo.account}
+                                    </div>
+                                  </div>
+                                  <Button
+                                    variant="text"
+                                    size="sm"
+                                    icon={<Copy className="w-4 h-4" />}
+                                    onClick={() => handleCopyAccount(paymentInfo.account)}
+                                    className="text-sg-brown font-bold shrink-0"
+                                  >
+                                    複製
+                                  </Button>
+                                </div>
+                                {safeOrderPaymentUrl && (
+                                  <a
+                                    href={safeOrderPaymentUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[12px] font-bold text-sg-brown underline"
+                                  >
+                                    開啟付款連結 →
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                            {paymentInfo.instructions && (
+                              <div className="text-[12.5px] text-sg-ink whitespace-pre-line">
+                                {paymentInfo.instructions}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* Last 5 digits row */}
+                        {!paymentInfo.account_missing && paymentInfo.require_last5 && (
+                          hasReportedLast5 && !isEditingLast5 ? (
+                            <div className="flex items-center justify-between text-[12px] text-sg-sage-ink font-bold pt-1">
+                              <span>已回報末五碼 {o.remittance_last5}，等待店家確認</span>
+                              <Button
+                                variant="text"
+                                size="sm"
+                                onClick={() => setEditingRemittance((prev) => ({ ...prev, [o.id]: true }))}
+                                className="text-[12px] text-sg-muted"
+                              >
+                                修改
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex gap-[6px] pt-1">
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={5}
+                                value={remittanceInputs[o.id] || ''}
+                                onChange={(e) =>
+                                  setRemittanceInputs((prev) => ({
+                                    ...prev,
+                                    [o.id]: e.target.value.replace(/\D/g, '').slice(0, 5),
+                                  }))
+                                }
+                                placeholder="匯款帳號末五碼"
+                                className="flex-1 min-w-0 rounded-[10px] border-[1.5px] border-sg-line bg-sg-paper px-3 py-[6px] text-[16px] text-sg-ink placeholder:text-sg-full focus:border-sg-brown focus:outline-none"
+                              />
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                loading={reportingRemittance[o.id]}
+                                onClick={() => handleReportRemittance(o.id)}
+                                className="min-h-[44px] px-4"
+                              >
+                                回報
+                              </Button>
+                            </div>
+                          )
                         )}
 
                         {/* LINE verify button */}
-                        {safeOfficialLineUrl && (
+                        {!paymentInfo.account_missing && safeOrderLineUrl && (
                           <Button
                             variant="secondary"
                             size="sm"
                             icon={<MessageCircle className="w-4 h-4" />}
-                            onClick={() => window.open(safeOfficialLineUrl, '_blank', 'noopener,noreferrer')}
+                            onClick={() => window.open(safeOrderLineUrl, '_blank', 'noopener,noreferrer')}
                             className="w-full mt-1"
                           >
                             傳 LINE 給我們對帳

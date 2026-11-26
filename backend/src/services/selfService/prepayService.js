@@ -21,6 +21,7 @@ import { calculateEquipmentChargeableHours } from '../../utils/equipmentPricing.
 import { resolveEquipmentWindow } from '../../utils/equipmentWindow.js';
 import { evaluatePromoCode } from '../../controllers/checkoutController.js';
 import { releasePoolAccount } from './poolAccountService.js';
+import { formatBankLabel } from '../shop/orderPaymentInfo.js';
 import { sendSelfServiceExpiredNotification } from '../../utils/lineMessaging.js';
 import { bookableSessionWhere, assertDateBookable } from '../calendar/sessionFilters.js';
 import { getDayInfo } from '../calendar/dayType.js';
@@ -953,6 +954,16 @@ export async function attachSelfInfoToReservations(groupedReservations = [], txO
   ]);
 
   const prepayByRef = new Map(prepays.map((p) => [p.booking_ref, p]));
+  const poolAccountNumbers = [
+    ...new Set(prepays.map((p) => p.assigned_pool_account).filter(Boolean))
+  ];
+  const poolRows = poolAccountNumbers.length > 0
+    ? await client.oneTimeAccountPool.findMany({
+        where: { account_number: { in: poolAccountNumbers } },
+        select: { account_number: true, bank_code: true, bank_name: true }
+      })
+    : [];
+  const poolByAccount = new Map(poolRows.map((row) => [row.account_number, row]));
   const dailyByDate = new Map(
     dailySettings.map((d) => [toTaipeiDateString(d.date), d])
   );
@@ -984,6 +995,10 @@ export async function attachSelfInfoToReservations(groupedReservations = [], txO
       date: dStr
     });
 
+    const poolRow = prepay?.assigned_pool_account
+      ? poolByAccount.get(prepay.assigned_pool_account)
+      : null;
+
     const sanitizedPrepay = prepay
       ? {
           id: prepay.id,
@@ -998,6 +1013,9 @@ export async function attachSelfInfoToReservations(groupedReservations = [], txO
           selected_bank_info: prepay.selected_bank_info,
           assigned_pool_account: prepay.assigned_pool_account,
           assigned_pool_url: prepay.assigned_pool_url,
+          bank_label: prepay.assigned_pool_account
+            ? formatBankLabel(poolRow?.bank_name, poolRow?.bank_code)
+            : '',
           remittance_last5: prepay.remittance_last5,
           remittance_reported_at: prepay.remittance_reported_at,
           agreed_terms_at: prepay.agreed_terms_at,
