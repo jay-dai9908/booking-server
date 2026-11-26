@@ -9,6 +9,7 @@ import shopRoutes from '../src/routes/shop.js';
 import { createProductOrder } from '../src/controllers/shopController.js';
 import { releaseExpiredPreorders } from '../src/cronJobs.js';
 import { runEnableShopOrderExpiry } from '../scripts/enable-shop-order-expiry.mjs';
+import { formatMultiBankChoice } from '../src/services/shop/orderPaymentInfo.js';
 import { dateOnly } from '../../shared/time.js';
 
 function startLocalApp() {
@@ -61,9 +62,10 @@ test('Round 45 Item 4: universal expiry, auto_expire flag, enable-shop-order-exp
     }
 
     // Ensure standard payment methods exist & enabled
+    const defaultBanks = [{ bank_code: '013', bank_name: '國泰世華', account: '0000111122223333' }];
     const methodDefs = [
       { code: 'ctbc_pool', name: '中信專屬一次帳號', method_type: 'POOL_ACCOUNT' },
-      { code: 'bank_transfer', name: '銀行轉帳', method_type: 'MULTI_BANK' },
+      { code: 'bank_transfer', name: '銀行轉帳', method_type: 'MULTI_BANK', bank_accounts_json: defaultBanks },
       { code: 'jkopay', name: '街口支付', method_type: 'EWALLET' },
       { code: 'onsite', name: '到店付款', method_type: 'ONSITE' }
     ];
@@ -71,13 +73,31 @@ test('Round 45 Item 4: universal expiry, auto_expire flag, enable-shop-order-exp
       const ex = await prisma.paymentMethodConfig.findUnique({ where: { code: def.code } });
       if (!ex) {
         await prisma.paymentMethodConfig.create({
-          data: { code: def.code, name: def.name, method_type: def.method_type, is_enabled: true }
+          data: {
+            code: def.code,
+            name: def.name,
+            method_type: def.method_type,
+            bank_accounts_json: def.bank_accounts_json ?? undefined,
+            is_enabled: true
+          }
         });
         createdMethodCodes.push(def.code);
-      } else if (!ex.is_enabled) {
-        await prisma.paymentMethodConfig.update({ where: { code: def.code }, data: { is_enabled: true } });
+      } else {
+        const patch = {};
+        if (!ex.is_enabled) patch.is_enabled = true;
+        if (def.bank_accounts_json && (!Array.isArray(ex.bank_accounts_json) || ex.bank_accounts_json.length === 0)) {
+          patch.bank_accounts_json = def.bank_accounts_json;
+        }
+        if (Object.keys(patch).length > 0) {
+          await prisma.paymentMethodConfig.update({ where: { code: def.code }, data: patch });
+        }
       }
     }
+    const bankMethod = await prisma.paymentMethodConfig.findUnique({ where: { code: 'bank_transfer' } });
+    const bankChoices = Array.isArray(bankMethod?.bank_accounts_json)
+      ? bankMethod.bank_accounts_json.map((b) => formatMultiBankChoice(b).trim())
+      : [];
+    const selectedBankInfo = bankChoices[0] || formatMultiBankChoice(defaultBanks[0]).trim();
 
     staffUser = await prisma.adminUser.create({
       data: {
@@ -326,6 +346,7 @@ test('Round 45 Item 4: universal expiry, auto_expire flag, enable-shop-order-exp
           body: JSON.stringify({
             items: [{ product_id: product.id, quantity: 1 }],
             payment_method_code: 'bank_transfer',
+            selected_bank_info: selectedBankInfo,
             now: nov24Utc
           })
         })

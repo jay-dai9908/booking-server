@@ -448,10 +448,11 @@ test('Round 45 Item 2: poolAccountService orderRef required, reuse safety, repor
     assert.ok(prepayReleaseAudit.summary.includes(acct3.slice(-4)));
     assert.ok(!prepayReleaseAudit.summary.includes(acct3));
 
-    // Customer cancel F (pending_payment) -> immediately releases acct4
+    // Customer cancel F (pending_payment) with confirm_no_transfer -> immediately releases acct4 (R48-4)
     res = await fetch(`${srv.baseUrl}/api/reservations/${refF}`, {
       method: 'DELETE',
-      headers: custHeaders
+      headers: custHeaders,
+      body: JSON.stringify({ confirm_no_transfer: true })
     });
     assert.equal(res.status, 200);
     poolRow = await prisma.oneTimeAccountPool.findUnique({ where: { account_number: acct4 } });
