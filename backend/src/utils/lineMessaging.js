@@ -276,8 +276,12 @@ export const buildBrandFlexMessage = ({
 export const formatBookingRef = (ref) => {
   if (!ref) return '';
   const str = String(ref);
-  if (str.length <= 12) return str;
-  return `BK-${str.slice(0, 4).toUpperCase()}-${str.slice(-4).toUpperCase()}`;
+  if (str.startsWith('BK-') && str.length === 12) return str;
+  const clean = str.replace(/[^a-zA-Z0-9]/g, '');
+  if (clean.length >= 8) {
+    return `BK-${clean.slice(0, 4).toUpperCase()}-${clean.slice(-4).toUpperCase()}`;
+  }
+  return str;
 };
 
 /**
@@ -479,7 +483,7 @@ export const sendSelfServiceTransferPendingNotification = async (info, user) => 
     subtitle: '完成匯款並回報末五碼後，預約才算正式成立',
     bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您於【拾光製所】的半自助時段預約已暫時保留，請於 ${deadlineDisplay} 前完成匯款並於頁面回報帳號末五碼；逾時未完成匯款將自動取消。`,
     infoRows: [
-      { label: '預約編號', value: info.booking_ref },
+      { label: '預約編號', value: formatBookingRef(info.booking_ref) },
       { label: '預約日期', value: toTaipeiDateString(info.session_date) || '指定日期' },
       { label: '預約時段', value: info.time_range || '' },
       { label: '需匯金額', value: amountText, color: '#8B5B43' },
@@ -500,7 +504,7 @@ export const sendSelfServiceExpiredNotification = async (info, user) => {
   if (!user?.line_user_id || user.line_user_id.startsWith('manual_')) return;
   const frontendUrl = process.env.FRONTEND_URL || 'https://shiguangstudio.com';
   const infoRows = [
-    { label: '預約編號', value: info.booking_ref },
+    { label: '預約編號', value: formatBookingRef(info.booking_ref) },
     { label: '預約日期', value: toTaipeiDateString(info.session_date) || '' },
     { label: '預約時段', value: info.time_range || '' }
   ];
@@ -533,7 +537,7 @@ export const sendSelfServiceVerifiedNotification = async (info, user) => {
     subtitle: `當天 ${info.open_at || ''} 起可進場`,
     bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您的半自助時段匯款已核對無誤！當天 ${info.open_at || ''} 起，請打開「我的預約」顯示進場 QR，在門口報到機掃碼（QR 每 5 分鐘更新，截圖無效），或在報到機輸入手機號碼報到。`,
     infoRows: [
-      { label: '預約編號', value: info.booking_ref },
+      { label: '預約編號', value: formatBookingRef(info.booking_ref) },
       { label: '預約日期', value: toTaipeiDateString(info.session_date) || '' },
       { label: '預約時段', value: info.time_range || '' },
       { label: '最早進場', value: `${info.open_at || ''} 起`, color: '#2E7D32' }
@@ -558,7 +562,7 @@ export const sendSelfServiceMismatchNotification = async (info, user) => {
     subtitle: '請確認匯款金額或聯繫拾光製所',
     bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您回報的半自助時段預約款項與應匯金額不符${info.note ? `（說明：${info.note}）` : ''}，請查看預約頁資訊或透過 LINE 與我們聯繫。`,
     infoRows: [
-      { label: '預約編號', value: info.booking_ref },
+      { label: '預約編號', value: formatBookingRef(info.booking_ref) },
       { label: '應匯金額', value: `NT$ ${(info.amount_due || 0).toLocaleString()}`, color: '#C65332' },
       ...(info.note ? [{ label: '備註說明', value: info.note }] : [])
     ],
@@ -583,7 +587,7 @@ export const sendSelfServiceRemindNotification = async (info, user) => {
     subtitle: `請於 ${deadlineDisplay} 前完成匯款並回報末五碼`,
     bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n提醒您於【拾光製所】的半自助時段預約尚未完成匯款與末五碼回報，逾時系統將自動取消預約。`,
     infoRows: [
-      { label: '預約編號', value: info.booking_ref },
+      { label: '預約編號', value: formatBookingRef(info.booking_ref) },
       { label: '預約日期', value: toTaipeiDateString(info.session_date) || '' },
       { label: '需匯金額', value: `NT$ ${(info.amount_due || 0).toLocaleString()}`, color: '#8B5B43' },
       { label: '付款期限', value: deadlineDisplay, color: '#C65332' }

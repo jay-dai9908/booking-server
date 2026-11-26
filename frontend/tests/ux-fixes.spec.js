@@ -279,7 +279,7 @@ async function run() {
 
     // Verify BarcodeSheet does NOT duplicate weekday (B3)
     console.log('Testing Barcode Sheet for weekday duplication (B3)...');
-    const barcodeBtn = card.locator('button:has-text("出示到店條碼")');
+    const barcodeBtn = card.locator('button:has-text("出示到店 QR")');
     assert.ok(await barcodeBtn.isVisible(), 'Barcode button must exist');
     await barcodeBtn.click();
     await cPage.waitForTimeout(600);

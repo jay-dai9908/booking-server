@@ -86,6 +86,10 @@ export function weekdayChar(date) {
   return WEEKDAY_CHARS[d.getDay()] || '';
 }
 
+/**
+ * 將純日期字串（YYYY-MM-DD，如 session_date）格式化為 `MM/DD 週X`。
+ * 若傳入時間戳記（如 payment_deadline / created_at），請改用 formatDateTime(ts, 'MM/dd HH:mm')。
+ */
 export function formatDateShort(date, fallback = '—') {
   if (!date) return fallback;
   const d = toDateObj(date);

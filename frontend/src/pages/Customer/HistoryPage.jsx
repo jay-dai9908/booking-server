@@ -35,11 +35,10 @@ import api from '../../api/axios';
 import { safeHttpUrl } from '@shared/safeUrl.js';
 import {
   formatDateShort,
-  formatDateFull,
+  formatDateTime,
   weekdayChar,
   formatMoney,
   formatBookingRef,
-  formatShortRef,
   formatPhone,
   formatYMD,
   toDateObj,
@@ -914,7 +913,7 @@ export default function HistoryPage() {
                             </span>
                           )}
                         </div>
-                        <span className="font-num sg-small">{formatShortRef(r.booking_ref)}</span>
+                        <span className="font-num sg-small">{formatBookingRef(r.booking_ref)}</span>
                       </div>
 
                       {/* Date & Time */}
@@ -1126,7 +1125,7 @@ export default function HistoryPage() {
                               }}
                               className="w-full mt-1"
                             >
-                              出示到店條碼
+                              出示到店 QR
                             </Button>
                           )}
                         </>
@@ -1220,9 +1219,10 @@ export default function HistoryPage() {
               orders.map((o) => {
                 const statusInfo = getOrderStatusInfo(o);
                 const firstItem = (o.items && o.items[0]) || {};
+                const firstItemName = firstItem.product_name_snapshot || firstItem.product_name;
                 const otherCount = (o.items?.length || 1) - 1;
-                const itemSummary = firstItem.product_name
-                  ? `${firstItem.product_name}${otherCount > 0 ? ` 等 ${otherCount + 1} 項` : ''}`
+                const itemSummary = firstItemName
+                  ? `${firstItemName}${otherCount > 0 ? ` 等 ${otherCount + 1} 項` : ''}`
                   : '預購商品';
                 const totalAmount = o.total_amount || 0;
                 const depositRequired = o.deposit_required || 0;
@@ -1253,7 +1253,7 @@ export default function HistoryPage() {
                 const safeOrderPaymentUrl = safeHttpUrl(paymentInfo.payment_url);
                 const safeOrderLineUrl = safeOfficialLineUrl || safeHttpUrl(globalSettings?.line_button_url);
 
-                const deadlineStr = o.payment_deadline ? formatDateShort(o.payment_deadline) : '';
+                const deadlineStr = o.payment_deadline ? formatDateTime(o.payment_deadline, 'MM/dd HH:mm') : '';
 
                 const hasReportedLast5 = !!o.remittance_last5;
                 const isEditingLast5 = editingRemittance[o.id];
@@ -1262,7 +1262,7 @@ export default function HistoryPage() {
                   <Card key={o.id} gap={10}>
                     {/* 1. Header */}
                     <div className="flex justify-between items-center">
-                      <span className="font-num sg-small">{o.order_number || o.id}</span>
+                      <span className="font-num sg-small">{o.order_ref || o.order_number || o.id}</span>
                       <Pill variant={statusInfo.pill.variant}>{statusInfo.pill.text}</Pill>
                     </div>
 
@@ -1273,7 +1273,7 @@ export default function HistoryPage() {
                       </div>
                       <div className="sg-small mt-0.5">
                         ×{o.items?.reduce((a, b) => a + (b.quantity || 1), 0) || 1} · 總額 {formatMoney(totalAmount)} · 訂金 {formatMoney(depositRequired)}
-                        {o.shipping_method === 'DELIVERY' && ' · 宅配'}
+                        {(o.delivery_method === 'shipping' || o.shipping_method === 'DELIVERY') && ' · 宅配'}
                       </div>
                     </div>
 
@@ -1520,9 +1520,9 @@ export default function HistoryPage() {
                 if (!p.expires_at) {
                   details.push('無使用期限');
                 } else if (p.pass_type === 'MONTHLY_PASS' || p.pass_type === 'TIME_PASS') {
-                  details.push(`${formatDateFull(p.created_at)} 到 ${formatDateShort(p.expires_at)}`);
+                  details.push(`${formatDateTime(p.created_at, 'yyyy/MM/dd')} 到 ${formatDateTime(p.expires_at, 'yyyy/MM/dd')}`);
                 } else {
-                  details.push(`有效至 ${formatDateFull(p.expires_at)}`);
+                  details.push(`有效至 ${formatDateTime(p.expires_at, 'yyyy/MM/dd')}`);
                 }
 
                 if (p.order_product_name) {

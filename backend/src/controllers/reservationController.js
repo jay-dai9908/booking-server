@@ -3631,7 +3631,7 @@ export const adminQuickLookup = async (req, res) => {
   }
 
   try {
-    const shortRefMatch = q.match(/^(?:BK-)?([0-9a-fA-F]{4})-([0-9a-fA-F]{4})$/i);
+    const shortRefMatch = q.match(/^(?:BK-)?([0-9a-zA-Z]{4})-([0-9a-zA-Z]{4})$/i);
     const cleanRefPrefix = q.replace(/^BK-/i, '');
     const resOrConditions = [
       { booking_ref: { contains: q, mode: 'insensitive' } },

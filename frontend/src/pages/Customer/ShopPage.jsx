@@ -33,7 +33,7 @@ import { safeHttpUrl } from '@shared/safeUrl.js';
 import {
   formatMoney,
   formatMoneyBig,
-  formatDateShort,
+  formatDateTime,
 } from '../../utils/customer/format';
 import {
   getMergedBeadColors,
@@ -224,7 +224,12 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
       api.get('/shop/my-orders')
         .then((res) => {
           const list = Array.isArray(res.data) ? res.data : [];
-          const found = list.find((o) => String(o.id) === String(doneOrderId) || o.order_number === doneOrderId);
+          const found = list.find(
+            (o) =>
+              String(o.id) === String(doneOrderId) ||
+              o.order_ref === doneOrderId ||
+              o.order_number === doneOrderId
+          );
           if (found) {
             setDoneOrder(found);
             if (found.remittance_last5) setReportedSuccess(true);
@@ -443,7 +448,7 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
         localStorage.removeItem(SHOP_DRAFT_STORAGE_KEY);
       } catch (e) {}
 
-      navigate(`${location.pathname}?view=done&order=${createdOrder.id || createdOrder.order_number}`, { replace: true });
+      navigate(`${location.pathname}?view=done&order=${createdOrder.order_ref || createdOrder.order_number || createdOrder.id}`, { replace: true });
     } catch (err) {
       console.error('Failed to submit order', err);
       const errData = err.response?.data;
@@ -506,9 +511,9 @@ export default function ShopPage({ userRole, isLineEntry = false }) {
       );
     }
 
-    const orderNumber = doneOrder?.order_number || doneOrder?.id || doneOrderId;
+    const orderNumber = doneOrder?.order_ref || doneOrder?.order_number || doneOrder?.id || doneOrderId;
     const depositRequired = doneOrder?.deposit_required || 0;
-    const deadlineStr = doneOrder?.payment_deadline ? formatDateShort(doneOrder.payment_deadline) : '';
+    const deadlineStr = doneOrder?.payment_deadline ? formatDateTime(doneOrder.payment_deadline, 'MM/dd HH:mm') : '';
     const paymentInfo = doneOrder?.payment_info || {
       needs_payment: doneOrder?.payment_method_code !== 'onsite',
       method_type: null,
