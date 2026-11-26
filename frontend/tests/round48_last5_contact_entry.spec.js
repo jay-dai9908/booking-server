@@ -126,7 +126,7 @@ async function run() {
       return s;
     };
 
-    const sToday = await ensureSess(todayDate, '22:00', '23:30');
+    const sToday = await ensureSess(todayDate, '22:00', '24:00');
     const sFut1 = await ensureSess(fut1Date);
     const sFut2 = await ensureSess(fut2Date);
     const sFut3 = await ensureSess(fut3Date);
