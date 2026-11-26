@@ -76,12 +76,14 @@ async function run() {
   });
 
   try {
-    // 1. Prepare today's sessions: 13:00 to 21:00 (8 slots: 13:00, 14:00, 15:00, 16:00, 17:00, 18:00, 19:00, 20:00)
+    // 1. Prepare future day (tomorrow) sessions: 13:00 to 21:00 (8 slots: 13:00..21:00) so afternoon tests never hit SESSION_STARTED after 13:00
     const todayStr = toTaipeiDateString(new Date());
-    const todayDate = new Date(`${todayStr}T00:00:00.000Z`);
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    const targetStr = new Date(Date.UTC(ty, tm - 1, td + 1)).toISOString().slice(0, 10);
+    const targetDate = new Date(`${targetStr}T00:00:00.000Z`);
 
-    // Clean existing sessions for today and create 13:00-21:00 sessions
-    await prisma.session.deleteMany({ where: { session_date: todayDate } });
+    // Clean existing sessions for target date and create 13:00-21:00 sessions
+    await prisma.session.deleteMany({ where: { session_date: targetDate } });
     const slotTimes = [
       ['13:00', '14:00'],
       ['14:00', '15:00'],
@@ -95,7 +97,7 @@ async function run() {
     for (const [st, et] of slotTimes) {
       await prisma.session.create({
         data: {
-          session_date: todayDate,
+          session_date: targetDate,
           start_time: st,
           end_time: et,
           max_capacity: 20
@@ -105,7 +107,7 @@ async function run() {
 
     // Set initial draft for unlimited booking 13:00 to 21:00
     const draft = {
-      date: todayStr,
+      date: targetStr,
       mode: 'unlimited',
       arrival: 0,
       leave: 8,

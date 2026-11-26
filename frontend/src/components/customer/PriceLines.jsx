@@ -19,10 +19,10 @@ export default function PriceLines({ lines = [], className = '' }) {
             label={line.label}
             tone={isSave ? 'save' : undefined}
             value={
-              <div className="flex items-center gap-1.5 justify-end">
+              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 justify-end">
                 <span className="font-num tabular-nums">{formattedAmount}</span>
                 {line.note && (
-                  <span className="font-body text-[12px] text-sg-muted font-normal whitespace-nowrap">
+                  <span className="font-body text-[12px] text-sg-muted font-normal">
                     （{line.note}）
                   </span>
                 )}
