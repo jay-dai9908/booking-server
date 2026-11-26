@@ -289,8 +289,9 @@ async function run() {
     if (await barcodeSummaryEl.isVisible()) {
       const bSummary = await barcodeSummaryEl.textContent();
       console.log('Barcode summary:', bSummary);
-      assert.ok(!bSummary.includes('週二 週二'), 'Barcode date must not duplicate weekday');
-      assert.ok(bSummary.includes('週二'), 'Barcode date must include weekday once');
+      const expectedWeekday = `週${['日', '一', '二', '三', '四', '五', '六'][targetDateObj.getDay()]}`;
+      assert.ok(!bSummary.includes(`${expectedWeekday} ${expectedWeekday}`), 'Barcode date must not duplicate weekday');
+      assert.ok(bSummary.includes(expectedWeekday), 'Barcode date must include weekday once');
     }
     // Close barcode sheet
     const barcodeClose = cPage.locator('button[aria-label="關閉"]').or(cPage.locator('button:has-text("關閉")')).first();
