@@ -234,7 +234,7 @@ async function run() {
     await openCard.waitFor({ state: 'visible', timeout: 10000 });
     const qrCanvas = custPage.locator('[data-testid="entry-pass-qr-canvas"]');
     await qrCanvas.waitFor({ state: 'visible', timeout: 8000 });
-    await custPage.locator('text=進場 QR').waitFor({ state: 'visible', timeout: 5000 });
+    await custPage.getByText('進場 QR', { exact: true }).waitFor({ state: 'visible', timeout: 5000 });
     await custPage.locator('[data-testid="entry-pass-countdown"]').waitFor({ state: 'visible', timeout: 5000 });
     await custPage.waitForTimeout(500);
 
