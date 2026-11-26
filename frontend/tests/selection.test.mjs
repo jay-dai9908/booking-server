@@ -175,4 +175,50 @@ describe('Customer booking selection mode switching (Section 2.2)', () => {
     assert.ok(fileContent.includes('className="text-sg-muted font-bold whitespace-nowrap shrink-0">智能板租借</span>'), 'Label must have whitespace-nowrap and shrink-0');
     assert.ok(fileContent.includes('break-words min-w-0'), 'Content must have break-words and min-w-0');
   });
+
+  test('10. R49 Item 3: buildUnlimitedOptions with fixedToClose lists late arrivals and returns single closing leave', () => {
+    const day9 = [
+      { start_time: '10:00', end_time: '11:00' }, // 0
+      { start_time: '11:00', end_time: '12:00' }, // 1
+      { start_time: '12:00', end_time: '13:00' }, // 2
+      { start_time: '13:00', end_time: '14:00' }, // 3
+      { start_time: '14:00', end_time: '15:00' }, // 4
+      { start_time: '15:00', end_time: '16:00' }, // 5
+      { start_time: '16:00', end_time: '17:00' }, // 6
+      { start_time: '17:00', end_time: '18:00' }, // 7
+      { start_time: '18:00', end_time: '19:00' }, // 8
+    ];
+    const allOpen = buildUnlimitedOptions(day9, {
+      N: 4,
+      usable: () => true,
+      linked: () => true,
+      isPast: () => false,
+      fixedToClose: true,
+    });
+    assert.equal(allOpen.arrivals.length, 9);
+    assert.equal(allOpen.arrivals[7].time, '17:00');
+    assert.equal(allOpen.arrivals[7].enabled, true);
+    assert.equal(allOpen.arrivals[8].time, '18:00');
+    assert.equal(allOpen.arrivals[8].enabled, true);
+    const l7 = allOpen.leavesFor(7);
+    assert.equal(l7.length, 1);
+    assert.equal(l7[0].isClosing, true);
+    assert.equal(l7[0].endIndex, 9);
+    assert.equal(l7[0].time, '19:00');
+
+    // Full slot at 15:00 (index 5) -> 10:00..14:00 (0..4) disabled, 16:00..18:00 (6..8) enabled
+    const withFullAt5 = buildUnlimitedOptions(day9, {
+      N: 4,
+      usable: (i) => i !== 5,
+      linked: () => true,
+      isPast: () => false,
+      fixedToClose: true,
+    });
+    for (let i = 0; i <= 4; i++) {
+      assert.equal(withFullAt5.arrivals[i].enabled, false, `slot ${i} cannot reach close`);
+    }
+    for (let i = 6; i <= 8; i++) {
+      assert.equal(withFullAt5.arrivals[i].enabled, true, `slot ${i} can reach close`);
+    }
+  });
 });

@@ -74,7 +74,11 @@ export default function StepConfirm({
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState('');
   const [quoteNonce, setQuoteNonce] = useState(0);
+  const [ackFlash, setAckFlash] = useState(false);
   const quoteSeqRef = React.useRef(0);
+  const ackRef = React.useRef(null);
+  const transferSectionRef = React.useRef(null);
+  const deadlineNoticeRef = React.useRef(null);
 
   const H = bookingSessions.length;
   const startTime = bookingSessions[0]?.start_time || '';
@@ -700,13 +704,14 @@ export default function StepConfirm({
               </div>
             ) : !selfTransferOpen ? (
               <div
+                ref={deadlineNoticeRef}
                 data-testid="self-deadline-passed-notice"
                 className="rounded-[12px] bg-sg-danger-soft border border-sg-danger/40 px-3 py-2.5 text-[13px] font-bold text-sg-danger"
               >
                 已超過付款期限（前一日 {deadlineHourStr}），需要匯款的預約無法線上成立。全部用計次不限時卡而且不租智能板，仍然可以預約。
               </div>
             ) : (
-              <div className="grid gap-2">
+              <div ref={transferSectionRef} className="grid gap-2">
                 <div className="text-[13px] font-bold text-sg-ink">選擇匯款帳號</div>
                 {(prepayOptions?.transfer_methods || []).map((m) => {
                   const isPool = m.code === 'ctbc_pool';
@@ -845,7 +850,14 @@ export default function StepConfirm({
       </Card>
 
       {isSelfService && (
-        <label className="flex items-start gap-2.5 rounded-[14px] border border-sg-line bg-sg-paper px-3.5 py-3 cursor-pointer select-none">
+        <label
+          ref={ackRef}
+          className={`flex items-start gap-2.5 rounded-[14px] px-3.5 py-3 cursor-pointer select-none transition ${
+            ackFlash
+              ? 'border-2 border-sg-danger bg-sg-danger-soft/40 ring-2 ring-sg-danger/30'
+              : 'border border-sg-line bg-sg-paper'
+          }`}
+        >
           <input
             type="checkbox"
             data-testid="self-ack-checkbox"
@@ -896,13 +908,40 @@ export default function StepConfirm({
             !dayPricing ||
             globalLoading ||
             Boolean(globalError) ||
-            (isSelfService &&
-              (!selfServiceAck ||
-                quoteLoading ||
-                !prepayQuote ||
-                Boolean(quoteError) ||
-                (needsTransferOnSelfDay && (!selfTransferOpen || !selfTransferMethod?.code))))
+            (isSelfService && Boolean(quoteError))
           }
+          blockedReason={
+            isSelfService
+              ? !selfServiceAck
+                ? 'NO_ACK'
+                : quoteLoading || !prepayQuote
+                ? 'QUOTE_LOADING'
+                : needsTransferOnSelfDay && !selfTransferOpen
+                ? 'DEADLINE_PASSED'
+                : needsTransferOnSelfDay && !selfTransferMethod?.code
+                ? 'NO_TRANSFER_METHOD'
+                : null
+              : null
+          }
+          onBlockedClick={(reason) => {
+            if (reason === 'NO_ACK') {
+              ackRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              setAckFlash(true);
+              setTimeout(() => setAckFlash(false), 1200);
+              toast.show('請先勾選「我已經會玩拼豆」', { type: 'info' });
+            } else if (reason === 'NO_TRANSFER_METHOD') {
+              transferSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              toast.show('請選擇匯款方式', { type: 'info' });
+            } else if (reason === 'DEADLINE_PASSED') {
+              deadlineNoticeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              toast.show(
+                `已超過付款期限（前一日 ${deadlineHourStr}），需要匯款的預約無法線上成立。全部用計次不限時卡而且不租智能板，仍然可以預約。`,
+                { type: 'info' }
+              );
+            } else if (reason === 'QUOTE_LOADING') {
+              toast.show('金額計算中，請稍等', { type: 'info' });
+            }
+          }}
           onAction={() => executeBooking(false)}
           hasTabBarBelow={false}
         />

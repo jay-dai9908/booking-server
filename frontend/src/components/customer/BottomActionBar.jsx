@@ -15,6 +15,8 @@ export default function BottomActionBar({
   onAction,
   disabled = false,
   loading = false,
+  blockedReason = null,
+  onBlockedClick,
   hasTabBarBelow = false,
   className = '',
   actionVariant = 'primary',
@@ -25,6 +27,8 @@ export default function BottomActionBar({
   const pbClass = hasTabBarBelow
     ? 'pb-[10px]'
     : 'pb-[max(14px,env(safe-area-inset-bottom))]';
+  const isHardDisabled = disabled || loading;
+  const isSoftBlocked = Boolean(blockedReason) && !isHardDisabled;
 
   return (
     <div
@@ -59,10 +63,11 @@ export default function BottomActionBar({
         size="sm"
         loading={loading}
         disabled={disabled}
+        softDisabled={isSoftBlocked}
         href={actionHref}
         target={target}
         rel={rel}
-        onClick={onAction}
+        onClick={isSoftBlocked ? () => onBlockedClick?.(blockedReason) : onAction}
         className="min-h-[44px] px-[18px] min-w-[104px] shrink-0 whitespace-nowrap"
       >
         {actionLabel}

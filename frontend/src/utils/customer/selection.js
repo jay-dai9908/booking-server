@@ -20,7 +20,7 @@ export function tapSlot(sel, idx, { usable, linked }) {
   return { sel: idx < start ? { start: idx, end } : { start, end: idx } };
 }
 
-export function buildUnlimitedOptions(sessions, { N, usable, linked, isPast }) {
+export function buildUnlimitedOptions(sessions, { N, usable, linked, isPast, fixedToClose = false }) {
   const count = sessions.length;
   // run[i]：從第 i 格開始，連續可選（且時間相連）的格數
   const run = new Array(count + 1).fill(0);
@@ -29,6 +29,25 @@ export function buildUnlimitedOptions(sessions, { N, usable, linked, isPast }) {
   }
   const first = sessions.findIndex((s, i) => !isPast(i));
   if (first === -1) return { arrivals: [], leavesFor: () => [] };
+  if (fixedToClose) {
+    const arrivals = [];
+    for (let i = first; i < count; i++) {
+      arrivals.push({
+        index: i,
+        time: sessions[i].start_time,
+        enabled: i + run[i] === count,
+      });
+    }
+    const leavesFor = () => [
+      {
+        endIndex: count,
+        time: sessions[count - 1].end_time,
+        isClosing: true,
+        enabled: true,
+      },
+    ];
+    return { arrivals, leavesFor };
+  }
   const lastShown = Math.min(count - 1, count - N + 2);
   const arrivals = [];
   for (let i = first; i <= lastShown; i++) {

@@ -76,6 +76,7 @@ export default function StepSelectTime({
   // Pricing values
   const isSelfService = Boolean(daily?.is_self_service);
   const allowHourly = isSelfService ? Boolean(daily?.self_allow_hourly) : true;
+  const selfUnlimitedOnly = isSelfService && !allowHourly;
   const hourly = dayPricing?.hourly;
   const cap = dayPricing?.cap;
   const allowUnlimited = isSelfService ? true : (dayPricing?.allowUnlimited ?? true);
@@ -133,8 +134,14 @@ export default function StepSelectTime({
   // Options for unlimited mode
   const unlimitedOptions = useMemo(() => {
     if (!hasSessions || !allowUnlimited) return { arrivals: [], leavesFor: () => [] };
-    return buildUnlimitedOptions(sortedSessions, { N, usable, linked, isPast });
-  }, [sortedSessions, N, hasSessions, allowUnlimited]);
+    return buildUnlimitedOptions(sortedSessions, {
+      N,
+      usable,
+      linked,
+      isPast,
+      fixedToClose: selfUnlimitedOnly,
+    });
+  }, [sortedSessions, N, hasSessions, allowUnlimited, selfUnlimitedOnly]);
 
   const lastTimedSelRef = useRef(sel);
   const lastUnlimitedRef = useRef(arrival != null && leave != null ? { arrival, leave } : null);
@@ -275,7 +282,12 @@ export default function StepSelectTime({
     if (seatCalc.isCapped && seatCalc.capSaving > 0) {
       strikePrice = seatCalc.raw;
     }
-  } else if (mode === 'unlimited' && arrival != null && leave != null) {
+  } else if (
+    mode === 'unlimited' &&
+    arrival != null &&
+    leave != null &&
+    (!selfUnlimitedOnly || unlimitedOptions.arrivals.some((a) => a.index === arrival && a.enabled))
+  ) {
     canProceed = true;
     const startStr = sortedSessions[arrival]?.start_time || '';
     const endStr = sortedSessions[leave - 1]?.end_time || '';
@@ -372,6 +384,14 @@ export default function StepSelectTime({
               showPaymentLine
             />
           )}
+          {isSelfService && daily?.self_service?.transfer_open === false && (
+            <div
+              data-testid="step1-self-deadline-banner"
+              className="rounded-[14px] border border-sg-danger/40 bg-sg-danger-soft px-3.5 py-2.5 text-[13px] font-bold text-sg-danger leading-relaxed"
+            >
+              已超過付款期限（前一日 {String(daily?.self_service?.prepay_deadline_hour ?? 12).padStart(2, '0')}:00）。這天只能全員用計次不限時卡預約，而且不能租智能板；沒有卡的話請選其他日期。
+            </div>
+          )}
           {globalError && !hasPricing ? (
             <EmptyState
               title="暫時抓不到價格"
@@ -460,13 +480,20 @@ export default function StepSelectTime({
                 <span><b>當日不限時暢玩封頂價格，</b>中途可離場，我們會為您保留座位。</span>
               </NoticeBox>
 
-              {unlimitedOptions.arrivals.length === 0 ? (
-                <EmptyState
-                  title={`這天剩下的時間不夠玩滿 ${N} 小時`}
-                  description="可以改用計時，玩幾小時算幾小時"
-                  actionLabel="改用計時"
-                  onAction={() => handleModeChange('timed')}
-                />
+              {unlimitedOptions.arrivals.length === 0 || (selfUnlimitedOnly && !unlimitedOptions.arrivals.some((a) => a.enabled)) ? (
+                selfUnlimitedOnly ? (
+                  <EmptyState
+                    title="這天剩下的時段都額滿或已經開始了"
+                    description="請選擇其他日期"
+                  />
+                ) : (
+                  <EmptyState
+                    title={`這天剩下的時間不夠玩滿 ${N} 小時`}
+                    description="可以改用計時，玩幾小時算幾小時"
+                    actionLabel="改用計時"
+                    onAction={() => handleModeChange('timed')}
+                  />
+                )
               ) : (
                 <>
                   <div className="grid gap-[6px]">
@@ -490,23 +517,32 @@ export default function StepSelectTime({
                   </div>
 
                   {arrival != null && (
-                    <div className="grid gap-[6px]">
-                      <div className="text-[14px] font-bold">預計幾點離開？</div>
-                      <HourChips
-                        options={unlimitedOptions.leavesFor(arrival).map((l) => ({
-                          time: l.isClosing ? `玩到打烊 ${l.time}` : l.time,
-                          value: l.endIndex,
-                          disabled: !l.enabled,
-                          isWide: l.isClosing,
-                        }))}
-                        selectedValue={leave}
-                        onSelect={onChangeLeave}
-                      />
-                      <div className="sg-small mt-1">
-                        <div>{unlimitedRuleLine1}</div>
-                        <div>未滿 {N} 小時請選「計時」。</div>
+                    selfUnlimitedOnly ? (
+                      <div
+                        data-testid="self-unlimited-closing-line"
+                        className="rounded-[12px] border border-sg-line/70 bg-sg-paper px-3 py-2 text-[13.5px] font-bold text-sg-ink"
+                      >
+                        離開時間：玩到打烊 {sortedSessions[sortedSessions.length - 1]?.end_time || ''}
                       </div>
-                    </div>
+                    ) : (
+                      <div className="grid gap-[6px]">
+                        <div className="text-[14px] font-bold">預計幾點離開？</div>
+                        <HourChips
+                          options={unlimitedOptions.leavesFor(arrival).map((l) => ({
+                            time: l.isClosing ? `玩到打烊 ${l.time}` : l.time,
+                            value: l.endIndex,
+                            disabled: !l.enabled,
+                            isWide: l.isClosing,
+                          }))}
+                          selectedValue={leave}
+                          onSelect={onChangeLeave}
+                        />
+                        <div className="sg-small mt-1">
+                          <div>{unlimitedRuleLine1}</div>
+                          <div>未滿 {N} 小時請選「計時」。</div>
+                        </div>
+                      </div>
+                    )
                   )}
 
                   {unlimitedPillStatus && (

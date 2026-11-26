@@ -7,6 +7,7 @@ export default function Button({
   variant = 'primary',
   size = 'md',
   disabled = false,
+  softDisabled = false,
   loading = false,
   icon,
   className = '',
@@ -19,37 +20,38 @@ export default function Button({
   ...props
 }) {
   const isDisabled = disabled || loading;
+  const looksDisabled = isDisabled || softDisabled;
 
   let variantClasses = '';
   switch (variant) {
     case 'primary':
-      variantClasses = isDisabled
+      variantClasses = looksDisabled
         ? 'bg-sg-full text-white cursor-not-allowed'
         : 'bg-sg-brown text-white hover:bg-sg-brown-hover active:bg-sg-brown-hover';
       break;
     case 'secondary':
-      variantClasses = isDisabled
+      variantClasses = looksDisabled
         ? 'bg-sg-paper text-sg-full border-[1.5px] border-sg-line cursor-not-allowed'
         : 'bg-sg-paper text-sg-brown border-[1.5px] border-sg-line hover:bg-sg-brown-soft active:bg-sg-brown-soft';
       break;
     case 'line':
-      variantClasses = isDisabled
+      variantClasses = looksDisabled
         ? 'bg-sg-line-green/60 text-white cursor-not-allowed'
         : 'bg-sg-line-green text-white font-bold hover:brightness-95 active:brightness-90';
       break;
     case 'text':
     case 'ghost':
-      variantClasses = isDisabled
+      variantClasses = looksDisabled
         ? 'bg-transparent text-sg-full cursor-not-allowed min-h-[44px] px-2 -mx-2'
         : 'bg-transparent text-sg-brown font-bold text-[13px] hover:text-sg-brown-hover active:text-sg-brown-hover min-h-[44px] px-2 -mx-2';
       break;
     case 'dangerText':
-      variantClasses = isDisabled
+      variantClasses = looksDisabled
         ? 'bg-transparent text-sg-full cursor-not-allowed min-h-[44px] px-2 -mx-2'
         : 'bg-transparent text-sg-danger font-bold text-[14px] hover:opacity-80 active:opacity-75 min-h-[44px] px-2 -mx-2';
       break;
     case 'danger':
-      variantClasses = isDisabled
+      variantClasses = looksDisabled
         ? 'bg-sg-full text-white cursor-not-allowed'
         : 'bg-sg-danger text-white hover:brightness-95 active:brightness-90';
       break;
@@ -65,7 +67,7 @@ export default function Button({
     : 'min-h-[48px] px-5 text-[16px]';
 
   const commonClasses = `inline-flex items-center justify-center gap-2 rounded-full font-bold font-body select-none transition whitespace-nowrap ${
-    isDisabled ? '' : 'active:scale-[0.98]'
+    looksDisabled ? '' : 'active:scale-[0.98]'
   } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sg-brown ${sizeClasses} ${variantClasses} ${className}`;
 
   const innerContent = loading ? (
@@ -99,6 +101,7 @@ export default function Button({
     <button
       type={type}
       disabled={isDisabled}
+      aria-disabled={softDisabled && !isDisabled ? 'true' : undefined}
       aria-busy={loading ? 'true' : undefined}
       onClick={isDisabled ? undefined : onClick}
       className={commonClasses}
