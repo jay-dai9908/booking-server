@@ -5,6 +5,7 @@ import { dateOnly } from '../../shared/time.js';
 import { ensureTestPublishedLayout, cleanupTestPublishedLayout } from './helpers/seedTestLayout.js';
 import {
   createReservation,
+  createReservationHandler,
   cancelReservation,
   getMyReservations
 } from '../src/controllers/reservationController.js';
@@ -42,6 +43,7 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
 
   let savedKiosk = null;
   let savedSmallEq = null;
+  let savedGlobal = null;
   let testUser = null;
   let otherUser = null;
   const createdRefs = [];
@@ -56,6 +58,7 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
     await ensureDefaultEquipmentConfigs();
     savedKiosk = await prisma.kioskSetting.findUnique({ where: { id: 1 } });
     savedSmallEq = await prisma.equipmentConfig.findUnique({ where: { id: 'pegboard_s' } });
+    savedGlobal = await prisma.globalSetting.findUnique({ where: { id: 1 } });
 
     // Ensure clean state for our isolated test dates & promo codes
     await prisma.bookingEquipment.deleteMany({
@@ -102,10 +105,10 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
       create: { id: 1, prepay_deadline_hour: 12, early_minutes: 30, after_close_minutes: 60, max_unpaid_self_bookings: 2 }
     });
 
-    // Seed GlobalSetting if missing
+    // Seed GlobalSetting if missing (and lift active limit for multi-booking scenario)
     await prisma.globalSetting.upsert({
       where: { id: 1 },
-      update: {},
+      update: { max_active_bookings_per_user: 0 },
       create: {
         id: 1,
         weekday_hourly_price: 150,
@@ -113,7 +116,8 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
         weekend_hourly_price: 200,
         weekend_unlimited_price: 900,
         line_auto_notify_booking: false,
-        line_auto_notify_cancel: false
+        line_auto_notify_cancel: false,
+        max_active_bookings_per_user: 0
       }
     });
 
@@ -353,7 +357,7 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
     let allPassPastRef = null;
     {
       const r = createMockRes();
-      await createReservation(makeReq(testUser, {
+      await createReservationHandler({ now: () => new Date(`${pastDateStr}T10:00:00+08:00`) })(makeReq(testUser, {
         body: {
           session_ids: pastSess.map(s => s.id),
           pax: 2,
@@ -562,7 +566,7 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
     // Case 7: 1 pass + 1 pegboard_s past deadline -> 409 PREPAY_DEADLINE_PASSED, quota unchanged
     {
       const r = createMockRes();
-      await createReservation(makeReq(testUser, {
+      await createReservationHandler({ now: () => new Date(`${pastDateStr}T10:00:00+08:00`) })(makeReq(testUser, {
         body: {
           session_ids: pastSess.map(s => s.id),
           pax: 1,
@@ -883,6 +887,12 @@ test('Round 25 Item 4: Self-service reservation quote, create, settle, cancel, a
       await prisma.paymentMethodConfig.deleteMany({ where: { code: createdMethodCode } });
     }
     await cleanupTestPublishedLayout(prisma, createdLayoutId);
+    if (savedGlobal) {
+      await prisma.globalSetting.update({
+        where: { id: 1 },
+        data: { max_active_bookings_per_user: savedGlobal.max_active_bookings_per_user }
+      }).catch(() => {});
+    }
     if (savedKiosk) {
       await prisma.kioskSetting.update({
         where: { id: 1 },

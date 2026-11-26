@@ -469,8 +469,23 @@ function buildPrepayQuoteResponse(quote, overrides = {}) {
   };
 }
 
+function resolveSessionEndMs(sessionDate, startTime, endTime) {
+  const dStr = sessionDate instanceof Date
+    ? sessionDate.toISOString().slice(0, 10)
+    : String(sessionDate).slice(0, 10);
+  if (endTime === '24:00') {
+    return new Date(`${dStr}T00:00:00+08:00`).getTime() + 86400000;
+  }
+  const baseMs = new Date(`${dStr}T${endTime}:00+08:00`).getTime();
+  if (startTime && endTime && endTime <= startTime) {
+    return baseMs + 86400000;
+  }
+  return baseMs;
+}
+
 export const createReservationHandler = (deps = {}) => async (req, res) => {
   const getBillFn = deps.getBookingBill || getBookingBill;
+  const getNowFn = typeof deps.now === 'function' ? deps.now : () => new Date();
   const { session_ids, pax, forceSplit } = req.body;
   const userId = req.user.id;
 
@@ -480,6 +495,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
   }
 
   try {
+    const now = getNowFn();
     const booking_ref = crypto.randomUUID();
 
     const result = await prisma.$transaction(async (tx) => {
@@ -487,6 +503,57 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       const user = await tx.user.findUnique({ where: { id: userId } });
       if (user?.is_blacklisted) {
         throw new Error('BLACKLISTED_USER');
+      }
+
+      // 0b. Lock customer row inside transaction to serialize per-user limit checks
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+
+      // 0c. Global booking limits (0 = unlimited)
+      const globalLimits = await tx.globalSetting.findUnique({
+        where: { id: 1 },
+        select: { max_pax_per_booking: true, max_active_bookings_per_user: true }
+      });
+      const maxPaxLimit = globalLimits?.max_pax_per_booking ?? 8;
+      const maxActiveLimit = globalLimits?.max_active_bookings_per_user ?? 3;
+
+      if (maxPaxLimit > 0 && parsedPax > maxPaxLimit) {
+        throw {
+          status: 400,
+          code: 'PAX_LIMIT',
+          limit: maxPaxLimit,
+          message: `線上預約一次最多 ${maxPaxLimit} 位；超過 ${maxPaxLimit} 人請用 LINE 聯繫我們`
+        };
+      }
+
+      if (maxActiveLimit > 0) {
+        const confirmedRows = await tx.reservation.findMany({
+          where: { user_id: userId, status: 'confirmed' },
+          select: {
+            booking_ref: true,
+            session: { select: { session_date: true, start_time: true, end_time: true } }
+          }
+        });
+        const maxEndByRef = new Map();
+        for (const r of confirmedRows) {
+          if (!r.session) continue;
+          const endMs = resolveSessionEndMs(r.session.session_date, r.session.start_time, r.session.end_time);
+          const prev = maxEndByRef.get(r.booking_ref);
+          if (prev === undefined || endMs > prev) {
+            maxEndByRef.set(r.booking_ref, endMs);
+          }
+        }
+        let activeCount = 0;
+        for (const endMs of maxEndByRef.values()) {
+          if (endMs > now.getTime()) activeCount += 1;
+        }
+        if (activeCount >= maxActiveLimit) {
+          throw {
+            status: 409,
+            code: 'TOO_MANY_ACTIVE_BOOKINGS',
+            limit: maxActiveLimit,
+            message: `你目前已有 ${maxActiveLimit} 筆還沒到的預約，請先完成或取消再預約；需要預約更多請用 LINE 聯繫我們`
+          };
+        }
       }
 
       // 1. Read requested sessions without row lock first to resolve Taipei date & validate
@@ -512,6 +579,28 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       );
       if (uniqueDates.size > 1) {
         throw new Error('CROSS_DATE_SESSIONS');
+      }
+
+      const preDateStr = [...uniqueDates][0];
+      const preSorted = [...preRequestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
+      for (const s of preSorted) {
+        const startAt = new Date(`${preDateStr}T${s.start_time}:00+08:00`);
+        if (startAt.getTime() <= now.getTime()) {
+          throw {
+            status: 400,
+            code: 'SESSION_STARTED',
+            message: '選的時段已經開始或已經過去，請重新選擇'
+          };
+        }
+      }
+      for (let i = 0; i < preSorted.length - 1; i++) {
+        if (preSorted[i].end_time !== preSorted[i + 1].start_time) {
+          throw {
+            status: 400,
+            code: 'SESSIONS_NOT_CONTIGUOUS',
+            message: '時段必須連續，請重新選擇'
+          };
+        }
       }
 
       const sessionDate = preRequestedSessions[0].session_date;
@@ -1211,6 +1300,7 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       return res.status(error.status).json({
         error: error.message,
         ...(error.code ? { code: error.code } : {}),
+        ...(error.limit !== undefined ? { limit: error.limit } : {}),
         ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
@@ -2032,6 +2122,7 @@ export const moveSeat = async (req, res) => {
       return res.status(error.status).json({
         error: error.message,
         ...(error.code ? { code: error.code } : {}),
+        ...(error.limit !== undefined ? { limit: error.limit } : {}),
         ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
@@ -2096,6 +2187,7 @@ export const swapSeats = async (req, res) => {
       return res.status(error.status).json({
         error: error.message,
         ...(error.code ? { code: error.code } : {}),
+        ...(error.limit !== undefined ? { limit: error.limit } : {}),
         ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
@@ -2712,6 +2804,7 @@ export const adminCreateReservation = async (req, res) => {
       return res.status(error.status).json({
         error: error.message,
         ...(error.code ? { code: error.code } : {}),
+        ...(error.limit !== undefined ? { limit: error.limit } : {}),
         ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
@@ -3101,6 +3194,7 @@ export const extendReservation = async (req, res) => {
       return res.status(error.status).json({
         error: error.message,
         ...(error.code ? { code: error.code } : {}),
+        ...(error.limit !== undefined ? { limit: error.limit } : {}),
         ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
@@ -3282,6 +3376,7 @@ export const updateAttendance = async (req, res) => {
       return res.status(error.status).json({
         error: error.message,
         ...(error.code ? { code: error.code } : {}),
+        ...(error.limit !== undefined ? { limit: error.limit } : {}),
         ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }

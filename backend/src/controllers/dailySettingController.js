@@ -1010,7 +1010,9 @@ export const getGlobalSetting = async (req, res) => {
       auto_print_receipt: setting.auto_print_receipt ?? true,
       auto_print_summary: setting.auto_print_summary ?? true,
       receipt_footer_text: setting.receipt_footer_text ?? null,
-      store_phone: setting.store_phone ?? null
+      store_phone: setting.store_phone ?? null,
+      max_active_bookings_per_user: setting.max_active_bookings_per_user ?? 3,
+      max_pax_per_booking: setting.max_pax_per_booking ?? 8
     };
 
     res.json(safeSetting);
@@ -1054,6 +1056,8 @@ const GLOBAL_INT_FIELDS = new Set([
   'weekend_hourly_price',
   'weekend_unlimited_price',
   'default_session_capacity',
+  'max_active_bookings_per_user',
+  'max_pax_per_booking',
   'billing_grace_minutes',
   'billing_block_minutes',
   'board_swap_grace_minutes',
@@ -1155,6 +1159,8 @@ function getEffectiveOldSetting(oldSetting) {
       : null,
     guest_line_hint_text: oldSetting?.guest_line_hint_text ?? null,
     default_session_capacity: oldSetting?.default_session_capacity ?? 16,
+    max_active_bookings_per_user: oldSetting?.max_active_bookings_per_user ?? 3,
+    max_pax_per_booking: oldSetting?.max_pax_per_booking ?? 8,
     payment_methods_json: normalizePaymentMethods(rawMethods),
     print_enabled: oldSetting?.print_enabled ?? true,
     billing_grace_minutes: oldSetting?.billing_grace_minutes ?? 10,
@@ -1277,6 +1283,8 @@ export const updateGlobalSetting = async (req, res) => {
     booking_note_chips,
     guest_line_hint_text,
     default_session_capacity,
+    max_active_bookings_per_user,
+    max_pax_per_booking,
     payment_methods_json,
     print_enabled,
     cancel_pending_jobs,
@@ -1423,6 +1431,20 @@ export const updateGlobalSetting = async (req, res) => {
         return res.status(422).json({ field: 'default_session_capacity', error: '預設時段人數上限必須為 1 至 200 的整數' });
       }
       dataToUpdate.default_session_capacity = parsed;
+    }
+    if (max_active_bookings_per_user !== undefined) {
+      const parsed = parseStrictInt(max_active_bookings_per_user);
+      if (parsed === null || parsed < 0 || parsed > 100) {
+        return res.status(422).json({ field: 'max_active_bookings_per_user', error: '每位會員有效預約筆數上限必須為 0 至 100 的整數' });
+      }
+      dataToUpdate.max_active_bookings_per_user = parsed;
+    }
+    if (max_pax_per_booking !== undefined) {
+      const parsed = parseStrictInt(max_pax_per_booking);
+      if (parsed === null || parsed < 0 || parsed > 100) {
+        return res.status(422).json({ field: 'max_pax_per_booking', error: '單筆線上預約人數上限必須為 0 至 100 的整數' });
+      }
+      dataToUpdate.max_pax_per_booking = parsed;
     }
 
     if (business_hours_json !== undefined && didGlobalSettingFieldChange('business_hours_json', business_hours_json, oldSetting, effectiveOld)) {
@@ -1672,6 +1694,8 @@ export const updateGlobalSetting = async (req, res) => {
           preview_disabled_text: dataToUpdate.preview_disabled_text ?? "系統維護中，請點擊下方按鈕使用 LINE 進行預約",
           business_hours_json: dataToUpdate.business_hours_json ?? DEFAULT_BUSINESS_HOURS,
           default_session_capacity: dataToUpdate.default_session_capacity ?? 16,
+          max_active_bookings_per_user: dataToUpdate.max_active_bookings_per_user ?? 3,
+          max_pax_per_booking: dataToUpdate.max_pax_per_booking ?? 8,
           billing_grace_minutes: dataToUpdate.billing_grace_minutes ?? 10,
           billing_block_minutes: dataToUpdate.billing_block_minutes ?? 30,
           board_swap_grace_minutes: dataToUpdate.board_swap_grace_minutes ?? 10,

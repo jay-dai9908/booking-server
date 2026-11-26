@@ -14,7 +14,7 @@ import {
   remindAdminPrepayHandler,
   releasePrepayPoolAccountHandler
 } from '../controllers/prepayController.js';
-import { prepayQuoteLimiter, entryPassLimiter } from '../middlewares/rateLimiter.js';
+import { prepayQuoteLimiter, entryPassLimiter, reservationCreateLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
@@ -33,7 +33,7 @@ router.post('/admin/prepays/:booking_ref/overpaid-refunded', ...prepayStaffAuth,
 router.post('/admin/prepays/:booking_ref/remind', ...prepayStaffAuth, remindAdminPrepayHandler);
 router.post('/admin/prepays/:booking_ref/release-account', ...prepayStaffAuth, releasePrepayPoolAccountHandler);
 
-router.post('/', verifyToken, requireRegisteredUser, createReservation);
+router.post('/', verifyToken, requireRegisteredUser, reservationCreateLimiter, createReservation);
 router.get('/my', verifyToken, requireRegisteredUser, getMyReservations);
 router.delete('/:id', verifyToken, requireRegisteredUser, cancelReservation);
 router.patch('/:booking_ref/notes', verifyToken, requireRegisteredUser, updateReservationNotes);

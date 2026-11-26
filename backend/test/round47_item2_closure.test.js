@@ -66,14 +66,16 @@ test('Round 47 Item 2: Admin day-type assignment, DAY_CLOSED across 4 booking en
         weekday_hourly_price: 150,
         weekday_unlimited_price: 750,
         weekend_hourly_price: 180,
-        weekend_unlimited_price: 1100
+        weekend_unlimited_price: 1100,
+        max_active_bookings_per_user: 0
       },
       create: {
         id: 1,
         weekday_hourly_price: 150,
         weekday_unlimited_price: 750,
         weekend_hourly_price: 180,
-        weekend_unlimited_price: 1100
+        weekend_unlimited_price: 1100,
+        max_active_bookings_per_user: 0
       }
     });
 
@@ -341,7 +343,8 @@ test('Round 47 Item 2: Admin day-type assignment, DAY_CLOSED across 4 booking en
           weekday_hourly_price: prevGlobal.weekday_hourly_price,
           weekday_unlimited_price: prevGlobal.weekday_unlimited_price,
           weekend_hourly_price: prevGlobal.weekend_hourly_price,
-          weekend_unlimited_price: prevGlobal.weekend_unlimited_price
+          weekend_unlimited_price: prevGlobal.weekend_unlimited_price,
+          max_active_bookings_per_user: prevGlobal.max_active_bookings_per_user
         }
       });
     }

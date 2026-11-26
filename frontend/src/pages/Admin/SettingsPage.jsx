@@ -88,6 +88,8 @@ export default function SettingsPage() {
     sunday: { start: '09:00', end: '21:00' }
   });
   const [defaultSessionCapacity, setDefaultSessionCapacity] = useState(16);
+  const [maxActiveBookingsPerUser, setMaxActiveBookingsPerUser] = useState(3);
+  const [maxPaxPerBooking, setMaxPaxPerBooking] = useState(8);
   const [layoutSeatCount, setLayoutSeatCount] = useState(16);
 
   // 4. Smart Board Global Rules
@@ -222,6 +224,8 @@ export default function SettingsPage() {
       }
 
       setDefaultSessionCapacity(d.default_session_capacity ?? 16);
+      setMaxActiveBookingsPerUser(d.max_active_bookings_per_user ?? 3);
+      setMaxPaxPerBooking(d.max_pax_per_booking ?? 8);
       try {
         const lRes = await api.get('/seat-layouts/active');
         const count = lRes.data?.capacity ?? (lRes.data?.seats || []).filter(s => s.is_active)?.length ?? 16;
@@ -341,7 +345,9 @@ export default function SettingsPage() {
         auto_print_summary: nextAutoSummary,
         receipt_footer_text: nextFooterText,
         business_hours_json: loadedBusinessHours,
-        default_session_capacity: d.default_session_capacity ?? 16
+        default_session_capacity: d.default_session_capacity ?? 16,
+        max_active_bookings_per_user: d.max_active_bookings_per_user ?? 3,
+        max_pax_per_booking: d.max_pax_per_booking ?? 8
       });
 
       try {
@@ -398,7 +404,9 @@ export default function SettingsPage() {
           auto_print_summary: autoPrintSummary,
           receipt_footer_text: receiptFooterText,
           business_hours_json: businessHours,
-          default_session_capacity: toNumericOrRaw(defaultSessionCapacity)
+          default_session_capacity: toNumericOrRaw(defaultSessionCapacity),
+          max_active_bookings_per_user: toNumericOrRaw(maxActiveBookingsPerUser),
+          max_pax_per_booking: toNumericOrRaw(maxPaxPerBooking)
         };
 
         payloadToSend = diffSettings(savedSnapshot, draft);
@@ -1260,6 +1268,51 @@ export default function SettingsPage() {
               onChange={e => setDefaultSessionCapacity(e.target.value)}
               className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43] focus:outline-none focus:border-[#8B5B43]"
             />
+          </div>
+        </div>
+
+        {/* 顧客線上預約筆數與單筆人數上限 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <label className="block text-sm font-bold text-[#3E332B] mb-0.5">
+                每位會員有效預約筆數上限
+              </label>
+              <div className="text-xs text-gray-500">
+                0 代表不限（一般日與半自助合計未結束筆數）
+              </div>
+            </div>
+            <div className="w-full sm:w-28 shrink-0">
+              <input
+                type="number"
+                min="0"
+                data-testid="max-active-bookings-input"
+                value={maxActiveBookingsPerUser}
+                onChange={e => setMaxActiveBookingsPerUser(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43] focus:outline-none focus:border-[#8B5B43]"
+              />
+            </div>
+          </div>
+
+          <div className="bg-[#FAF7F2] p-4 rounded-xl border border-[#E8DEC8] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <label className="block text-sm font-bold text-[#3E332B] mb-0.5">
+                單筆線上預約人數上限
+              </label>
+              <div className="text-xs text-gray-500">
+                0 代表不限（超過時引導用 LINE 聯繫）
+              </div>
+            </div>
+            <div className="w-full sm:w-28 shrink-0">
+              <input
+                type="number"
+                min="0"
+                data-testid="max-pax-per-booking-input"
+                value={maxPaxPerBooking}
+                onChange={e => setMaxPaxPerBooking(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-[#E8DEC8] rounded-lg text-sm font-bold text-[#8B5B43] focus:outline-none focus:border-[#8B5B43]"
+              />
+            </div>
           </div>
         </div>
 

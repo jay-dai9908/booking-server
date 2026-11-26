@@ -44,6 +44,8 @@ export const GLOBAL_SETTING_FIELD_GROUPS = {
     'cancel_unprinted_jobs',
     'business_hours_json',
     'default_session_capacity',
+    'max_active_bookings_per_user',
+    'max_pax_per_booking',
     'booking_note_chips',
     'guest_line_hint_text',
     'billing_grace_minutes',

@@ -147,7 +147,7 @@ test('Round 47 Item 1: Day type drives pricing, snapshots, passes, promos, solid
 
     // Booking on 2026-11-25 captures pricing_snapshot.is_weekend = true & hourly = 180
     const resBook = createMockRes();
-    await createReservationHandler()(
+    await createReservationHandler({ now: () => new Date(`${wedStr}T10:00:00+08:00`) })(
       {
         user: { id: user.id, name: user.name, phone: user.phone },
         body: {

@@ -7,6 +7,7 @@ import EmptyState from '../../../components/customer/EmptyState';
 import { BoardTimeBox } from '../../../components/customer/RangeSlider';
 import { SoftBox } from '../../../components/customer/Banners';
 import BottomActionBar from '../../../components/customer/BottomActionBar';
+import StoreContactCard from '../../../components/customer/StoreContactCard';
 import { useToast } from '../../../components/customer/Toast';
 import {
   formatDateShort,
@@ -52,12 +53,24 @@ export default function StepPeopleAddons({
   const hourStartTimes = useMemo(() => bookingSessions.map((s) => s.start_time), [bookingSessions]);
   const boundaryTime = (k) => (k < H ? bookingSessions[k].start_time : bookingSessions[H - 1].end_time);
 
-  // Maximum people allowed = minimum remaining capacity among selected sessions
-  const maxPax = useMemo(() => {
+  // Maximum people allowed = min(remaining capacity, max_pax_per_booking when > 0)
+  const remainingCap = useMemo(() => {
     if (!bookingSessions.length) return 1;
     const mins = bookingSessions.map((s) => s.remaining_capacity ?? 99);
     return Math.max(1, Math.min(...mins));
   }, [bookingSessions]);
+
+  const rawMaxPaxLimit = Number(globalSettings?.max_pax_per_booking ?? 8);
+  const maxPaxLimit = Number.isInteger(rawMaxPaxLimit) && rawMaxPaxLimit > 0 ? rawMaxPaxLimit : 0;
+
+  const maxPax = useMemo(() => {
+    if (maxPaxLimit > 0) {
+      return Math.max(1, Math.min(remainingCap, maxPaxLimit));
+    }
+    return remainingCap;
+  }, [remainingCap, maxPaxLimit]);
+
+  const showPaxLimitHint = maxPaxLimit > 0 && pax >= maxPaxLimit && remainingCap >= maxPaxLimit;
 
   const allowExceedPax = !!globalSettings?.allow_exceed_pax;
   const showLiveStock = globalSettings?.show_equipment_live_stock !== false;
@@ -360,6 +373,14 @@ export default function StepPeopleAddons({
             label="人數"
           />
         </div>
+        {showPaxLimitHint && (
+          <div data-testid="pax-limit-notice" className="mt-2.5 pt-2.5 border-t border-sg-line/60 grid gap-2">
+            <div className="text-[12.5px] font-bold text-sg-brown">
+              超過 {maxPaxLimit} 人請用 LINE 聯繫我們
+            </div>
+            <StoreContactCard globalSettings={globalSettings} showPhone={false} showLine={true} />
+          </div>
+        )}
       </Card>
 
       {/* 4. Smart Board Card */}

@@ -94,7 +94,7 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
 
     await prisma.globalSetting.upsert({
       where: { id: 1 },
-      update: {},
+      update: { max_active_bookings_per_user: 0 },
       create: {
         id: 1,
         weekday_hourly_price: 150,
@@ -102,7 +102,8 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
         weekend_hourly_price: 200,
         weekend_unlimited_price: 900,
         line_auto_notify_booking: false,
-        line_auto_notify_cancel: false
+        line_auto_notify_cancel: false,
+        max_active_bookings_per_user: 0
       }
     });
 
@@ -563,7 +564,8 @@ test('Round 25 Item 5: Admin prepay reconciliation, verify settlement, mismatch,
           weekday_hourly_price: savedGlobal.weekday_hourly_price,
           weekday_unlimited_price: savedGlobal.weekday_unlimited_price,
           weekend_hourly_price: savedGlobal.weekend_hourly_price,
-          weekend_unlimited_price: savedGlobal.weekend_unlimited_price
+          weekend_unlimited_price: savedGlobal.weekend_unlimited_price,
+          max_active_bookings_per_user: savedGlobal.max_active_bookings_per_user
         }
       }).catch(() => {});
     }

@@ -51,6 +51,7 @@ test('Round 34 Item 4: PromoRedemption concurrency, exact code match, lifecycle 
   let dailyWd = null;
   let srv = null;
   let createdLayoutId = null;
+  let origGlobal = null;
   const createdPromoIds = [];
   const createdRefs = [];
 
@@ -73,8 +74,20 @@ test('Round 34 Item 4: PromoRedemption concurrency, exact code match, lifecycle 
     if (cust2?.id) await prisma.user.delete({ where: { id: cust2.id } }).catch(() => {});
     if (adminUser?.id) await prisma.adminUser.delete({ where: { id: adminUser.id } }).catch(() => {});
     await cleanupTestPublishedLayout(prisma, createdLayoutId);
+    if (origGlobal) {
+      await prisma.globalSetting.update({
+        where: { id: 1 },
+        data: { max_active_bookings_per_user: origGlobal.max_active_bookings_per_user }
+      }).catch(() => {});
+    }
   });
 
+  origGlobal = await prisma.globalSetting.findUnique({ where: { id: 1 } });
+  await prisma.globalSetting.upsert({
+    where: { id: 1 },
+    update: { max_active_bookings_per_user: 0 },
+    create: { id: 1, max_active_bookings_per_user: 0 }
+  });
   createdLayoutId = await ensureTestPublishedLayout(prisma);
   srv = await startLocalApp();
 

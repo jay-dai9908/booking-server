@@ -44,6 +44,7 @@ test('Round 26 Item 4: Customer Entry API returns all 8 states, 403 on non-owner
   const tEnded = new Date(`${selfDateStr}T22:05:00.000+08:00`);
 
   let savedKiosk = null;
+  let savedGlobal = null;
   let createdLayoutId = null;
   let createdMethodCode = null;
   let device = null;
@@ -53,6 +54,12 @@ test('Round 26 Item 4: Customer Entry API returns all 8 states, 403 on non-owner
   try {
     await ensureDefaultEquipmentConfigs();
     savedKiosk = await prisma.kioskSetting.findUnique({ where: { id: 1 } });
+    savedGlobal = await prisma.globalSetting.findUnique({ where: { id: 1 } });
+    await prisma.globalSetting.upsert({
+      where: { id: 1 },
+      update: { max_active_bookings_per_user: 0 },
+      create: { id: 1, max_active_bookings_per_user: 0 }
+    });
     await prisma.kioskSetting.upsert({
       where: { id: 1 },
       update: { early_minutes: 30, after_close_minutes: 60, prepay_deadline_hour: 12, max_unpaid_self_bookings: 10 },
@@ -357,6 +364,12 @@ test('Round 26 Item 4: Customer Entry API returns all 8 states, 403 on non-owner
     }
     if (createdLayoutId) {
       await cleanupTestPublishedLayout(prisma, createdLayoutId);
+    }
+    if (savedGlobal) {
+      await prisma.globalSetting.update({
+        where: { id: 1 },
+        data: { max_active_bookings_per_user: savedGlobal.max_active_bookings_per_user }
+      }).catch(() => {});
     }
     if (savedKiosk) {
       await prisma.kioskSetting.update({

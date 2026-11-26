@@ -192,5 +192,46 @@ export const registerLimiter = (() => {
   };
 })();
 
+/**
+ * 8. 建立預約限流：同一會員 10 分鐘內最多 10 次（無會員 id 時用 IP），超過回 429
+ */
+const reservationCreateLimiterStore = new Map();
+
+export const resetReservationCreateLimiter = () => {
+  reservationCreateLimiterStore.clear();
+};
+
+export const reservationCreateLimiter = (() => {
+  const windowMs = 10 * 60 * 1000;
+  const max = 10;
+
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of reservationCreateLimiterStore.entries()) {
+      if (now > record.resetTime) {
+        reservationCreateLimiterStore.delete(key);
+      }
+    }
+  }, 60000);
+  if (cleanup.unref) cleanup.unref();
+
+  return (req, res, next) => {
+    const actorKey = req.user?.id ? `u:${req.user.id}` : `ip:${req.ip || req.connection?.remoteAddress || 'unknown'}`;
+    const key = `res-create-${actorKey}`;
+    const now = Date.now();
+    let record = reservationCreateLimiterStore.get(key);
+    if (!record || now > record.resetTime) {
+      record = { count: 1, resetTime: now + windowMs };
+      reservationCreateLimiterStore.set(key, record);
+    } else {
+      record.count += 1;
+    }
+    if (record.count > max) {
+      return res.status(429).json({ error: '預約送出太頻繁，請 10 分鐘後再試', code: 'RATE_LIMITED' });
+    }
+    next();
+  };
+})();
+
 // 舊相容相容函式
 export const rateLimiter = (options) => createMemoryLimiter(options);

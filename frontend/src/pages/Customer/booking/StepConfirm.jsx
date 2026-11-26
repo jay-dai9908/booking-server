@@ -8,6 +8,7 @@ import Skeleton from '../../../components/customer/Skeleton';
 import EmptyState from '../../../components/customer/EmptyState';
 import { ErrorBanner } from '../../../components/customer/Banners';
 import BottomActionBar from '../../../components/customer/BottomActionBar';
+import StoreContactCard from '../../../components/customer/StoreContactCard';
 import SplitSeatSheet from '../../../components/customer/sheets/SplitSeatSheet';
 import Stepper from '../../../components/customer/Stepper';
 import { BeadLoader } from '../../../components/customer/Bead';
@@ -62,6 +63,7 @@ export default function StepConfirm({
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [bookingLimitError, setBookingLimitError] = useState('');
   const [showSplitSheet, setShowSplitSheet] = useState(false);
 
   const isSelfService = Boolean(daily?.is_self_service);
@@ -346,6 +348,7 @@ export default function StepConfirm({
   // Submit Reservation
   const executeBooking = async (forceSplit = false) => {
     setSubmitting(true);
+    setBookingLimitError('');
     try {
       const sessionIds = bookingSessions.map((s) => s.id || s.session_id).filter(Boolean);
       const payloadEquipments = units.map((u) => {
@@ -387,7 +390,14 @@ export default function StepConfirm({
       const data = err.response?.data;
       const errorMsg = data?.message || data?.error || '';
 
-      if (status === 409 && (data?.code === 'AMOUNT_CHANGED' || errorMsg.includes('金額'))) {
+      if (status === 400 && (data?.code === 'SESSION_STARTED' || data?.code === 'SESSIONS_NOT_CONTIGUOUS')) {
+        toast.show(errorMsg || '選的時段無法預約，請重新選擇', { type: 'error' });
+        onGoBackToSelectTime();
+      } else if ((status === 409 && data?.code === 'TOO_MANY_ACTIVE_BOOKINGS') || (status === 400 && data?.code === 'PAX_LIMIT')) {
+        setBookingLimitError(errorMsg || '已超過線上預約上限，請用 LINE 聯繫我們');
+      } else if (status === 429 || data?.code === 'RATE_LIMITED') {
+        toast.show(errorMsg || '預約送出太頻繁，請 10 分鐘後再試', { type: 'error' });
+      } else if (status === 409 && (data?.code === 'AMOUNT_CHANGED' || errorMsg.includes('金額'))) {
         setQuoteNonce((n) => n + 1);
         toast.show(errorMsg || '金額已更新，請確認最新金額後再送出', { type: 'info' });
       } else if (status === 409 && errorMsg.includes('拆散')) {
@@ -853,6 +863,17 @@ export default function StepConfirm({
       )}
 
       {/* 5. Bottom bar */}
+      {bookingLimitError && (
+        <div
+          data-testid="booking-limit-error-box"
+          className="rounded-[14px] border border-sg-danger/40 bg-sg-danger-soft/70 px-3.5 py-3 grid gap-2"
+        >
+          <div className="text-[13.5px] font-bold text-sg-danger leading-snug">
+            {bookingLimitError}
+          </div>
+          <StoreContactCard globalSettings={globalSettings} showPhone={false} showLine={true} />
+        </div>
+      )}
       <div className="sticky bottom-0 z-40 -mx-4 -mb-5 mt-auto">
         <BottomActionBar
           summary={summaryNode}
