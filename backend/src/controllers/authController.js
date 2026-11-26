@@ -4,6 +4,7 @@ import { generateToken, getSuperAdminFingerprint, syncAndVerifyAdminUser } from 
 import { getClientIp, recordUserLoginLog } from '../utils/deviceParser.js';
 import { isPlainString, normalizeTwMobile } from '../utils/phone.js';
 import { activeUserWhere } from '../utils/userQuery.js';
+import { cookieSecure } from '../utils/cookieOptions.js';
 import {
   attemptAdminPasswordLogin,
   attemptAdminUnlock,
@@ -69,7 +70,7 @@ export const lineStart = (req, res) => {
     httpOnly: true,
     sameSite: 'lax',
     path: LINE_STATE_COOKIE_PATH,
-    secure: Boolean(req.secure),
+    secure: cookieSecure(req),
     maxAge: LINE_STATE_TTL_MS
   });
 
@@ -104,7 +105,7 @@ export const createLineCallbackHandler = (deps = {}) => {
       httpOnly: true,
       sameSite: 'lax',
       path: LINE_STATE_COOKIE_PATH,
-      secure: Boolean(req.secure),
+      secure: cookieSecure(req),
       maxAge: LINE_STATE_TTL_MS
     });
 
@@ -161,7 +162,7 @@ export const createLineCallbackHandler = (deps = {}) => {
         const token = generateToken({ id: user.id, role: 'customer', typ: 'customer' });
         res.cookie('token', token, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
+          secure: cookieSecure(req),
           sameSite: 'lax',
           maxAge: requireEveryTime ? 4 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
         });
@@ -183,7 +184,7 @@ export const createLineCallbackHandler = (deps = {}) => {
           isTemp: true,
           typ: 'line_temp'
         }, { expiresIn: '30m' });
-        res.cookie('token', tempToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 60 * 1000 }); // 30 mins
+        res.cookie('token', tempToken, { httpOnly: true, secure: cookieSecure(req), sameSite: 'lax', maxAge: 30 * 60 * 1000 }); // 30 mins
         return res.json({
           message: 'Registration required',
           token: tempToken,
@@ -210,7 +211,24 @@ export const register = async (req, res) => {
   const userPayload = req.user; // from verifyToken middleware
   
   if (!userPayload || userPayload.typ !== 'line_temp' || userPayload.isTemp !== true || !userPayload.line_user_id) {
-    return res.status(401).json({ error: 'Invalid temporary session. Please login with LINE again.' });
+    return res.status(401).json({
+      code: 'TEMP_SESSION_EXPIRED',
+      error: '登入已過期，請重新用 LINE 登入'
+    });
+  }
+
+  if (
+    name === undefined ||
+    name === null ||
+    phone === undefined ||
+    phone === null ||
+    (isPlainString(name) && !name.trim()) ||
+    (isPlainString(phone) && !phone.trim())
+  ) {
+    return res.status(400).json({
+      code: 'REGISTER_FIELDS_REQUIRED',
+      error: '請填寫稱呼和手機號碼'
+    });
   }
 
   if (!isPlainString(name)) {
@@ -326,7 +344,7 @@ export const register = async (req, res) => {
     const token = generateToken({ id: finalUser.id, role: 'customer', typ: 'customer' });
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: cookieSecure(req),
       sameSite: 'lax',
       maxAge: requireEveryTime ? 4 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
     });
@@ -339,7 +357,7 @@ export const register = async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Failed to register user.' });
+    res.status(500).json({ error: '註冊失敗，請稍後再試' });
   }
 };
 
@@ -465,7 +483,7 @@ export const adminLogin = async (req, res) => {
     ? String(process.env.ADMIN_PASSWORD).trim().replace(/^["']|["']$/g, '').replace(/[\r\n]/g, '')
     : '';
 
-  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  const isHttps = cookieSecure(req);
   const ip = getClientIp(req);
   const userAgent = req.headers['user-agent'] || '';
 
@@ -557,7 +575,7 @@ export const adminLogin = async (req, res) => {
 };
 
 export const logout = (req, res) => {
-  res.clearCookie('token');
+  res.clearCookie('token', { httpOnly: true, secure: cookieSecure(req), sameSite: 'lax' });
   res.json({ message: 'Logged out successfully' });
 };
 
@@ -566,7 +584,7 @@ export const me = async (req, res) => {
     if (req.user.role === 'admin') {
       const verifiedAdmin = await syncAndVerifyAdminUser(req.user);
       if (!verifiedAdmin) {
-        res.clearCookie('token');
+        res.clearCookie('token', { httpOnly: true, secure: cookieSecure(req), sameSite: 'lax' });
         return res.status(401).json({ error: '後台登入憑證已失效或已變更，請重新登入' });
       }
       return res.json({
@@ -578,7 +596,7 @@ export const me = async (req, res) => {
     }
 
     if (req.user.role === 'customer' && req.user.typ !== 'customer') {
-      res.clearCookie('token');
+      res.clearCookie('token', { httpOnly: true, secure: cookieSecure(req), sameSite: 'lax' });
       return res.status(401).json({ error: '登入憑證已過期，請重新登入' });
     }
 
@@ -588,7 +606,7 @@ export const me = async (req, res) => {
     // If admin enabled "顧客每次使用皆須從 LINE 登入", only allow when current browser session has fresh login
     if (requireEveryTime && !req.user.isTemp) {
       if (req.query.fresh_session !== '1') {
-        res.clearCookie('token');
+        res.clearCookie('token', { httpOnly: true, secure: cookieSecure(req), sameSite: 'lax' });
         return res.status(401).json({
           error: 'Require fresh LINE login on every visit',
           requireLineLoginEveryTime: true

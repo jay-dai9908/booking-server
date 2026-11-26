@@ -1,8 +1,9 @@
 import React, { useEffect, useState, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import api from './api/axios';
 import { getBrowserClientInfo, getBrowserClientInfoAsync } from './utils/clientInfo';
 import { ToastProvider } from './components/customer/Toast';
+import { safeNextPath } from './utils/customer/nextPath';
 
 // Customer Entry Page (Eagerly loaded for instant LINE WebView startup)
 import Home from './pages/Customer/Home';
@@ -33,6 +34,28 @@ const PrintStationPage = lazy(() => import('./pages/Admin/PrintStationPage'));
 const KioskPage = lazy(() => import('./pages/Admin/KioskPage'));
 const DisplayAdminPage = lazy(() => import('./pages/Admin/DisplayAdminPage'));
 const DisplayPage = lazy(() => import('./pages/Display/DisplayPage'));
+
+function CustomerRouteGuard({ userRole, children }) {
+  const location = useLocation();
+  if (userRole === 'customer') return children;
+  const nextVal = safeNextPath(`${location.pathname}${location.search || ''}`);
+  const suffix = nextVal ? `?next=${encodeURIComponent(nextVal)}` : '';
+  if (userRole === 'temp_customer') {
+    return <Navigate to={`/register${suffix}`} replace />;
+  }
+  return <Navigate to={`/${suffix}`} replace />;
+}
+
+function RegisterRouteGuard({ userRole, setUserRole }) {
+  const location = useLocation();
+  if (userRole === 'temp_customer') return <Register setUserRole={setUserRole} />;
+  const params = new URLSearchParams(location.search);
+  const nextTarget = safeNextPath(params.get('next'));
+  if (userRole === 'customer' && nextTarget) {
+    return <Navigate to={nextTarget} replace />;
+  }
+  return <Navigate to="/" replace />;
+}
 
 function App() {
   const [userRole, setUserRole] = useState(null); // 'customer', 'temp_customer', 'admin', or null
@@ -110,15 +133,15 @@ function App() {
           <Route path="/preview" element={<Preview />} />
           <Route 
             path="/register" 
-            element={userRole === 'temp_customer' ? <Register setUserRole={setUserRole} /> : <Navigate to="/" />} 
+            element={<RegisterRouteGuard userRole={userRole} setUserRole={setUserRole} />} 
           />
           <Route 
             path="/booking" 
-            element={userRole === 'customer' ? <Booking /> : <Navigate to="/" />} 
+            element={<CustomerRouteGuard userRole={userRole}><Booking /></CustomerRouteGuard>} 
           />
           <Route 
             path="/history" 
-            element={userRole === 'customer' ? <HistoryPage /> : <Navigate to="/" />} 
+            element={<CustomerRouteGuard userRole={userRole}><HistoryPage /></CustomerRouteGuard>} 
           />
           <Route 
             path="/shop" 

@@ -23,6 +23,7 @@ import { buildDiscountConfig } from '../../utils/customer/pricing';
 import { boardDiscountTexts } from '../../utils/customer/discountText';
 import { dayState } from '../../utils/customer/availability';
 import { taipeiToday } from '../../utils/customer/taipeiTime';
+import { safeNextPath } from '../../utils/customer/nextPath';
 import { formatMoney } from '../../utils/customer/format';
 
 export default function Home({ userRole }) {
@@ -53,8 +54,17 @@ export default function Home({ userRole }) {
     const queryParams = new URLSearchParams(location.search);
     if (queryParams.has('code')) return;
 
+  const safeNext = useMemo(() => {
+    const rawNext = new URLSearchParams(location.search).get('next');
+    return safeNextPath(rawNext);
+  }, [location.search]);
+
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    if (queryParams.get('code')) return;
+
     if (userRole === 'customer') {
-      let target = '/booking';
+      let target = safeNext || '/booking';
       try {
         const savedRedirect =
           sessionStorage.getItem('shiguang_post_login_redirect') ||
@@ -62,14 +72,15 @@ export default function Home({ userRole }) {
         if (savedRedirect) {
           sessionStorage.removeItem('shiguang_post_login_redirect');
           localStorage.removeItem('shiguang_post_login_redirect');
-          target = savedRedirect;
+          target = safeNextPath(savedRedirect) || target;
         }
       } catch (e) {}
       navigate(target, { replace: true });
     } else if (userRole === 'temp_customer') {
-      navigate('/register', { replace: true });
+      const suffix = safeNext ? `?next=${encodeURIComponent(safeNext)}` : '';
+      navigate(`/register${suffix}`, { replace: true });
     }
-  }, [userRole, navigate, location.search]);
+  }, [userRole, navigate, location.search, safeNext]);
 
   // 2. 處理 LINE OAuth Callback (/?code=...&state=...)
   useEffect(() => {
@@ -80,7 +91,7 @@ export default function Home({ userRole }) {
     if (!code) return;
 
     if (userRole === 'customer') {
-      let target = '/booking';
+      let target = safeNext || '/booking';
       try {
         const savedRedirect =
           sessionStorage.getItem('shiguang_post_login_redirect') ||
@@ -88,7 +99,7 @@ export default function Home({ userRole }) {
         if (savedRedirect) {
           sessionStorage.removeItem('shiguang_post_login_redirect');
           localStorage.removeItem('shiguang_post_login_redirect');
-          target = savedRedirect;
+          target = safeNextPath(savedRedirect) || target;
         }
       } catch (e) {}
       navigate(target, { replace: true });
@@ -96,7 +107,8 @@ export default function Home({ userRole }) {
     }
 
     if (userRole === 'temp_customer') {
-      navigate('/register', { replace: true });
+      const suffix = safeNext ? `?next=${encodeURIComponent(safeNext)}` : '';
+      navigate(`/register${suffix}`, { replace: true });
       return;
     }
 
@@ -385,7 +397,7 @@ export default function Home({ userRole }) {
           <GuestLineLoginButton
             page="home"
             globalSettings={globalSettings}
-            returnPath="/booking"
+            returnPath={safeNext || '/booking'}
             onClick={() => {
               hasProcessedRef.current = false;
               setAuthErrorMsg('');

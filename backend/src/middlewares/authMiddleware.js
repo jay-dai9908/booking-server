@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import prisma from '../prismaClient.js';
 import { PERMISSION_LABELS } from './permissionGroups.js';
+import { cookieSecure } from '../utils/cookieOptions.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
@@ -97,7 +98,7 @@ export const verifyToken = async (req, res, next) => {
     if (decoded.role === 'admin') {
       const verifiedAdmin = await syncAndVerifyAdminUser(decoded);
       if (!verifiedAdmin) {
-        res.clearCookie('token');
+        res.clearCookie('token', { httpOnly: true, secure: cookieSecure(req), sameSite: 'lax' });
         return res.status(401).json({ error: '登入憑證已失效或帳號已被停用，請重新登入' });
       }
       req.user = verifiedAdmin;
@@ -107,7 +108,7 @@ export const verifyToken = async (req, res, next) => {
     req.user = decoded; // { id, role, isTemp, ... }
     next();
   } catch (error) {
-    res.clearCookie('token');
+    res.clearCookie('token', { httpOnly: true, secure: cookieSecure(req), sameSite: 'lax' });
     return res.status(401).json({ error: '登入憑證已過期，請重新登入' });
   }
 };

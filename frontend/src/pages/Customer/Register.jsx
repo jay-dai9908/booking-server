@@ -1,16 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import CustomerLayout from '../../components/customer/CustomerLayout';
 import AppBar from '../../components/customer/AppBar';
-import BrandLogo from '../../components/customer/BrandLogo';
 import Field from '../../components/customer/Field';
 import Button from '../../components/customer/Button';
+import BottomSheet from '../../components/customer/BottomSheet';
 import { ErrorBanner, InfoBanner } from '../../components/customer/Banners';
 import api from '../../api/axios';
 import { getBrowserClientInfoAsync } from '../../utils/clientInfo';
+import { initiateLineOAuth } from '../../utils/lineAuth';
+import { safeNextPath } from '../../utils/customer/nextPath';
+import { useGlobalSettings } from '../../hooks/customer/useGlobalSettings';
+
+export const DEFAULT_PRIVACY_NOTICE =
+  '拾光製所會蒐集你的稱呼、手機號碼和 LINE 帳號基本資料，用在預約與到店核對、聯繫預約相關事項、會員卡券與消費紀錄。資料只在本店預約系統使用，不提供給第三方（法律規定除外），保存到你要求刪除為止。你可以隨時用 LINE 聯絡我們查詢、更正或刪除資料。不提供手機號碼將無法完成線上預約。';
 
 function formatPhoneInput(digits) {
-  // Format as 4-3-3: 0912 345 678
+  // Format as 4-3-3: 09xx xxx xxx
   const clean = digits.replace(/\D/g, '').slice(0, 10);
   if (clean.length <= 4) return clean;
   if (clean.length <= 7) return `${clean.slice(0, 4)} ${clean.slice(4)}`;
@@ -18,12 +25,26 @@ function formatPhoneInput(digits) {
 }
 
 export default function Register({ setUserRole }) {
+  const [searchParams] = useSearchParams();
+  const safeNext = useMemo(() => safeNextPath(searchParams.get('next')), [searchParams]);
+  const { settings: globalSettings } = useGlobalSettings();
+
   const [name, setName] = useState('');
   const [phoneDisplay, setPhoneDisplay] = useState('');
   const [phoneError, setPhoneError] = useState('');
   const [backendError, setBackendError] = useState('');
+  const [tempExpired, setTempExpired] = useState(false);
+  const [showPrivacySheet, setShowPrivacySheet] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successTarget, setSuccessTarget] = useState(null);
+
+  const privacyText = useMemo(() => {
+    const custom = globalSettings?.privacy_notice_text;
+    if (typeof custom === 'string' && custom.trim()) {
+      return custom.trim();
+    }
+    return DEFAULT_PRIVACY_NOTICE;
+  }, [globalSettings]);
 
   const rawPhone = phoneDisplay.replace(/\D/g, '');
 
@@ -63,6 +84,7 @@ export default function Register({ setUserRole }) {
 
     setIsSubmitting(true);
     setBackendError('');
+    setTempExpired(false);
 
     try {
       const clientInfo = await getBrowserClientInfoAsync();
@@ -72,7 +94,7 @@ export default function Register({ setUserRole }) {
         clientInfo,
       });
 
-      let target = '/booking';
+      let target = safeNext || '/booking';
       try {
         sessionStorage.setItem('shiguang_line_fresh_login', '1');
         if (res.data?.token) {
@@ -84,14 +106,22 @@ export default function Register({ setUserRole }) {
         if (savedRedirect) {
           sessionStorage.removeItem('shiguang_post_login_redirect');
           localStorage.removeItem('shiguang_post_login_redirect');
-          target = savedRedirect;
+          target = safeNextPath(savedRedirect) || target;
         }
-      } catch (err) {}
+      } catch (storageErr) {}
 
       setSuccessTarget(target);
     } catch (err) {
       console.error('Registration failed', err);
-      setBackendError(err.response?.data?.error || err.response?.data?.message || '註冊失敗，請重試');
+      const status = err.response?.status;
+      if (status === 401) {
+        setTempExpired(true);
+      }
+      const rawMsg = err.response?.data?.error || err.response?.data?.message || '';
+      const safeZhMsg = rawMsg && /[\u4e00-\u9fff]/.test(rawMsg)
+        ? rawMsg
+        : (status === 401 ? '登入已過期，請重新用 LINE 登入' : '註冊失敗，請稍後再試');
+      setBackendError(safeZhMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -99,7 +129,7 @@ export default function Register({ setUserRole }) {
 
   const handleContinueAfterSuccess = () => {
     if (setUserRole) setUserRole('customer');
-    window.location.href = successTarget || '/booking';
+    window.location.href = successTarget || safeNext || '/booking';
   };
 
   if (successTarget) {
@@ -202,7 +232,34 @@ export default function Register({ setUserRole }) {
             error={phoneError}
           />
 
-          {backendError && <ErrorBanner message={backendError} />}
+          <div className="text-[12.5px] text-sg-muted leading-relaxed -mt-1">
+            送出即表示你同意我們依個資告知使用你的稱呼和手機。{' '}
+            <button
+              type="button"
+              data-testid="open-privacy-notice-btn"
+              onClick={() => setShowPrivacySheet(true)}
+              className="font-bold text-sg-brown underline underline-offset-2"
+            >
+              查看個資告知
+            </button>
+          </div>
+
+          {backendError && (
+            <div className="grid gap-2">
+              <ErrorBanner message={backendError} />
+              {tempExpired && (
+                <Button
+                  type="button"
+                  variant="line"
+                  size="md"
+                  onClick={() => initiateLineOAuth({ returnPath: safeNext || '/booking' })}
+                  className="w-full"
+                >
+                  重新用 LINE 登入
+                </Button>
+              )}
+            </div>
+          )}
         </form>
 
         {/* 3. Fixed Bottom Area */}
@@ -219,6 +276,19 @@ export default function Register({ setUserRole }) {
           </Button>
         </div>
       </div>
+
+      <BottomSheet
+        isOpen={showPrivacySheet}
+        onClose={() => setShowPrivacySheet(false)}
+        title="個人資料蒐集告知"
+      >
+        <p
+          data-testid="privacy-notice-content"
+          className="text-[14px] leading-[1.6] text-sg-ink whitespace-pre-line"
+        >
+          {privacyText}
+        </p>
+      </BottomSheet>
     </CustomerLayout>
   );
 }
