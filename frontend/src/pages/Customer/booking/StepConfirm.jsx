@@ -65,6 +65,7 @@ export default function StepConfirm({
   const [submitting, setSubmitting] = useState(false);
   const [bookingLimitError, setBookingLimitError] = useState('');
   const [showSplitSheet, setShowSplitSheet] = useState(false);
+  const [splitContext, setSplitContext] = useState({ split_kind: 'split', pax, is_self_service: isSelfService });
 
   const isSelfService = Boolean(daily?.is_self_service);
   const [prepayOptions, setPrepayOptions] = useState(null);
@@ -400,7 +401,12 @@ export default function StepConfirm({
       } else if (status === 409 && (data?.code === 'AMOUNT_CHANGED' || errorMsg.includes('金額'))) {
         setQuoteNonce((n) => n + 1);
         toast.show(errorMsg || '金額已更新，請確認最新金額後再送出', { type: 'info' });
-      } else if (status === 409 && errorMsg.includes('拆散')) {
+      } else if (status === 409 && (data?.code === 'SPLIT_REQUIRED' || errorMsg.includes('拆散'))) {
+        setSplitContext({
+          split_kind: data?.split_kind || 'split',
+          pax: data?.pax ?? pax,
+          is_self_service: data?.is_self_service ?? isSelfService,
+        });
         setShowSplitSheet(true);
       } else if ((status === 409 || status === 400) && (errorMsg.includes('capacity') || errorMsg.includes('額滿') || errorMsg.includes('Not enough'))) {
         toast.show('剛剛有人訂走了部分時段，請重新選擇', { type: 'error' });
@@ -907,6 +913,9 @@ export default function StepConfirm({
         isOpen={showSplitSheet}
         onClose={() => setShowSplitSheet(false)}
         loading={submitting}
+        splitKind={splitContext.split_kind}
+        pax={splitContext.pax}
+        isSelfService={splitContext.is_self_service}
         onConfirmForceSplit={() => {
           setShowSplitSheet(false);
           executeBooking(true);

@@ -652,9 +652,27 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       ];
       const allocResult = allocateSeats(allocCurrentReservations, newReservationBlock, forceSplit === true, ctx);
 
+      const dailySetting = await tx.dailySetting.findUnique({
+        where: { date: new Date(`${dateStr}T00:00:00.000Z`) }
+      });
+      const isSelfServiceDay = Boolean(dailySetting?.is_self_service);
+
       if (!allocResult.success) {
         if (allocResult.error === 'INSUFFICIENT_SEATS') throw new Error('INSUFFICIENT_CAPACITY');
-        if (allocResult.error === 'SPLIT_REQUIRED') throw new Error('SPLIT_REQUIRED');
+        if (allocResult.error === 'SPLIT_REQUIRED') {
+          const trialResult = allocateSeats(allocCurrentReservations, newReservationBlock, true, ctx);
+          const trialSeats = (trialResult?.updates || []).flatMap((u) => u.assigned_seats || []);
+          const hasWait = trialSeats.some((s) => typeof s === 'string' && s.startsWith('WAIT-'));
+          const split_kind = hasWait ? 'no_seat' : 'split';
+          throw {
+            status: 409,
+            code: 'SPLIT_REQUIRED',
+            split_kind,
+            pax: parsedPax,
+            is_self_service: isSelfServiceDay,
+            message: '連續座位不足，同行者將被拆散。是否確認預約？'
+          };
+        }
         throw new Error('ALLOCATION_FAILED');
       }
 
@@ -669,11 +687,6 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
       const is_unlimited = req.body.isUnlimited === true;
       const cleanCustomerNote = req.body.customer_note ? String(req.body.customer_note).trim() : null;
       const sortedRequestedSessions = [...requestedSessions].sort((a, b) => a.start_time.localeCompare(b.start_time));
-
-      const dailySetting = await tx.dailySetting.findUnique({
-        where: { date: new Date(`${dateStr}T00:00:00.000Z`) }
-      });
-      const isSelfServiceDay = Boolean(dailySetting?.is_self_service);
       if (isSelfServiceDay) {
         if (req.body.self_service_ack !== true) {
           throw makePrepayError('SELF_ACK_REQUIRED', '請先勾選同意半自助時段須知', 400);
@@ -1301,6 +1314,9 @@ export const createReservationHandler = (deps = {}) => async (req, res) => {
         error: error.message,
         ...(error.code ? { code: error.code } : {}),
         ...(error.limit !== undefined ? { limit: error.limit } : {}),
+        ...(error.split_kind !== undefined ? { split_kind: error.split_kind } : {}),
+        ...(error.pax !== undefined ? { pax: error.pax } : {}),
+        ...(error.is_self_service !== undefined ? { is_self_service: error.is_self_service } : {}),
         ...(error.closed_note !== undefined ? { closed_note: error.closed_note } : {})
       });
     }
