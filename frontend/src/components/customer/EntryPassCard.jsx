@@ -33,14 +33,14 @@ function formatCheckinTime(isoStr) {
   }
 }
 
-function SelfServiceReminderList({ ironText }) {
+function SelfServiceReminderList({ ironText, earlyMinutes = 30 }) {
   return (
     <div className="rounded-[12px] bg-white/60 border border-sg-line/60 p-3 text-[12.5px] text-sg-muted grid gap-1">
       <div className="font-bold text-sg-ink text-[13px] mb-0.5">半自助時段提醒</div>
       <div>• <b>對象：</b>僅限已經會玩拼豆的朋友</div>
       <div>• <b>教學：</b>當天部分時段沒有店員，無法現場教學</div>
       <div>• <b>熨燙：</b>{ironText || '店員會在今天下午到店協助熨燙'}。完成後請放在熨燙區托盤上</div>
-      <div>• <b>進場：</b>憑預約條碼或電話在門口報到機報到，最早可提前 30 分鐘進場</div>
+      <div>• <b>進場：</b>當天在「我的預約」打開進場 QR，或輸入手機號碼，在門口報到機報到；最早可提前 {earlyMinutes ?? 30} 分鐘進場</div>
     </div>
   );
 }

@@ -38,7 +38,7 @@ export default function SelfServiceInfoCard({
         <li className="grid grid-cols-[3.6em_minmax(0,1fr)] gap-2">
           <b className="text-sg-honey-ink font-bold">進場</b>
           <span className="min-w-0 break-words">
-            憑預約條碼或電話在門口報到機報到，最早可提前 {earlyMinutes ?? 30} 分鐘進場
+            當天在「我的預約」打開進場 QR，或輸入手機號碼，在門口報到機報到；最早可提前 {earlyMinutes ?? 30} 分鐘進場
           </span>
         </li>
         {showPaymentLine && (

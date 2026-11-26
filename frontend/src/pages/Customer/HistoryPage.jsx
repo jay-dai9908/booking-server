@@ -596,7 +596,7 @@ export default function HistoryPage() {
                       當天 {r.self_info?.open_at || ''} 起可進場
                     </div>
                     <div className="text-[12.5px] text-sg-muted">
-                      預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場條碼到時候會出現在這裡。
+                      預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場 QR 到時候會出現在這裡。
                     </div>
                   </Card>
                 )
@@ -1028,29 +1028,35 @@ export default function HistoryPage() {
                                 >
                                   <div className="font-bold text-sg-sage-ink">付款已確認 · 當天 {r.self_info?.open_at || ''} 起可進場</div>
                                   <div className="text-[12px] text-sg-muted">
-                                    預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場條碼到時候會出現在這裡。
+                                    預約 {r.start_time} 開始，最早可提前 {r.self_info?.early_minutes ?? 30} 分鐘。進場 QR 到時候會出現在這裡。
                                   </div>
                                 </div>
                               )}
                             </div>
                           )}
 
-                          {/* Barcode button */}
-                          <Button
-                            variant={isNearest ? 'primary' : 'secondary'}
-                            size="sm"
-                            icon={<QrCode className="w-4 h-4" />}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveBarcodeData({
-                                ref: r.booking_ref,
-                                summary: `${dateShort} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`,
-                              });
-                            }}
-                            className="w-full mt-1"
-                          >
-                            出示到店條碼
-                          </Button>
+                          {/* Barcode button (normal day) or dynamic QR reminder (self-service non-today) */}
+                          {r.is_self_service ? (
+                            <div className="text-[12px] text-sg-muted pt-0.5">
+                              當天這裡會出現動態進場 QR，截圖無效
+                            </div>
+                          ) : (
+                            <Button
+                              variant={isNearest ? 'primary' : 'secondary'}
+                              size="sm"
+                              icon={<QrCode className="w-4 h-4" />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveBarcodeData({
+                                  ref: r.booking_ref,
+                                  summary: `${dateShort} ${r.start_time} 到 ${r.end_time} · ${r.pax} 位`,
+                                });
+                              }}
+                              className="w-full mt-1"
+                            >
+                              出示到店條碼
+                            </Button>
+                          )}
                         </>
                       )}
 

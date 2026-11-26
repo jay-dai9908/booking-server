@@ -338,7 +338,7 @@ export default function StepDone({ result }) {
         <div className="sg-small px-1 text-sg-muted">
           {isSelfService
             ? isPrepayVerified
-              ? `到店時在門口報到機出示條碼或電話就能報到，最早可提前 ${selfInfo?.early_minutes ?? 30} 分鐘進場。`
+              ? `當天 ${openAt} 起，打開「我的預約」會出現進場 QR，對準門口報到機掃碼。QR 每 5 分鐘換一組，截圖無效；也可以在報到機輸入手機號碼報到。`
               : '對帳沒完成前，報到機不會開門。'
             : '到店時出示條碼就能報到。要改時間的話，先取消再重新預約。'}
         </div>
@@ -367,18 +367,20 @@ export default function StepDone({ result }) {
 
       {/* 3. Fixed Bottom Area */}
       <div className="sticky bottom-0 z-40 bg-sg-paper border-t border-sg-line px-4 pt-3 pb-[max(18px,env(safe-area-inset-bottom))] grid gap-2">
+        {!isSelfService && (
+          <Button
+            variant="primary"
+            size="md"
+            icon={<QrCode className="w-5 h-5" />}
+            onClick={() => setShowBarcode(true)}
+            className="w-full"
+          >
+            查看到店條碼
+          </Button>
+        )}
         <Button
-          variant="primary"
-          size="md"
-          icon={<QrCode className="w-5 h-5" />}
-          onClick={() => setShowBarcode(true)}
-          className="w-full"
-        >
-          查看到店條碼
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
+          variant={isSelfService ? 'primary' : 'secondary'}
+          size={isSelfService ? 'md' : 'sm'}
           onClick={() => navigate('/history?tab=bookings')}
           className="w-full"
         >
@@ -386,13 +388,15 @@ export default function StepDone({ result }) {
         </Button>
       </div>
 
-      {/* Barcode Sheet */}
-      <BarcodeSheet
-        isOpen={showBarcode}
-        onClose={() => setShowBarcode(false)}
-        bookingRef={bookingRef}
-        summaryText={barcodeSummaryText}
-      />
+      {/* Barcode Sheet (normal day only) */}
+      {!isSelfService && (
+        <BarcodeSheet
+          isOpen={showBarcode}
+          onClose={() => setShowBarcode(false)}
+          bookingRef={bookingRef}
+          summaryText={barcodeSummaryText}
+        />
+      )}
     </div>
   );
 }

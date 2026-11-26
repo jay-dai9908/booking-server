@@ -531,14 +531,14 @@ export const sendSelfServiceVerifiedNotification = async (info, user) => {
   const flexMessage = buildBrandFlexMessage({
     title: '付款已確認，半自助預約成立',
     subtitle: `當天 ${info.open_at || ''} 起可進場`,
-    bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您的半自助時段匯款已核對無誤！當天 ${info.open_at || ''} 起，請於門口報到機出示預約條碼或手機號碼即可報到進場。`,
+    bodyText: `親愛的 ${user.name || '貴賓'} 您好：\n您的半自助時段匯款已核對無誤！當天 ${info.open_at || ''} 起，請打開「我的預約」顯示進場 QR，在門口報到機掃碼（QR 每 5 分鐘更新，截圖無效），或在報到機輸入手機號碼報到。`,
     infoRows: [
       { label: '預約編號', value: info.booking_ref },
       { label: '預約日期', value: toTaipeiDateString(info.session_date) || '' },
       { label: '預約時段', value: info.time_range || '' },
       { label: '最早進場', value: `${info.open_at || ''} 起`, color: '#2E7D32' }
     ],
-    buttonLabel: '查看條碼與預約詳情',
+    buttonLabel: '查看預約詳情',
     buttonUrl: `${frontendUrl}/history?tab=bookings`,
     tagText: '✅ 付款已確認'
   });
